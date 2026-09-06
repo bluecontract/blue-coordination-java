@@ -135,6 +135,142 @@ class ManagedRepresentationHistoryTest {
             System.out.println("SDK_STORE_RESTART_PRESERVES_AUTHENTICATED_REPRESENTATION_CHAIN");
         }
     }
+    @Test
+    void blockedReconnectTraversesActualProcessorPositionsWithoutClaimingHostPublication() throws Exception {
+        // given
+        try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+            String template;
+            try (var stream = getClass().getResourceAsStream("/historical-representation/reconnect.template.json")) {
+                template = new String(java.util.Objects.requireNonNull(stream).readAllBytes(), StandardCharsets.UTF_8);
+            }
+            String owner = "review/representation-gap/alice";
+            Map<String, String> sources = new LinkedHashMap<>();
+            Map<String, ExactBlueValue> originals = new LinkedHashMap<>();
+            Map<String, DocumentHandle> handles = new LinkedHashMap<>();
+            for (String name : List.of("A", "B")) {
+                String source = template.replace("<NODE>", name).replace("<NAMESPACE>", "review-gap").replace("<TIMELINE>", owner);
+                sources.put(name, source);
+                originals.put(name, blue.values().yaml(source));
+            }
+            assertEquals("EvDZ5SpjRrcYNbikhKvtPctuwoFXCMZvK9kpfc52owWy", originals.get("A").blueId());
+            assertEquals("HbhBw4c8AU5fUSeEgqMVm2eZoH1j1FSSrMUr7rFNn61z", originals.get("B").blueId());
+            var timeline = blue.timelines().register(owner, "alice");
+            for (String name : sources.keySet()) handles.put(name, blue.documents().admit(ManagedDocument.yaml(
+                    DocumentId.of(originals.get(name).blueId()), sources.get(name)).publicRoot().fromNow()));
+            for (String[] edge : new String[][]{{"A", "b", "B"}, {"B", "a", "A"}}) {
+                var entry = blue.operations().on(handles.get(edge[0])).from(timeline).call("attach").through("ownerChannel")
+                        .request(r -> r.exact("edge", blue.values().yaml(edge[1])).exact("source", originals.get(edge[2]))).submit();
+                assertTrue(blue.processing().drainJournal(new DrainBudget(1L, 1L)).entry(entry).applied());
+                for (int step = 0; step < 32 && !pairReady(blue, originals); step++) {
+                    var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
+                    assertEquals(1, blue.processing().drainManagedEpochApplication(work.workIdentity()).managedEpochApplications().size());
+                }
+                assertTrue(pairReady(blue, originals));
+            }
+            assertTrue(blue.operations().on(handles.get("B")).from(timeline).call("emit").through("ownerChannel")
+                    .requestYaml("{to: A, next: stop}").execute().applied());
+            assertTrue(blue.operations().on(handles.get("A")).from(timeline).call("detach").through("ownerChannel")
+                    .requestYaml("{edge: b}").execute().applied());
+            assertTrue(blue.operations().on(handles.get("B")).from(timeline).call("emit").through("ownerChannel")
+                    .requestYaml("{to: A, next: stop}").execute().applied());
+            // when
+            var entry = blue.operations().on(handles.get("A")).from(timeline).call("attach").through("ownerChannel")
+                    .request(r -> r.exact("edge", blue.values().yaml("b")).exact("source", originals.get("B"))).submit();
+            assertTrue(blue.processing().drainJournal(new DrainBudget(1L, 1L)).entry(entry).applied());
+            var rejection = assertThrows(blue.coordination.api.CoordinationException.class, () -> {
+                for (int step = 0; step < 32 && !pairReady(blue, originals); step++) {
+                    var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
+                    assertEquals(1, blue.processing().drainManagedEpochApplication(work.workIdentity()).managedEpochApplications().size());
+                }
+            });
+            // then
+            assertTrue(rejection.getMessage().contains("Managed application occurrence cursor changed"));
+            assertFalse(pairReady(blue, originals), "the unchanged SDK owner remains a required failure");
+            verifyBlockedPairProcessorTraversal(blue);
+            assertFalse(pairReady(blue, originals), "a processor-only proof must not pretend to publish SDK readiness");
+        }
+    }
+
+    private static boolean pairReady(BlueCoordination blue, Map<String, ExactBlueValue> originals) {
+        return originals.values().stream().allMatch(value -> blue.advanced()
+                .auditManagedDocumentReadiness(DocumentId.of(value.blueId())).orElseThrow().ready());
+    }
+
+    private static void verifyBlockedPairProcessorTraversal(BlueCoordination blue) {
+        var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
+        var publication = engine.documents().publicationSnapshot();
+        var pending = publication.occurrenceInventory().rows().stream()
+                .filter(row -> !row.active() && row.pendingHistoricalEpoch() != null).findFirst().orElseThrow();
+        var sourceId = DocumentId.of(pending.targetDocumentId().value());
+        var history = new ManagedRepresentationHistory(engine.documents());
+        var chainAtSeven = history.at(sourceId, pending.pendingHistoricalEpoch());
+        assertEquals(7L, chainAtSeven.epoch());
+        assertEquals(6, chainAtSeven.transitions().size());
+        assertEquals(1, history.at(sourceId, 8L).transitions().size());
+        var original = chainAtSeven.transitions().get(0).originalInput();
+        var retainedReceipts = blue.advanced().auditManagedEpochs(sourceId).stream().map(r -> r.receiptIdentity()).toList();
+        var members = new ArrayList<ManagedDocumentSnapshot>();
+        for (var component : publication.componentStates()) for (var memberId : component.orderedMemberDocumentIds()) {
+            var session = engine.documents().find(DocumentId.of(memberId.value())).orElseThrow();
+            members.add(new ManagedDocumentSnapshot(memberId, session.currentRepresentation().blueId(),
+                    session.currentRepresentation().copyNode(), true, false, true, session.epoch(), component.componentGeneration()));
+        }
+        var roots = members.stream().map(ManagedDocumentSnapshot::documentId).sorted().toList();
+        long generation = publication.documentHeads().keySet().stream()
+                .mapToLong(id -> publication.graphGenerations().require(id)).max().orElseThrow();
+        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory.affectedClosure(generation, members,
+                publication.occurrenceInventory().rows(), publication.componentStates(), roots);
+        String occurrence = pending.occurrenceIdentity();
+        int steps = 0;
+        int representationSteps = 0;
+        long totalGas = 0;
+        try (BlueRuntime runtime = BlueRuntime.create(engine.objects());
+                BlueClosureContracts contracts = new BlueClosureContracts(runtime.documentProcessor())) {
+            while (steps < 32) {
+                var row = snapshot.occurrences().stream().filter(r -> r.occurrenceIdentity().equals(occurrence)).findFirst().orElseThrow();
+                if (row.active()) break;
+                var chain = history.atCaptured(sourceId, row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
+                var transition = chain.next(row.pendingRepresentationCursor(), row.expectedTargetBlueId());
+                ProcessingCause cause;
+                if (transition.isPresent()) {
+                    var next = transition.orElseThrow();
+                    cause = new ManagedRepresentationCause(occurrence, next, chain.targetPositionIdentity(),
+                            chain.nextRevisionReceiptIdentity(), engine.objects().cyclicSetProofFor(next.transitionReceipt().afterBlueId()).proof().orElse(null));
+                    history.verifyCause((ManagedRepresentationCause) cause, row);
+                    representationSteps++;
+                } else {
+                    var next = engine.documents().managedEpochEvidence(sourceId, row.pendingHistoricalEpoch() + 1L);
+                    cause = ClosureEvidenceFactory.managedRevisionCause(occurrence, row.pendingHistoricalEpoch(),
+                            row.pendingHistoricalEpoch() + 1L, next.receipt().afterDocument().copyNode(), next.transitionReceipt(),
+                            engine.objects().cyclicSetProofFor(next.receipt().afterBlueId()).proof().orElse(null));
+                }
+                var input = ClosureEvidenceFactory.processClosure(snapshot, cause, List.of(), original.executionPolicy(), original.environment());
+                var rollback = contracts.processClosure(ClosureEvidenceFactory.processClosure(snapshot, cause, List.of(),
+                        ClosureEvidenceFactory.executionPolicy(1L, original.executionPolicy().localLimits(), "reconnect-rollback"), original.environment()));
+                assertTrue(rollback.isComplete());
+                assertFalse(rollback.processResult().commits());
+                assertEquals(snapshot.closureIdentity(), rollback.processResult().outputClosureIdentity());
+                var attempt = contracts.processClosure(input);
+                assertTrue(attempt.isComplete());
+                var result = attempt.processResult();
+                assertTrue(result.commits(), "core reconnect step rejected: " + result.diagnostic());
+                assertTrue(result.publicEvents().isEmpty(), "traversal must not duplicate already consumed source events");
+                assertTrue(result.totalGas() > 0L);
+                totalGas += result.totalGas();
+                steps++;
+                assertTrue(result.resultingDocuments().stream().allMatch(r -> r.epoch() >= publication
+                        .requireHead(DocumentId.of(r.documentId().value())).epoch()), "no authoritative member may rewind");
+                snapshot = resultingSnapshot(result, roots);
+            }
+        }
+        assertEquals(9, steps, "seven positional steps and two unchanged numbered revisions finish the actual blocked closure");
+        assertEquals(7, representationSteps);
+        assertTrue(snapshot.occurrences().stream().allMatch(ManagedOccurrenceBinding::active));
+        assertEquals(publication.documentHeads(), engine.documents().publicationSnapshot().documentHeads());
+        assertEquals(retainedReceipts, blue.advanced().auditManagedEpochs(sourceId).stream().map(r -> r.receiptIdentity()).toList());
+        System.out.println("CORE_PAIR_POSITION_TRAVERSAL_COMPLETE steps=" + steps + " gas=" + totalGas + " SDK_PUBLICATION_NOT_IMPLEMENTED");
+    }
+
     /** Core conformance fixture; it deliberately does not claim SDK publication or restart coverage. */
     private void verifyIndependentConsumerProcessing(BlueCoordination blue, DefaultCoordinationEngine engine,
             ManagedRepresentationHistory.Chain chain, String template, String owner) {
