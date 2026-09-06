@@ -7,7 +7,6 @@ import blue.language.identity.BlueIds;
 import blue.language.identity.CircularSetIdentityCalculator;
 import blue.language.identity.DirectBlueIdCalculator;
 import blue.language.model.Node;
-import blue.language.merge.ResolvedSnapshot;
 import blue.language.model.NodePathEditor;
 import blue.language.model.wire.JsonPointer;
 import blue.language.processor.EffectiveFragmentationCatalog;
@@ -122,18 +121,18 @@ public final class Contracts10AuthoredClosureCompiler {
                 verificationObjects,
                 verificationMetrics,
                 engine.retainedExactNodeProvider())) {
-            List<ResolvedSnapshot> sourceSnapshots = new ArrayList<>();
+            List<ExactValue> sourceTypeEvidence = new ArrayList<>();
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
                     verificationObjects,
-                    Objects.requireNonNull(identityMode, "identityMode"), sourceSnapshots);
+                    Objects.requireNonNull(identityMode, "identityMode"), sourceTypeEvidence);
             validateDeclarationsAndCoverage(
                     index, resolved, verificationRuntime,
                     verificationObjects);
             LinkedHashMap<DocumentId, Node> authored =
                     installAndVerifyPreliminaryReferences(
                             index, resolved, identityMode);
-            return finalizeClosure(input, index, authored, sourceSnapshots);
+            return finalizeClosure(input, index, authored, sourceTypeEvidence);
         }
     }
 
@@ -142,14 +141,13 @@ public final class Contracts10AuthoredClosureCompiler {
             BlueRuntime runtime,
             WholeObjectStore objects,
             DocumentIdentityMode identityMode,
-            List<ResolvedSnapshot> sourceSnapshots) {
+            List<ExactValue> sourceTypeEvidence) {
         LinkedHashMap<DocumentId, Node> result = new LinkedHashMap<>();
         for (AuthoredDocument document : documents) {
             ExactValue exact = runtime.exactProcessingSource(
                     document.authoredYaml(),
                     objects,
-                    "contracts10-authored-compiler-source");
-            exact.snapshot().ifPresent(sourceSnapshots::add);
+                    "contracts10-authored-compiler-source", sourceTypeEvidence);
             Node body = exact.copyNode();
             switch (identityMode) {
                 case EXPLICIT_LINEAGE -> requireOrWriteDocumentId(
@@ -304,7 +302,7 @@ public final class Contracts10AuthoredClosureCompiler {
             CompilationRequest request,
             RequestIndex index,
             LinkedHashMap<DocumentId, Node> authored,
-            List<ResolvedSnapshot> sourceSnapshots) {
+            List<ExactValue> sourceTypeEvidence) {
         ContractsClosureAdmissionAdapter adapter =
                 engine.contractsClosureAdmissionAdapter();
         ClosureEnvironment environment = adapter.environment();
@@ -373,7 +371,7 @@ public final class Contracts10AuthoredClosureCompiler {
                 finalization,
                 canonicalBindings,
                 independentlyVerifiedMasters,
-                sourceSnapshots);
+                sourceTypeEvidence);
     }
 
     private static List<ManagedOccurrenceBinding> bindings(
@@ -903,9 +901,8 @@ public final class Contracts10AuthoredClosureCompiler {
                 ComponentFinalizationResult finalization,
                 List<ManagedOccurrenceBinding> bindings,
                 Map<String, String> verifiedMasters,
-                List<ResolvedSnapshot> sourceSnapshots) {
-            this.inlineTypeEvidence = sourceSnapshots.stream()
-                    .flatMap(snapshot -> ProcessingSourceTypeEvidence.from(snapshot).stream()).toList();
+                List<ExactValue> sourceTypeEvidence) {
+            this.inlineTypeEvidence = List.copyOf(sourceTypeEvidence);
             this.invocation = Objects.requireNonNull(
                     invocation, "invocation");
             this.activationInputs = Objects.requireNonNull(

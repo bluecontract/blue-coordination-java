@@ -140,7 +140,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                         public ComputeProgramPlan create() {
                             return buildPlan(exactRawStepNode,
                                     resolvedDefinitionNode,
-                                    effectiveEntry);
+                                    effectiveEntry, context);
                         }
                     });
             ComputeProgramPlan computePlan = lookup.plan();
@@ -289,7 +289,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
 
     private ComputeProgramPlan buildPlan(FrozenNode rawStepNode,
                                          FrozenNode rawDefinitionNode,
-                                         String effectiveEntry) {
+                                         String effectiveEntry, StepExecutionContext context) {
         FrozenNode programNode = normalizer.program(rawStepNode);
         FrozenNode definitionNode = rawDefinitionNode != null
                 ? normalizer.definition(rawDefinitionNode)
@@ -312,6 +312,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                         definitionSourceNode,
                         normalizedEntry)
                 : BexProgramSource.inline(programNode);
+        ComputeStaticTypeValidation.validate(source, context);
         if (metrics != null) {
             metrics.incrementComputeProgramSourceBuilds();
             metrics.addComputeProgramSourceBuildNanos(System.nanoTime() - sourceStart);

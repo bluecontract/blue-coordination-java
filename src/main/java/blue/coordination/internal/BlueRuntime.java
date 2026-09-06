@@ -36,6 +36,7 @@ import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
 import blue.language.provider.SequentialNodeProvider;
 import blue.language.runtime.BlueLanguage;
+import blue.language.runtime.LanguageProcessing;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.BlueRepository;
 import java.util.ArrayDeque;
@@ -334,6 +335,11 @@ final class BlueRuntime implements AutoCloseable {
     }
 
     ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose) {
+        return exactProcessingSource(yaml, objects, purpose, new ArrayList<>());
+    }
+
+    ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose,
+                                     Collection<ExactValue> retainedTypes) {
         Node preprocessed = preprocess(parseSourceYaml(yaml));
         // A pure reference already states its identity. Its content is an
         // execution demand; identity inspection must not eagerly require it.
@@ -342,7 +348,13 @@ final class BlueRuntime implements AutoCloseable {
         }
         ResolvedSnapshot snapshot = processingSourceSnapshot(preprocessed);
         for (ExactValue definition : ProcessingSourceTypeEvidence.from(snapshot)) {
-            objects.put(definition, "processing Source inline type");
+            retainedTypes.add(objects.put(definition, "processing Source inline type"));
+        }
+        try (LanguageProcessing.Scope scope = language.processing().openScope()) {
+            for (ExactValue definition : ProcessingSourceTypeEvidence.fromCanonicalizedSource(
+                    snapshot.canonicalRoot(), preprocessed, scope)) {
+                retainedTypes.add(objects.put(definition, "processing Source exact-field inline type"));
+            }
         }
         return objects.put(snapshot, purpose);
     }
