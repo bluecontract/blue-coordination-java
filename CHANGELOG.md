@@ -3,6 +3,19 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## Unreleased
+
+### Fixed
+
+- A host `ExactNodeProvider` that throws while PROCESS demands an exact node
+  is now treated exactly like a provider that has not answered: the demanding
+  closure suspends as `NEEDS_RESOURCES` with the provider failure in the
+  demand diagnostic, and the same retained entry applies once the provider
+  answers. Previously the failure was wrapped as invalid content, the kernel
+  classified it as `RUNTIME_FATAL`, and the entry was consumed as a terminal
+  `REJECTED`, so a transient database or network fault could permanently drop
+  an entry. Pinned by `SdkThrowingExactNodeProviderTest`.
+
 ## 3.0.0-rc.5 - retained execution and catch-up candidate
 
 ### Added

@@ -139,7 +139,10 @@ display-only. Missing exact content may be registered through the host's
 immutable exact-node provider before retrying the same work; ambiguity,
 unproven history, selector mismatch, and invalid authored content are not
 uploadable-content waits. Supplying content never authorizes a direct consumer
-patch or a replacement operation.
+patch or a replacement operation. A provider that throws while answering a
+demand has not answered: the work stays suspended with the provider failure
+recorded in the demand diagnostic, and nothing is cached for that BlueId, so
+the same retained entry retries once the provider responds.
 
 The supported same-epoch source representation change is bounded to the
 eventless, finite two-member cycle formed by the managed application. The exact

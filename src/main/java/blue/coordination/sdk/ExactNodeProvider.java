@@ -18,6 +18,13 @@ import java.util.function.Function;
  * runtime aliases should first call
  * {@link ExactValues#providerContentYaml(String)} and supply the resulting
  * {@link ExactBlueValue#json()}.</p>
+ *
+ * <p>An empty result and a thrown {@link RuntimeException} both mean the
+ * provider has not answered yet: the demanding work is suspended as
+ * {@code NEEDS_RESOURCES} and the same retained entry is retried once the
+ * provider answers. A thrown failure is never interpreted as evidence about
+ * the requested content, so a transient host fault (database or network
+ * error) cannot consume an entry.</p>
  */
 @FunctionalInterface
 public interface ExactNodeProvider {

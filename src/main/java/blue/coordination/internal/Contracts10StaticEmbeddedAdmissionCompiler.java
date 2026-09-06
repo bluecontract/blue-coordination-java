@@ -161,6 +161,9 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
         private final ExactNodeProvider delegate;
         private final Map<String, Optional<ExactValue>> verified =
                 new LinkedHashMap<>();
+        /** Last provider failure per BlueId; diagnostics only, never cached as evidence. */
+        private final Map<String, String> providerFailures =
+                new LinkedHashMap<>();
 
         private VerifiedExactNodeProvider(ExactNodeProvider delegate) {
             this.delegate = Objects.requireNonNull(delegate, "delegate");
@@ -185,9 +188,12 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                         retained.orElseThrow().copyNode()));
             if (BlueIds.hasCyclicMemberSeparator(selected))
                 return NodeProviderResult.notFound();
-            return NodeProviderResult.unavailable(
-                    "Application exact-node provider has not supplied "
-                            + selected);
+            String failure = providerFailures.get(selected);
+            return NodeProviderResult.unavailable(failure == null
+                    ? "Application exact-node provider has not supplied "
+                            + selected
+                    : "Application exact-node provider failed while "
+                            + "reading " + selected + ": " + failure);
         }
 
         @Override
@@ -216,10 +222,13 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
             } catch (CoordinationException failure) {
                 throw failure;
             } catch (RuntimeException failure) {
-                throw invalid(selected, null,
-                        "Exact-node provider failed while reading content",
-                        failure);
+                // A provider that throws has not answered. Its failure is
+                // ambient host state, not evidence about the content, so the
+                // demand stays open and the same work retries later.
+                providerFailures.put(selected, failure.toString());
+                return Optional.empty();
             }
+            providerFailures.remove(selected);
             if (supplied.isEmpty()) {
                 return Optional.empty();
             }
