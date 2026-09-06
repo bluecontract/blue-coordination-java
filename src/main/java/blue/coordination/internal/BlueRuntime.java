@@ -181,6 +181,11 @@ final class BlueRuntime implements AutoCloseable {
         return language.snapshots().resolve(source);
     }
 
+    ResolvedSnapshot processingSourceSnapshot(Node source) {
+        ensureOpen();
+        return contracts.processingSourceSnapshot(source);
+    }
+
     ResolvedSnapshot resolveToSnapshotPreservingPaths(
             Node source,
             Collection<String> paths) {
@@ -189,6 +194,14 @@ final class BlueRuntime implements AutoCloseable {
     }
 
     ResolvedSnapshot loadExactSnapshot(String blueId) {
+        return loadExactSnapshot(blueId, false);
+    }
+
+    ResolvedSnapshot loadExactProcessingSnapshot(String blueId) {
+        return loadExactSnapshot(blueId, true);
+    }
+
+    private ResolvedSnapshot loadExactSnapshot(String blueId, boolean processingSource) {
         ensureOpen();
         FrozenNode reference = FrozenNode.fromNode(new Node().blueId(
                 Objects.requireNonNull(blueId, "blueId")));
@@ -206,8 +219,15 @@ final class BlueRuntime implements AutoCloseable {
             throw new InvalidExecutionEvidenceException(reason);
         }
         FrozenNode materialized = result.requireEstablished();
-        return contracts.runtimeAccess().resolveTransient(
-                materialized.toNode());
+        if (!processingSource) {
+            return contracts.runtimeAccess().resolveTransient(materialized.toNode());
+        }
+        ResolvedSnapshot snapshot = processingSourceSnapshot(materialized.toNode());
+        if (!blueId.equals(snapshot.blueId())) {
+            throw new InvalidExecutionEvidenceException(
+                    "Exact processing snapshot identity differs from its authenticated reference");
+        }
+        return snapshot;
     }
 
     ResolvedSnapshot cache(ResolvedSnapshot snapshot) {

@@ -60,7 +60,7 @@ final class DocumentTransitionProcessor {
                 () -> runtime.preprocess(source));
         ResolvedSnapshot snapshot = metrics.timed(
                 "documentStart.resolve",
-                () -> runtime.cache(runtime.resolveToSnapshot(preprocessed)));
+                () -> runtime.processingSourceSnapshot(preprocessed));
         return admitSnapshot(
                 Objects.requireNonNull(documentId, "documentId"),
                 snapshot,
@@ -80,8 +80,8 @@ final class DocumentTransitionProcessor {
                         () -> {
                             metrics.increment(
                                     "documentStart.referenceOnlySnapshotLoads");
-                            return runtime.cache(runtime.loadExactSnapshot(
-                                    authoredExact.blueId()));
+                            return runtime.loadExactProcessingSnapshot(
+                                    authoredExact.blueId());
                         }));
         return admitSnapshot(
                 Objects.requireNonNull(documentId, "documentId"),
@@ -99,8 +99,9 @@ final class DocumentTransitionProcessor {
         long started = System.nanoTime();
         Objects.requireNonNull(snapshot, "snapshot");
         Objects.requireNonNull(admissionFrontier, "admissionFrontier");
-        ExactValue authoredExact = objects.put(
-                runtime.cache(snapshot), "authored-document");
+        // Processing snapshots retain deferred declaration fields. Preserve
+        // that lane in the exact store; never pin it as a complete value.
+        ExactValue authoredExact = objects.put(snapshot, "authored-document");
         DocumentIdentityReader.verifyOptionalDocumentId(
                 authoredExact, documentId);
         EmbeddedOnlyLayout authoredLayout = layoutBuilder.build(authoredExact);

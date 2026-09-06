@@ -667,7 +667,7 @@ public final class DefaultCoordinationEngine
 
     synchronized ExactValue registerType(String sourceYaml) {
         ensureOpen();
-        return runtime.exactSource(sourceYaml, objects, "test-type");
+        return runtime.exactProcessingSource(sourceYaml, objects, "test-type");
     }
 
     synchronized ExactValue exactRequest(String requestYaml) {
