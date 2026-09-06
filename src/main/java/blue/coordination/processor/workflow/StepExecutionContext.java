@@ -7,8 +7,11 @@ import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
 import blue.language.processor.WorkingDocument;
 import blue.language.processor.FrozenJsonPatch;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.model.JsonPatch;
 import blue.language.snapshot.FrozenNode;
+import blue.language.snapshot.InvalidCanonicalPatchException;
 import blue.repo.coordination.SequentialWorkflow;
 import blue.repo.coordination.SequentialWorkflowStep;
 import java.util.List;
@@ -355,11 +358,13 @@ public final class StepExecutionContext implements BexWorkflowStepContext {
         if (patches == null || patches.isEmpty()) {
             return null;
         }
+        // The owning Contracts/BEX boundary classifies this exact failure. Missing evidence,
+        // provider outages and implementation faults must not become semantic runtime-fatal.
         try {
             return workingDocument().previewAndApplyPatches(patches);
-        } catch (RuntimeException ex) {
-            throwFatal("Working document preview failed: " + ex.getMessage());
-            return null;
+        } catch (InvalidCanonicalPatchException invalidPatch) {
+            throw new ProcessorFailureException(ProcessorErrorCategory.InvalidPatch,
+                    invalidPatch.getMessage(), invalidPatch);
         }
     }
 
@@ -369,9 +374,9 @@ public final class StepExecutionContext implements BexWorkflowStepContext {
         }
         try {
             return workingDocument().previewAndApplyFrozenPatches(patches);
-        } catch (RuntimeException ex) {
-            throwFatal("Working document preview failed: " + ex.getMessage());
-            return null;
+        } catch (InvalidCanonicalPatchException invalidPatch) {
+            throw new ProcessorFailureException(ProcessorErrorCategory.InvalidPatch,
+                    invalidPatch.getMessage(), invalidPatch);
         }
     }
 }

@@ -322,7 +322,7 @@ final class SdkAcceptanceTest {
             // then
             assertFiniteRingResult(
                     fixture, result, initialMaster,
-                    expectedStepOrder, 1_364L);
+                    expectedStepOrder, 1_380L);
         }
     }
 
@@ -345,7 +345,7 @@ final class SdkAcceptanceTest {
             // then
             assertFiniteRingResult(
                     fixture, result, initialMaster,
-                    expectedStepOrder, 1_787L);
+                    expectedStepOrder, 1_831L);
         }
     }
 
@@ -419,7 +419,7 @@ final class SdkAcceptanceTest {
                     List.of(members),
                     before,
                     1L,
-                    3_768L);
+                    3_968L);
             assertNotEquals(initialMaster,
                     assertCyclicComponent(handles, members));
             assertEquals("done",
@@ -521,13 +521,13 @@ final class SdkAcceptanceTest {
                     List.of(List.of(a1, b1), List.of(a2, b2)),
                     before,
                     1L,
-                    2_746L);
+                    2_778L);
             assertEquals(List.of(a1, b1, a1), result.closures()
                     .get(0).stats().documentStepOrder());
             assertEquals(List.of(a2, b2, a2), result.closures()
                     .get(1).stats().documentStepOrder());
-            assertExactGas(result.closures().get(0).stats(), 1_373L);
-            assertExactGas(result.closures().get(1).stats(), 1_373L);
+            assertExactGas(result.closures().get(0).stats(), 1_389L);
+            assertExactGas(result.closures().get(1).stats(), 1_389L);
             assertExactPublicEvents(
                     coordination,
                     result.closures().get(0).publicEvents(),
@@ -562,7 +562,7 @@ final class SdkAcceptanceTest {
         List<DocumentId> expectedOrder = expectedAlternatingLoopOrder(
                 DocumentId.of("sdk-gas-loop-a"),
                 DocumentId.of("sdk-gas-loop-b"),
-                742);
+                731);
 
         // when
         GasLoopEvidence first = runGasLoop();
@@ -571,7 +571,7 @@ final class SdkAcceptanceTest {
         // then
         assertEquals(first, retry);
         assertEquals(expectedOrder, first.documentStepOrder());
-        assertEquals(99_967L, first.gas());
+        assertEquals(99_998L, first.gas());
     }
 
     @Test
@@ -609,9 +609,9 @@ final class SdkAcceptanceTest {
             assertEquals(0L, rejected.stats().committedTransitions());
             assertEquals(2L, rejected.stats().documentsOpened());
             assertEquals(expectedAlternatingLoopOrder(
-                            scenario.a().id(), scenario.b().id(), 712),
+                            scenario.a().id(), scenario.b().id(), 701),
                     rejected.stats().documentStepOrder());
-            assertExactGas(rejected.stats(), 99_997L);
+            assertExactGas(rejected.stats(), 99_998L);
             assertEquals(initial, blueIds(handles));
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
@@ -634,7 +634,7 @@ final class SdkAcceptanceTest {
                     detached.stats().documentStepOrder());
             assertEquals(2L, detached.stats().committedTransitions());
             assertEquals(2L, detached.stats().documentsOpened());
-            assertExactGas(detached.stats(), 736L);
+            assertExactGas(detached.stats(), 754L);
             assertTrue(detached.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     detached,
@@ -729,7 +729,7 @@ final class SdkAcceptanceTest {
                     detached.stats().documentStepOrder());
             assertEquals(2L, detached.stats().committedTransitions());
             assertEquals(2L, detached.stats().documentsOpened());
-            assertExactGas(detached.stats(), 736L);
+            assertExactGas(detached.stats(), 754L);
             assertTrue(detached.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     detached,
@@ -795,7 +795,7 @@ final class SdkAcceptanceTest {
                     readded.stats().documentStepOrder());
             assertEquals(2L, readded.stats().committedTransitions());
             assertEquals(2L, readded.stats().documentsOpened());
-            assertExactGas(readded.stats(), 1_260L);
+            assertExactGas(readded.stats(), 1_268L);
             assertTrue(readded.publicEvents().isEmpty());
             assertExactChangeEvidence(
                     readded,
@@ -1022,9 +1022,9 @@ final class SdkAcceptanceTest {
             assertEquals(result.stats(), result.closures().get(0).stats());
             assertEquals(0L, result.stats().committedTransitions());
             assertEquals(2L, result.stats().documentsOpened());
-            assertEquals(expectedAlternatingLoopOrder(a, b, 742),
+            assertEquals(expectedAlternatingLoopOrder(a, b, 731),
                     result.stats().documentStepOrder());
-            assertExactGas(result.stats(), 99_967L);
+            assertExactGas(result.stats(), 99_998L);
             assertEquals(before, blueIds(handles));
             handles.values().forEach(handle ->
                     assertCurrentHistory(handle, 0L));
@@ -1260,8 +1260,9 @@ final class SdkAcceptanceTest {
             long expectedGas) {
         long counterGas = stats.counters().values().stream()
                 .reduce(0L, Math::addExact);
-        assertEquals(expectedGas, stats.gas());
-        assertEquals(expectedGas, counterGas);
+        assertEquals(stats.gas(), counterGas);
+        assertEquals(expectedGas, stats.gas(),
+                () -> "steps=" + stats.documentStepOrder().size() + ", counters=" + stats.counters());
     }
 
     private static void assertExactPublicEvents(

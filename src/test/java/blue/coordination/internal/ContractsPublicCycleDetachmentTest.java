@@ -164,7 +164,9 @@ final class ContractsPublicCycleDetachmentTest {
             assertEquals(rejected.inputClosureIdentity(),
                     rejected.outputClosureIdentity());
             assertNotNull(rejected.rejectedCharge());
-            assertNotNull(rejected.rejectedWorkOccurrence());
+            ContractsGasFailureAssertions.assertEnteredLoopAndRejectedExactOwner(rejected,
+                    engine.contractsClosureAdapter().lastExecutionEvidence().orElseThrow(),
+                    engine.contractsClosureAdmissionAdapter().executionPolicy().sharedLimit());
             assertNull(rejected.platformCommitCompanion());
             assertTrue(rejected.graphChanges().isEmpty());
             assertTrue(rejected.checkpointWrites().isEmpty());

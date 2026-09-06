@@ -1,6 +1,8 @@
 package blue.coordination.processor.workflow;
 
 import blue.bex.BexException;
+import blue.bex.api.BexFailureBoundary;
+import blue.bex.contracts.BexContractsFailureBoundary;
 import blue.bex.api.BexEngine;
 import blue.bex.api.BexExecutionContext;
 import blue.bex.api.BexProgramSource;
@@ -17,6 +19,8 @@ import blue.language.processor.PortableLimitExceededException;
 import blue.language.processor.ProcessorErrorCategory;
 import blue.language.processor.ProcessorFailureException;
 import blue.language.processor.ProcessorFatalException;
+import blue.language.processor.NoncommittingExecutionException;
+import blue.language.processor.UnclassifiedProcessingException;
 import blue.language.provider.ProviderUnavailableException;
 import blue.language.snapshot.FrozenNode;
 import blue.language.runtime.BlueLanguage;
@@ -181,6 +185,11 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             if (classified != null) {
                 throw classified;
             }
+            if (ex.getCause() != null
+                    && BexContractsFailureBoundary.INSTANCE.classify(ex.getCause())
+                    == BexFailureBoundary.Classification.UNCLASSIFIED) {
+                throw new UnclassifiedProcessingException(ex);
+            }
             if (metrics != null) {
                 metrics.incrementComputeResultValidationFailures();
             }
@@ -188,10 +197,16 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             return WorkflowStepResult.none();
         } catch (ProcessorFatalException ex) {
             throw ex;
+        } catch (NoncommittingExecutionException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             RuntimeException classified = classifiedBoundaryFailure(ex);
             if (classified != null) {
                 throw classified;
+            }
+            if (BexContractsFailureBoundary.INSTANCE.classify(ex)
+                    != BexFailureBoundary.Classification.DETERMINISTIC) {
+                throw new UnclassifiedProcessingException(ex);
             }
             context.throwFatal("Compute failed: " + ex.getMessage());
             return WorkflowStepResult.none();

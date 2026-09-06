@@ -61,7 +61,7 @@ final class SdkManagedEpochSourceTerminationTest {
             componentStateIdentityMethod();
 
     @Test
-    void productionTerminationLaneRemainsFailClosed() {
+    void productionTerminationPublishesOneRealTerminalEpochAndNeverReexecutesOnDrain() {
         // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
@@ -70,9 +70,12 @@ final class SdkManagedEpochSourceTerminationTest {
                     ManagedDocument.yaml(SOURCE, terminatingSourceYaml())
                             .publicRoot()
                             .fromNow());
+            DefaultCoordinationEngine engine = (DefaultCoordinationEngine)
+                    coordination.advanced().rawEngine();
+            String beforeBlueId = source.snapshot().blueId();
 
             // when
-            EntryResult finished = coordination.operations()
+            EntryResult result = coordination.operations()
                     .on(source)
                     .from(timeline)
                     .call("finish")
@@ -81,19 +84,30 @@ final class SdkManagedEpochSourceTerminationTest {
                     .execute();
 
             // then
-            assertEquals(EntryDisposition.REJECTED, finished.disposition(),
-                    finished.diagnostic().toString());
-            assertEquals("RUNTIME_EXECUTION_FAILURE",
-                    finished.diagnostic().code());
-            assertTrue(finished.diagnostic().message().contains(
-                    "Termination requires the lifecycle and marker batch lane"));
-            assertEquals(SessionStatus.READY,
+            assertEquals(EntryDisposition.APPLIED, result.disposition(), () -> result.diagnostic().toString());
+            var evidence = engine.contractsClosureAdapter().lastExecutionEvidence().orElseThrow();
+            assertTrue(evidence.complete());
+            assertEquals(SessionStatus.TERMINATED,
                     coordination.advanced().auditDocument(SOURCE).status());
-            assertEquals(List.of(0L), coordination.advanced()
+            assertTrue(source.snapshot().booleanAt("/finished"));
+            assertEquals(List.of(0L, 1L), coordination.advanced()
                     .auditManagedEpochs(SOURCE).stream()
                     .map(ManagedEpochReceipt::epoch)
                     .toList());
-            assertEquals(1, source.history().size());
+            assertEquals(2, source.history().size());
+            assertEquals(1, engine.metrics().journalEntryCount());
+            ManagedEpochReceipt terminal = coordination.advanced().auditManagedEpoch(SOURCE, 1L).orElseThrow();
+            assertEquals(beforeBlueId, terminal.beforeBlueId().orElseThrow());
+            assertEquals(source.snapshot().blueId(), terminal.afterBlueId());
+            assertEquals(1, terminal.emittedEvents().size());
+            assertTrue(terminal.sourceEntry().isPresent());
+            InMemoryDocumentStore.PublicationSnapshot published = engine.documents().publicationSnapshot();
+            long calls = externalProcessCalls(coordination);
+            assertTrue(coordination.processing().drain().quiescent());
+            assertEquals(published, engine.documents().publicationSnapshot());
+            assertEquals(calls, externalProcessCalls(coordination));
+            assertEquals(1, engine.metrics().journalEntryCount());
+            assertEquals(2, source.history().size());
         }
     }
 

@@ -279,8 +279,10 @@ final class ContractsPublicOrderingAcceptanceTest {
             assertTrue(result.rollbackToInput());
             assertEquals(result.inputClosureIdentity(),
                     result.outputClosureIdentity());
-            assertNotNull(result.rejectedWorkOccurrence());
             assertNotNull(result.rejectedCharge());
+            ContractsGasFailureAssertions.assertEnteredLoopAndRejectedExactOwner(result,
+                    engine.contractsClosureAdapter().lastExecutionEvidence().orElseThrow(),
+                    engine.contractsClosureAdmissionAdapter().executionPolicy().sharedLimit());
             assertEquals(
                     engine.contractsClosureAdmissionAdapter().executionPolicy()
                             .sharedLimit() - result.totalGas(),

@@ -346,20 +346,22 @@ final class ContractsPublicInitializationTopologyTest {
             assertTrue(unavailable.attempt().isComplete());
             ClosureProcessResult result = unavailable.attempt()
                     .processResult();
-            assertEquals(ProcessorStatus.RUNTIME_FATAL,
+            assertEquals(ProcessorStatus.CAPABILITY_FAILURE,
                     result.status());
             assertFalse(result.commits());
             assertTrue(result.rollbackToInput());
             assertTrue(result.publicEvents().isEmpty());
-            assertEquals(ProcessorErrorCategory.RuntimeExecutionFailure,
+            assertEquals(ProcessorErrorCategory.UnsupportedRuntimeRole,
                     result.diagnostic().category());
+            assertEquals("INITIALIZATION_EVENT_QUEUE_REQUIRED",
+                    result.diagnostic().detail("closureCapability"));
             ClosureImplementationEvidence evidence = engine
                     .contractsClosureAdmissionAdapter()
                     .lastExecutionEvidence().orElseThrow();
-            assertNull(evidence.nonConformanceCode());
+            assertEquals("INITIALIZATION_EVENT_QUEUE_REQUIRED", evidence.nonConformanceCode());
             assertEquals(List.of(A.value(), A.value()),
                     workTargets(evidence));
-            assertTrue(evidence.complete());
+            assertFalse(evidence.complete());
             assertEquals(0, engine.documentCount());
             assertTrue(engine.documents().publicationSnapshot()
                     .admissionReceipts().isEmpty());

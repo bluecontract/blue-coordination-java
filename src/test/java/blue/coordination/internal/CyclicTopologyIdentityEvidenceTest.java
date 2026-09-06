@@ -35,6 +35,7 @@ import java.util.Optional;
 import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Deterministic mixed-lane identity evidence from public Coordination tests
@@ -44,6 +45,8 @@ final class CyclicTopologyIdentityEvidenceTest {
     private static final String WRITE_MODE_ENV =
             "BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE";
     private static final String WRITE_MODE = "WRITE";
+    private static final String CANDIDATE_DIRECTORY_ENV =
+            "BLUE_CYCLIC_TOPOLOGY_IDENTITY_CANDIDATE_DIRECTORY";
     private static final Path ARTIFACT_DIRECTORY = Path.of(
             "stabilization", "full-lifecycle-admission-phase2");
     private static final Path JSON_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
@@ -91,10 +94,67 @@ final class CyclicTopologyIdentityEvidenceTest {
             "UNAVAILABLE_SUPERSEDED_BY_LATER_COHORT";
 
     @Test
+    void boundedCapabilityEvidenceRequiresItsExactNoncommittingBoundary() {
+        Map<String, Object> scenario = boundedCapabilityScenario();
+        Recorder.validateExecutionEvidence("P6.c-clo-08-bounded-compatibility", scenario);
+        assertThrows(IllegalStateException.class, () ->
+                Recorder.validateExecutionEvidence("P6.static-three-member-admission", scenario));
+        for (Map.Entry<String, Object> invalid : Map.<String, Object>of(
+                "status", "RUNTIME_FATAL", "commits", true,
+                "rollbackToInput", false, "outputClosureIdentity", "changed",
+                "publicEvents", List.of("event")).entrySet()) {
+            Map<String, Object> changed = new LinkedHashMap<>(scenario);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = new LinkedHashMap<>((Map<String, Object>) scenario.get("result"));
+            result.put(invalid.getKey(), invalid.getValue());
+            changed.put("result", result);
+            assertThrows(IllegalStateException.class, () ->
+                    Recorder.validateExecutionEvidence("P6.c-clo-08-bounded-compatibility", changed));
+        }
+    }
+
+    @Test
+    void boundedCapabilityEvidenceCannotClaimCompleteOrAnotherCapability() {
+        for (Map.Entry<String, Object> invalid : Map.<String, Object>of(
+                "complete", true, "nonConformanceCode", "OTHER_CAPABILITY").entrySet()) {
+            Map<String, Object> scenario = boundedCapabilityScenario();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> execution = new LinkedHashMap<>((Map<String, Object>) scenario.get("execution"));
+            execution.put(invalid.getKey(), invalid.getValue());
+            scenario.put("execution", execution);
+            assertThrows(IllegalStateException.class, () ->
+                    Recorder.validateExecutionEvidence("P6.c-clo-08-bounded-compatibility", scenario));
+        }
+    }
+
+    private static Map<String, Object> boundedCapabilityScenario() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("invocationIdentity", "invocation");
+        result.put("inputClosureIdentity", "unchanged");
+        result.put("outputClosureIdentity", "unchanged");
+        result.put("status", "CAPABILITY_FAILURE");
+        result.put("commits", false);
+        result.put("rollbackToInput", true);
+        result.put("publicEvents", List.of());
+        result.put("checkpointWrites", List.of());
+        result.put("subscriptionDeltas", List.of());
+        result.put("diagnostic", Map.of("category", "UnsupportedRuntimeRole",
+                "details", Map.of("closureCapability", "INITIALIZATION_EVENT_QUEUE_REQUIRED")));
+        return new LinkedHashMap<>(Map.of(
+                "result", result,
+                "execution", Map.of("invocationIdentity", "invocation", "complete", false,
+                        "nonConformanceCode", "INITIALIZATION_EVENT_QUEUE_REQUIRED"),
+                "assertedFacts", Map.of("publicationOutcome", "NOT_PUBLISHED",
+                        "admissionLane", "BOUNDED_COMPATIBILITY", "publicApiExercised", false),
+                "durableState", Map.of("documentHeads", List.of(),
+                        "components", List.of(), "occurrences", List.of())));
+    }
+
+    @Test
     void exactRuntimeIdentitiesMatchTheCommittedArtifacts() throws Exception {
         // given
-
-        Recorder recorder = new Recorder();
+        Path candidateDirectory = candidateDirectory();
+        Recorder recorder = new Recorder(candidateDirectory != null);
         if (ACTIVE.get() != null) {
             throw new IllegalStateException(
                     "Cyclic identity evidence capture is already active");
@@ -114,6 +174,23 @@ final class CyclicTopologyIdentityEvidenceTest {
 
         // when
         if (mode == null) {
+            if (candidateDirectory != null) {
+                // Diagnostic capture never updates the committed oracle or
+                // bypasses either exact artifact assertion below.
+                Files.writeString(candidateDirectory.resolve(JSON_ARTIFACT.getFileName()),
+                        json, StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE_NEW);
+                Files.writeString(candidateDirectory.resolve(MARKDOWN_ARTIFACT.getFileName()),
+                        markdown, StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE_NEW);
+                String candidateHash = java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256")
+                                .digest(json.getBytes(StandardCharsets.UTF_8)));
+                Files.writeString(candidateDirectory.resolve("gas-trace-review.json"),
+                        Json.render(Map.of("schemaVersion", "local-cyclic-gas-review/1",
+                                "candidateArtifactSha256", candidateHash,
+                                "scenarios", recorder.gasReview)) + "\n",
+                        StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE_NEW);
+                System.out.println("Cyclic identity review candidates: " + candidateDirectory);
+            }
 
             // then
             assertEquals(readRequired(JSON_ARTIFACT), json,
@@ -258,6 +335,30 @@ final class CyclicTopologyIdentityEvidenceTest {
         return Files.readString(path, StandardCharsets.UTF_8);
     }
 
+    private static Path candidateDirectory() throws IOException {
+        String configured = System.getenv(CANDIDATE_DIRECTORY_ENV);
+        if (configured == null) {
+            return null;
+        }
+        if (System.getenv(WRITE_MODE_ENV) != null) {
+            throw new IllegalStateException("Candidate capture and artifact WRITE mode are exclusive");
+        }
+        Path directory = Path.of(configured);
+        if (!directory.isAbsolute() || !Files.isDirectory(directory)) {
+            throw new IllegalArgumentException("Candidate directory must be an existing absolute directory");
+        }
+        directory = directory.toRealPath();
+        if (directory.startsWith(Path.of("").toRealPath())) {
+            throw new IllegalArgumentException("Candidate directory must be outside the repository");
+        }
+        try (var entries = Files.list(directory)) {
+            if (entries.findAny().isPresent()) {
+                throw new IllegalArgumentException("Candidate directory must be empty");
+            }
+        }
+        return directory;
+    }
+
     private static void writeAtomically(Path target, String value)
             throws IOException {
         Files.createDirectories(target.getParent());
@@ -335,10 +436,16 @@ final class CyclicTopologyIdentityEvidenceTest {
     }
 
     private static final class Recorder {
+        private final boolean captureGasReview;
+        private final LinkedHashMap<String, Map<String, Object>> gasReview = new LinkedHashMap<>();
         private final LinkedHashMap<String, Map<String, Object>> scenarios =
                 new LinkedHashMap<>();
         private final LinkedHashMap<String, Integer> repeatCounts =
                 new LinkedHashMap<>();
+
+        private Recorder(boolean captureGasReview) {
+            this.captureGasReview = captureGasReview;
+        }
 
         void capture(
                 String scenarioId,
@@ -353,6 +460,13 @@ final class CyclicTopologyIdentityEvidenceTest {
             scenario.put("execution", projectExecution(engine, result));
             scenario.put("durableState", projectDurableState(engine));
             add(scenarioId, scenario);
+            if (captureGasReview) {
+                Map<String, Object> review = projectGasReview(result);
+                Map<String, Object> prior = gasReview.putIfAbsent(scenarioId, review);
+                if (prior != null) {
+                    assertEquals(prior, review, "repeated full gas capture differs for " + scenarioId);
+                }
+            }
         }
 
         void captureHost(
@@ -451,9 +565,49 @@ final class CyclicTopologyIdentityEvidenceTest {
                         "Execution/result invocation mismatch for "
                                 + scenarioId);
             }
+            if ("P6.c-clo-08-bounded-compatibility".equals(scenarioId)) {
+                validateBoundedCapability(scenario, result, execution);
+                return;
+            }
             if (!Boolean.TRUE.equals(execution.get("complete"))) {
                 throw new IllegalStateException(
                         "Incomplete execution evidence for " + scenarioId);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private static void validateBoundedCapability(
+                Map<String, Object> scenario,
+                Map<String, Object> result,
+                Map<String, Object> execution) {
+            Map<String, Object> diagnostic = (Map<String, Object>) result.get("diagnostic");
+            Map<String, Object> facts = (Map<String, Object>) scenario.get("assertedFacts");
+            Map<String, Object> durable = (Map<String, Object>) scenario.get("durableState");
+            String requiredCode = "INITIALIZATION_EVENT_QUEUE_REQUIRED";
+            if (!"CAPABILITY_FAILURE".equals(result.get("status"))
+                    || !Boolean.FALSE.equals(result.get("commits"))
+                    || !Boolean.TRUE.equals(result.get("rollbackToInput"))
+                    || !Objects.equals(result.get("inputClosureIdentity"),
+                            result.get("outputClosureIdentity"))
+                    || !Boolean.FALSE.equals(execution.get("complete"))
+                    || !requiredCode.equals(execution.get("nonConformanceCode"))
+                    || diagnostic == null
+                    || !"UnsupportedRuntimeRole".equals(diagnostic.get("category"))
+                    || !(diagnostic.get("details") instanceof Map<?, ?> details)
+                    || !requiredCode.equals(details.get("closureCapability"))
+                    || facts == null
+                    || !"NOT_PUBLISHED".equals(facts.get("publicationOutcome"))
+                    || !"BOUNDED_COMPATIBILITY".equals(facts.get("admissionLane"))
+                    || !Boolean.FALSE.equals(facts.get("publicApiExercised"))
+                    || durable == null
+                    || !List.of().equals(durable.get("documentHeads"))
+                    || !List.of().equals(durable.get("components"))
+                    || !List.of().equals(durable.get("occurrences"))
+                    || !List.of().equals(result.get("publicEvents"))
+                    || !List.of().equals(result.get("checkpointWrites"))
+                    || !List.of().equals(result.get("subscriptionDeltas"))) {
+                throw new IllegalStateException(
+                        "Bounded admission must retain its exact noncommitting capability boundary");
             }
         }
 
@@ -526,10 +680,11 @@ final class CyclicTopologyIdentityEvidenceTest {
                     boundary(
                             "gasRejectionBoundary",
                             "CHARACTERIZED",
-                            "The observed rejected internalEventEnqueued charge "
-                                    + "belongs to an already-started work "
-                                    + "occurrence; this round does not claim "
-                                    + "rejection before that work begins."));
+                            "The rollback witnesses execute their loop-start workflow "
+                                    + "and complete feedback work before exhaustion. "
+                                    + "Each rejected charge records its exact WORK, "
+                                    + "FINALIZATION, or INVOCATION owner; non-work "
+                                    + "charges do not invent a rejected work occurrence."));
         }
 
         private static Map<String, Object> boundary(
@@ -875,6 +1030,40 @@ final class CyclicTopologyIdentityEvidenceTest {
                 value.put("rejectedWorkAdmittedCounters", List.of());
             }
             return value;
+        }
+
+        private static Map<String, Object> projectGasReview(ClosureProcessResult result) {
+            assertEquals(result.gasTraceIdentity(), GasTraceEntry.identityOfTrace(result.gasTrace()));
+            TreeMap<String, Long> quantities = new TreeMap<>();
+            TreeMap<String, Long> subtotals = new TreeMap<>();
+            List<Map<String, Object>> trace = new ArrayList<>();
+            long total = 0;
+            for (GasTraceEntry entry : result.gasTrace()) {
+                String counter = entry.namespace().wireValue() + "." + entry.counter();
+                quantities.merge(counter, entry.quantity(), Math::addExact);
+                subtotals.merge(counter, entry.subtotal(), Math::addExact);
+                total = Math.addExact(total, entry.subtotal());
+                LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+                row.put("sequence", entry.sequence());
+                row.put("namespace", entry.namespace().wireValue());
+                row.put("counter", entry.counter());
+                row.put("quantity", entry.quantity());
+                row.put("weight", entry.weight());
+                row.put("subtotal", entry.subtotal());
+                row.put("documentId", entry.documentId() == null ? null : entry.documentId().value());
+                row.put("scopePath", entry.scopePath());
+                row.put("activationGeneration", entry.activationGeneration());
+                row.put("componentGeneration", entry.componentGeneration());
+                row.put("contractKey", entry.contractKey());
+                row.put("logicalPath", entry.logicalPath());
+                row.put("workOccurrenceId", entry.workOccurrenceId());
+                row.put("reason", entry.reason());
+                trace.add(row);
+            }
+            assertEquals(result.totalGas(), total);
+            return Map.of("invocationIdentity", result.invocationIdentity(),
+                    "gasTraceIdentity", result.gasTraceIdentity(), "totalGas", total,
+                    "quantities", quantities, "subtotals", subtotals, "trace", trace);
         }
 
         private static Map<String, Object> projectRejectedCharge(

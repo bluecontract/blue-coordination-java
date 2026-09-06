@@ -302,7 +302,7 @@ final class ContractsPublicThreeMemberCycleTest {
         // then
         assertEquals(first, second);
         assertTrue(first.gasEntries() > 0);
-        assertTrue(first.rejectedWorkOrdinal() > 0L);
+        assertNotNull(first.rejectedOwner().get("kind"));
         assertEquals(RejectedCharge.ApplicableCap.Kind.SHARED.name(),
                 first.applicableCap());
     }
@@ -478,60 +478,17 @@ final class ContractsPublicThreeMemberCycleTest {
             assertTrue(result.rollbackToInput());
             assertEquals(result.inputClosureIdentity(),
                     result.outputClosureIdentity());
-            assertNotNull(result.rejectedWorkOccurrence());
-            assertNotNull(result.rejectedCharge());
-            assertNull(result.platformCommitCompanion());
-            assertTrue(result.graphChanges().isEmpty());
-            assertTrue(result.subscriptionDeltas().isEmpty());
-            assertTrue(result.checkpointWrites().isEmpty());
-            assertTrue(result.publicEvents().isEmpty());
-            assertEquals(
-                    RejectedCharge.ApplicableCap.Kind.SHARED,
-                    result.rejectedCharge().applicableCap().kind());
-            assertEquals(
-                    scenario.admission().executionPolicy().sharedLimit(),
-                    result.totalGas()
-                            + result.rejectedCharge()
-                                    .remainingBeforeCharge());
-            assertTrue(result.rejectedCharge().subtotal()
-                    > result.rejectedCharge().remainingBeforeCharge());
-            assertEquals(RejectedCharge.Owner.Kind.WORK,
-                    result.rejectedCharge().owner().kind());
-            assertEquals(result.rejectedWorkOccurrence().workIdentity(),
-                    result.rejectedCharge().owner()
-                            .workOccurrenceIdentity());
-            String rejectedWorkIdentity = result.rejectedWorkOccurrence()
-                    .workIdentity();
-            // At the release default the isolated step has emitted LOOP, but
-            // its internal-event enqueue is the exact next charge and is
-            // rejected before that enqueue mutates invocation state.
-            assertEquals("internalEventEnqueued",
-                    result.rejectedCharge().counter());
-            assertEquals(List.of(
-                            "closureWorkOccurrenceEnqueued",
-                            "closureWorkOccurrenceDequeued",
-                            "scopeOpened",
-                            "contractHeaderRecognized",
-                            "contractHeaderRecognized",
-                            "contractHeaderRecognized",
-                            "embeddedPathEntryRead",
-                            "embeddedPathSegmentValidated",
-                            "embeddedEventDelivered",
-                            "handlerCandidateTested",
-                            "handlerCall",
-                            "workflowStepVisited",
-                            "workflowStepExecuted",
-                            "triggerEventStep"),
-                    result.gasTrace().stream()
-                            .filter(entryGas -> rejectedWorkIdentity.equals(
-                                    entryGas.workOccurrenceId()))
-                            .map(GasTraceEntry::counter)
-                            .toList());
+            ContractsGasFailureAssertions.assertEnteredLoopAndRejectedExactOwner(
+                    result,
+                    engine.contractsClosureAdapter().lastExecutionEvidence()
+                            .orElseThrow(),
+                    scenario.admission().executionPolicy().sharedLimit());
+            // The selected route metering can exhaust a non-work charge.
+            // Preserve its closed owner and the entire admitted prefix, not
+            // a fabricated work occurrence or the former schedule's cutoff.
+            Map<String, Object> rejectedOwner = rejectedOwnerEvidence(result);
             GasTraceEntry lastAdmitted = result.gasTrace().get(
                     result.gasTrace().size() - 1);
-            assertEquals("triggerEventStep", lastAdmitted.counter());
-            assertEquals(rejectedWorkIdentity,
-                    lastAdmitted.workOccurrenceId());
             assertEquals(result.totalGas(), result.gasTrace().stream()
                     .mapToLong(GasTraceEntry::subtotal)
                     .sum());
@@ -573,9 +530,10 @@ final class ContractsPublicThreeMemberCycleTest {
                                 "beforeMasterBlueId", beforeMaster,
                                 "rejectedCounter",
                                 result.rejectedCharge().counter(),
-                                "rejectedWorkIdentity",
-                                result.rejectedWorkOccurrence()
-                                        .workIdentity()));
+                                "rejectedOwner", rejectedOwner,
+                                "remainingBeforeRejectedCharge",
+                                result.rejectedCharge().remainingBeforeCharge(),
+                                "lastAdmittedCharge", gasEntryShape(lastAdmitted)));
             }
 
             return new LoopEvidence(
@@ -588,10 +546,8 @@ final class ContractsPublicThreeMemberCycleTest {
                     result.gasTrace().size(),
                     result.gasTraceIdentity(),
                     gasTraceShape(result),
-                    result.rejectedWorkOccurrence().ordinal(),
-                    result.rejectedWorkOccurrence().targetDocumentId()
-                            .value(),
-                    result.rejectedWorkOccurrence().workIdentity(),
+                    rejectedOwner,
+                    gasEntryShape(lastAdmitted),
                     result.rejectedCharge().rejectedChargeIdentity(),
                     result.rejectedCharge().counter(),
                     result.rejectedCharge().remainingBeforeCharge(),
@@ -846,15 +802,47 @@ final class ContractsPublicThreeMemberCycleTest {
 
     private static List<String> gasTraceShape(ClosureProcessResult result) {
         return result.gasTrace().stream()
-                .map(entry -> entry.sequence()
-                        + ":" + entry.namespace()
-                        + ":" + entry.counter()
-                        + ":" + entry.subtotal()
-                        + ":" + entry.documentId()
-                        + ":" + entry.contractKey()
-                        + ":" + entry.logicalPath()
-                        + ":" + entry.workOccurrenceId())
+                .map(ContractsPublicThreeMemberCycleTest::gasEntryShape)
                 .toList();
+    }
+
+    private static String gasEntryShape(GasTraceEntry entry) {
+        return entry.sequence() + ":" + entry.namespace()
+                + ":" + entry.counter() + ":" + entry.quantity()
+                + ":" + entry.weight() + ":" + entry.subtotal()
+                + ":" + entry.documentId() + ":" + entry.scopePath()
+                + ":" + entry.activationGeneration()
+                + ":" + entry.componentGeneration()
+                + ":" + entry.contractKey() + ":" + entry.logicalPath()
+                + ":" + entry.workOccurrenceId() + ":" + entry.reason();
+    }
+
+    private static Map<String, Object> rejectedOwnerEvidence(
+            ClosureProcessResult result) {
+        RejectedCharge.Owner owner = result.rejectedCharge().owner();
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("kind", owner.kind().name());
+        switch (owner.kind()) {
+            case WORK -> {
+                assertTrue(result.rejectedWorkOccurrence().ordinal() > 0L);
+                fields.put("workOrdinal", result.rejectedWorkOccurrence().ordinal());
+                fields.put("documentId", result.rejectedWorkOccurrence()
+                        .targetDocumentId().value());
+                fields.put("workIdentity", owner.workOccurrenceIdentity());
+                fields.put("admittedWorkPrefix", result.gasTrace().stream()
+                        .filter(entry -> owner.workOccurrenceIdentity()
+                                .equals(entry.workOccurrenceId()))
+                        .map(ContractsPublicThreeMemberCycleTest::gasEntryShape)
+                        .toList());
+            }
+            case FINALIZATION -> {
+                fields.put("finalizationOrdinal", owner.finalizationOrdinal());
+                fields.put("componentIdentity", owner.componentIdentity());
+                fields.put("componentGeneration", owner.componentGeneration());
+            }
+            case INVOCATION -> { /* No work or component owner exists. */ }
+        }
+        return java.util.Collections.unmodifiableMap(fields);
     }
 
     private static CoordinationEngine engine(Set<DocumentId> publicRoots) {
@@ -1297,9 +1285,8 @@ final class ContractsPublicThreeMemberCycleTest {
             int gasEntries,
             String gasTraceIdentity,
             List<String> gasTraceShape,
-            long rejectedWorkOrdinal,
-            String rejectedDocumentId,
-            String rejectedWorkIdentity,
+            Map<String, Object> rejectedOwner,
+            String lastAdmittedCharge,
             String rejectedChargeIdentity,
             String rejectedCounter,
             long remainingBeforeRejectedCharge,

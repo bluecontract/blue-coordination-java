@@ -151,7 +151,8 @@ final class SdkManagedDraftAcceptanceTest {
 
                 // then
                 assertEquals(EntryDisposition.APPLIED, result.disposition(),
-                        operation);
+                        () -> operation + ": " + result.diagnostic()
+                                + ", closures=" + result.closures());
                 assertEquals(1, result.closures().size(), operation);
                 ClosureResult closure = result.closures().get(0);
                 assertEquals(2L, closure.processorAttemptCount(), operation);
