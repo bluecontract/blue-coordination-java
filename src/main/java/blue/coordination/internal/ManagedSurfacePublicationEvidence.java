@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
 import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ComponentSnapshot;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 
@@ -22,7 +23,14 @@ record ManagedSurfacePublicationEvidence(
         List<ResolvedOccurrence> resolvedOccurrences,
         List<ComponentSnapshot> inputComponents,
         List<OperationRouteIndex.OperationRouteChange>
-                operationRouteChanges) {
+                operationRouteChanges,
+        ClosureInvocationInput originalInvocation) {
+
+    ManagedSurfacePublicationEvidence(List<ResolvedOccurrence> resolvedOccurrences,
+            List<ComponentSnapshot> inputComponents,
+            List<OperationRouteIndex.OperationRouteChange> operationRouteChanges) {
+        this(resolvedOccurrences, inputComponents, operationRouteChanges, null);
+    }
 
     /** Compatibility constructor for evidence captured before route prepare. */
     ManagedSurfacePublicationEvidence(
@@ -86,7 +94,7 @@ record ManagedSurfacePublicationEvidence(
         return new ManagedSurfacePublicationEvidence(
                 resolutions,
                 selected.input().snapshot().components(),
-                List.of());
+                List.of(), selected.input());
     }
 
     /** Retains exact route-index changes after replacement preparation. */
@@ -99,7 +107,8 @@ record ManagedSurfacePublicationEvidence(
         return new ManagedSurfacePublicationEvidence(
                 resolvedOccurrences,
                 inputComponents,
-                changes);
+                changes,
+                originalInvocation);
     }
 
     boolean present() {

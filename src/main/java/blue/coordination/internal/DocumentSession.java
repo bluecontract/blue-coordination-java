@@ -237,12 +237,10 @@ final class DocumentSession {
             String beforeBlueId,
             String afterBlueId,
             String transitionReceiptIdentity) {
-        return componentRepresentationTransitions.contains(
-                new ComponentRepresentationTransition(
-                        transitionEpoch,
-                        beforeBlueId,
-                        afterBlueId,
-                        transitionReceiptIdentity));
+        return componentRepresentationTransitions.stream().anyMatch(row ->
+                row.epoch() == transitionEpoch && row.beforeBlueId().equals(beforeBlueId)
+                        && row.afterBlueId().equals(afterBlueId)
+                        && row.transitionReceiptIdentity().equals(transitionReceiptIdentity));
     }
 
     public synchronized OptionalLong epochForState(String exactBlueId) {
@@ -409,6 +407,12 @@ final class DocumentSession {
             EmbeddedOnlyLayout nextLayout,
             List<SubscriptionDelta.Entry> nextSubscriptions,
             String transitionReceipt) {
+        rebindComponentRepresentation(expectedEpoch, nextLayout, nextSubscriptions, transitionReceipt, null);
+    }
+
+    synchronized void rebindComponentRepresentation(long expectedEpoch,
+            EmbeddedOnlyLayout nextLayout, List<SubscriptionDelta.Entry> nextSubscriptions,
+            String transitionReceipt, String originalPublicationIdentity) {
         if (expectedEpoch != epoch) {
             throw new IllegalStateException(
                     "Component representation epoch changed for " + documentId);
@@ -442,15 +446,20 @@ final class DocumentSession {
                         epoch,
                         beforeBlueId,
                         replacement.rootBlueId(),
-                        receipt));
+                        receipt, originalPublicationIdentity));
     }
 
-    private record ComponentRepresentationTransition(
+    synchronized List<ComponentRepresentationTransition> representationTransitions() {
+        return List.copyOf(componentRepresentationTransitions);
+    }
+
+    record ComponentRepresentationTransition(
             long epoch,
             String beforeBlueId,
             String afterBlueId,
-            String transitionReceiptIdentity) {
-        private ComponentRepresentationTransition {
+            String transitionReceiptIdentity,
+            String originalPublicationIdentity) {
+        ComponentRepresentationTransition {
             if (epoch < 0L) {
                 throw new IllegalArgumentException(
                         "Component representation epoch must be non-negative");

@@ -1554,6 +1554,61 @@ When several imported sources are catching up together, the feeder selects the n
 
 It MUST NOT arbitrarily finish one child's complete history while an earlier eligible entry from another required source waits.
 
+### 19.8 Historical representation positions (proposed extension)
+
+This subsection is an isolated proposal requiring a new specification identity
+and explicit compatibility binding before adoption. It applies only with the
+proposed Contracts §§2.3a and 7.5a. Existing `ManagedRevisionCause` retains its
+one-epoch rule, and existing managed-epoch receipts remain immutable.
+
+A same-epoch exact-identity change permitted by Contracts §5.7.1 MUST be
+retained as an ordered representation position by the same atomic publication
+that commits the change. The position binds the immutable numbered-epoch
+anchor, exact predecessor position, complete original input and result,
+source transition receipt, and commit companion. The host MUST verify durable
+membership and the original narrow finalizer-only classification. Neither
+equal endpoints, equal epochs, nor a newly computed position hash supplies
+that authority. Repeated identities at different positions remain distinct.
+
+The host selects one representation transition as separately identified work.
+Its identity binds the occurrence and activation generation, exact source
+epoch and predecessor/successor positions, captured goal, original source
+evidence, consumer committed head, graph generation, and existing catch-up
+barrier. Its type MUST distinguish it from numbered-epoch application work.
+The concrete work and application-receipt wire schemas are not established by
+this proposal's Java prototype and require explicit versioned binding.
+
+For an intermediate chain, the captured goal is the exact predecessor of the
+next immutable numbered receipt. For a representation-only tail, the goal is
+the exact terminal position captured when scheduling the chain. One work
+invokes Contracts exactly once with one `ManagedRepresentationCause`. It MUST
+NOT hide several positions inside one numbered-epoch work or advance the
+numbered historical cursor. Missing proof blocks the named work without
+declaring readiness or falling back to an ambient current snapshot.
+
+The resulting consumer state, representation cursor, affected graph and
+containing references, actual gas and Document Update effects, next-work
+selection, and complete application receipt MUST commit atomically. The
+application receipt binds the selected work, complete Contracts invocation
+and result, source position evidence, before/after occurrence, and commit
+companion. An exact committed-work retry reconciles that receipt; it does not
+repeat the source or downstream effects. Unknown or partial publication
+retains ordinary recovery behavior. Restart MUST reconstruct the identical
+position and next-work identity from durable evidence before reporting ready.
+
+Representation work inherits the existing barrier's attachment order and
+outer timestamp cutoff. It has no synthetic Timeline timestamp. It cannot
+overtake required earlier work, admit future source entries through an older
+root frontier, or discard ordinary later source revisions. The terminal
+Contracts action reconciles and activates once at the captured goal; newly
+created representation-only feedback does not enlarge that captured chain.
+
+Managed-History and Durable conformance additionally require authenticated
+multi-position and repeated-identity traversal, missing/forged/reordered proof
+rejection, source-head preservation, unchanged saved-original graph owners,
+per-invocation gas rollback, response-loss reconciliation, and fresh durable
+restart. Processor-only fixtures do not establish these host claims.
+
 ---
 
 ## 20. Other Channel specifications and extensibility

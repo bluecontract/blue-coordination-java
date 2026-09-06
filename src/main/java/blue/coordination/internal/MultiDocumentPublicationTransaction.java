@@ -847,7 +847,7 @@ final class MultiDocumentPublicationTransaction {
                     update.resultingDocument().epoch(),
                     update.resultingLayout(),
                     update.resultingSubscriptions(),
-                    update.transitionReceipt().transitionReceiptIdentity());
+                    update.transitionReceipt().transitionReceiptIdentity(), publicationIdentity);
             replacement.markGraphPublished();
             if (!resultingReadiness.blocked(documentId)) {
                 replacement.markReady(
