@@ -40,6 +40,8 @@ final class SelectedWorkflowBodyLocalityTest {
                     .subscriptionSurfaceProjection().projectInitial(
                             initialized.document(), 0L, activation);
 
+            // Strict invocation scopes require the complete verified provider,
+            // including exact bodies retained during initialization.
             List<String> events = List.of(
                     requestPresenceEvent("emptyOnly", false),
                     requestPresenceEvent("emptyOnly", true),
@@ -53,7 +55,7 @@ final class SelectedWorkflowBodyLocalityTest {
                 results.add(runtime.contracts().processForPlatformCommit(
                         initialized.document(), runtime.yamlToNode(yaml),
                         PlatformProcessInvocation.builder().deliveryPlan(plan)
-                                .nodeProvider(runtime.nodeProvider()).build()));
+                                .nodeProvider(runtime.language().processing().runtimeAccess().getNodeProvider()).build()));
             }
 
             // then
@@ -128,7 +130,7 @@ final class SelectedWorkflowBodyLocalityTest {
                             event,
                             PlatformProcessInvocation.builder()
                                     .deliveryPlan(plan)
-                                    .nodeProvider(runtime.nodeProvider())
+                                    .nodeProvider(runtime.language().processing().runtimeAccess().getNodeProvider())
                                     .build());
 
             // then

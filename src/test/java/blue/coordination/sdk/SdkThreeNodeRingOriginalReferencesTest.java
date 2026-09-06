@@ -36,6 +36,12 @@ final class SdkThreeNodeRingOriginalReferencesTest {
                 handles.put(name, blue.documents().admit(ManagedDocument.yaml(
                         DocumentId.of(originals.get(name).blueId()), sources.get(name)).publicRoot().fromNow()));
             }
+            Map<DocumentId, Long> initialEventCounts = new LinkedHashMap<>();
+            for (var original : originals.values()) {
+                DocumentId id = DocumentId.of(original.blueId());
+                initialEventCounts.put(id, blue.advanced().auditManagedEpochs(id).stream()
+                        .mapToLong(receipt -> receipt.emittedEvents().size()).sum());
+            }
             // when
             for (String[] edge : new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}) {
                 DocumentId child = DocumentId.of(originals.get(edge[2]).blueId());
@@ -49,6 +55,7 @@ final class SdkThreeNodeRingOriginalReferencesTest {
                 for (int step = 0; step < 32 && originals.values().stream().anyMatch(value -> !blue.advanced()
                         .auditManagedDocumentReadiness(DocumentId.of(value.blueId())).orElseThrow().ready()); step++) {
                     var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
+                    long sourceHeadBefore = blue.advanced().auditDocument(work.sourceDocumentId()).epoch();
                     Map<DocumentId, List<String>> priorReceipts = new LinkedHashMap<>();
                     for (var value : originals.values()) {
                         DocumentId id = DocumentId.of(value.blueId());
@@ -64,6 +71,11 @@ final class SdkThreeNodeRingOriginalReferencesTest {
                                 System.out.println("RING_WORK_TRACE " + evidence.workTrace()));
                         throw failure;
                     }
+                    assertEquals(sourceHeadBefore,
+                            blue.advanced().auditDocument(work.sourceDocumentId()).epoch(),
+                            "finalizer-only historical target changes must not move the catch-up head");
+                    System.out.println("RING_PROGRESS source=" + work.sourceDocumentId()
+                            + " receipt=" + work.sourceEpoch() + " head=" + sourceHeadBefore);
                     for (var prior : priorReceipts.entrySet()) {
                         List<String> retained = blue.advanced().auditManagedEpochs(prior.getKey()).stream()
                                 .map(receipt -> receipt.receiptIdentity()).toList();
@@ -73,7 +85,19 @@ final class SdkThreeNodeRingOriginalReferencesTest {
             }
             // then
             for (var original : originals.values()) {
-                assertTrue(blue.advanced().auditManagedDocumentReadiness(DocumentId.of(original.blueId())).orElseThrow().ready());
+                DocumentId id = DocumentId.of(original.blueId());
+                assertTrue(blue.advanced().auditManagedDocumentReadiness(id).orElseThrow().ready());
+                assertEquals(initialEventCounts.get(id).longValue(),
+                        blue.advanced().auditManagedEpochs(id).stream()
+                                .mapToLong(receipt -> receipt.emittedEvents().size()).sum(),
+                        "reference reconciliation must not duplicate initialization or source events");
+            }
+            for (String[] edge : new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}) {
+                var occurrence = blue.advanced().auditManagedOccurrence(
+                        DocumentId.of(originals.get(edge[0]).blueId()), "/peers/" + edge[1]).orElseThrow();
+                assertTrue(occurrence.active());
+                assertEquals(DocumentId.of(originals.get(edge[2]).blueId()), occurrence.targetDocumentId());
+                assertEquals(1L, occurrence.activationGeneration());
             }
         }
     }
