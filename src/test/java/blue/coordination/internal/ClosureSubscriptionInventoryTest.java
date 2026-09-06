@@ -1054,7 +1054,7 @@ final class ClosureSubscriptionInventoryTest {
             ExternalOrderKey sourceOrder) {
         return new TimelineEntry(
                 entry.exactEvent(),
-                entry.exactRequest(),
+                entry.request(),
                 sourceOrder,
                 sourceOrder,
                 entry.timeline(),

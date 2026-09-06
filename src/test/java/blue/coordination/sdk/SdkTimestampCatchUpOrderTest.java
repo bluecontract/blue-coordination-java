@@ -13,6 +13,8 @@ final class SdkTimestampCatchUpOrderTest {
 
     @Test
     void fourThirtyRootInputCannotBeOvertakenByQueuedFivePmSourceInput() {
+        // given
+        // an independently advanced source and its saved original exact value.
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             Timeline alice = blue.advanced().rawEngine().registerTimeline("tutorial/time/alice", "alice");
             Timeline bob = blue.advanced().rawEngine().registerTimeline("tutorial/time/bob", "bob");
@@ -31,6 +33,8 @@ final class SdkTimestampCatchUpOrderTest {
             var retained = java.util.stream.LongStream.rangeClosed(0, 2)
                     .mapToObj(epoch -> blue.advanced().auditManagedEpoch(child.id(), epoch)
                             .orElseThrow().receiptIdentity()).toList();
+            // when
+            // future source input is queued before the earlier attachment and root input.
             blue.advanced().rawEngine().appendAt(alice,
                     Operation.yaml("increment", "ownerChannel", "amount: 100"), DAY + 17 * HOUR);
             blue.advanced().rawEngine().appendAt(bob,
@@ -39,6 +43,8 @@ final class SdkTimestampCatchUpOrderTest {
                     Operation.yaml("mark", "ownerChannel", "{}"), DAY + 16 * HOUR + HOUR / 2);
 
             DrainResult drained = blue.processing().drain();
+            // then
+            // the merged processing order respects the attachment's timestamp frontier.
             assertTrue(drained.quiescent(), drained.diagnostic().toString());
             assertTrue(root.snapshot().ready());
             assertEquals(2L, root.snapshot().longAt("/observedAtMark"),

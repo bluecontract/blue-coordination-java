@@ -30,6 +30,21 @@ public record TimelineEntrySnapshot(
         }
     }
 
+    /** Accepted-base constructor; preserves request presence and its possibly collapsed envelope value. */
+    public TimelineEntrySnapshot(
+            ExactBlueValue exact, TimelineHandle timeline,
+            Optional<String> previousEntryBlueId, String operation, String channel,
+            long timestampMicros, long globalSequence, long timelineSequence) {
+        this(exact, requestIn(exact), timeline, previousEntryBlueId, operation, channel,
+                timestampMicros, globalSequence, timelineSequence);
+    }
+
+    private static Optional<ExactBlueValue> requestIn(ExactBlueValue exact) {
+        return Optional.ofNullable(blue.language.model.NodePathEditor.getOrNull(
+                Objects.requireNonNull(exact, "exact").copyNode(), "/message/request"))
+                .map(value -> ExactBlueValue.wrap(blue.coordination.api.ExactValue.verified(value)));
+    }
+
     /** Exact content identity of {@link #exact()}. */
     public String blueId() {
         return exact.blueId();

@@ -64,14 +64,14 @@ final class WholeRequestEntryFactoryPresenceTest {
                     1L);
 
             // then
-            assertTrue(absent.exactRequest().isEmpty());
+            assertTrue(absent.request().isEmpty());
             assertNull(NodePathEditor.getOrNull(
                     absent.exactEvent().copyNode(), "/message/request"));
-            assertTrue(empty.exactRequest().isPresent());
+            assertTrue(empty.request().isPresent());
             assertEquals(EMPTY_OBJECT_BLUE_ID,
-                    empty.exactRequest().orElseThrow().blueId());
+                    empty.request().orElseThrow().blueId());
             assertEquals(DirectBlueIdCalculator.calculateBlueId(blue.language.model.Nodes.emptyObject()),
-                    empty.exactRequest().orElseThrow().blueId());
+                    empty.request().orElseThrow().blueId());
             assertEquals(EMPTY_OBJECT_BLUE_ID,
                     NodePathEditor.getOrNull(
                             empty.exactEvent().copyNode(),
@@ -147,7 +147,7 @@ final class WholeRequestEntryFactoryPresenceTest {
                     1_800_000_000_000_000L,
                     1L,
                     1L);
-            ExactValue exactRequest = source.exactRequest().orElseThrow();
+            ExactValue exactRequest = source.request().orElseThrow();
 
             EngineMetrics targetMetrics = new EngineMetrics();
             WholeObjectStore targetObjects = new WholeObjectStore(
@@ -172,10 +172,10 @@ final class WholeRequestEntryFactoryPresenceTest {
 
                 // then
                 assertEquals(EMPTY_OBJECT_BLUE_ID,
-                        referenced.exactRequest().orElseThrow().blueId());
+                        referenced.request().orElseThrow().blueId());
                 assertEquals(EMPTY_OBJECT_BLUE_ID,
                         inline.blueId());
-                assertTrue(referenced.exactRequest().orElseThrow()
+                assertTrue(referenced.request().orElseThrow()
                         .sameExactValue(inline));
             }
         }
@@ -201,7 +201,7 @@ final class WholeRequestEntryFactoryPresenceTest {
                     1_800_000_000_000_000L,
                     1L,
                     1L);
-            String requestBlueId = source.exactRequest()
+            String requestBlueId = source.request()
                     .orElseThrow().blueId();
             NodeProvider unavailable = new NodeProvider() {
                 @Override
@@ -297,14 +297,14 @@ final class WholeRequestEntryFactoryPresenceTest {
                     3L);
 
             // then
-            assertTrue(absent.exactRequest().isEmpty());
+            assertTrue(absent.request().isEmpty());
             assertNull(NodePathEditor.getOrNull(
                     absent.exactEvent().copyNode(), "/message/request"));
             assertEquals(template.blueId(), absent.blueId(),
                     "BEX request:null must converge with request omission");
-            assertTrue(empty.exactRequest().isPresent());
+            assertTrue(empty.request().isPresent());
             assertEquals(EMPTY_OBJECT_BLUE_ID,
-                    empty.exactRequest().orElseThrow().blueId());
+                    empty.request().orElseThrow().blueId());
             assertNotEquals(absent.blueId(), empty.blueId());
             assertFalse(absent.exactEvent().sameExactValue(
                     empty.exactEvent()));

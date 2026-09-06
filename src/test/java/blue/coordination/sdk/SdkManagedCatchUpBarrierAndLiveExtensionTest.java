@@ -367,6 +367,9 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
             assertApplied(increment(coordination, b, bTimeline).execute());
             assertApplied(increment(coordination, b, bTimeline).execute());
 
+            // when
+
+            // attach the retained state, then queue direct and future source work.
             EntryHandle attachment = coordination.operations()
                     .on(a)
                     .from(aTimeline)
@@ -402,6 +405,8 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     control.restartFromStores();
                 }
             }
+            // then
+            // bounded drains finish the captured suffix before either queued entry.
             ManagedOccurrenceCatchUpPlan completed = planFor(coordination, B);
             assertTrue(completed.status().terminal());
             assertEquals(3L, completed.nextSourceEpoch());
