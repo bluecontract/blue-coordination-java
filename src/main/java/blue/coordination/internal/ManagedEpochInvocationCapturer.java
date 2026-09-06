@@ -16,6 +16,8 @@ import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ManagedDocumentTransitionReceipt;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ManagedRevisionCause;
+import blue.language.processor.closure.ManagedRepresentationCause;
+import blue.language.processor.closure.ProcessingCause;
 import blue.language.provider.CyclicSetProof;
 import blue.language.snapshot.FrozenNode;
 
@@ -85,7 +87,7 @@ final class ManagedEpochInvocationCapturer {
                         work.consumerDocumentId())
                 || !plan.sourceDocumentId().equals(
                         work.sourceDocumentId())
-                || plan.nextSourceEpoch() != work.sourceEpoch()
+                || plan.nextSourceEpoch() != work.expectedNextSourceEpoch()
                 || plan.activationGeneration()
                         != work.activationGeneration()
                 || !plan.targetOccurrenceIdentity().equals(
@@ -115,8 +117,10 @@ final class ManagedEpochInvocationCapturer {
                 .orElseThrow(() -> ContractsClosureAdapter.stale(
                         "Managed application occurrence retired before "
                                 + work.workIdentity()));
-        long fromEpoch = Math.subtractExact(work.sourceEpoch(), 1L);
-        String sourceBeforeBlueId = sourceTransition == null
+        ManagedRepresentationCause representation = work.representationCause().orElse(null);
+        if (representation != null) new ManagedRepresentationHistory(documents).verifyCause(representation, target);
+        long fromEpoch = representation == null ? Math.subtractExact(work.sourceEpoch(), 1L) : work.sourceEpoch();
+        String sourceBeforeBlueId = representation != null ? representation.beforeBlueId() : sourceTransition == null
                 ? sourceReceipt.beforeBlueId().orElseThrow(() ->
                         new IllegalStateException(
                                 "A transition-free managed epoch requires "
@@ -245,7 +249,7 @@ final class ManagedEpochInvocationCapturer {
         // for each exact BlueId, including a same-state historical source.
         Node invocationSourceAfter = providerBackedInvocationDocument(
                 sourceReceipt.afterDocument(), lineageIndex);
-        ManagedRevisionCause cause = sourceTransition == null
+        ProcessingCause cause = representation != null ? representation : sourceTransition == null
                 ? ClosureEvidenceFactory.managedRevisionCause(
                         work.targetOccurrenceIdentity(),
                         ContractsClosureAdapter.closureId(

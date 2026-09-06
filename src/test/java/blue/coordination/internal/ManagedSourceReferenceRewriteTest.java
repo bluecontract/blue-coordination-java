@@ -124,6 +124,32 @@ final class ManagedSourceReferenceRewriteTest {
         assertFalse(invalid);
     }
 
+    @Test void authenticatesRetiredRowsWithoutNormalizingTheirAbsentPaths() {
+        var oldRetired = retired(OLD_ID);
+        var newRetired = retired(NEW_ID);
+        assertTrue(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+                List.of(row(OLD_ID), oldRetired), List.of(row(NEW_ID), newRetired),
+                Map.of("retired-child", OLD), Map.of("retired-child", NEW)));
+        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+                List.of(row(OLD_ID), oldRetired), List.of(row(NEW_ID), newRetired)), "Missing member evidence must fail closed");
+    }
+
+    @Test void rejectsForgedRetiredTargetAndUnreviewedRetiredPathBytes() {
+        var prior = List.of(row(OLD_ID), retired(OLD_ID));
+        var next = List.of(row(NEW_ID), retired(NEW_ID));
+        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", OLD)));
+        var changed = parent(NEW.clone());
+        changed.getProperties().put("retired", new Node().value("unexpected"));
+        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), changed,
+                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", NEW)));
+    }
+
+    private static ManagedOccurrenceBinding retired(String exact) {
+        return ManagedOccurrenceBinding.derived(POLICY, new DocumentId("parent"),
+                ScopeAddress.embedded("/retired", 1), new DocumentId("retired-child"), exact, false, null);
+    }
+
     private static ManagedOccurrenceBinding secondRow(String exact) {
         return ManagedOccurrenceBinding.derived(POLICY, new DocumentId("parent"),
                 ScopeAddress.embedded("/second", 1), new DocumentId("child"), exact, true, null);

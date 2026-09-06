@@ -136,7 +136,7 @@ class ManagedRepresentationHistoryTest {
         }
     }
     @Test
-    void blockedReconnectTraversesActualProcessorPositionsWithoutClaimingHostPublication() throws Exception {
+    void reconnectProcessorProofAgreesWithPublishedSdkTraversal() throws Exception {
         // given
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
             String template;
@@ -177,17 +177,19 @@ class ManagedRepresentationHistoryTest {
             var entry = blue.operations().on(handles.get("A")).from(timeline).call("attach").through("ownerChannel")
                     .request(r -> r.exact("edge", blue.values().yaml("b")).exact("source", originals.get("B"))).submit();
             assertTrue(blue.processing().drainJournal(new DrainBudget(1L, 1L)).entry(entry).applied());
-            var rejection = assertThrows(blue.coordination.api.CoordinationException.class, () -> {
-                for (int step = 0; step < 32 && !pairReady(blue, originals); step++) {
-                    var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
-                    assertEquals(1, blue.processing().drainManagedEpochApplication(work.workIdentity()).managedEpochApplications().size());
+            boolean processorProofRan = false;
+            for (int step = 0; step < 32 && !pairReady(blue, originals); step++) {
+                var work = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
+                if (!processorProofRan && work.isRepresentationApplication()) {
+                    assertFalse(pairReady(blue, originals));
+                    verifyBlockedPairProcessorTraversal(blue);
+                    assertFalse(pairReady(blue, originals), "detached processor proof cannot publish SDK readiness");
+                    processorProofRan = true;
                 }
-            });
-            // then
-            assertTrue(rejection.getMessage().contains("Managed application occurrence cursor changed"));
-            assertFalse(pairReady(blue, originals), "the unchanged SDK owner remains a required failure");
-            verifyBlockedPairProcessorTraversal(blue);
-            assertFalse(pairReady(blue, originals), "a processor-only proof must not pretend to publish SDK readiness");
+                assertEquals(1, blue.processing().drainManagedEpochApplication(work.workIdentity()).managedEpochApplications().size());
+            }
+            assertTrue(processorProofRan, "the real reconnect must exercise the independently verified position chain");
+            assertTrue(pairReady(blue, originals));
         }
     }
 

@@ -410,7 +410,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     NodeProvider exactNodes) {
         ManagedOccurrenceResolver resolver = new ManagedOccurrenceResolver(
                 Objects.requireNonNull(exactNodes, "exactNodes"),
-                runtime.metrics());
+                runtime.metrics(), new ManagedRepresentationHistory(documents));
         return new AutomaticOccurrenceResolutionCoordinator<>(
                 resolver,
                 runtime.metrics(),
@@ -1270,7 +1270,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                             },
                             documentId -> memberSet.contains(documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -1932,7 +1934,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             String targetDocumentId,
             String expectedTargetBlueId,
             boolean active,
-            Long pendingHistoricalEpoch) {
+            Long pendingHistoricalEpoch,
+            blue.language.processor.closure.ManagedRepresentationCursor pendingRepresentationCursor) {
         static OccurrenceProjection from(ManagedOccurrenceBinding row) {
             return new OccurrenceProjection(
                     row.occurrenceIdentity(),
@@ -1944,7 +1947,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     row.targetDocumentId().value(),
                     row.expectedTargetBlueId(),
                     row.active(),
-                    row.pendingHistoricalEpoch());
+                    row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
         }
     }
 

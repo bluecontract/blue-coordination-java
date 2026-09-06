@@ -51,13 +51,25 @@ final class ManagedOccurrenceResolver {
 
     private final NodeProvider exactNodeSource;
     private final EngineMetrics metrics;
+    private final ManagedRepresentationHistory representationHistory;
 
     ManagedOccurrenceResolver(
             NodeProvider exactNodes,
             EngineMetrics metrics) {
+        this(exactNodes, metrics, null);
+    }
+
+    ManagedOccurrenceResolver(NodeProvider exactNodes, EngineMetrics metrics,
+            ManagedRepresentationHistory representationHistory) {
+        this.representationHistory = representationHistory;
         this.exactNodeSource = Objects.requireNonNull(
                 exactNodes, "exactNodes");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
+    }
+
+    private boolean isReplayable(ManagedLineageIndex.Lineage lineage, long epoch) {
+        return lineage.isReplayableHistoricalPosition(epoch) || (representationHistory != null
+                && representationHistory.provesReplayable(lineage, epoch));
     }
 
     Resolution resolve(ResolutionRequest request) {
@@ -446,17 +458,17 @@ final class ManagedOccurrenceResolver {
                 null));
     }
 
-    private static String blueIdAt(
+    private String blueIdAt(
             ManagedLineageIndex.Lineage lineage,
             long sourceEpoch) {
         if (sourceEpoch == -1L) {
-            return lineage.isReplayableHistoricalPosition(sourceEpoch)
+            return isReplayable(lineage, sourceEpoch)
                     ? lineage.authoredInitialBlueId() : null;
         }
         if (sourceEpoch == lineage.currentEpoch()) {
             return lineage.currentBlueId();
         }
-        if (!lineage.isReplayableHistoricalPosition(sourceEpoch)) {
+        if (!isReplayable(lineage, sourceEpoch)) {
             return null;
         }
         for (ManagedLineageIndex.RetainedState state
@@ -490,18 +502,18 @@ final class ManagedOccurrenceResolver {
                 .stream()
                 .filter(state -> state.documentId().equals(
                         lineage.documentId()))
-                .filter(state -> lineage.isReplayableHistoricalPosition(
+                .filter(state -> isReplayable(lineage, 
                         state.epoch()))
                 .map(ManagedLineageIndex.RetainedState::epoch)
                 .distinct()
                 .toList();
         LinkedHashSet<Long> matchingPositions = new LinkedHashSet<>();
         if (lineage.authoredInitialBlueId().equals(suppliedBlueId)
-                && lineage.isReplayableHistoricalPosition(-1L)) {
+                && isReplayable(lineage, -1L)) {
             matchingPositions.add(-1L);
         }
         if (lineage.initializedBlueId().equals(suppliedBlueId)
-                && lineage.isReplayableHistoricalPosition(0L)) {
+                && isReplayable(lineage, 0L)) {
             matchingPositions.add(0L);
         }
         matchingPositions.addAll(retainedEpochs);
@@ -559,7 +571,7 @@ final class ManagedOccurrenceResolver {
         }
     }
 
-    private static LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage>
+    private LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage>
             candidates(ManagedLineageIndex index, String suppliedBlueId) {
         LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage> candidates =
                 new LinkedHashMap<>();
@@ -577,25 +589,25 @@ final class ManagedOccurrenceResolver {
                         "Retained state has no indexed lineage "
                                 + retained.documentId());
             }
-            if (lineage.isReplayableHistoricalPosition(retained.epoch())) {
+            if (isReplayable(lineage, retained.epoch())) {
                 candidates.putIfAbsent(lineage.documentId(), lineage);
             }
         }
         return candidates;
     }
 
-    private static boolean hasKnownNonReplayablePosition(
+    private boolean hasKnownNonReplayablePosition(
             ManagedLineageIndex index,
             String suppliedBlueId) {
         for (ManagedLineageIndex.Lineage lineage
                 : index.authoredInitialMatches(suppliedBlueId)) {
-            if (!lineage.isReplayableHistoricalPosition(-1L)) {
+            if (!isReplayable(lineage, -1L)) {
                 return true;
             }
         }
         for (ManagedLineageIndex.Lineage lineage
                 : index.initializedMatches(suppliedBlueId)) {
-            if (!lineage.isReplayableHistoricalPosition(0L)) {
+            if (!isReplayable(lineage, 0L)) {
                 return true;
             }
         }
@@ -608,19 +620,19 @@ final class ManagedOccurrenceResolver {
                         "Retained state has no indexed lineage "
                                 + retained.documentId());
             }
-            if (!lineage.isReplayableHistoricalPosition(retained.epoch())) {
+            if (!isReplayable(lineage, retained.epoch())) {
                 return true;
             }
         }
         return false;
     }
 
-    private static void addReplayableCandidates(
+    private void addReplayableCandidates(
             Map<DocumentId, ManagedLineageIndex.Lineage> candidates,
             Collection<ManagedLineageIndex.Lineage> lineages,
             long historicalPosition) {
         for (ManagedLineageIndex.Lineage lineage : lineages) {
-            if (lineage.isReplayableHistoricalPosition(historicalPosition)) {
+            if (isReplayable(lineage, historicalPosition)) {
                 candidates.putIfAbsent(lineage.documentId(), lineage);
             }
         }

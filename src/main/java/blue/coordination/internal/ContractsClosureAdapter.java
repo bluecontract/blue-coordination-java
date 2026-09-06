@@ -185,7 +185,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 runtime.documentProcessor(), executionObserver);
         ManagedOccurrenceResolver occurrenceResolver =
                 new ManagedOccurrenceResolver(
-                        runtime.nodeProvider(), runtime.metrics());
+                        runtime.nodeProvider(), runtime.metrics(), new ManagedRepresentationHistory(documents));
         this.automaticResolutionCoordinator =
                 new AutomaticOccurrenceResolutionCoordinator<
                         CohortInvocation>(
@@ -2616,7 +2616,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             documentId -> invocation.memberSet().contains(
                                     documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             requireRouteSelectionCurrent(batch, invocation);
@@ -4096,7 +4098,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             String targetDocumentId,
             String expectedTargetBlueId,
             boolean active,
-            Long pendingHistoricalEpoch) {
+            Long pendingHistoricalEpoch,
+            blue.language.processor.closure.ManagedRepresentationCursor pendingRepresentationCursor) {
         static OccurrenceProjection from(ManagedOccurrenceBinding row) {
             return new OccurrenceProjection(
                     row.occurrenceIdentity(),
@@ -4108,7 +4111,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     row.targetDocumentId().value(),
                     row.expectedTargetBlueId(),
                     row.active(),
-                    row.pendingHistoricalEpoch());
+                    row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
         }
     }
 

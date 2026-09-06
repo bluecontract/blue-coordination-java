@@ -658,6 +658,17 @@ final class ManagedEpochApplicationExecutor {
                             consumerRevision.receiptIdentity(),
                             consumerRevision.afterBlueId(),
                             Math.addExact(work.sourceEpoch(), 1L));
+            if (work.isRepresentationApplication()) {
+                var completedOccurrence = resultingInventory.find(work.consumerDocumentId(), work.targetPath())
+                        .orElseThrow(() -> new IllegalStateException("Representation application lost its owning occurrence"));
+                var cause = work.representationCause().orElseThrow();
+                if (completedOccurrence.active() != cause.terminalPositionReached()
+                        || (!completedOccurrence.active() && !java.util.Objects.equals(completedOccurrence.pendingHistoricalEpoch(), cause.fromEpoch()))) {
+                    throw new IllegalStateException("Representation application changed the numbered cursor or activated before its captured tail");
+                }
+                application = ManagedEpochApplicationReceipt.identifiedRepresentation(application, work,
+                        completedOccurrence.pendingRepresentationCursor());
+            }
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
             ManagedCatchUpBarrier owningBarrier = beforeCatchUpPlans
@@ -697,7 +708,9 @@ final class ManagedEpochApplicationExecutor {
                             documentId -> invocation.memberSet().contains(
                                     documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -831,7 +844,11 @@ final class ManagedEpochApplicationExecutor {
         // other parent fields before permitting an ordinary appended revision.
         return ManagedSourceReferenceRewrite.verifies(
                 before.current().copyNode(), after.document(),
-                prior.rowsFrom(documentId), next.rowsFrom(documentId));
+                prior.rowsFrom(documentId), next.rowsFrom(documentId),
+                invocation.documents().entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                        entry -> entry.getKey().value(), entry -> entry.getValue().current().copyNode())),
+                result.resultingDocuments().stream().collect(java.util.stream.Collectors.toMap(
+                        row -> row.documentId().value(), ResultingDocument::document)));
     }
 
     private static boolean isIndirectComponentRepresentationRebind(

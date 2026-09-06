@@ -10,29 +10,71 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
 
 /** Authenticates ordered same-epoch steps from the original atomic publications. */
 final class ManagedRepresentationHistory {
     private final InMemoryDocumentStore documents;
+    private final ContractsClosurePublicationReceipt stagedPublication;
+    private final Map<DocumentId, ManagedCatchUpPlanner.Head> stagedHeads;
+    private final Map<DocumentId, ManagedEpochReceipt> stagedReceipts;
     ManagedRepresentationHistory(InMemoryDocumentStore documents) {
+        this(documents, null, Map.of(), Map.of());
+    }
+    private ManagedRepresentationHistory(InMemoryDocumentStore documents,
+            ContractsClosurePublicationReceipt publication, Map<DocumentId, ManagedCatchUpPlanner.Head> heads,
+            Map<DocumentId, ManagedEpochReceipt> receipts) {
         this.documents = Objects.requireNonNull(documents, "documents");
+        this.stagedPublication = publication;
+        this.stagedHeads = Map.copyOf(heads);
+        this.stagedReceipts = Map.copyOf(receipts);
+    }
+    /** Used only to prepare work inside the same atomic publication; execution reauthenticates durable membership. */
+    ManagedRepresentationHistory afterPublication(ContractsClosurePublicationReceipt publication,
+            Map<DocumentId, ManagedCatchUpPlanner.Head> heads, Map<DocumentId, ManagedEpochReceipt> receipts) {
+        return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts);
+    }
+    private ManagedEpochReceipt receipt(DocumentId id, long epoch) {
+        ManagedEpochReceipt staged = stagedReceipts.get(id);
+        return staged != null && staged.epoch() == epoch ? staged : documents.managedEpochEvidence(id, epoch).receipt();
+    }
+    boolean provesReplayable(ManagedLineageIndex.Lineage lineage, long epoch) {
+        if (epoch < -1L || epoch >= lineage.currentEpoch()) return false;
+        try {
+            for (long position = Math.max(0L, epoch); position <= lineage.currentEpoch(); position++) at(lineage.documentId(), position);
+            return true;
+        } catch (IllegalArgumentException | IllegalStateException unproved) {
+            return false;
+        }
     }
 
     Chain at(DocumentId documentId, long epoch) {
-        DocumentSession session = documents.find(documentId).orElseThrow(() ->
-                new IllegalArgumentException("Historical representation source is absent"));
-        ManagedEpochReceipt anchor = documents.managedEpochEvidence(documentId, epoch).receipt();
+        DocumentSession session = documents.find(documentId).orElse(null);
+        ManagedCatchUpPlanner.Head head = stagedHeads.get(documentId);
+        if (head == null && session != null) head = new ManagedCatchUpPlanner.Head(session.epoch(), session.currentRepresentation().blueId());
+        if (head == null) throw new IllegalArgumentException("Historical representation source is absent");
+        ManagedEpochReceipt anchor = receipt(documentId, epoch);
         if (anchor == null) throw new IllegalArgumentException("Representation epoch anchor is unavailable");
         List<ManagedRepresentationTransition> transitions = new ArrayList<>();
         String predecessorPosition = anchor.receiptIdentity();
         String beforeBlueId = anchor.afterBlueId();
-        for (DocumentSession.ComponentRepresentationTransition row : session.representationTransitions()) {
+        List<DocumentSession.ComponentRepresentationTransition> rows = new ArrayList<>(session == null ? List.of() : session.representationTransitions());
+        if (session != null && stagedPublication != null && head.epoch() == session.epoch()
+                && !head.blueId().equals(session.currentRepresentation().blueId())) {
+            var transition = stagedPublication.attempt().processResult().managedTransitionReceipts().stream()
+                    .filter(item -> item.documentId().value().equals(documentId.value())).findFirst().orElseThrow();
+            rows.add(new DocumentSession.ComponentRepresentationTransition(head.epoch(),
+                    session.currentRepresentation().blueId(), head.blueId(), transition.transitionReceiptIdentity(),
+                    stagedPublication.publicationIdentity()));
+        }
+        for (DocumentSession.ComponentRepresentationTransition row : rows) {
             if (row.epoch() != epoch) continue;
             if (!row.beforeBlueId().equals(beforeBlueId) || row.originalPublicationIdentity() == null) {
                 throw new IllegalArgumentException("Unproved ordered representation predecessor");
             }
-            ContractsClosurePublicationReceipt publication = documents
-                    .closurePublicationReceipt(row.originalPublicationIdentity())
+            ContractsClosurePublicationReceipt publication = (stagedPublication != null
+                    && stagedPublication.publicationIdentity().equals(row.originalPublicationIdentity())
+                    ? Optional.of(stagedPublication) : documents.closurePublicationReceipt(row.originalPublicationIdentity()))
                     .filter(ContractsClosurePublicationReceipt::commits)
                     .orElseThrow(() -> new IllegalArgumentException("Original representation commit is unavailable"));
             if (!publication.documentIds().contains(documentId)
@@ -52,12 +94,12 @@ final class ManagedRepresentationHistory {
             predecessorPosition = proved.positionIdentity();
             beforeBlueId = row.afterBlueId();
         }
-        ManagedEpochReceipt next = documents.managedEpochEvidence(documentId, epoch + 1L).receipt();
+        ManagedEpochReceipt next = receipt(documentId, epoch + 1L);
         if (next != null && !next.beforeBlueId().orElseThrow().equals(beforeBlueId)) {
             throw new IllegalArgumentException("Unproved gap before the next immutable source receipt");
         }
-        if (next == null && (epoch != session.epoch()
-                || !session.currentRepresentation().blueId().equals(beforeBlueId))) {
+        if (next == null && (epoch != head.epoch()
+                || !head.blueId().equals(beforeBlueId))) {
             throw new IllegalArgumentException("Unproved terminal representation head");
         }
         return new Chain(documentId, epoch, anchor, List.copyOf(transitions),

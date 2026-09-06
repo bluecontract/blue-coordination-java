@@ -127,7 +127,7 @@ final class BlueRuntime implements AutoCloseable {
                 .nodeProvider(nodeProvider)
                 .preprocessingAliases(imports)
                 .environmentImports(imports)
-                .cachePolicy(BlueCachePolicy.highThroughputDefaults())
+                .cachePolicy(BlueCachePolicy.boundedDefaults())
                 .build();
         CoordinationProcessorOptions options =
                 CoordinationProcessorOptions.builder()

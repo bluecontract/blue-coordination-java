@@ -94,12 +94,11 @@ final class ManagedEpochSourceEvidenceVerifier {
                 && receipt.kind() == DocumentRevision.Kind.INITIALIZATION;
         boolean initializationMismatch = initialization
                 && (before != null
-                        || plan.admittedSourceEpoch() != -1L
-                        || work.sourceEpoch()
-                                != Math.addExact(
-                                        plan.admittedSourceEpoch(), 1L)
-                        || !plan.admittedSourceBlueId().equals(
-                                transition.beforeBlueId()));
+                        || (work.isRepresentationApplication()
+                            ? !documents.require(work.sourceDocumentId()).authoredInitialBlueId().equals(transition.beforeBlueId())
+                            : (plan.admittedSourceEpoch() != -1L
+                                || work.sourceEpoch() != Math.addExact(plan.admittedSourceEpoch(), 1L)
+                                || !plan.admittedSourceBlueId().equals(transition.beforeBlueId()))));
         if (initializationMismatch
                 || (!initialization
                         && (before == null

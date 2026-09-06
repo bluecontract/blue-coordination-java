@@ -1,16 +1,22 @@
 package blue.coordination.api;
 
 import blue.language.identity.BlueIds;
+import blue.language.processor.closure.ManagedRepresentationCause;
+import java.util.Optional;
+import java.util.LinkedHashMap;
 import blue.language.model.wire.JsonPointer;
 
 import java.util.Map;
 import java.util.Objects;
 
-/** One canonical work item applying one source epoch through one occurrence. */
+/** One canonical managed-history item; representation steps have a separate identity domain. */
 public final class ManagedEpochApplicationWork {
     private static final String IDENTITY_DOMAIN =
             "blue-coordination-managed-epoch-application-work/1.0";
 
+    private static final String REPRESENTATION_DOMAIN =
+            "blue-coordination-managed-representation-application-work/1.0";
+    private final ManagedRepresentationCause representationCause;
     private final String workIdentity;
     private final String planIdentity;
     private final String barrierIdentity;
@@ -40,6 +46,37 @@ public final class ManagedEpochApplicationWork {
             long expectedConsumerCommittedEpoch,
             String expectedConsumerCommittedBlueId,
             long expectedGraphGeneration) {
+        this(workIdentity,
+                planIdentity,
+                barrierIdentity,
+                sourceReceiptIdentity,
+                sourceDocumentId,
+                sourceEpoch,
+                consumerDocumentId,
+                targetOccurrenceIdentity,
+                targetPath,
+                activationGeneration,
+                expectedConsumerCommittedEpoch,
+                expectedConsumerCommittedBlueId,
+                expectedGraphGeneration, null);
+    }
+
+    private ManagedEpochApplicationWork(
+            String workIdentity,
+            String planIdentity,
+            String barrierIdentity,
+            String sourceReceiptIdentity,
+            DocumentId sourceDocumentId,
+            long sourceEpoch,
+            DocumentId consumerDocumentId,
+            String targetOccurrenceIdentity,
+            String targetPath,
+            long activationGeneration,
+            long expectedConsumerCommittedEpoch,
+            String expectedConsumerCommittedBlueId,
+            long expectedGraphGeneration,
+            ManagedRepresentationCause representationCause) {
+        this.representationCause = representationCause;
         this.planIdentity = ManagedIdentity.requireSha256(
                 planIdentity, "planIdentity");
         this.barrierIdentity = ManagedIdentity.requireSha256(
@@ -66,9 +103,15 @@ public final class ManagedEpochApplicationWork {
                         "/expectedConsumerCommittedBlueId");
         this.expectedGraphGeneration = ManagedIdentity.requireSafeInteger(
                 expectedGraphGeneration, "expectedGraphGeneration");
+        if (representationCause != null && (representationCause.fromEpoch() != sourceEpoch
+                || !representationCause.childDocumentId().value().equals(sourceDocumentId.value())
+                || !representationCause.targetOccurrenceIdentity().equals(targetOccurrenceIdentity)
+                || !representationCause.transition().anchorReceiptIdentity().equals(sourceReceiptIdentity))) {
+            throw new IllegalArgumentException("Representation work must bind its exact source anchor and occurrence");
+        }
         this.workIdentity = ManagedIdentity.verify(
                 workIdentity,
-                IDENTITY_DOMAIN,
+                representationCause == null ? IDENTITY_DOMAIN : REPRESENTATION_DOMAIN,
                 identityValue(),
                 "workIdentity");
     }
@@ -116,6 +159,34 @@ public final class ManagedEpochApplicationWork {
                 expectedGraphGeneration);
     }
 
+    /** Constructs one separately identified same-epoch step, never an ordinary epoch work item. */
+    public static ManagedEpochApplicationWork identifiedRepresentation(
+            ManagedEpochApplicationWork coordinates, ManagedRepresentationCause cause) {
+        Objects.requireNonNull(coordinates, "coordinates");
+        Objects.requireNonNull(cause, "cause");
+        if (coordinates.isRepresentationApplication()) throw new IllegalArgumentException("Coordinates already carry representation work");
+        Map<String, Object> value = new LinkedHashMap<>(coordinates.identityValue());
+        value.put("representationCauseIdentity", cause.causeIdentity());
+        return new ManagedEpochApplicationWork(ManagedIdentity.identify(REPRESENTATION_DOMAIN, value),
+                coordinates.planIdentity(),
+                coordinates.barrierIdentity(),
+                coordinates.sourceReceiptIdentity(),
+                coordinates.sourceDocumentId(),
+                coordinates.sourceEpoch(),
+                coordinates.consumerDocumentId(),
+                coordinates.targetOccurrenceIdentity(),
+                coordinates.targetPath(),
+                coordinates.activationGeneration(),
+                coordinates.expectedConsumerCommittedEpoch(),
+                coordinates.expectedConsumerCommittedBlueId(),
+                coordinates.expectedGraphGeneration(), cause);
+    }
+
+    public Optional<ManagedRepresentationCause> representationCause() { return Optional.ofNullable(representationCause); }
+    public boolean isRepresentationApplication() { return representationCause != null; }
+    /** The numbered receipt cursor owned by this step, which representation work does not advance. */
+    public long expectedNextSourceEpoch() { return isRepresentationApplication() ? Math.addExact(sourceEpoch, 1L) : sourceEpoch; }
+
     public String workIdentity() { return workIdentity; }
 
     public String planIdentity() { return planIdentity; }
@@ -149,7 +220,7 @@ public final class ManagedEpochApplicationWork {
     public long expectedGraphGeneration() { return expectedGraphGeneration; }
 
     private Map<String, Object> identityValue() {
-        return identityValue(
+        Map<String, Object> value = new LinkedHashMap<>(identityValue(
                 planIdentity,
                 barrierIdentity,
                 sourceReceiptIdentity,
@@ -161,7 +232,9 @@ public final class ManagedEpochApplicationWork {
                 activationGeneration,
                 expectedConsumerCommittedEpoch,
                 expectedConsumerCommittedBlueId,
-                expectedGraphGeneration);
+                expectedGraphGeneration));
+        if (representationCause != null) value.put("representationCauseIdentity", representationCause.causeIdentity());
+        return value;
     }
 
     private static Map<String, Object> identityValue(

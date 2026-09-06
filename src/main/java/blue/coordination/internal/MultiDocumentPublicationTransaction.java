@@ -2364,7 +2364,8 @@ final class MultiDocumentPublicationTransaction {
             String occurrenceIdentity,
             String bindingIdentity,
             boolean active,
-            Long pendingHistoricalEpoch) {
+            Long pendingHistoricalEpoch,
+            blue.language.processor.closure.ManagedRepresentationCursor pendingRepresentationCursor) {
         static OccurrenceRow from(ManagedOccurrenceBinding row) {
             return new OccurrenceRow(
                     row.sourceDocumentId().value(),
@@ -2376,7 +2377,7 @@ final class MultiDocumentPublicationTransaction {
                     row.occurrenceIdentity(),
                     row.bindingIdentity(),
                     row.active(),
-                    row.pendingHistoricalEpoch());
+                    row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
         }
     }
 

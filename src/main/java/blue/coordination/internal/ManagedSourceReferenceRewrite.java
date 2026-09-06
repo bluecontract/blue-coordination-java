@@ -8,6 +8,7 @@ import blue.language.processor.closure.ManagedOccurrenceBinding;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /** Exact same-lineage reference substitutions, with all other fields preserved. */
@@ -17,6 +18,13 @@ final class ManagedSourceReferenceRewrite {
     static boolean verifies(Node before, Node after,
             List<ManagedOccurrenceBinding> prior,
             List<ManagedOccurrenceBinding> next) {
+        return verifies(before, after, prior, next, Map.of(), Map.of());
+    }
+
+    static boolean verifies(Node before, Node after,
+            List<ManagedOccurrenceBinding> prior,
+            List<ManagedOccurrenceBinding> next,
+            Map<String, Node> beforeTargets, Map<String, Node> afterTargets) {
         if (prior.isEmpty() || prior.size() != next.size()) return false;
         var unmatched = new HashMap<String, ManagedOccurrenceBinding>();
         for (ManagedOccurrenceBinding row : next) {
@@ -36,7 +44,18 @@ final class ManagedSourceReferenceRewrite {
                     || successor.activationGeneration() != row.activationGeneration()
                     || successor.active() != row.active()
                     || !Objects.equals(successor.pendingHistoricalEpoch(),
-                            row.pendingHistoricalEpoch())) return false;
+                            row.pendingHistoricalEpoch())
+                    || !Objects.equals(successor.pendingRepresentationCursor(),
+                            row.pendingRepresentationCursor())) return false;
+            if (!row.active() && row.pendingHistoricalEpoch() == null) {
+                // Retired paths are absent from the source document. Their retained
+                // binding rows still follow finalizer-owned target identities.
+                // Authenticate both endpoints against the complete committed member
+                // values, and leave every byte at the retired source path untouched.
+                if (!establishes(beforeTargets.get(row.targetDocumentId().value()), row.expectedTargetBlueId())
+                        || !establishes(afterTargets.get(row.targetDocumentId().value()), successor.expectedTargetBlueId())) return false;
+                continue;
+            }
             Node previousValue = NodePathEditor.getOrNull(before, row.sourcePath());
             Node nextValue = NodePathEditor.getOrNull(after, row.sourcePath());
             if (!establishes(previousValue, row.expectedTargetBlueId())

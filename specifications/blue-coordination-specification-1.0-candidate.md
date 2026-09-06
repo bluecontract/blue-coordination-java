@@ -1575,8 +1575,22 @@ Its identity binds the occurrence and activation generation, exact source
 epoch and predecessor/successor positions, captured goal, original source
 evidence, consumer committed head, graph generation, and existing catch-up
 barrier. Its type MUST distinguish it from numbered-epoch application work.
-The concrete work and application-receipt wire schemas are not established by
-this proposal's Java prototype and require explicit versioned binding.
+The proposed backward-compatible Java envelope retains the existing numbered
+epoch constructor. A representation work carries a separately typed
+`ManagedRepresentationCause`, uses identity domain
+`blue-coordination-managed-representation-application-work/1.0`, and binds
+`representationCauseIdentity` in addition to every existing work fence.
+The source receipt is the numbered anchor at N; its expected numbered cursor
+remains N+1 throughout the positional step. Ordinary work retains its original
+domain and source-epoch interpretation.
+
+The corresponding application receipt uses domain
+`blue-coordination-managed-representation-application-receipt/1.0` and additionally
+binds `representationCauseIdentity` and the resulting representation cursor.
+Its numbered `resultingSourceCursor` remains N+1. The cursor is absent only
+after the separately proved terminal activation. SDK work exposes the exact
+before/after positions, goal, next-revision anchor, endpoints and cause identity.
+The new domains and schemas require explicit release compatibility bindings.
 
 For an intermediate chain, the captured goal is the exact predecessor of the
 next immutable numbered receipt. For a representation-only tail, the goal is
