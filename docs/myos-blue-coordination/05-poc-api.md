@@ -11,10 +11,12 @@ program interpretation, placement/routing order, canonical initialization and ga
 supersedes earlier candidates; a Java usage example is not implementation or conformance proof.
 
 Phase1 libraries are implemented in `worktrees/coordination-external-state`; Phase2 host primitives
-and durable witnesses are in `../myos-simple` on `feat/coordination-with-external-state`. Both are
-locally verified; see the linked handoff and verification record. They are ready for the Phase3 integration described in
-[25](25-phase-3-integration-plan.md), not released, production-ready, API-frozen, or a formal pass of
-every acceptance-catalog scenario. The concrete surface below is the implemented API. Later host
+and durable witnesses are in `../myos-simple` on `feat/coordination-with-external-state`. Their
+baseline local verification is recorded in the linked handoff. The subsequent
+[review repairs and changed-candidate verification](implementation/pre-phase-3-review-remediation.md)
+have passed the agreed gate for the Phase3 integration described in [25](25-phase-3-integration-plan.md).
+This is not a release, production readiness, API freeze or a formal pass of every acceptance-catalog
+scenario. The concrete surface below is the implemented API. Later host
 protocol sections preserve design requirements; their capitalized conceptual names are not claims
 that corresponding Java classes or methods exist. One evolving local stack remains authoritative.
 
@@ -71,8 +73,16 @@ After receiving a prepared result the host does not call Contracts again to inte
 
 `EvaluationEvidence` contains the snapshot, exact relevant Timeline set and prefixes, optional
 `handledThrough`, predecessor operation IDs, retained source programs/failures/gaps, offered
-initializations/frontier selections, and host fences. Its additive helpers are
-`withOperationFences`, `withSourceInitializations`, and `withSourceFrontiers`.
+initializations/frontier selections, host fences, expected producer bases and original source-input
+admissions. Its additive helpers are `withOperationFences`, `withSourceInitializations`,
+`withSourceFrontiers`, `withExpectedSourceBases` and `withSourceInputAdmissions`. Each helper preserves
+the other evidence; the internal history-cut copy changes only prefixes, handled position and
+predecessors. The new review-repair paths remain subject to their focused verification record.
+
+Expected source bases come from authenticated source admission/prefix authority, not from hashing
+the offered producer result and trusting that same hash. The source's execution policy is checked
+against its expected source basis; it need not equal the independent consumer's gas budget. Missing
+required authority is a need before metadata-only progress as well as before execution.
 
 `TimelineInput.timelineId()` is the exact **string locator** stored at
 `/timeline/timelineId` of a typed `MyOS/Timeline` inside the typed `Coordination/Timeline Entry`.
@@ -101,6 +111,9 @@ The implemented composition is:
 - Source prefix: `CanonicalSourceHistory.start`, `prepareNext`, and `resume` retain bounded
   canonical preparation steps. Its results are `Await`, `Step`, `Complete(Boundary)`, or `Blocked`.
   A `Step` retains all fresh prerequisite/group publications; it is not necessarily one operation.
+  `Await(keys, resourceDemands)` is lossless; `CanonicalSourceAwaitCodec` and the owning
+  `ClosureResourceDemandCodec` retain portable request data within aggregate physical budgets,
+  not a private runtime continuation.
 - Attachment: `ObserverAttachmentPlan.select` and `SourceFrontierSelection.fromBoundary` bind
   selected history and a closed canonical boundary. `SourceFrontierView` alone is an exact view,
   not completeness authority. Source initialization/attachment capabilities are activated at their
@@ -112,6 +125,23 @@ The implemented composition is:
 - Cold evidence: `OperationReceiptCodec` encodes a prepared operation or group and restores exact
   state, source program/initialization/failure, per-consumer source gap, managed lanes, gas and
   effects. `ManagedProgressReceiptCodec` represents its distinct metadata-only lane outcome.
+
+For external source-history steps, `CanonicalSourceHistory.Request` carries original admission
+roots keyed by exact selected Entry identity. This can be a sparse per-step map: the caller need
+not load every historical admission. Evidence separately offers restored `SourceInputAdmission`
+records. Core's existing owning selection verifies chronology/completeness first, then requires the
+original admission before executing or consuming metadata. The two-argument Request has no such
+authority and returns a need for external work; it is not a request to silently use empty choices.
+
+`SourceInputAdmission.encodeCandidate` creates bytes, not authority. Restore only against the
+independently authenticated original logical input root. The record binds exact Entry, source bases,
+original semantic predecessors and complete frozen choices, including an explicit empty selection.
+A legitimate original multi-owner input may be projected through its members; each co-owner's
+basis must match that common invocation, regardless of the requested member. Independent read
+dependencies may have different producer policies. Unrelated reverse
+observers cannot become source prerequisites through the record. Prefix records retain its identity
+for cold verification. Neither first materialization nor importing A may select new choices for X's
+old attachment to Y. Intrinsic source initialization keeps its fixed canonical rule.
 
 `SourceObservationProgram` is the actual retained action program: steps, patches with resulting
 bindings, enqueues, reference projections, borrowed programs and accepted creation evidence.

@@ -140,9 +140,45 @@ class FrontierCreatorIntegrationTest {
             var need = assertInstanceOf(CoordinationCore.NeedEvidence.class, f.core.evaluate(work, input, policy));
             if (fullHistory) assertFalse(need.resourceDemands().isEmpty());
             else assertTrue(need.keys().stream().anyMatch(key -> key.startsWith("source-frontier:")));
-            var operations = assertInstanceOf(CoordinationCore.PreparedOperations.class, f.core.evaluate(work,
-                    fullHistory ? input.withSourceInitializations(List.of(initialization)) : input.withSourceFrontiers(List.of(frontier)), policy));
+            var completeEvidence = fullHistory ? input.withSourceInitializations(List.of(initialization)) : input.withSourceFrontiers(List.of(frontier));
+            var operations = assertInstanceOf(CoordinationCore.PreparedOperations.class, f.core.evaluate(work, completeEvidence, policy));
             assertEquals(1, operations.operations().size()); var created = operations.operations().get(0);
+            // The creator is now reconstructed as a historical source. Its OWN original choices
+            // are admitted independently; an importing observer's policy never enters this call.
+            var creatorHistory = new CanonicalSourceHistory(f.core);
+            var creatorRequest = new CanonicalSourceHistory.Request(creator.documentId(), creation.order());
+            var creatorBirth = assertInstanceOf(CanonicalSourceHistory.Step.class, creatorHistory.prepareNext(creatorRequest,
+                    creatorHistory.start(creator.documentId()), evidence(List.of(authored), List.of(), List.of(), Map.of()), f.blobs::put, LIMITS));
+            var original = OriginalSourceInputTestSupport.admit(f.core, creatorBirth.after(), creatorRequest, completeEvidence, policy, f.blobs);
+            String alternateRoot = SourceInputAdmission.encodeCandidate(creation, original.admission().sourceBases(),
+                    original.admission().originalPredecessors(), SameOriginAttachmentPolicy.empty(), f.blobs::put, LIMITS);
+            assertNotEquals(original.admission().identity(), alternateRoot, "Original nondefault choices are identity-bearing");
+            var alternate = SourceInputAdmission.restore(alternateRoot, f.blobs::get, LIMITS);
+            var changedChoices = assertInstanceOf(CanonicalSourceHistory.Await.class, creatorHistory.prepareNext(original.request(),
+                    creatorBirth.after(), original.evidence().withSourceInputAdmissions(List.of(alternate)), f.blobs::put, LIMITS));
+            assertEquals(List.of("source-input-admission-record:" + original.admission().identity()), changedChoices.keys(),
+                    "A retry's alternate policy record cannot replace the authenticated original choices");
+            assertThrows(blue.language.processor.InvalidExecutionEvidenceException.class, () -> SourceInputAdmission.restore(
+                    original.admission().identity(), ignored -> f.blobs.get(alternateRoot), LIMITS));
+            if (fullHistory) {
+                var pending = assertInstanceOf(CanonicalSourceHistory.Await.class, creatorHistory.prepareNext(original.request(), creatorBirth.after(),
+                        original.evidence().withSourceInitializations(List.of()), f.blobs::put, LIMITS));
+                assertInstanceOf(SourceInitializationDemand.class, pending.resourceDemands().get(0));
+                String retainedNeed = CanonicalSourceAwaitCodec.encode(pending, f.blobs::put, LIMITS);
+                var coldNeed = CanonicalSourceAwaitCodec.decode(retainedNeed, f.blobs::get, LIMITS);
+                assertEquals(pending.resourceDemands(), coldNeed.resourceDemands());
+                assertEquals(pending.keys(), coldNeed.keys());
+            }
+            var historical = assertInstanceOf(CanonicalSourceHistory.Step.class, creatorHistory.prepareNext(original.request(), creatorBirth.after(),
+                    original.evidence(), f.blobs::put, LIMITS));
+            var historicalOperation = assertInstanceOf(CoordinationCore.PreparedOperations.class, historical.evaluation()).operations().get(0);
+            assertEquals(created.operationId(), historicalOperation.operationId(), "Direct execution and source reconstruction use the same original selection seed");
+            assertEquals(created.result().gasTraceIdentity(), historicalOperation.result().gasTraceIdentity());
+            assertEquals(created.result().resultingDocuments().get(0).afterBlueId(), historicalOperation.result().resultingDocuments().get(0).afterBlueId());
+            java.util.concurrent.atomic.AtomicInteger coldReads = new java.util.concurrent.atomic.AtomicInteger();
+            var coldCreator = creatorHistory.resume(creator.documentId(), historical.after().recordIdentity().orElseThrow(),
+                    key -> { coldReads.incrementAndGet(); return f.blobs.get(key); }, LIMITS);
+            assertEquals(1, coldReads.get()); assertEquals(original.admission().identity(), coldCreator.originalAdmissionIdentity().orElseThrow());
             assertEquals(Set.of(creator.documentId()), created.ownedLineages());
             assertEquals(ProcessorStatus.SUCCESS, created.result().status(), () -> created.result().failure().toString());
             assertEquals(BigInteger.valueOf(fullHistory ? 0 : 10), created.projections().get(0).result().document().get("/previewSeen"),

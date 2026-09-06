@@ -219,9 +219,11 @@ class CanonicalSourceHistoryTest {
             assertEquals(List.of("canonical-initialization:" + child.documentId().value()), missing.keys());
             evidence = evidence.withSourceInitializations(List.of(OperationReceiptCodec.restoreSourceInitialization(
                     childBirth.receiptIdentity(), f.blobs::get, LIMITS)));
+            var childAdmission = OriginalSourceInputTestSupport.admit(f.core, childBirth.after(),
+                    new CanonicalSourceHistory.Request(child.documentId(), cut),
+                    f.evidence(child, List.of(input("later source input", 15, "account")), 21), SameOriginAttachmentPolicy.empty(), f.blobs);
             var laterChild = assertInstanceOf(CanonicalSourceHistory.Step.class, history.prepareNext(
-                    new CanonicalSourceHistory.Request(child.documentId(), cut), childBirth.after(),
-                    f.evidence(child, List.of(input("later source input", 15, "account")), 21), f.blobs::put, LIMITS));
+                    childAdmission.request(), childBirth.after(), childAdmission.evidence(), f.blobs::put, LIMITS));
             var aheadChild = f.restore(laterChild.after().successfulView().orElseThrow());
             var aheadSnapshot = ClosureEvidenceFactory.affectedClosure(0, List.of(parent, aheadChild), List.of(binding),
                     List.of(ClosureEvidenceFactory.acyclicComponent(aheadChild), ClosureEvidenceFactory.acyclicComponent(parent)),
@@ -436,7 +438,8 @@ class CanonicalSourceHistoryTest {
                 List.of(input("fresh B input", 15, "account")))), Optional.empty(), List.of(childFence, parentFence),
                 Map.of(child.documentId(), childBirth.after().semanticPredecessor().orElseThrow(), parent.documentId(), birth.after().semanticPredecessor().orElseThrow()))
                 .withOperationFences(Map.of(child.documentId(), List.of(childFence), parent.documentId(), List.of(parentFence)));
-        return new FreshChild(history, request, birth, child, parent, external);
+        var admitted = OriginalSourceInputTestSupport.admit(f.core, birth.after(), request, external, SameOriginAttachmentPolicy.empty(), f.blobs);
+        return new FreshChild(history, admitted.request(), birth, child, parent, admitted.evidence());
     }
 
     private static String retainPrefix(com.fasterxml.jackson.databind.node.ObjectNode value, Map<String, byte[]> blobs) {
@@ -561,8 +564,10 @@ class CanonicalSourceHistoryTest {
             var cursor = history.start(authored.documentId()); var state = authored;
             List<CanonicalSourceHistory.Step> steps = new ArrayList<>();
             for (int iteration = 0; iteration < 10; iteration++) {
-                var result = history.prepareNext(new CanonicalSourceHistory.Request(authored.documentId(), cut), cursor,
-                        evidence(state, inputs, completeBefore), blobs::put, LIMITS);
+                var admitted = OriginalSourceInputTestSupport.admit(core, cursor,
+                        new CanonicalSourceHistory.Request(authored.documentId(), cut), evidence(state, inputs, completeBefore),
+                        SameOriginAttachmentPolicy.empty(), blobs);
+                var result = history.prepareNext(admitted.request(), cursor, admitted.evidence(), blobs::put, LIMITS);
                 if (result instanceof CanonicalSourceHistory.Complete complete) return new Prepared(List.copyOf(steps), complete.boundary());
                 var step = assertInstanceOf(CanonicalSourceHistory.Step.class, result);
                 steps.add(step); cursor = step.after(); state = restore(cursor.successfulView().orElseThrow());
@@ -611,8 +616,13 @@ class CanonicalSourceHistoryTest {
             var snapshot = ClosureEvidenceFactory.affectedClosure(0, List.of(observer.before, source), List.of(observer.binding),
                     List.of(ClosureEvidenceFactory.acyclicComponent(source), ClosureEvidenceFactory.acyclicComponent(observer.before)),
                     List.of(source.documentId(), observer.before.documentId()));
+            Map<DocumentId, String> originalBases = new TreeMap<>();
+            // These fixtures produce their source operations under this fixed original Core configuration.
+            for (var program : programs) for (DocumentId member : program.ownedDocumentIds())
+                originalBases.put(member, SourceExecutionBasis.identity(member, core.environment(), core.executionPolicy()));
             return new CoordinationCore.EvaluationEvidence(snapshot, Set.of("timeline"),
-                    List.of(new CoordinationCore.TimelinePrefix("timeline", 31, inputs)), handled, List.of(), Map.of(), programs);
+                    List.of(new CoordinationCore.TimelinePrefix("timeline", 31, inputs)), handled, List.of(), Map.of(), programs)
+                    .withExpectedSourceBases(originalBases);
         }
         @Override public void close() { processor.close(); runtime.close(); }
     }

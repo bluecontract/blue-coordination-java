@@ -7,9 +7,11 @@ Section numbers are retained from the original analysis so that references and c
 
 ## Current implementation status
 
-Phase1/2 are ready for Phase3 integration within the [recorded verification scope](implementation/phase-1-2-readiness.md).
-The implementation lives in the isolated [workspaces](00-conventions-and-provenance.md), not this
-documentation checkout's unchanged runtime sources.
+Phase1/2 passed the [baseline verification scope](implementation/phase-1-2-readiness.md).
+The subsequent [pre-Phase3 review repairs](implementation/pre-phase-3-review-remediation.md) passed
+their separate affected-library and host integration checks; the earlier results are not relabeled
+as that changed candidate. Code and documentation are now
+consolidated on the implementation branch in the isolated [workspaces](00-conventions-and-provenance.md).
 
 | Area | Implemented | Still to integrate or measure |
 |---|---|---|

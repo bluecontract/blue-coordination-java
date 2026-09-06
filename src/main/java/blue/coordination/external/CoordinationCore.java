@@ -28,6 +28,7 @@ import blue.language.processor.closure.SourceOperationFailure;
 import blue.language.processor.closure.SameOriginOperationResult;
 import blue.language.processor.closure.SameOriginAttachmentPolicy;
 import blue.language.processor.closure.SameOriginProcessAttempt;
+import blue.language.processor.closure.SourceExecutionBasis;
 
 import java.util.ArrayList;
 import java.util.ArrayDeque;
@@ -123,7 +124,19 @@ public final class CoordinationCore {
                                      List<blue.language.processor.closure.SourceOperationFailure> sourceFailures,
                                      List<SourceInitialization> sourceInitializations,
                                      Map<DocumentId, List<ReadFence>> operationFences,
-                                     List<SourceFrontierSelection> sourceFrontiers) {
+                                     List<SourceFrontierSelection> sourceFrontiers,
+                                     Map<DocumentId, String> expectedSourceBases,
+                                     List<SourceInputAdmission> sourceInputAdmissions) {
+        public EvaluationEvidence(AffectedClosureSnapshot snapshot, Set<String> relevantTimelines,
+                                  List<TimelinePrefix> prefixes, Optional<ExternalOrderKey> handledThrough,
+                                  List<ReadFence> fences, Map<DocumentId, String> precedingOperations,
+                                  List<SourceObservationProgram> sourcePrograms,
+                                  Map<DocumentId, List<blue.language.processor.closure.SourceObservationGap>> sourceGaps,
+                                  List<SourceOperationFailure> sourceFailures, List<SourceInitialization> sourceInitializations,
+                                  Map<DocumentId, List<ReadFence>> operationFences, List<SourceFrontierSelection> sourceFrontiers) {
+            this(snapshot, relevantTimelines, prefixes, handledThrough, fences, precedingOperations, sourcePrograms,
+                    sourceGaps, sourceFailures, sourceInitializations, operationFences, sourceFrontiers, Map.of(), List.of());
+        }
         public EvaluationEvidence(AffectedClosureSnapshot snapshot, Set<String> relevantTimelines,
                                   List<TimelinePrefix> prefixes, Optional<ExternalOrderKey> handledThrough,
                                   List<ReadFence> fences, Map<DocumentId, String> precedingOperations,
@@ -181,6 +194,12 @@ public final class CoordinationCore {
             sourceFailures = List.copyOf(sourceFailures);
             sourceInitializations = List.copyOf(sourceInitializations);
             sourceFrontiers = List.copyOf(sourceFrontiers);
+            expectedSourceBases = Map.copyOf(expectedSourceBases);
+            for (String basis : expectedSourceBases.values()) if (!basis.matches("[0-9a-f]{64}"))
+                throw new IllegalArgumentException("Expected source basis must be an authenticated canonical digest");
+            sourceInputAdmissions = List.copyOf(sourceInputAdmissions);
+            if (sourceInputAdmissions.stream().map(SourceInputAdmission::identity).distinct().count() != sourceInputAdmissions.size())
+                throw new IllegalArgumentException("Repeated original source admission");
             var copiedFences = new java.util.TreeMap<DocumentId, List<ReadFence>>();
             Map<String, String> exactRevisions = new java.util.HashMap<>();
             operationFences.forEach((owner, values) -> {
@@ -198,16 +217,33 @@ public final class CoordinationCore {
         }
         public EvaluationEvidence withSourceInitializations(List<SourceInitialization> initializations) {
             return new EvaluationEvidence(snapshot, relevantTimelines, prefixes, handledThrough, fences,
-                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, initializations, operationFences, sourceFrontiers);
+                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, initializations, operationFences, sourceFrontiers,
+                    expectedSourceBases, sourceInputAdmissions);
         }
         /** Mutable CAS authority belongs to the named owner; source receipts are immutable dependencies. */
         public EvaluationEvidence withOperationFences(Map<DocumentId, List<ReadFence>> byOwner) {
             return new EvaluationEvidence(snapshot, relevantTimelines, prefixes, handledThrough, fences,
-                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, byOwner, sourceFrontiers);
+                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, byOwner, sourceFrontiers,
+                    expectedSourceBases, sourceInputAdmissions);
         }
         public EvaluationEvidence withSourceFrontiers(List<SourceFrontierSelection> selections) {
             return new EvaluationEvidence(snapshot, relevantTimelines, prefixes, handledThrough, fences,
-                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, operationFences, selections);
+                    precedingOperations, sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, operationFences, selections,
+                    expectedSourceBases, sourceInputAdmissions);
+        }
+        /** Authority selected from original source admission/prefix context, never inferred from offered receipt fields. */
+        public EvaluationEvidence withExpectedSourceBases(Map<DocumentId, String> bases) {
+            return new EvaluationEvidence(snapshot, relevantTimelines, prefixes, handledThrough, fences, precedingOperations,
+                    sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, operationFences, sourceFrontiers, bases, sourceInputAdmissions);
+        }
+        public EvaluationEvidence withSourceInputAdmissions(List<SourceInputAdmission> admissions) {
+            return new EvaluationEvidence(snapshot, relevantTimelines, prefixes, handledThrough, fences, precedingOperations,
+                    sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, operationFences, sourceFrontiers, expectedSourceBases, admissions);
+        }
+        EvaluationEvidence withHistoryCut(List<TimelinePrefix> bounded, Optional<ExternalOrderKey> through, Map<DocumentId, String> predecessors) {
+            return new EvaluationEvidence(snapshot, relevantTimelines, bounded, through, fences, predecessors,
+                    sourcePrograms, sourceGaps, sourceFailures, sourceInitializations, operationFences, sourceFrontiers,
+                    expectedSourceBases, sourceInputAdmissions);
         }
     }
 
@@ -398,6 +434,16 @@ public final class CoordinationCore {
 
     /** Explicit authored attachment choices; offered child evidence is not an active source seed. */
     public EvaluationResult evaluate(WorkIntent intent, EvaluationEvidence evidence, SameOriginAttachmentPolicy attachmentPolicy) {
+        return evaluate(intent, evidence, attachmentPolicy, null, null);
+    }
+
+    EvaluationResult evaluateCanonicalSource(WorkIntent intent, EvaluationEvidence evidence,
+                                              Map<String, String> originalAdmissionRoots, String sourceBasis) {
+        return evaluate(intent, evidence, SameOriginAttachmentPolicy.empty(), originalAdmissionRoots, sourceBasis);
+    }
+
+    private EvaluationResult evaluate(WorkIntent intent, EvaluationEvidence evidence, SameOriginAttachmentPolicy attachmentPolicy,
+                                      Map<String, String> originalAdmissionRoots, String sourceBasis) {
         Objects.requireNonNull(intent, "intent"); Objects.requireNonNull(evidence, "evidence");
         Objects.requireNonNull(attachmentPolicy, "attachmentPolicy");
         if (intent.kind() != OperationKind.EXTERNAL_INPUT && !attachmentPolicy.entries().isEmpty())
@@ -409,19 +455,11 @@ public final class CoordinationCore {
         if (target == null) return new NeedEvidence(List.of("lineage:" + intent.lineage().value()));
         Set<DocumentId> readRoots = new HashSet<>(); readRoots.add(intent.lineage());
         Set<DocumentId> liveMembers = directedMemberIds(readRoots, evidence.snapshot(), true);
-        for (SameOriginAttachmentPolicy.Selection selection : attachmentPolicy.entries()) {
-            if (!liveMembers.contains(selection.creatorLineage()))
-                throw new IllegalArgumentException("Attachment policy creator is outside the selected live directed cut");
-            if (evidence.snapshot().managedDocument(selection.targetLineage()) == null)
-                return new NeedEvidence(List.of("lineage:" + selection.targetLineage().value()));
-            readRoots.add(selection.targetLineage());
-        }
         // Keep complete outgoing rows (including inactive prospective bindings) for
         // sealed component authority. Eligibility is a separate live-root set;
         // trimming the evidence itself would invalidate the selected topology.
         AffectedClosureSnapshot directed = canonicalSemanticSnapshot(directedSnapshot(readRoots, evidence.snapshot(),
                 intent.kind() == OperationKind.INITIALIZATION));
-        attachmentPolicy.verifyBasis(directed);
         Set<DocumentId> owned = new HashSet<>();
         for (ComponentSnapshot component : directed.components()) {
             if (component.orderedMemberDocumentIds().contains(intent.lineage())) {
@@ -484,7 +522,9 @@ public final class CoordinationCore {
             DirectedTimelineMembership.Checked membership;
             Map<DocumentId, Set<String>> logicalHeaderOrigins;
             try (BlueClosureContracts selection = new BlueClosureContracts(processor)) {
-                logicalHeaderOrigins = logicalHeaderOrigins(directed, liveMembers, evidence, selection);
+                var headerSelection = logicalHeaderOrigins(directed, liveMembers, evidence, selection);
+                if (!headerSelection.needs().isEmpty()) return new NeedEvidence(headerSelection.needs());
+                logicalHeaderOrigins = headerSelection.origins();
                 List<String> unaligned = logicalHeaderOrigins.entrySet().stream().filter(entry -> entry.getValue().isEmpty())
                         .map(entry -> "root-channel-logical-view:" + entry.getKey().value()).sorted().toList();
                 if (!unaligned.isEmpty()) return new NeedEvidence(unaligned);
@@ -522,11 +562,39 @@ public final class CoordinationCore {
                     .map(p -> "timeline-complete-after:" + p.timelineId() + ":" + input.timestampMicros())
                     .sorted().toList();
             if (!incomplete.isEmpty()) return new NeedEvidence(incomplete);
+            if (originalAdmissionRoots != null) {
+                String admittedRoot = originalAdmissionRoots.get(input.entry().blueId());
+                if (admittedRoot == null) return new NeedEvidence(List.of("source-input-admission:" + intent.lineage().value()
+                        + ":" + input.entry().blueId()));
+                SourceInputAdmission admitted = evidence.sourceInputAdmissions().stream()
+                        .filter(value -> value.identity().equals(admittedRoot)).findFirst().orElse(null);
+                if (admitted == null) return new NeedEvidence(List.of("source-input-admission-record:" + admittedRoot));
+                admitted.verify(intent.lineage(), sourceBasis, input, evidence.precedingOperations(), liveMembers, owned);
+                // Co-owned members execute one original invocation with one policy. Independent
+                // directed dependencies are deliberately not compared to this consumer policy.
+                for (DocumentId member : owned) if (!SourceExecutionBasis.identity(member, environment, executionPolicy)
+                        .equals(admitted.sourceBases().get(member)))
+                    throw new blue.language.processor.InvalidExecutionEvidenceException(
+                            "Original admission changes a co-owned member's producer basis");
+                attachmentPolicy = admitted.selections();
+            }
+            for (var choice : attachmentPolicy.entries()) {
+                if (!liveMembers.contains(choice.creatorLineage()))
+                    throw new IllegalArgumentException("Attachment policy creator is outside the selected live directed cut");
+                if (directed.managedDocument(choice.targetLineage()) == null)
+                    return new NeedEvidence(List.of("lineage:" + choice.targetLineage().value()));
+            }
+            attachmentPolicy.verifyBasis(directed);
             for (SourceObservationProgram program : expandBorrowedPrograms(evidence.sourcePrograms())) {
                 if (program.causeKind() == blue.language.processor.closure.ProcessingCause.Kind.EXTERNAL
                         && program.externalCause() != null
                         && program.externalCause().eventBlueId().equals(input.entry().blueId())
                         && program.ownedDocumentIds().stream().anyMatch(liveMembers::contains)) {
+                    if (program.externalCause().sourceOrder().compareTo(input.order()) != 0)
+                        throw new IllegalArgumentException("Source program belongs to another canonical input position");
+                    List<String> contextNeeds = verifySourceContext(program.ownedDocumentIds(), program.environment(),
+                            program.executionPolicy(), evidence.expectedSourceBases());
+                    if (!contextNeeds.isEmpty()) return new NeedEvidence(contextNeeds);
                     // Extra retained/cache evidence is not a causal dependency. Keep an
                     // eligible producing operation whole, including its authenticated owners.
                     sourcePrograms.add(program);
@@ -536,13 +604,12 @@ public final class CoordinationCore {
             for (var failure : evidence.sourceFailures()) {
                 if (failure.externalCause() != null && failure.externalCause().eventBlueId().equals(input.entry().blueId())
                         && failure.ownedDocumentIds().stream().anyMatch(liveMembers::contains)) {
-                    if (failure.externalCause().sourceOrder().compareTo(input.order()) != 0
-                            || !failure.environment().runtimeRegistryIdentity().equals(environment.runtimeRegistryIdentity())
-                            || !failure.environment().gasManifestIdentity().equals(environment.gasManifestIdentity())
-                            || !failure.environment().managedBindingPolicyIdentity().equals(environment.managedBindingPolicyIdentity())
-                            || !failure.environment().externalOrderPolicyIdentity().equals(environment.externalOrderPolicyIdentity())) {
+                    if (failure.externalCause().sourceOrder().compareTo(input.order()) != 0) {
                         throw new IllegalArgumentException("Failed source belongs to another canonical execution environment or position");
                     }
+                    List<String> contextNeeds = verifySourceContext(failure.ownedDocumentIds(), failure.environment(),
+                            failure.executionPolicy(), evidence.expectedSourceBases());
+                    if (!contextNeeds.isEmpty()) return new NeedEvidence(contextNeeds);
                     failure.verifyObservationBasis(directed, owned, evidence.sourceGaps());
                     sourceFailures.add(failure);
                     for (DocumentId source : failure.ownedDocumentIds()) {
@@ -627,7 +694,8 @@ public final class CoordinationCore {
             SameOriginProcessAttempt attempt;
             try (BlueClosureContracts contracts = new BlueClosureContracts(processor)) {
                 attempt = contracts.processSameOrigin(invocation, attachmentPolicy,
-                        sourcePrograms, evidence.sourceGaps(), sourceFailures, evidence.sourceInitializations(), frontierViews);
+                        sourcePrograms, evidence.sourceGaps(), sourceFailures, evidence.sourceInitializations(), frontierViews,
+                        evidence.expectedSourceBases());
             }
             if (!attempt.complete()) {
                 List<String> needs = new ArrayList<>(attempt.requiredExactBlueIds());
@@ -743,9 +811,13 @@ public final class CoordinationCore {
         }
         Map<String, SourceObservationProgram> roots = new java.util.TreeMap<>();
         Map<String, SourceOperationFailure> failed = new java.util.TreeMap<>();
+        Map<DocumentId, String> sourceBases = new java.util.TreeMap<>(evidence.expectedSourceBases());
         List<String> missing = new ArrayList<>();
         for (ManagedImportLane.Due due : selection.due()) {
             var header = due.source();
+            String previousBasis = sourceBases.putIfAbsent(header.sourceLineage(), header.canonicalSourceBasis());
+            if (previousBasis != null && !previousBasis.equals(header.canonicalSourceBasis()))
+                throw new IllegalArgumentException("Managed source authority conflicts with its original lane basis");
             if (header.status() == ProcessorStatus.SUCCESS) {
                 SourceObservationProgram program = available.get(header.operationIdentity());
                 if (program == null) missing.add("source-program:" + header.operationIdentity());
@@ -778,12 +850,14 @@ public final class CoordinationCore {
         for (SourceObservationProgram program : programs) {
             if (program.externalCause() == null) throw new IllegalArgumentException("Initialization is installed separately, not imported as a business epoch");
             cause = sameSourceCause(cause, program.externalCause());
+            missing.addAll(verifySourceContext(program.ownedDocumentIds(), program.environment(), program.executionPolicy(), sourceBases));
         }
         for (SourceOperationFailure failure : failures) {
             cause = sameSourceCause(cause, failure.externalCause());
-            requireCompatibleSourceFailure(failure);
+            missing.addAll(verifySourceContext(failure.ownedDocumentIds(), failure.environment(), failure.executionPolicy(), sourceBases));
             failure.verifyObservationBasis(directed, owned, evidence.sourceGaps());
         }
+        if (!missing.isEmpty()) return new NeedEvidence(missing.stream().distinct().sorted().toList());
         if (programs.isEmpty()) {
             List<ManagedImportLane.Delta> deltas = selection.due().stream().map(due -> due.finish(selection.context().identity(),
                     ManagedImportLane.Outcome.SOURCE_FAILURE, due.cursor().successfulBlueId(), due.cursor().successfulEpoch())).toList();
@@ -803,7 +877,7 @@ public final class CoordinationCore {
         Capture capture = new Capture();
         ClosureAttemptResult attempt;
         try (BlueClosureContracts contracts = new BlueClosureContracts(processor, capture)) {
-            attempt = contracts.processManagedReaction(invocation, owned, programs, evidence.sourceGaps(), failures, selection.context());
+            attempt = contracts.processManagedReaction(invocation, owned, programs, evidence.sourceGaps(), failures, selection.context(), sourceBases);
         }
         if (!attempt.isComplete()) {
             Set<String> needs = new TreeSet<>(attempt.requiredExactBlueIds());
@@ -855,9 +929,12 @@ public final class CoordinationCore {
     }
 
     /** An ambient head never supplies channels for an older exact occurrence pin without a selected source operation explaining that cut. */
-    private Map<DocumentId, Set<String>> logicalHeaderOrigins(AffectedClosureSnapshot cut, Set<DocumentId> live,
+    private record LogicalHeaderSelection(Map<DocumentId, Set<String>> origins, List<String> needs) { }
+
+    private LogicalHeaderSelection logicalHeaderOrigins(AffectedClosureSnapshot cut, Set<DocumentId> live,
             EvaluationEvidence evidence, BlueClosureContracts contracts) {
         Map<DocumentId, Set<String>> explained = new HashMap<>();
+        Set<String> missing = new TreeSet<>();
         for (ManagedOccurrenceBinding binding : cut.occurrences()) {
             if (binding.active() && live.contains(binding.sourceDocumentId()) && live.contains(binding.targetDocumentId())
                     && !binding.expectedTargetBlueId().equals(cut.managedDocument(binding.targetDocumentId()).blueId()))
@@ -872,6 +949,10 @@ public final class CoordinationCore {
                 var after = program.sourceResults().stream().filter(value -> value.documentId().equals(source)).findFirst().orElseThrow();
                 boolean atBefore = current.blueId().equals(before.blueId()) && current.epoch() == before.epoch();
                 boolean atAfter = current.blueId().equals(after.blueId()) && current.epoch() == after.epoch();
+                if (!atBefore && !atAfter) continue;
+                List<String> contextNeeds = verifySourceContext(program.ownedDocumentIds(), program.environment(),
+                        program.executionPolicy(), evidence.expectedSourceBases());
+                if (!contextNeeds.isEmpty()) { missing.addAll(contextNeeds); continue; }
                 // If the completed operation changes membership, its post-state cannot
                 // select its own earlier input. Request the exact predecessor header cut.
                 if (atBefore || atAfter && before.initialized() == after.initialized()
@@ -883,11 +964,15 @@ public final class CoordinationCore {
             for (SourceOperationFailure failure : evidence.sourceFailures()) {
                 if (!failure.ownedDocumentIds().contains(source) || failure.externalCause() == null) continue;
                 var before = failure.sourcePredecessors().stream().filter(value -> value.documentId().equals(source)).findFirst().orElseThrow();
-                if (current.blueId().equals(before.blueId()) && current.epoch() == before.epoch())
+                if (current.blueId().equals(before.blueId()) && current.epoch() == before.epoch()) {
+                    List<String> contextNeeds = verifySourceContext(failure.ownedDocumentIds(), failure.environment(),
+                            failure.executionPolicy(), evidence.expectedSourceBases());
+                    if (!contextNeeds.isEmpty()) { missing.addAll(contextNeeds); continue; }
                     explained.get(source).add(failure.externalCause().eventBlueId());
+                }
             }
         }
-        return explained;
+        return new LogicalHeaderSelection(explained, List.copyOf(missing));
     }
 
     private static boolean hasTerminationMarker(blue.language.model.Node document) {
@@ -917,17 +1002,16 @@ public final class CoordinationCore {
                 .map(ManagedOccurrenceBinding::bindingIdentity).sorted().toList();
     }
 
-    private void requireCompatibleSourceFailure(SourceOperationFailure failure) {
-        ClosureEnvironment other = failure.environment();
-        if (!List.of(environment.blueLanguageSpecificationIdentity(), environment.contractsSpecificationIdentity(), environment.runtimeRegistryIdentity(),
-                environment.gasManifestIdentity(), environment.managedDocumentIdentityPolicyIdentity(), environment.managedBindingPolicyIdentity(),
-                environment.exactNodeProviderDomainIdentity(), environment.externalOrderPolicyIdentity(), environment.portableLimitPolicyIdentity(),
-                environment.cyclicFinalizerIdentity(), environment.cyclicProofVerifierIdentity()).equals(List.of(other.blueLanguageSpecificationIdentity(),
-                other.contractsSpecificationIdentity(), other.runtimeRegistryIdentity(), other.gasManifestIdentity(), other.managedDocumentIdentityPolicyIdentity(),
-                other.managedBindingPolicyIdentity(), other.exactNodeProviderDomainIdentity(), other.externalOrderPolicyIdentity(), other.portableLimitPolicyIdentity(),
-                other.cyclicFinalizerIdentity(), other.cyclicProofVerifierIdentity()))
-                || !executionPolicy.identity().equals(failure.executionPolicy().identity()))
-            throw new IllegalArgumentException("Failed source belongs to another canonical environment or execution policy");
+    private List<String> verifySourceContext(Set<DocumentId> owners, ClosureEnvironment actual, ExecutionPolicy producerPolicy,
+                                             Map<DocumentId, String> expectedBases) {
+        SourceExecutionBasis.requireCompatibleEnvironment(environment, actual);
+        List<String> needs = new ArrayList<>();
+        for (DocumentId source : owners) {
+            String basis = expectedBases.get(source);
+            if (basis == null) needs.add("source-execution-basis:" + source.value());
+            else SourceExecutionBasis.requireProducerBasis(basis, source, actual, producerPolicy);
+        }
+        return needs.stream().sorted().toList();
     }
 
     private static List<String> consumedSources(List<SourceObservationProgram> programs,

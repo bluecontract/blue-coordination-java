@@ -1,6 +1,10 @@
 # First implementation: parallel library and host delivery
 
-> **Revision:** 15.12 · **Status:** Phase1/2 integration readiness verified; Phase3 implementation not yet started
+> **Revision:** 15.12 · **Status:** agreed pre-Phase3 repairs verified; general Phase3 implementation not started
+
+The [review remediation record](implementation/pre-phase-3-review-remediation.md) tracks the
+authorized corrections after the baseline handoff below. Its changed paths require fresh affected
+verification; the historical counts below are not acceptance of those subsequent repairs.
 
 ## Objective and scope
 
@@ -121,7 +125,8 @@ API freeze, publication or deployment beyond this local POC follows from the pre
 
 ## Implementation checkpoint — 2026-09-06
 
-Phase1/2 are verified for starting Phase3 in the documented scope; this is not Phase3 acceptance.
+At this baseline checkpoint, Phase1/2 were verified for starting Phase3 in the documented scope;
+this was not Phase3 acceptance. Subsequent corrections are tracked above.
 Runtime work was uncommitted during this verification; its subsequent
 [source commits](implementation/source-commits.md) preserve the tested implementation. Focused test counts below overlap
 and must not be summed into a regression total. The [library summary](24-phase-1-library-summary.md)

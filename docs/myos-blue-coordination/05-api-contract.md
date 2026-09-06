@@ -20,8 +20,10 @@ The owning libraries expose group-local operations, exact managed reads and sour
 substitution. A host cannot split an already-started private invocation or derive write ownership
 from every member of a read snapshot.
 
-Phase1/2 implementation and local validation are complete for integration readiness; the detailed
-[handoff](24-phase-1-library-summary.md) records scope and limits. This page now explains the actual
+The Phase1/2 baseline implementation and local validation are recorded in the detailed
+[handoff](24-phase-1-library-summary.md), with scope and limits. Subsequent
+[review repairs and changed-candidate verification](implementation/pre-phase-3-review-remediation.md)
+have passed the agreed integration-readiness gate. This page explains the actual
 boundary and preserves the remaining host protocol requirements. It is not a release/API freeze or
 formal acceptance of every catalog scenario. Names retained for host concepts are not invented
 public Java interfaces; [05](05-poc-api.md#core-interface) and the updated reference list actual APIs.
@@ -154,6 +156,12 @@ and source execution policy. FROM_NOW/FROM_FRONTIER select observer attachment h
 view, not a different birth for the shared source. The new explicit attachment boundary must not be
 replaced by the older SDK's birth-at-attachment enum conversion.
 Promoter, row existence and physical admission time cannot remove an applicable earlier source entry.
+
+Reconstructing a historical source operation must also preserve its own original attachment choices.
+The importing observer's policy is not that source input. Original admission authority binds source,
+exact cause, predecessors and frozen choices (including empty choices); missing authority pauses
+reconstruction. Caller-created candidate bytes or a first-worker choice do not establish this
+authority. See the concrete [source preparation API](05-poc-api.md#source-preparation-attachment-and-import).
 
 Canonical independent source initialization and parent consumption have separate fixed gas scopes,
 including cold execution. Source80 and parent20 with limits90 pass cold/warm; no target comparison

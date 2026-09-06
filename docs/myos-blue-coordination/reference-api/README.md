@@ -9,6 +9,11 @@
 [25 — Phase3 plan](../25-phase-3-integration-plan.md) describes the remaining application integration;
 Phase3 has not been implemented by this documentation update.
 
+The [pre-Phase3 corrections](../implementation/pre-phase-3-review-remediation.md) passed their
+separate verification gate. Historical admission, portable needs and producer-basis APIs are
+synchronized here; the Java usage reference also passed a compilation check against those artifacts.
+That check is not a host implementation or formal acceptance of the full scenario catalog.
+
 [00-poc-minimal-boundary.java](00-poc-minimal-boundary.java) now contains **usage examples of actual
 public APIs**, followed by explicitly non-executable host protocol notes. Its example helper class
 is not itself a library API. It replaces the earlier standalone model of proposed records/interfaces:
@@ -30,6 +35,9 @@ directory, not to this reference folder. The examples use these actual types:
 | Metadata-only progress | `MetadataProgress`, `ManagedProgress` |
 | Complete proposals | `PreparedOperation`, `PreparedOperations` containing independently atomic `PreparedGroupOperation` values |
 | Canonical source history | `CanonicalSourceHistory.start / prepareNext / resume`; `Await / Step / Complete / Blocked` |
+| Original historical input | `CanonicalSourceHistory.Request.originalAdmissionRoots`, `SourceInputAdmission`; candidate bytes do not establish authority |
+| Complete portable history needs | `CanonicalSourceAwaitCodec`, Language's `ClosureResourceDemandCodec` |
+| Expected producer context | `EvaluationEvidence.withExpectedSourceBases`, Language's `SourceExecutionBasis`; independent of consumer gas policy |
 | Initialization / attachment | `SourceInitialization`, `ObserverAttachmentPlan`, `SourceFrontierSelection`, `ManagedImportLane` |
 | Cold retained evidence | `OperationReceiptCodec`, `ManagedProgressReceiptCodec`, Language's `SourceObservationProgram` and evidence codecs |
 | Sparse exact read cut | `AffectedClosureSnapshot`, `ReusableComponentAuthority`, `RootChannelMetadata`, `ManagedReadPin` |

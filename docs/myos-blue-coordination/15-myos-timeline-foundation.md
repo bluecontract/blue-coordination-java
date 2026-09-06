@@ -402,7 +402,9 @@ constant total work for arbitrary authored dependency graphs.
 
 ## Timeline acceptance obligations (`E2a-T`) and current evidence
 
-The foundation is ready for Phase3 in the [recorded scope](implementation/phase-1-2-readiness.md).
+The foundation passed its [baseline recorded scope](implementation/phase-1-2-readiness.md).
+The subsequent [review remediation](implementation/pre-phase-3-review-remediation.md) adds maintenance
+fairness repairs and same-type descriptor substitution tests at the actual adapter boundary.
 The original obligations below are retained, not waived or all relabeled as integrated passes.
 The local provider/index primitives and owning directed-cut tests supply Phase1/2 evidence;
 full provider interoperability and the real graph/scale combinations still need Phase3 evidence.

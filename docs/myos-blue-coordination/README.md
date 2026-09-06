@@ -1,10 +1,13 @@
 # MyOS Mini and Coordination POC
 
-> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-06 Phase1/2 handoff · **Status:** ready for Phase3 integration, not a production release
+> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-06 · **Status:** agreed pre-Phase3 repairs verified; Phase3 remains planned
 
 This package defines the first POC's processing algorithm, API shape, invariants and planned tests.
-The authorized Phase1/2 implementation has passed its integration-readiness checks; see the
+The authorized Phase1/2 implementation passed its baseline integration-readiness checks; see the
 [library summary](24-phase-1-library-summary.md) and [verification record](implementation/phase-1-2-readiness.md).
+The subsequent [code-review remediation](implementation/pre-phase-3-review-remediation.md) records
+the completed repair gate and new verification, with F05 and complete F07 selection explicitly
+assigned to Phase3. Earlier green tests are not substituted for those new checks.
 [25](25-phase-3-integration-plan.md) plans the next phase; implementation of that phase has not begun.
 This is not a production release or formal acceptance of every scenario in the full catalog.
 Code and documentation are consolidated on `codex/coordination-external-state-poc`.
@@ -26,7 +29,7 @@ what was actually implemented and refined. Earlier snapshots do not define alter
 Revision 15.12 closes conditional-attempt invalidation and multi-producer Entry-site alignment, and
 clarifies logical versus network publication order. The user authorized two parallel implementation
 tracks: owning libraries and target-shaped PostgreSQL MyOS Simple. Their incremental tests,
-supervised reviews and joint readiness handshake are complete in the recorded scope. Active chapters,
+supervised reviews and joint readiness handshake are complete for the recorded baseline scope. Active chapters,
 tutorials and API references are synchronized with that handoff. Full Phase3 integration and
 measurements follow; host quotas and the deferred general interruption mechanism are unchanged.
 
@@ -60,7 +63,8 @@ measurements follow; host quotas and the deferred general interruption mechanism
 2. Review the [minimal API](05-poc-api.md), [Java sketch](reference-api/00-poc-minimal-boundary.java),
    storage and [delivery plan](10-poc-delivery-plan.md).
 3. Read the completed [Phase1/2 handoff](24-phase-1-library-summary.md), its verification limits and
-   the [Phase3 integration/measurement plan](25-phase-3-integration-plan.md). Expect further iterations.
+   the [review remediation status](implementation/pre-phase-3-review-remediation.md), then the
+   [Phase3 integration/measurement plan](25-phase-3-integration-plan.md). Expect further iterations.
 
 The [independent-review prompt](review/gpt-pro-review-prompt.md) asks for counterexamples to the
 selected algorithm, not another list of choices or an alternative historical specification.

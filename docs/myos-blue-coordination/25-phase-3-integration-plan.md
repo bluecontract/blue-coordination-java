@@ -3,6 +3,10 @@
 > Plan, 2026-09-06. Phase3 implementation is not yet authorized by this document.
 > [Phase1 summary](24-phase-1-library-summary.md) · [Readiness](implementation/phase-1-2-readiness.md)
 
+The authorized [pre-Phase3 review repairs](implementation/pre-phase-3-review-remediation.md)
+precede acceptance of the dependent paths below. They preserve these slices and the processing
+kernel; they do not create another specification profile or start the general adapter.
+
 ## Target
 
 Run the real Coordination processing path inside MyOS Simple, with PostgreSQL as durable authority,
@@ -18,6 +22,9 @@ or production-HA project is part of this phase.
 ## Entry conditions
 
 - Close Phase1/2's known correctness failures and final regression/adapter handshake.
+- Verify the review repairs on the changed candidate: lossless historical needs and original-input
+  choices, producer-basis compatibility, real BEX validation/operator controls, retained-publication
+  capacity release and fair Timeline maintenance. Earlier baseline passes do not cover these cases.
 - Retain the Phase2 M1/M2 witness: M1 commits with exact next selection known while M2's execution
   body is unavailable; a fresh JVM resumes M2 without reapplying M1. Missing selection authority
   remains a separate hold. Do not substitute the narrower missing-fragment restore test.
@@ -46,6 +53,13 @@ canonical-initialization adapter directly. Wiring an actual runnable provider is
 Implement the adapter's complete result dispatch, initially exercised with a simple counter:
 
 - Exact immutable input/evidence loading and verification; named needs register durable waits.
+- Preserve complete typed needs through portable storage and cold restore. Source reconstruction
+  uses authenticated original source-input selections, including explicit empty selections, not
+  the importing observer's policy or a default chosen because evidence is missing.
+- Translate exact Timeline descriptor, actor, provider proof and complete entry through one verified
+  adapter boundary. Same-type descriptors sharing a locator are not interchangeable. This check
+  also covers empty prefixes/completeness before any metadata or handled-cursor progress; retain
+  lawful channel-pattern semantics instead of requiring every pattern to equal a full descriptor.
 - Complete repository/type registration during cold startup. The smoke work exposed that a nested
   Principal Actor can otherwise decode as a generic Actor and lose its account constraint. Retain
   a cold-start authorization regression through the actual application entry point.
@@ -56,10 +70,16 @@ Implement the adapter's complete result dispatch, initially exercised with a sim
 - Verified state, history, successful/handled cursors, receipts, obligations and outbox in the
   corresponding transaction; no semantic execution or provider wait inside an SQL transaction.
 - Cold receipt restoration, uncertain-commit reconciliation and idempotent publication.
+- Exercise both publication-read and sink-payload capacity holds through a real release: retry the
+  retained stream head after supported capacity increases, without new semantic work or gas. Wire
+  non-spinning blocked-head handling and keep unrelated streams progressing. Admission and the
+  supported publication envelope must agree; page limits cannot make an admitted batch unreleasable.
 - Runnable recovery, discovery and outbox pumps. The current bootstrap performs one recovery/drain
   pass; it is not yet a continuously operating application service. Persist the continuation
   between independently committed prepared groups: the existing host completion commits one plan,
   not a wrapper transaction containing all groups.
+- Use bounded fair service per Timeline in both evidence-maintenance queues. Ordinary work-claim
+  fairness is not proof of maintenance progress under a sustained earlier-key backlog.
 
 **Exit:** an actual create → append → process → publish → stop → restart → append sequence passes
 through the runnable profile. The host contains no second interpreter and no authoritative runtime
@@ -88,12 +108,30 @@ Preserve these boundaries explicitly:
   named needs; a physically newer head cannot substitute for them.
 - Semantic failed source/consumer operations retain verified failure capabilities and actual
   consumer/source-specific successful pins. Operational failures consume nothing.
+- Verify producer success/failure against the independently expected canonical source basis before
+  metadata or execution progress. Producer and observer budgets may legitimately differ; copying
+  the observer's policy into producer verification is not the compatibility rule.
 - Genuine feedback and conditional joins use the library's complete ownership/rollback result.
   The host does not infer an atomic group from graph reachability or changed bytes.
 
 Start with one Agreement and two Orders, then a chain, aliases, dynamic attachment and a finite
 cycle. Add staged history/prefix mapping through the same verified receipt boundary. The bounded
 test-only smoke bridges must not become a production semantic shortcut.
+
+Before optimizing discovery, specify the full library-position-to-SQL projection. External order
+uses `(timestampMicros, entryBlueId)`; producing position, inherited reaction origin, source SQL
+sequence and occurrence generation have different roles. Conservative scalar bounds may over-select
+ambiguous equal-time candidates but may not omit an entitled one. Preserve the original authority
+for final eligibility. Test attach/input/remove at equal timestamps with different entry IDs.
+
+Close F07 by using complete indexed temporal candidates and a source-fenced lifecycle high-water,
+including staged-prefix rows and late registration/backfill. Avoid per-receipt scans of all retired
+activations. Initial high-water preparation alone removes old log replay, not the remaining lifetime
+occurrence scan. Require a small churn witness before larger scale runs; do not substitute a
+`currently_active` predicate or infer discovery closure from an empty page.
+The candidate range must cover historical imports plus live lifetime: K100's FULL_HISTORY
+registration with physical source tail zero still requires E10 when that canonical prefix is
+activated later. Filtering E10 solely against live `activeFrom=K100` would lose that obligation.
 
 **Exit:** the small graph story set below passes through the general adapter with both warm and
 cold PostgreSQL reads. Test-only library fixtures are no longer dependencies of the runnable path.
@@ -109,6 +147,11 @@ source/registration races, missing content, delayed Timeline completeness, faile
 operational quota pause/resume. Validate committed authority directly, not only queue counters or
 the same indexes used to select work. Use small raw-history audit fixtures independently of the
 large index/performance corpus.
+
+Include three independently prepared groups with crashes between their commits; a producer failure
+alongside target metadata progress; and a multi-publication history record with one publication
+omitted or substituted. Exact continuation must retain prior independent commits and reject broken
+linkage, without turning physical prefix/commit keys into semantic operation identities.
 
 **Exit:** perturbing the physical schedule changes attempts/latency only, not the settled semantic
 history, gas or identities. No partial owned operation publishes; earlier independent commits
@@ -152,6 +195,10 @@ fault overlays and measured budgets. Mandatory kernel witnesses remain mandatory
 | Failed import followed by another input | Retain handled failure without successful epoch; align each consumer's actual source pin at the proper Entry site; no failed-event replay. | E, F |
 | Graceful termination and observer cutoff | Execute a real termination request, lifecycle handlers and terminal marker; restore the terminal source observation cold. If one independent Order terminates on E1, Agreement's later E2 and a healthy Order still finish. Preserve exact marker visibility, event order and the subsequent no-work rule for the terminated document. Synthetic terminal receipts alone do not prove this. | C, E, F; kernel22 observer cutoff |
 | M1 committed, M2 missing execution data | Restart and acquire M2 without replaying M1. Missing selection evidence is a different hold. | E, I, R |
+| Historical dynamic attachment needs | Full typed needs and original source-input selections survive cold storage; direct and reconstructed histories agree; changed admission or missing choices cannot select a different default. | A, E, I |
+| Wrong source basis; different legitimate observer budget | Reject substituted environment/producer policy before metadata progress, but accept the correctly authenticated source with an independently budgeted observer. | E, F, K |
+| Exact Timeline alias at the adapter | Same locator/type with a different descriptor, actor or proof rejects before cursor movement, including empty complete prefixes. | M, K |
+| Committed publication above a physical budget | Actual capacity release and lost-ACK retry publish the retained result once logically; no second source evaluation or gas settlement. | I, K, L |
 | Historical prefix to live tail | Activation, metadata/failure records, registration and live handoff lose or duplicate no entitled operation. | A, D, G, H, K |
 | Large valid import chain under quota | Bounded operational pause and exact resume, with no fresh semantic policy or invented cancellation outcome. | J-AUTOMATIC-REATTACHMENT-CHAIN, L-QUOTA-PAUSE |
 
@@ -189,12 +236,20 @@ runs; report retries and reconstruction separately from one accepted logical sou
 | Dormant graph and lazy reads | Grow total graph/body size while keeping the affected/read spine fixed. Count resident bodies, exact reads, fetched/decoded/copied/hashed bytes and peak heap. Include absent unneeded bodies as a positive control. |
 | Rich source operation | Vary intermediate observable updates U=1, 10, 100, 1000 separately from consumer count and history length. Measure capture-time memory as well as decoding/transport; physical budgets must produce operational holds, not semantic gas changes. |
 | Long history and continuation | Vary source history and finite nested work across 10/100/1000 commits. Measure prefix/live pagination, cumulative verification, control queries, serialization and WAL; one selected action must not reload the whole history. |
+| Lifecycle churn | Keep one live consumer; independently grow retired activations R and subsequent receipts M. Measure total rows examined, candidates/work created, duplicate acquisition, WAL and source-lock time. Closed old lifecycle history must not create an O(M × R) term in fresh fanout. |
+| Maintenance fairness | Pre-existing selectors for busy Timeline A and ready Timeline Z; replenish A continuously with page/budget one. Bound Z's service in active-Timeline turns, including restart, rather than A's backlog size. Exercise both maintenance queues. |
 | Contention and overload | Multiple active accounts, thousands of active documents per account, bounded pools/caches/workers, then load above capacity. Measure fairness, queue-age growth, backpressure and drain after overload; distinguish required consumer work from global scans or repeated source computation. |
 
 Do not multiply every large axis in the first benchmark. Run one-factor sweeps, then a few measured
 worst interactions, with explicit resource ceilings. Reuse Phase2's indexed metadata probes as
 supporting evidence, not as proof of processing 100000 real documents. Record hardware, heap, pool,
 cache, concurrency, dataset, warmup and repetitions; retain raw query plans, profiles and counters.
+
+Source independence can grow retained history when an observer remains behind. Measure storage and
+backlog growth under a held consumer; do not promise unbounded lag, continued source progress, full
+later replay and constant retained storage simultaneously. No destructive history GC is introduced
+without verified retention authority. Bounded transport/cache size also does not bound aggregate
+attempt-pinned bytes, decoded DAGs or capture peaks; record those separately.
 
 The current staged-prefix activation fences at most 1000 dependency sources. A 10000-source fan-in
 row therefore tests a real integration/capacity boundary, not already demonstrated support. If it

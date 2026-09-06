@@ -1,6 +1,11 @@
 # Phase1/2 implementation readiness
 
-> Final integration-readiness record, 2026-09-06. **Phase1/2 ready for Phase3 in the documented scope.**
+> Baseline integration-readiness record, 2026-09-06. **Follow-up repairs have a separate passing gate.**
+
+The subsequent [pre-Phase3 code-review remediation](pre-phase-3-review-remediation.md) identifies
+additional composition, validation and host-progress gaps. Its status qualifies this earlier gate:
+the recorded tests below remain historical evidence, not acceptance of the new counterexamples or
+changed code. Phase3 implementation has not begun.
 
 Runtime workspaces and starting branches are recorded in
 [the execution plan](../23-first-implementation-execution-plan.md). Changes were local and uncommitted
@@ -8,7 +13,7 @@ during verification; the subsequent [source commit map](source-commits.md) ident
 This record distinguishes executed library behavior from independent host-storage
 tests. Green focused tests are not a claim that Phase3 has been implemented.
 
-The known implementation/regression failures were repaired and their affected checks passed.
+The implementation/regression failures known at the baseline gate were repaired and their affected checks passed.
 The final real-library/PostgreSQL handshake also passed. This is readiness to begin the general
 application integration, not a production release, throughput guarantee or formal all-catalog
 scenario acceptance. Phase3 remains planned, not implemented.
@@ -168,7 +173,8 @@ The final PostgreSQL handshake then passed **7/7**, zero failures/errors/skips, 
 these stable library artifacts. Its final archive is listed in the capability map. The unchanged
 independent PostgreSQL foundation pack (**66/66**) and earlier unchanged BEX regression (**40 tests**)
 were reused rather than rerun for documentation or golden-file edits. Shared composite builds were
-serialized. No known implementation blocker remains for beginning the documented Phase3 plan.
+serialized. At that baseline gate, no known implementation blocker remained for beginning the
+documented Phase3 plan. The later review and its scoped repairs are tracked separately above.
 
 No production release, API freeze, remote push, legacy-data migration or production throughput
 guarantee follows from this gate. Further Coordination changes based on Phase3 results are expected.

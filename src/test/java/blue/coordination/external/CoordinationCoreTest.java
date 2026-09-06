@@ -9,6 +9,7 @@ import blue.language.processor.closure.ClosureEnvironment;
 import blue.language.processor.closure.ClosureEvidenceFactory;
 import blue.language.processor.closure.DocumentId;
 import blue.language.processor.closure.ExecutionPolicy;
+import blue.language.processor.closure.SourceExecutionBasis;
 import blue.language.processor.closure.FrozenNodeEvidenceCodec;
 import blue.language.processor.closure.ManagedDocumentGraph;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
@@ -132,7 +133,9 @@ class CoordinationCoreTest {
             assertEquals(sourceResult.operationId(), fresh.operations().get(0).operationId(), "Producer identity excludes observer inventory");
             var imported = singleGroup(core(processor).evaluate(
                     new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
-                    pairEvidence(observerBefore, sourceBefore, binding, entries, List.of(sourceResult.sourceProgram().orElseThrow()))));
+                    pairEvidence(observerBefore, sourceBefore, binding, entries, List.of(sourceResult.sourceProgram().orElseThrow()))
+                            .withExpectedSourceBases(Map.of(sourceId, SourceExecutionBasis.identity(sourceId,
+                                    sourceResult.invocation().environment(), sourceResult.invocation().executionPolicy())))));
             assertEquals(ProcessorStatus.SUCCESS, imported.result().status(), () -> imported.result().failure().toString());
             assertEquals(fresh.operations().get(1).operationId(), imported.operationId());
             assertEquals(fresh.operations().get(1).result().gasTraceIdentity(), imported.result().gasTraceIdentity());
@@ -172,7 +175,9 @@ class CoordinationCoreTest {
                     ClosureEvidenceFactory.executionPolicy(0L, Map.of(), "zero-consumer-gas"));
             var failed = singleGroup(noGas.evaluate(
                     new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
-                    pairEvidence(observerBefore, sourceBefore, binding, entries, List.of(sourceResult.sourceProgram().orElseThrow()))));
+                    pairEvidence(observerBefore, sourceBefore, binding, entries, List.of(sourceResult.sourceProgram().orElseThrow()))
+                            .withExpectedSourceBases(Map.of(sourceId, SourceExecutionBasis.identity(sourceId,
+                                    sourceResult.invocation().environment(), sourceResult.invocation().executionPolicy())))));
             assertEquals(ProcessorStatus.GAS_LIMIT_EXCEEDED, failed.result().status());
             assertEquals(CoordinationCore.Disposition.CONSUMED, failed.disposition());
             Map<String, byte[]> persisted = new java.util.HashMap<>();
@@ -202,8 +207,14 @@ class CoordinationCoreTest {
             var failedSourceCut = new CoordinationCore.EvaluationEvidence(unchangedCut.snapshot(), unchangedCut.relevantTimelines(),
                     unchangedCut.prefixes(), unchangedCut.handledThrough(), unchangedCut.fences(), unchangedCut.precedingOperations(),
                     List.of(), Map.of(), List.of(sourceFailure));
-            var progress = assertInstanceOf(CoordinationCore.MetadataProgress.class, core(processor).evaluate(
+            var missingSourceBasis = assertInstanceOf(CoordinationCore.NeedEvidence.class, core(processor).evaluate(
                     new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT), failedSourceCut));
+            assertEquals(List.of("source-execution-basis:" + sourceId.value()), missingSourceBasis.keys());
+            // The original producer's configuration is known independently of this offered failure record.
+            var originalSourceBasis = Map.of(sourceId, SourceExecutionBasis.identity(sourceId, noGas.environment(), noGas.executionPolicy()));
+            var progress = assertInstanceOf(CoordinationCore.MetadataProgress.class, core(processor).evaluate(
+                    new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
+                    failedSourceCut.withExpectedSourceBases(originalSourceBasis)));
             assertEquals(List.of(failedSource.operationId()), progress.consumedSourceOperations());
             assertEquals(input.blueId(), progress.input().entry().blueId());
             assertEquals(java.math.BigInteger.ZERO, observerBefore.document().getProperties().get("seen").getValue(),
@@ -214,7 +225,8 @@ class CoordinationCoreTest {
             assertThrows(IllegalArgumentException.class, () -> core(processor).evaluate(
                     new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
                     new CoordinationCore.EvaluationEvidence(wrongCut.snapshot(), wrongCut.relevantTimelines(), wrongCut.prefixes(),
-                            wrongCut.handledThrough(), wrongCut.fences(), Map.of(), List.of(), Map.of(), List.of(sourceFailure))),
+                            wrongCut.handledThrough(), wrongCut.fences(), Map.of(), List.of(), Map.of(), List.of(sourceFailure))
+                            .withExpectedSourceBases(originalSourceBasis)),
                     "Metadata-only advancement still requires the exact failed source observation basis");
             }
         }

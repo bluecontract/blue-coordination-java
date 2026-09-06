@@ -18,11 +18,13 @@
 package documentation.examples;
 
 import blue.coordination.api.ExactValue;
+import blue.coordination.external.CanonicalSourceAwaitCodec;
 import blue.coordination.external.CanonicalSourceHistory;
 import blue.coordination.external.CoordinationCore;
 import blue.coordination.external.ManagedImportSelection;
 import blue.coordination.external.OperationReceiptCodec;
 import blue.coordination.external.SourceFrontierSelection;
+import blue.coordination.external.SourceInputAdmission;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.AffectedClosureSnapshot;
@@ -90,16 +92,22 @@ final class PocMinimalBoundaryReference {
             List<SourceOperationFailure> retainedSourceFailures,
             List<SourceInitialization> offeredInitializations,
             Map<DocumentId, List<CoordinationCore.ReadFence>> fencesByOwner,
-            List<SourceFrontierSelection> offeredFrontiers) {
+            List<SourceFrontierSelection> offeredFrontiers,
+            Map<DocumentId, String> authenticatedProducerBases,
+            List<SourceInputAdmission> originalSourceAdmissions) {
         /*
          * This is the actual full record constructor. Shorter constructors also exist.
-         * withSourceInitializations, withOperationFences and withSourceFrontiers are
-         * additive helpers on EvaluationEvidence, not separate evaluator entry points.
+         * withSourceInitializations, withOperationFences, withSourceFrontiers,
+         * withExpectedSourceBases and withSourceInputAdmissions return new evidence values;
+         * they are not separate evaluator entry points.
          *
          * Relevant membership is complete directed live membership, not arbitrary host choice.
          * Every relevant prefix must be complete strictly after the selected timestamp.
          * Sparse bodies do not permit missing topology, quiet Timelines, markers or selected pins.
          * Retained source facts are offered evidence, not ambient activation or publication.
+         * Expected producer bases come from independently trusted source context, not from
+         * the offered result or the importing consumer's possibly different gas budget.
+         * Original admission records require separately authenticated roots in a history Request.
          *
          * An owned group's mutable CAS fences are its owners' exact union. A consumed immutable
          * source operation is a dependency, not a stale mutable-source-head fence.
@@ -108,7 +116,7 @@ final class PocMinimalBoundaryReference {
                 directedReadCut, completeRelevantTimelineLocators, completePrefixes,
                 handledThrough, readFences, precedingOperations, retainedSourcePrograms,
                 gapsBySource, retainedSourceFailures, offeredInitializations,
-                fencesByOwner, offeredFrontiers);
+                fencesByOwner, offeredFrontiers, authenticatedProducerBases, originalSourceAdmissions);
     }
 
     static CoordinationCore.EvaluationResult initialize(
@@ -157,15 +165,35 @@ final class PocMinimalBoundaryReference {
             ExternalOrderKey inclusiveCut,
             CanonicalSourceHistory.Cursor retainedCursor,
             CoordinationCore.EvaluationEvidence exactNextCut,
+            Map<String, String> authenticatedOriginalAdmissionRoots,
+            List<SourceInputAdmission> originalAdmissions,
             FrozenNodeEvidenceCodec.Writer fragments,
             FrozenNodeEvidenceCodec.Limits physicalCodecLimits) {
         // Actual composition, not a Core.prepareSourcePrefixStep method.
         // Await / Step / Complete / Blocked are CanonicalSourceHistory results.
         // Step.publications() retains EVERY independently atomic prerequisite/group.
         // Preparation retains immutable evidence; it does not advance authoritative host heads.
+        // Sparse per-step roots come from original logical input authority, not this worker.
+        // Even an empty selection is explicit. Missing admission returns Await before execution.
         return new CanonicalSourceHistory(core).prepareNext(
-                new CanonicalSourceHistory.Request(source, inclusiveCut), retainedCursor,
-                exactNextCut, fragments, physicalCodecLimits);
+                new CanonicalSourceHistory.Request(source, inclusiveCut, authenticatedOriginalAdmissionRoots),
+                retainedCursor, exactNextCut.withSourceInputAdmissions(originalAdmissions),
+                fragments, physicalCodecLimits);
+    }
+
+    static SourceInputAdmission restoreOriginalSourceInput(
+            String authenticatedOriginalAdmissionRoot,
+            FrozenNodeEvidenceCodec.Reader fragments,
+            FrozenNodeEvidenceCodec.Limits physicalCodecLimits) {
+        // encodeCandidate produces bytes only; it does not authenticate an original choice.
+        return SourceInputAdmission.restore(authenticatedOriginalAdmissionRoot, fragments, physicalCodecLimits);
+    }
+
+    static CanonicalSourceHistory.Await restoreHistoryNeed(
+            String retainedNeedRoot, FrozenNodeEvidenceCodec.Reader fragments,
+            FrozenNodeEvidenceCodec.Limits physicalCodecLimits) {
+        // Includes typed requests, not only hashes; this does not admit the demanded resources.
+        return CanonicalSourceAwaitCodec.decode(retainedNeedRoot, fragments, physicalCodecLimits);
     }
 
     static CanonicalSourceHistory.Cursor resumeCanonicalSourceHistory(

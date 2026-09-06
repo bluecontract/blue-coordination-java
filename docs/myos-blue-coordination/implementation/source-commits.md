@@ -2,6 +2,10 @@
 
 > Recorded 2026-09-06. Working branches, not releases or an API freeze.
 
+This is the committed **baseline** source set. Later local changes and their verification are
+tracked in [pre-Phase3 review remediation](pre-phase-3-review-remediation.md); the commits below
+must not be cited as containing those subsequent repairs.
+
 These commits capture the implementation underlying the [readiness record](phase-1-2-readiness.md).
 Committing the verified source did not rerun the test suites or begin Phase3. The source trees were
 already verified as local changes; their compiled artifacts and test reports retain that original

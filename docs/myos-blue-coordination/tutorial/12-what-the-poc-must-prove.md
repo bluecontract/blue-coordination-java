@@ -1,6 +1,6 @@
 # 12. Put the pieces together, then test them
 
-> **Semantics:** r15.12 · **Status:** Phase1/2 ready in the documented scope; Phase3 remains planned · **Updated:** 2026-09-06
+> **Semantics:** r15.12 · **Status:** agreed pre-Phase3 repairs verified; Phase3 remains planned · **Updated:** 2026-09-06
 
 [Previous: notifications](11-from-database-to-notification.md) · [Tutorial map](README.md) · [Next: equivalence and reuse](13-equivalence-and-reuse.md)
 
@@ -10,7 +10,8 @@ a retained receipt and durable delivery-discovery authority. Each eligible Order
 receipt and commits its own result, cursor and outgoing obligations. Independent Orders may run in
 parallel; each required history still has exactly one allowed order.
 
-The libraries and PostgreSQL foundation now implement the necessary boundaries. The complete
+The libraries and PostgreSQL foundation implement the main boundaries, including the verified
+[review repairs](../implementation/pre-phase-3-review-remediation.md). The complete
 Agreement/Orders path still needs the general MyOS adapter. The diagram is that target flow,
 not a claim that the unchanged default application already runs it.
 

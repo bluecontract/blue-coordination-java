@@ -162,16 +162,18 @@ class ReceiptReadCutTest {
                     List.of(ManagedReadPin.fromExactEvidence(sourceBefore.documentId(), sourceBefore.blueId(), sourceBefore.document(), null)));
             var work = new CoordinationCore.WorkIntent(root.documentId(), CoordinationCore.OperationKind.EXTERNAL_INPUT);
             var predecessors = Map.of(root.documentId(), rootBirth.operationId(), sourceBefore.documentId(), bBirth.operationId());
+            var sourceBasis = Map.of(sourceBefore.documentId(), SourceExecutionBasis.identity(
+                    sourceBefore.documentId(), f.core.environment(), f.core.executionPolicy()));
             var wrongCut = assertInstanceOf(CoordinationCore.NeedEvidence.class, f.core.evaluate(work,
                     new CoordinationCore.EvaluationEvidence(afterCut, Set.of("timeline"), List.of(inputPrefix),
-                            Optional.empty(), List.of(), predecessors, List.of(coldProgram))));
+                            Optional.empty(), List.of(), predecessors, List.of(coldProgram)).withExpectedSourceBases(sourceBasis)));
             assertTrue(wrongCut.keys().contains("root-channel-logical-view:" + sourceBefore.documentId().value()));
 
             // Reconstructing the actual predecessor topology restores C's required guarantee.
             var priorCut = exactCut(List.of(root, sourceBefore, child), beforeRows, List.of());
             var missingChildGuarantee = assertInstanceOf(CoordinationCore.NeedEvidence.class, f.core.evaluate(work,
                     new CoordinationCore.EvaluationEvidence(priorCut, Set.of("timeline", "quiet"), List.of(inputPrefix),
-                            Optional.empty(), List.of(), predecessors, List.of(coldProgram))));
+                            Optional.empty(), List.of(), predecessors, List.of(coldProgram)).withExpectedSourceBases(sourceBasis)));
             assertEquals(List.of("timeline-prefix:quiet"), missingChildGuarantee.keys());
         }
     }

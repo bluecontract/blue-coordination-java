@@ -6,6 +6,8 @@ import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.closure.DocumentId;
 import blue.language.processor.closure.FrozenNodeEvidenceCodec;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
+import blue.language.processor.closure.ClosureResourceDemand;
+import blue.language.processor.closure.SourceExecutionBasis;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -27,7 +29,6 @@ import java.util.*;
  */
 public final class CanonicalSourceHistory {
     private static final String FORMAT = "blue-canonical-source-prefix-step-poc-1";
-    private static final String RULE = "blue-canonical-source-full-history-poc/1";
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
     private final CoordinationCore core;
     public enum RecordKind { SEMANTIC_OPERATION, METADATA_PROGRESS }
@@ -35,8 +36,15 @@ public final class CanonicalSourceHistory {
     public CanonicalSourceHistory(CoordinationCore core) { this.core = Objects.requireNonNull(core); }
 
     /** Exact inclusive canonical Timeline position, never a wall-clock NOW. */
-    public record Request(DocumentId source, ExternalOrderKey inclusiveCut) {
-        public Request { Objects.requireNonNull(source); requireOrder(inclusiveCut); }
+    public record Request(DocumentId source, ExternalOrderKey inclusiveCut, Map<String, String> originalAdmissionRoots) {
+        /** No original input authority: initialization can proceed; selected external input returns a named Need. */
+        public Request(DocumentId source, ExternalOrderKey inclusiveCut) { this(source, inclusiveCut, Map.of()); }
+        public Request {
+            Objects.requireNonNull(source); requireOrder(inclusiveCut); originalAdmissionRoots = Map.copyOf(originalAdmissionRoots);
+            originalAdmissionRoots.forEach((entry, root) -> {
+                BlueIds.requireBlueIdOrCyclicMember(entry, "originalEntry"); requireDigest(root);
+            });
+        }
     }
 
     /** A successful immutable source view, not a mutable host lineage row. */
@@ -50,7 +58,7 @@ public final class CanonicalSourceHistory {
     /** No observer identity, activation mode, attachment cutoff, worker or host fence. */
     public static final class Cursor {
         private final DocumentId source;
-        private final String basisIdentity, recordIdentity, semanticPredecessor;
+        private final String basisIdentity, recordIdentity, semanticPredecessor, originalAdmissionIdentity;
         private final View initialView, successfulView;
         private final ExternalOrderKey handledThrough;
         private final long records, operations;
@@ -58,13 +66,14 @@ public final class CanonicalSourceHistory {
         private final RecordKind recordKind;
         private Cursor(DocumentId source, String basisIdentity, String recordIdentity, String semanticPredecessor,
                        View initialView, View successfulView, ExternalOrderKey handledThrough, long records, long operations,
-                       List<Publication> publications, RecordKind recordKind) {
+                       List<Publication> publications, RecordKind recordKind, String originalAdmissionIdentity) {
             this.source = source; this.basisIdentity = basisIdentity; this.recordIdentity = recordIdentity;
             this.semanticPredecessor = semanticPredecessor; this.initialView = initialView;
             this.successfulView = successfulView; this.handledThrough = handledThrough;
             this.records = records; this.operations = operations;
             this.publications = List.copyOf(publications);
             this.recordKind = recordKind;
+            this.originalAdmissionIdentity = originalAdmissionIdentity;
         }
         public DocumentId source() { return source; }
         public String basisIdentity() { return basisIdentity; }
@@ -78,11 +87,16 @@ public final class CanonicalSourceHistory {
         /** All fresh publications at this record, dependency-first, not one aggregate operation. */
         public List<Publication> publications() { return publications; }
         public Optional<RecordKind> recordKind() { return Optional.ofNullable(recordKind); }
+        public Optional<String> originalAdmissionIdentity() { return Optional.ofNullable(originalAdmissionIdentity); }
     }
 
     public sealed interface Result permits Await, Step, Complete, Blocked { }
-    public record Await(List<String> keys) implements Result {
-        public Await { keys = List.copyOf(keys); if (keys.isEmpty()) throw invalid("Named source needs required"); }
+    public record Await(List<String> keys, List<ClosureResourceDemand> resourceDemands) implements Result {
+        public Await(List<String> keys) { this(keys, List.of()); }
+        public Await {
+            var need = new CoordinationCore.NeedEvidence(keys, resourceDemands);
+            keys = need.keys(); resourceDemands = need.resourceDemands();
+        }
     }
     public record Publication(String operationIdentity, Set<DocumentId> ownedLineages, String receiptIdentity) {
         public Publication {
@@ -129,7 +143,7 @@ public final class CanonicalSourceHistory {
     }
 
     public Cursor start(DocumentId source) {
-        return new Cursor(Objects.requireNonNull(source), basis(source), null, null, null, null, null, 0L, 0L, List.of(), null);
+        return new Cursor(Objects.requireNonNull(source), basis(source), null, null, null, null, null, 0L, 0L, List.of(), null, null);
     }
 
     public Result prepareNext(Request request, Cursor cursor, CoordinationCore.EvaluationEvidence evidence,
@@ -167,12 +181,11 @@ public final class CanonicalSourceHistory {
         List<CoordinationCore.TimelinePrefix> bounded = evidence.prefixes().stream().map(prefix ->
                 new CoordinationCore.TimelinePrefix(prefix.timelineId(), prefix.exclusiveCompleteBeforeMicros(),
                         prefix.inputs().stream().filter(input -> input.order().compareTo(request.inclusiveCut()) <= 0).toList())).toList();
-        var selected = new CoordinationCore.EvaluationEvidence(evidence.snapshot(), evidence.relevantTimelines(), bounded,
-                cursor.handledThrough(), evidence.fences(), predecessors, evidence.sourcePrograms(), evidence.sourceGaps(),
-                evidence.sourceFailures(), evidence.sourceInitializations(), evidence.operationFences());
+        var selected = evidence.withHistoryCut(bounded, cursor.handledThrough(), predecessors);
         var kind = cursor.successfulView == null ? CoordinationCore.OperationKind.INITIALIZATION : CoordinationCore.OperationKind.EXTERNAL_INPUT;
-        var result = core.evaluate(new CoordinationCore.WorkIntent(request.source(), kind), selected);
-        if (result instanceof CoordinationCore.NeedEvidence need) return new Await(need.keys());
+        var result = core.evaluateCanonicalSource(new CoordinationCore.WorkIntent(request.source(), kind), selected,
+                request.originalAdmissionRoots(), cursor.basisIdentity);
+        if (result instanceof CoordinationCore.NeedEvidence need) return new Await(need.keys(), need.resourceDemands());
         if (result instanceof CoordinationCore.Idle) return complete(request, cursor, evidence);
         FrozenNodeEvidenceCodec.Encoder encoder = new FrozenNodeEvidenceCodec.Encoder(writer, limits);
         String receipt, semanticPredecessor = cursor.semanticPredecessor;
@@ -241,14 +254,24 @@ public final class CanonicalSourceHistory {
             receipt = metadataReceipt(progress, cursor, semanticPredecessor, encoder);
         } else throw invalid("Unexpected canonical source result");
         long records = Math.addExact(cursor.records, 1L);
+        String originalAdmission = null;
+        Map<String, Object> originalAdmissionData = null;
+        if (kind == CoordinationCore.OperationKind.EXTERNAL_INPUT) {
+            String root = request.originalAdmissionRoots().get(through.components().get(1));
+            var admitted = selected.sourceInputAdmissions().stream().filter(value -> value.identity().equals(root)).findFirst()
+                    .orElseThrow(() -> invalid("Selected source input lost its verified original admission"));
+            originalAdmission = admitted.identity(); originalAdmissionData = admitted.value();
+        }
         Map<String, Object> row = map("format", FORMAT, "source", request.source().value(), "basis", cursor.basisIdentity,
                 "previous", cursor.recordIdentity, "receipt", receipt, "semanticPredecessor", semanticPredecessor,
                 "initial", view(initial), "successful", view(successful), "through", order(through),
                 "records", records, "operations", operationCount, "recordKind", recordKind.name(),
-                "publicationCount", publications.size(), "publications", publications(publications));
+                "publicationCount", publications.size(), "publications", publications(publications),
+                "originalAdmission", originalAdmission, "originalAdmissionData", originalAdmissionData,
+                "originalInputPredecessor", cursor.semanticPredecessor);
         String record = encoder.blob(bytes(row));
         Cursor after = new Cursor(request.source(), cursor.basisIdentity, record, semanticPredecessor,
-                initial, successful, through, records, operationCount, publications, recordKind);
+                initial, successful, through, records, operationCount, publications, recordKind, originalAdmission);
         return new Step(cursor, after, result, receipt, publications);
     }
 
@@ -276,6 +299,14 @@ public final class CanonicalSourceHistory {
         if (initial.epoch() > successful.epoch()) throw invalid("Source successful epoch precedes initialization");
         ExternalOrderKey through = row.path("through").isNull() ? null : parseOrder(row.path("through"));
         if ((records == 1) != (through == null)) throw invalid("Source input disposition position missing");
+        String originalAdmission = nullableText(row, "originalAdmission");
+        if (through == null) {
+            if (originalAdmission != null) throw invalid("Intrinsic initialization has no external input admission");
+        } else {
+            if (originalAdmission == null) throw invalid("External source prefix lost original input admission authority");
+            SourceInputAdmission.restoreInline(originalAdmission, row.get("originalAdmissionData")).verifyPrefix(source, basis(source), through,
+                    nullableText(row, "originalInputPredecessor"));
+        }
         List<Publication> publications = parsePublications(row);
         RecordKind recordKind = RecordKind.valueOf(text(row, "recordKind"));
         if (recordKind == RecordKind.SEMANTIC_OPERATION) {
@@ -287,7 +318,7 @@ public final class CanonicalSourceHistory {
             throw invalid("Metadata-only source record cannot own a fresh semantic publication");
         }
         return new Cursor(source, basis(source), authenticatedRecordIdentity, predecessor, initial, successful,
-                through, records, operations, publications, recordKind);
+                through, records, operations, publications, recordKind, originalAdmission);
     }
 
     private static String metadataReceipt(CoordinationCore.MetadataProgress progress, Cursor cursor, String semanticPredecessor,
@@ -339,12 +370,7 @@ public final class CanonicalSourceHistory {
     }
 
     private String basis(DocumentId source) {
-        var e = core.environment();
-        return FrozenNodeEvidenceCodec.digest(bytes(List.of("blue-canonical-source-basis-poc/1", RULE, source.value(),
-                e.blueLanguageSpecificationIdentity(), e.contractsSpecificationIdentity(), e.runtimeRegistryIdentity(),
-                e.gasManifestIdentity(), e.managedDocumentIdentityPolicyIdentity(), e.managedBindingPolicyIdentity(),
-                e.exactNodeProviderDomainIdentity(), e.externalOrderPolicyIdentity(), e.portableLimitPolicyIdentity(),
-                e.cyclicFinalizerIdentity(), e.cyclicProofVerifierIdentity(), core.executionPolicy().identity())));
+        return SourceExecutionBasis.identity(source, core.environment(), core.executionPolicy());
     }
 
     static void requireOrder(ExternalOrderKey order) {
