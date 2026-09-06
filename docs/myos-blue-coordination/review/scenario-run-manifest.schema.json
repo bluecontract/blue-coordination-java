@@ -1,0 +1,2543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blue:myos-coordination-poc:scenario-run-manifest:1",
+  "title": "Blue MyOS Coordination POC ScenarioRunManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestSchema",
+    "manifestIdentity",
+    "runId",
+    "createdAt",
+    "approvedBy",
+    "reviewReference",
+    "runKind",
+    "phase",
+    "ownedGates",
+    "artifacts",
+    "stack",
+    "buildArtifactKey",
+    "semanticConfigurationIdentity",
+    "semanticConfigurationArtifactSha256",
+    "semanticConfigurationArtifactKey",
+    "scenarioSpecificationArtifactKey",
+    "environment",
+    "datasets",
+    "overlayFactors",
+    "overlays",
+    "failpoints",
+    "mandatorySchedules",
+    "rows",
+    "exclusions",
+    "retention"
+  ],
+  "properties": {
+    "manifestSchema": {
+      "const": "blue.myos-coordination-poc.scenario-run-manifest/1"
+    },
+    "manifestIdentity": {
+      "$ref": "#/$defs/digest"
+    },
+    "runId": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "approvedBy": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "reviewReference": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "runKind": {
+      "enum": [
+        "FUNCTIONAL_ACCEPTANCE",
+        "PERFORMANCE_CALIBRATION",
+        "PERFORMANCE_ACCEPTANCE"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "PHASE_1",
+        "PHASE_2",
+        "PHASE_3"
+      ]
+    },
+    "ownedGates": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/gateId"
+      }
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifactMap"
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordination",
+        "language",
+        "bex",
+        "myosMini",
+        "myosJava"
+      ],
+      "properties": {
+        "coordination": {
+          "$ref": "#/$defs/stackComponent"
+        },
+        "language": {
+          "$ref": "#/$defs/stackComponent"
+        },
+        "bex": {
+          "$ref": "#/$defs/stackComponent"
+        },
+        "myosMini": {
+          "$ref": "#/$defs/stackComponent"
+        },
+        "myosJava": {
+          "$ref": "#/$defs/stackComponent"
+        }
+      }
+    },
+    "buildArtifactKey": {
+      "$ref": "#/$defs/artifactKey"
+    },
+    "semanticConfigurationIdentity": {
+      "$ref": "#/$defs/sha256Identity"
+    },
+    "semanticConfigurationArtifactSha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "semanticConfigurationArtifactKey": {
+      "$ref": "#/$defs/artifactKey"
+    },
+    "scenarioSpecificationArtifactKey": {
+      "$ref": "#/$defs/artifactKey"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/dataset"
+      }
+    },
+    "overlayFactors": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/nonEmpty"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "overlays": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/overlay"
+      }
+    },
+    "failpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/failpoint"
+      }
+    },
+    "mandatorySchedules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/mandatoryScheduleId"
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/exclusion"
+      }
+    },
+    "performanceContext": {
+      "$ref": "#/$defs/performanceContext"
+    },
+    "retention": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmpty"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "PHASE_2",
+              "PHASE_3"
+            ]
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "required": [
+              "disk",
+              "postgresql",
+              "databasePoolSize",
+              "cacheBudgetBytes"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runKind": {
+            "const": "FUNCTIONAL_ACCEPTANCE"
+          }
+        },
+        "required": [
+          "runKind"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "performanceContext"
+          ]
+        },
+        "properties": {
+          "ownedGates": {
+            "minItems": 1
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "gateIds": {
+                  "minItems": 1
+                },
+                "measurement": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "phase": {
+                  "const": "PHASE_1"
+                }
+              },
+              "required": [
+                "phase"
+              ]
+            },
+            "then": {
+              "properties": {
+                "ownedGates": {
+                  "enum": [
+                    [
+                      "G0"
+                    ],
+                    [
+                      "G1"
+                    ],
+                    [
+                      "G0",
+                      "G1"
+                    ]
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "ownedGates": {
+                        "const": [
+                          "G0"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "ownedGates"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "mandatorySchedules": {
+                        "$ref": "#/$defs/scheduleSetEmpty"
+                      },
+                      "exclusions": {
+                        "maxItems": 0
+                      },
+                      "rows": {
+                        "items": {
+                          "properties": {
+                            "gateIds": {
+                              "const": [
+                                "G0"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "ownedGates": {
+                        "const": [
+                          "G1"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "ownedGates"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "mandatorySchedules": {
+                        "$ref": "#/$defs/scheduleSetCore"
+                      },
+                      "rows": {
+                        "items": {
+                          "properties": {
+                            "gateIds": {
+                              "const": [
+                                "G1"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "ownedGates": {
+                        "const": [
+                          "G0",
+                          "G1"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "ownedGates"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "mandatorySchedules": {
+                        "$ref": "#/$defs/scheduleSetCore"
+                      },
+                      "rows": {
+                        "items": {
+                          "properties": {
+                            "gateIds": {
+                              "const": [
+                                "G0",
+                                "G1"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "phase": {
+                  "const": "PHASE_2"
+                }
+              },
+              "required": [
+                "phase"
+              ]
+            },
+            "then": {
+              "properties": {
+                "ownedGates": {
+                  "const": [
+                    "G2"
+                  ]
+                },
+                "mandatorySchedules": {
+                  "$ref": "#/$defs/scheduleSetHost"
+                },
+                "rows": {
+                  "items": {
+                    "properties": {
+                      "gateIds": {
+                        "const": [
+                          "G2"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "phase": {
+                  "const": "PHASE_3"
+                }
+              },
+              "required": [
+                "phase"
+              ]
+            },
+            "then": {
+              "properties": {
+                "ownedGates": {
+                  "const": [
+                    "G3"
+                  ]
+                },
+                "mandatorySchedules": {
+                  "$ref": "#/$defs/scheduleSetIntegrated"
+                },
+                "rows": {
+                  "items": {
+                    "properties": {
+                      "gateIds": {
+                        "const": [
+                          "G3"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runKind": {
+            "const": "PERFORMANCE_CALIBRATION"
+          }
+        },
+        "required": [
+          "runKind"
+        ]
+      },
+      "then": {
+        "required": [
+          "performanceContext"
+        ],
+        "properties": {
+          "phase": {
+            "const": "PHASE_3"
+          },
+          "ownedGates": {
+            "const": []
+          },
+          "mandatorySchedules": {
+            "$ref": "#/$defs/scheduleSetPerformance"
+          },
+          "performanceContext": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                },
+                {
+                  "required": [
+                    "m1"
+                  ]
+                }
+              ]
+            }
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "gateIds": {
+                  "maxItems": 0
+                },
+                "measurement": {
+                  "$ref": "#/$defs/measurement"
+                },
+                "budgets": {
+                  "minItems": 1,
+                  "items": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/performanceMetricUnitBinding"
+                      }
+                    ],
+                    "properties": {
+                      "direction": {
+                        "const": "OBSERVE_ONLY"
+                      },
+                      "threshold": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runKind": {
+            "const": "PERFORMANCE_ACCEPTANCE"
+          }
+        },
+        "required": [
+          "runKind"
+        ]
+      },
+      "then": {
+        "required": [
+          "performanceContext"
+        ],
+        "properties": {
+          "phase": {
+            "const": "PHASE_3"
+          },
+          "ownedGates": {
+            "const": [
+              "G4"
+            ]
+          },
+          "mandatorySchedules": {
+            "$ref": "#/$defs/scheduleSetPerformance"
+          },
+          "performanceContext": {
+            "required": [
+              "calibration",
+              "m1"
+            ]
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "gateIds": {
+                  "const": [
+                    "G4"
+                  ]
+                },
+                "measurement": {
+                  "$ref": "#/$defs/measurement"
+                },
+                "budgets": {
+                  "minItems": 1,
+                  "items": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/performanceMetricUnitBinding"
+                      },
+                      {
+                        "$ref": "#/$defs/performanceMetricDirectionBinding"
+                      }
+                    ],
+                    "properties": {
+                      "direction": {
+                        "enum": [
+                          "AT_MOST",
+                          "AT_LEAST"
+                        ]
+                      },
+                      "threshold": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gateId": {
+      "enum": [
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G4"
+      ]
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha256Identity": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "artifactKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "path"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "artifactMap": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/artifactKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "stackComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "dirty",
+        "patchArtifactKey"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "patchArtifactKey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/artifactKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dirty": {
+                "const": true
+              }
+            },
+            "required": [
+              "dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "patchArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "patchArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "cpu",
+        "ramBytes",
+        "jdk",
+        "jvmFlags",
+        "jvmCount",
+        "operationalBudget"
+      ],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "cpu": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "ramBytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "jdk": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "jvmFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "jvmCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operationalBudget": {
+          "$ref": "#/$defs/operationalBudget"
+        },
+        "disk": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "postgresql": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "databasePoolSize": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cacheBudgetBytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "operationalBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxRows",
+        "maxReadBytes",
+        "maxMaterializedBytes",
+        "maxMaterializedApplicationDefinitions",
+        "maxReadCalls",
+        "maxEvidenceRounds",
+        "maxAttemptNanos"
+      ],
+      "properties": {
+        "maxRows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxReadBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxMaterializedBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxMaterializedApplicationDefinitions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Positive per-read or discovery-page materialization bound, not a total consumer limit. A-scaling fixtures use a cap from 101 to 2147483646 for distinct 100/cap/cap+1 cells; total cap+1 consumers must progress via pages."
+        },
+        "maxReadCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "maxEvidenceRounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "maxAttemptNanos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "artifactKey",
+        "kind",
+        "generator",
+        "generatorVersion",
+        "seed",
+        "cardinalities",
+        "payloadBytes"
+      ],
+      "properties": {
+        "datasetId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "artifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "kind": {
+          "enum": [
+            "SCENARIO_FIXTURE",
+            "PERFORMANCE_NORMAL",
+            "PERFORMANCE_SHARED_SOURCE",
+            "PERFORMANCE_DORMANT",
+            "PERFORMANCE_CONNECTED_DAG"
+          ]
+        },
+        "generator": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "generatorVersion": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "seed": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "cardinalities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "documentCount",
+            "processEmbeddedEdgeCount",
+            "historyEntryCount",
+            "occurrenceCount",
+            "applicationCohortCount"
+          ],
+          "properties": {
+            "documentCount": {
+              "$ref": "#/$defs/nonNegativeInteger"
+            },
+            "processEmbeddedEdgeCount": {
+              "$ref": "#/$defs/nonNegativeInteger"
+            },
+            "historyEntryCount": {
+              "$ref": "#/$defs/nonNegativeInteger"
+            },
+            "occurrenceCount": {
+              "$ref": "#/$defs/nonNegativeInteger"
+            },
+            "applicationCohortCount": {
+              "$ref": "#/$defs/nonNegativeInteger"
+            }
+          }
+        },
+        "payloadBytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "controlGrowth": {
+          "$ref": "#/$defs/controlGrowthDimensions"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "controlGrowth"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cardinalities": {
+                "properties": {
+                  "applicationCohortCount": {
+                    "const": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "overlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overlayId",
+        "values"
+      ],
+      "properties": {
+        "overlayId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/nonEmpty"
+          }
+        }
+      }
+    },
+    "failpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failpointId",
+        "kind",
+        "stage"
+      ],
+      "properties": {
+        "failpointId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "kind": {
+          "enum": [
+            "SEMANTIC",
+            "OPERATIONAL"
+          ]
+        },
+        "stage": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "parameters": {
+          "$ref": "#/$defs/sourceStageFailpointParameters"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "enum": [
+                  "SOURCE_BEFORE_EXECUTION",
+                  "SOURCE_AFTER_RESULT_BEFORE_DURABLE_PROGRESS",
+                  "SOURCE_AFTER_DURABLE_RESULT_CHECKPOINT",
+                  "SOURCE_BEFORE_TERMINAL_SETTLEMENT"
+                ]
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          },
+          "then": {
+            "required": [
+              "parameters"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "parameters"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "const": "SOURCE_BEFORE_EXECUTION"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "properties": {
+                  "expectedCompleteResultIdentity": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stage": {
+                "enum": [
+                  "SOURCE_AFTER_RESULT_BEFORE_DURABLE_PROGRESS",
+                  "SOURCE_AFTER_DURABLE_RESULT_CHECKPOINT",
+                  "SOURCE_BEFORE_TERMINAL_SETTLEMENT"
+                ]
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "properties": {
+                  "expectedCompleteResultIdentity": {
+                    "$ref": "#/$defs/sha256Identity"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sourceStageFailpointParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceWorkIdentity",
+        "tentativeSourceCallsBeforeCut",
+        "deliveredPrefixIdentity",
+        "expectedCompleteResultIdentity"
+      ],
+      "properties": {
+        "sourceWorkIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "tentativeSourceCallsBeforeCut": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "deliveredPrefixIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "expectedCompleteResultIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256Identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "$comment": "Source result is source-local. deliveredPrefixIdentity binds a canonical committed consumer set, not physical commit order. All four SOURCE_* stages apply to live-independent fanout and retained-history fixtures. SOURCE_BEFORE_TERMINAL_SETTLEMENT has committed source and incomplete aggregate cause; semantic preflight enforces these meanings."
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheduleId",
+        "reason",
+        "approvedBy"
+      ],
+      "properties": {
+        "scheduleId": {
+          "$ref": "#/$defs/mandatoryScheduleId"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "approvedBy": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rowId",
+        "scenarioId",
+        "gateIds",
+        "goal",
+        "givenWhen",
+        "scheduleId",
+        "fixtureArtifactKey",
+        "oracleKind",
+        "expectedCoreResultArtifactKey",
+        "expectedSemanticTraceArtifactKey",
+        "expectedDurablePostStateArtifactKey",
+        "expectedCoreResult",
+        "expectedSemanticTrace",
+        "expectedDurablePostState",
+        "forbiddenOutcomeIds",
+        "datasetIds",
+        "overlayId",
+        "failpointIds",
+        "seed",
+        "budgets",
+        "budgetNotApplicableReason",
+        "measurement"
+      ],
+      "properties": {
+        "rowId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "scenarioId": {
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "I",
+            "J",
+            "K",
+            "L",
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T"
+          ]
+        },
+        "gateIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gateId"
+          }
+        },
+        "goal": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "givenWhen": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "scheduleId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "fixtureArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "oracleKind": {
+          "enum": [
+            "HAND_AUTHORED_EXACT",
+            "EAGER_MANAGED_REFERENCE",
+            "INDEPENDENT_GRAPH"
+          ]
+        },
+        "expectedCoreResultArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "expectedSemanticTraceArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "expectedDurablePostStateArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "expectedCoreResult": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "expectedSemanticTrace": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          }
+        },
+        "expectedDurablePostState": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "forbiddenOutcomeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          }
+        },
+        "datasetIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          }
+        },
+        "overlayId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "failpointIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          }
+        },
+        "seed": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "budgets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/budget"
+          }
+        },
+        "budgetNotApplicableReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmpty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "measurement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/measurement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subcaseId": {
+          "$ref": "#/$defs/requiredSubcaseId"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "budgets": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "budgets"
+            ]
+          },
+          "then": {
+            "properties": {
+              "budgetNotApplicableReason": {
+                "$ref": "#/$defs/nonEmpty"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "budgetNotApplicableReason": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "SOURCE-PROVENANCE-EQUAL-ORDER"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "CATCHUP-K1-K2-K3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "SOURCE-PROVENANCE-PAST-ORDER-CUTOFF"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "CATCHUP-K1-K2-K3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "NEXT-RECEIPT-PAYLOAD-UNAVAILABLE"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "CATCHUP-K1-K2-K3"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "SIGNED-CONTRACT-DECLARATION-ORDER"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "CANONICAL-SEMANTIC-INTEGER"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "SEQUENTIAL-R1-R2-R3-REPLAY"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "SAME-APPLICATION-COMMIT-RACE"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "CONTROL-STATE-MULTICOMMIT-GROWTH"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "APPLICATION-PLAN-A-SCALING"
+              },
+              "datasetIds": {
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "SAME-DOMAIN-ADMISSION-CONTENTION"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "REALM-NEGATIVE-ISOLATION"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "QUEUED-MANAGED-EXECUTION-CUT"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "DISJOINT-PREFIX-EXECUTION-CUT"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subcaseId": {
+                "const": "EXISTING-READY-SHARED-TARGET-JOIN"
+              }
+            },
+            "required": [
+              "subcaseId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scheduleId": {
+                "const": "NEW-SHARED-CHILD-PARTITION"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "PERFORMANCE_ACCEPTANCE semantic preflight and report validation join each row budget to its unique M1 guardrail by metricId and require equal unit, direction and threshold. JSON Schema alone cannot enforce this cross-object equality. Calibration retains OBSERVE_ONLY/null thresholds.",
+      "required": [
+        "budgetId",
+        "metricId",
+        "unit",
+        "direction",
+        "threshold"
+      ],
+      "properties": {
+        "budgetId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "metricId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "direction": {
+          "enum": [
+            "AT_MOST",
+            "AT_LEAST",
+            "OBSERVE_ONLY"
+          ]
+        },
+        "threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "OBSERVE_ONLY"
+              }
+            },
+            "required": [
+              "direction"
+            ]
+          },
+          "then": {
+            "properties": {
+              "threshold": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "threshold": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measurementId",
+        "completionScope",
+        "databaseSnapshotArtifactKey",
+        "gcProtocolArtifactKey",
+        "acquisitionMode",
+        "cacheMode",
+        "workerCount",
+        "dormantCorpusMultiplier",
+        "offeredCausesPerSecond",
+        "causesPerRepetition",
+        "warmupMilliseconds",
+        "measurementMilliseconds",
+        "terminalDeadlineMilliseconds",
+        "samplingCadenceMilliseconds",
+        "repetitions",
+        "pairedRowId",
+        "comparisonAxis"
+      ],
+      "properties": {
+        "measurementId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "completionScope": {
+          "enum": [
+            "SOURCE_OPERATION",
+            "CONSUMER_OPERATION"
+          ],
+          "description": "Preregistered local semantic operation measured by existing cause-named metrics. Sample identity joins original cause to selected operation/owned scope, not entry or worker job alone. One entry triggering two independent source operations contributes two; one coupled A/B operation contributes one. Source/consumer denominators retain exact entitled operations before physical discovery/queueing. Source completion does not wait for independent consumers; optional aggregate reporting creates no global terminal receipt."
+        },
+        "databaseSnapshotArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "gcProtocolArtifactKey": {
+          "$ref": "#/$defs/artifactKey"
+        },
+        "acquisitionMode": {
+          "enum": [
+            "B1_EAGER_BULK",
+            "B2_TYPED_LAZY"
+          ]
+        },
+        "cacheMode": {
+          "enum": [
+            "APP_COLD_DB_WARM",
+            "FULLY_WARM",
+            "FORCED_EVICTION"
+          ]
+        },
+        "workerCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dormantCorpusMultiplier": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "offeredCausesPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "causesPerRepetition": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warmupMilliseconds": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "measurementMilliseconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "terminalDeadlineMilliseconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "samplingCadenceMilliseconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "repetitions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pairedRowId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmpty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparisonAxis": {
+          "enum": [
+            "NONE",
+            "ACQUISITION_MODE",
+            "DORMANT_CORPUS_SCALE"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "comparisonAxis": {
+                "const": "NONE"
+              }
+            },
+            "required": [
+              "comparisonAxis"
+            ]
+          },
+          "then": {
+            "properties": {
+              "pairedRowId": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "pairedRowId": {
+                "$ref": "#/$defs/nonEmpty"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "performanceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "m0"
+      ],
+      "properties": {
+        "m0": {
+          "$ref": "#/$defs/m0"
+        },
+        "calibration": {
+          "$ref": "#/$defs/calibrationLink"
+        },
+        "m1": {
+          "$ref": "#/$defs/m1"
+        }
+      }
+    },
+    "m0": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approvedAt",
+        "approvedBy",
+        "reviewReference",
+        "applicationPlanLinearBaseline",
+        "guardrails"
+      ],
+      "properties": {
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "approvedBy": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "reviewReference": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "applicationPlanLinearBaseline": {
+          "$ref": "#/$defs/applicationPlanLinearBaseline"
+        },
+        "guardrails": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/guardrail"
+          }
+        }
+      }
+    },
+    "applicationPlanLinearBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formula",
+        "workUnit"
+      ],
+      "properties": {
+        "formula": {
+          "const": "PAGED_A_DEFINITIONS_PLUS_A_LOCAL_COMMITS"
+        },
+        "workUnit": {
+          "const": "application-blueprint-record-examination"
+        }
+      },
+      "$comment": "Isolated no-feedback A-consumer bookkeeping baseline 2A: each definition examined once across bounded pages plus one local completion projection per consumer. No global immutable partition. Processor verification, growing authority/WAL and retries measured separately."
+    },
+    "calibrationLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "manifestFileSha256",
+        "manifestPath",
+        "reportFileSha256",
+        "reportPath"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "manifestFileSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "manifestPath": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "reportFileSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "reportPath": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "m1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selectedAt",
+        "selectedBy",
+        "selectionNote",
+        "guardrails"
+      ],
+      "properties": {
+        "selectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "selectedBy": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "selectionNote": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "guardrails": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/guardrail"
+          }
+        }
+      }
+    },
+    "guardrail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metricId",
+        "unit",
+        "direction",
+        "threshold",
+        "basis"
+      ],
+      "properties": {
+        "metricId": {
+          "$ref": "#/$defs/performanceMetricId"
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "direction": {
+          "enum": [
+            "AT_MOST",
+            "AT_LEAST"
+          ]
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0
+        },
+        "basis": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/performanceMetricUnitBinding"
+        },
+        {
+          "$ref": "#/$defs/performanceMetricDirectionBinding"
+        }
+      ]
+    },
+    "performanceMetricId": {
+      "enum": [
+        "eligible-cause-latency.p50",
+        "eligible-cause-latency.p95",
+        "eligible-cause-latency.p99",
+        "normal-ingress-latency.p50",
+        "normal-ingress-latency.p95",
+        "normal-ingress-latency.p99",
+        "offered-load.causes-per-second",
+        "throughput.settled-causes-per-second",
+        "error-rate.failed-or-timeout-causes-ratio",
+        "backlog.p99-pending-causes",
+        "backlog.p99-age",
+        "amplification.logical-rows-per-cause",
+        "amplification.durable-writes-per-cause",
+        "amplification.sql-statements-per-cause",
+        "amplification.jdbc-round-trips-per-cause",
+        "amplification.exact-read-bytes-ratio",
+        "amplification.wal-bytes-per-cause",
+        "b1-b2.p99-latency-ratio",
+        "evidence.peak-resident-to-unique-ratio",
+        "evidence.cumulative-copied-to-unique-ratio",
+        "evidence.cumulative-decoded-to-unique-ratio",
+        "evidence.cumulative-hashed-to-unique-ratio",
+        "evidence.serialized-envelope-to-unique-ratio",
+        "evidence.wal-to-unique-ratio",
+        "evidence.post-attempt-retained-to-unique-ratio",
+        "b1-b2.throughput-ratio",
+        "b1-b2.rows-ratio",
+        "b1-b2.read-bytes-ratio",
+        "b1-b2.heap-after-gc-ratio",
+        "application-plan.validation-cpu-nanos-per-application",
+        "application-plan.bytes-read-per-application",
+        "application-plan.verified-hot-cache-miss-ratio",
+        "application-plan.cumulative-reprojection-to-linear-ratio",
+        "locality.dormant-100x-to-1x-p99-latency-ratio",
+        "locality.dormant-demand-count-delta",
+        "locality.normal-heap-after-gc",
+        "locality.normal-rss",
+        "locality.shared-n1000-heap-after-gc",
+        "locality.shared-n1000-rss",
+        "locality.shared-n1000-sql-statements-per-parent",
+        "locality.shared-n1000-jdbc-round-trips-per-parent",
+        "locality.shared-n1000-rows-per-occurrence",
+        "locality.shared-n1000-read-bytes-per-occurrence",
+        "locality.connected-dag-heap-after-gc",
+        "locality.connected-dag-rows-per-cause",
+        "locality.connected-dag-read-bytes-per-cause",
+        "locality.connected-dag-p99-latency",
+        "processor.physical-source-calls-per-settled-transition",
+        "processor.retry-execution-nanos-per-cause",
+        "processor.retry-verification-bytes-per-cause",
+        "state.cumulative-authority-bytes-per-transition",
+        "publication.batch-validations-per-published-batch",
+        "publication.peak-claim-bytes",
+        "recovery.satisfied-need-wakeup.p99",
+        "locality.topology-rows-per-cause",
+        "locality.document-body-bytes-per-cause"
+      ]
+    },
+    "performanceMetricUnitBinding": {
+      "oneOf": [
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "eligible-cause-latency.p50",
+                "eligible-cause-latency.p95",
+                "eligible-cause-latency.p99",
+                "normal-ingress-latency.p50",
+                "normal-ingress-latency.p95",
+                "normal-ingress-latency.p99",
+                "backlog.p99-age",
+                "locality.connected-dag-p99-latency",
+                "recovery.satisfied-need-wakeup.p99"
+              ]
+            },
+            "unit": {
+              "const": "milliseconds"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "offered-load.causes-per-second",
+                "throughput.settled-causes-per-second"
+              ]
+            },
+            "unit": {
+              "const": "causes/second"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "error-rate.failed-or-timeout-causes-ratio",
+                "amplification.exact-read-bytes-ratio",
+                "b1-b2.p99-latency-ratio",
+                "evidence.peak-resident-to-unique-ratio",
+                "evidence.cumulative-copied-to-unique-ratio",
+                "evidence.cumulative-decoded-to-unique-ratio",
+                "evidence.cumulative-hashed-to-unique-ratio",
+                "evidence.serialized-envelope-to-unique-ratio",
+                "evidence.wal-to-unique-ratio",
+                "evidence.post-attempt-retained-to-unique-ratio",
+                "b1-b2.throughput-ratio",
+                "b1-b2.rows-ratio",
+                "b1-b2.read-bytes-ratio",
+                "b1-b2.heap-after-gc-ratio",
+                "application-plan.verified-hot-cache-miss-ratio",
+                "application-plan.cumulative-reprojection-to-linear-ratio",
+                "locality.dormant-100x-to-1x-p99-latency-ratio"
+              ]
+            },
+            "unit": {
+              "const": "ratio"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "backlog.p99-pending-causes"
+            },
+            "unit": {
+              "const": "causes"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "amplification.logical-rows-per-cause",
+                "locality.connected-dag-rows-per-cause",
+                "locality.topology-rows-per-cause"
+              ]
+            },
+            "unit": {
+              "const": "rows/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "amplification.durable-writes-per-cause"
+            },
+            "unit": {
+              "const": "writes/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "amplification.sql-statements-per-cause"
+            },
+            "unit": {
+              "const": "statements/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "amplification.jdbc-round-trips-per-cause"
+            },
+            "unit": {
+              "const": "round-trips/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "amplification.wal-bytes-per-cause",
+                "locality.connected-dag-read-bytes-per-cause",
+                "processor.retry-verification-bytes-per-cause",
+                "locality.document-body-bytes-per-cause"
+              ]
+            },
+            "unit": {
+              "const": "bytes/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "application-plan.validation-cpu-nanos-per-application"
+            },
+            "unit": {
+              "const": "nanoseconds/application"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "application-plan.bytes-read-per-application"
+            },
+            "unit": {
+              "const": "bytes/application"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "locality.dormant-demand-count-delta"
+            },
+            "unit": {
+              "const": "demands/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "locality.normal-heap-after-gc",
+                "locality.normal-rss",
+                "locality.shared-n1000-heap-after-gc",
+                "locality.shared-n1000-rss",
+                "locality.connected-dag-heap-after-gc",
+                "publication.peak-claim-bytes"
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "locality.shared-n1000-sql-statements-per-parent"
+            },
+            "unit": {
+              "const": "statements/parent"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "locality.shared-n1000-jdbc-round-trips-per-parent"
+            },
+            "unit": {
+              "const": "round-trips/parent"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "locality.shared-n1000-rows-per-occurrence"
+            },
+            "unit": {
+              "const": "rows/occurrence"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "locality.shared-n1000-read-bytes-per-occurrence"
+            },
+            "unit": {
+              "const": "bytes/occurrence"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "processor.physical-source-calls-per-settled-transition"
+            },
+            "unit": {
+              "const": "calls/transition"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "processor.retry-execution-nanos-per-cause"
+            },
+            "unit": {
+              "const": "nanoseconds/cause"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "state.cumulative-authority-bytes-per-transition"
+            },
+            "unit": {
+              "const": "bytes/transition"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "const": "publication.batch-validations-per-published-batch"
+            },
+            "unit": {
+              "const": "validations/batch"
+            }
+          },
+          "required": [
+            "metricId",
+            "unit"
+          ]
+        }
+      ]
+    },
+    "performanceMetricDirectionBinding": {
+      "oneOf": [
+        {
+          "properties": {
+            "metricId": {
+              "enum": [
+                "offered-load.causes-per-second",
+                "throughput.settled-causes-per-second",
+                "b1-b2.throughput-ratio"
+              ]
+            },
+            "direction": {
+              "const": "AT_LEAST"
+            }
+          },
+          "required": [
+            "metricId",
+            "direction"
+          ]
+        },
+        {
+          "properties": {
+            "metricId": {
+              "not": {
+                "enum": [
+                  "offered-load.causes-per-second",
+                  "throughput.settled-causes-per-second",
+                  "b1-b2.throughput-ratio"
+                ]
+              }
+            },
+            "direction": {
+              "const": "AT_MOST"
+            }
+          },
+          "required": [
+            "metricId",
+            "direction"
+          ]
+        }
+      ]
+    },
+    "scheduleSetEmpty": {
+      "const": []
+    },
+    "scheduleSetCore": {
+      "const": [
+        "ORDER-EQUAL-MICROSECOND",
+        "DIRECT-ELIGIBILITY-ADD",
+        "DIRECT-ELIGIBILITY-REMOVE",
+        "DISJOINT-PREFIX-EXECUTION-CUT",
+        "NEW-SHARED-CHILD-PARTITION",
+        "EVENT-BATCH-NESTED-EMIT",
+        "ADMISSION-DURABLE-INELIGIBLE",
+        "ADMISSION-PREPARED-RACE",
+        "ADMISSION-PUBLISHER-FIRST",
+        "FULL-HISTORY-INITIAL-SOURCE-INTERLEAVING",
+        "FULL-HISTORY-SHARED-ORIGINAL-CAUSE",
+        "INITIAL-VERSUS-DYNAMIC-ATTACHMENT",
+        "ADMISSION-OWNED-PREREQUISITES-BEFORE-DEPENDENT-HISTORY",
+        "CAUSAL-DRAIN-ONE-STEP-ADMISSION",
+        "ROOT-PENDING-ACTION-PROJECTION",
+        "CATCHUP-K1-K2-K3",
+        "SOURCE-FEEDBACK-FINAL-STEP",
+        "SOURCE-FEEDBACK-NONFINAL-STEP",
+        "SAME-ROOT-INTERACTING-COHORTS",
+        "AUTHENTICATED-EVENTLESS-REPLAY",
+        "SOURCE-RECEIPT-EVENT-PROJECTION",
+        "LIVE-MANAGED-ROOT-FINALIZATION",
+        "SIBLING-MANAGED-FAILURE-ROOT-WIDE-FINALIZATION",
+        "AGGREGATE-MULTIPLAN-FAILURE-CLOSURE",
+        "DEPENDENCY-BLOCKED-NO-OVERTAKE",
+        "POLICY-BLOCKED-LIVE-DRAIN-WITHOUT-PENDING-WORK",
+        "BLOCKED-LIVE-DRAINS-PRIOR-DESCENDANTS",
+        "NO-RECIPIENT-ONE-STEP-DRAIN",
+        "CYCLE-CONTRACTS-TERMINATING",
+        "CYCLE-ZERO-EFFECT",
+        "CYCLE-BRANCHING",
+        "CROSS-INVOCATION-FEEDBACK-PAUSE",
+        "GAS-BOUNDARY",
+        "CANONICAL-SEMANTIC-INTEGER",
+        "SAME-APPLICATION-COMMIT-RACE",
+        "ORDERED-LATER-CAUSE",
+        "RESOURCE-AUTHORITATIVE-NOT-FOUND",
+        "RESOURCE-RETRY-EXPIRY",
+        "DIRECT-SINGLETON-LIVE-PROTOCOL"
+      ]
+    },
+    "scheduleSetHost": {
+      "const": [
+        "ORDER-EQUAL-MICROSECOND",
+        "DIRECT-ELIGIBILITY-ADD",
+        "DIRECT-ELIGIBILITY-REMOVE",
+        "DISJOINT-PREFIX-EXECUTION-CUT",
+        "NEW-SHARED-CHILD-PARTITION",
+        "EVENT-BATCH-NESTED-EMIT",
+        "ADMISSION-DURABLE-INELIGIBLE",
+        "ADMISSION-PREPARED-RACE",
+        "ADMISSION-PUBLISHER-FIRST",
+        "FULL-HISTORY-INITIAL-SOURCE-INTERLEAVING",
+        "FULL-HISTORY-SHARED-ORIGINAL-CAUSE",
+        "INITIAL-VERSUS-DYNAMIC-ATTACHMENT",
+        "ADMISSION-OWNED-PREREQUISITES-BEFORE-DEPENDENT-HISTORY",
+        "CAUSAL-DRAIN-ONE-STEP-ADMISSION",
+        "ROOT-PENDING-ACTION-PROJECTION",
+        "CATCHUP-K1-K2-K3",
+        "SOURCE-FEEDBACK-FINAL-STEP",
+        "SOURCE-FEEDBACK-NONFINAL-STEP",
+        "SAME-ROOT-INTERACTING-COHORTS",
+        "AUTHENTICATED-EVENTLESS-REPLAY",
+        "SOURCE-RECEIPT-EVENT-PROJECTION",
+        "LIVE-MANAGED-ROOT-FINALIZATION",
+        "SIBLING-MANAGED-FAILURE-ROOT-WIDE-FINALIZATION",
+        "AGGREGATE-MULTIPLAN-FAILURE-CLOSURE",
+        "DEPENDENCY-BLOCKED-NO-OVERTAKE",
+        "POLICY-BLOCKED-LIVE-DRAIN-WITHOUT-PENDING-WORK",
+        "BLOCKED-LIVE-DRAINS-PRIOR-DESCENDANTS",
+        "NO-RECIPIENT-ONE-STEP-DRAIN",
+        "CYCLE-CONTRACTS-TERMINATING",
+        "CYCLE-ZERO-EFFECT",
+        "CYCLE-BRANCHING",
+        "CROSS-INVOCATION-FEEDBACK-PAUSE",
+        "GAS-BOUNDARY",
+        "CANONICAL-SEMANTIC-INTEGER",
+        "SAME-APPLICATION-COMMIT-RACE",
+        "ORDERED-LATER-CAUSE",
+        "RESOURCE-AUTHORITATIVE-NOT-FOUND",
+        "RESOURCE-RETRY-EXPIRY",
+        "REALM-NEGATIVE-ISOLATION",
+        "RESOURCE-SUPPLY-REGISTER-RACE",
+        "INDEX-COHERENT-OMISSION",
+        "DOMAIN-SEMANTIC-REVISION-FENCE",
+        "EVIDENCE-ONE-DEMAND-PER-ROUND",
+        "BEX-COMPILE-MISS-STORM",
+        "COMMIT-UNKNOWN-BOTH-LOCK-ORDERS",
+        "OUTBOX-REVERSE-PUBLISH-ACK-LOSS",
+        "OUTBOX-BOUNDED-SUCCESSOR",
+        "CANONICAL-HOST-TIMESTAMP-ROUNDTRIP",
+        "DIRECT-SINGLETON-LIVE-PROTOCOL"
+      ]
+    },
+    "scheduleSetIntegrated": {
+      "const": [
+        "ORDER-EQUAL-MICROSECOND",
+        "DIRECT-ELIGIBILITY-ADD",
+        "DIRECT-ELIGIBILITY-REMOVE",
+        "DISJOINT-PREFIX-EXECUTION-CUT",
+        "NEW-SHARED-CHILD-PARTITION",
+        "EVENT-BATCH-NESTED-EMIT",
+        "ADMISSION-DURABLE-INELIGIBLE",
+        "ADMISSION-PREPARED-RACE",
+        "ADMISSION-PUBLISHER-FIRST",
+        "FULL-HISTORY-INITIAL-SOURCE-INTERLEAVING",
+        "FULL-HISTORY-SHARED-ORIGINAL-CAUSE",
+        "INITIAL-VERSUS-DYNAMIC-ATTACHMENT",
+        "ADMISSION-OWNED-PREREQUISITES-BEFORE-DEPENDENT-HISTORY",
+        "CAUSAL-DRAIN-ONE-STEP-ADMISSION",
+        "ROOT-PENDING-ACTION-PROJECTION",
+        "CATCHUP-K1-K2-K3",
+        "SOURCE-FEEDBACK-FINAL-STEP",
+        "SOURCE-FEEDBACK-NONFINAL-STEP",
+        "SAME-ROOT-INTERACTING-COHORTS",
+        "AUTHENTICATED-EVENTLESS-REPLAY",
+        "SOURCE-RECEIPT-EVENT-PROJECTION",
+        "LIVE-MANAGED-ROOT-FINALIZATION",
+        "SIBLING-MANAGED-FAILURE-ROOT-WIDE-FINALIZATION",
+        "AGGREGATE-MULTIPLAN-FAILURE-CLOSURE",
+        "DEPENDENCY-BLOCKED-NO-OVERTAKE",
+        "POLICY-BLOCKED-LIVE-DRAIN-WITHOUT-PENDING-WORK",
+        "BLOCKED-LIVE-DRAINS-PRIOR-DESCENDANTS",
+        "NO-RECIPIENT-ONE-STEP-DRAIN",
+        "CYCLE-CONTRACTS-TERMINATING",
+        "CYCLE-ZERO-EFFECT",
+        "CYCLE-BRANCHING",
+        "CROSS-INVOCATION-FEEDBACK-PAUSE",
+        "GAS-BOUNDARY",
+        "CANONICAL-SEMANTIC-INTEGER",
+        "SAME-APPLICATION-COMMIT-RACE",
+        "ORDERED-LATER-CAUSE",
+        "RESOURCE-AUTHORITATIVE-NOT-FOUND",
+        "RESOURCE-RETRY-EXPIRY",
+        "REALM-NEGATIVE-ISOLATION",
+        "RESOURCE-SUPPLY-REGISTER-RACE",
+        "INDEX-COHERENT-OMISSION",
+        "DOMAIN-SEMANTIC-REVISION-FENCE",
+        "EVIDENCE-ONE-DEMAND-PER-ROUND",
+        "BEX-COMPILE-MISS-STORM",
+        "COMMIT-UNKNOWN-BOTH-LOCK-ORDERS",
+        "OUTBOX-REVERSE-PUBLISH-ACK-LOSS",
+        "OUTBOX-BOUNDED-SUCCESSOR",
+        "CANONICAL-HOST-TIMESTAMP-ROUNDTRIP",
+        "DIRECT-SINGLETON-LIVE-PROTOCOL",
+        "APPLICATION-PLAN-A-SCALING",
+        "SHARED-N-SOURCE-STAGES",
+        "SHARED-N-FANOUT-FAULT",
+        "LOCALITY-CONNECTED-DAG"
+      ]
+    },
+    "scheduleSetPerformance": {
+      "const": [
+        "RESOURCE-SUPPLY-REGISTER-RACE",
+        "EVIDENCE-ONE-DEMAND-PER-ROUND",
+        "BEX-COMPILE-MISS-STORM",
+        "OUTBOX-BOUNDED-SUCCESSOR",
+        "APPLICATION-PLAN-A-SCALING",
+        "SHARED-N-SOURCE-STAGES",
+        "SHARED-N-FANOUT-FAULT",
+        "LOCALITY-CONNECTED-DAG"
+      ]
+    },
+    "mandatoryScheduleId": {
+      "enum": [
+        "ORDER-EQUAL-MICROSECOND",
+        "DIRECT-ELIGIBILITY-ADD",
+        "DIRECT-ELIGIBILITY-REMOVE",
+        "DISJOINT-PREFIX-EXECUTION-CUT",
+        "NEW-SHARED-CHILD-PARTITION",
+        "EVENT-BATCH-NESTED-EMIT",
+        "ADMISSION-DURABLE-INELIGIBLE",
+        "ADMISSION-PREPARED-RACE",
+        "ADMISSION-PUBLISHER-FIRST",
+        "FULL-HISTORY-INITIAL-SOURCE-INTERLEAVING",
+        "FULL-HISTORY-SHARED-ORIGINAL-CAUSE",
+        "INITIAL-VERSUS-DYNAMIC-ATTACHMENT",
+        "ADMISSION-OWNED-PREREQUISITES-BEFORE-DEPENDENT-HISTORY",
+        "CAUSAL-DRAIN-ONE-STEP-ADMISSION",
+        "ROOT-PENDING-ACTION-PROJECTION",
+        "CATCHUP-K1-K2-K3",
+        "SOURCE-FEEDBACK-FINAL-STEP",
+        "SOURCE-FEEDBACK-NONFINAL-STEP",
+        "SAME-ROOT-INTERACTING-COHORTS",
+        "AUTHENTICATED-EVENTLESS-REPLAY",
+        "SOURCE-RECEIPT-EVENT-PROJECTION",
+        "LIVE-MANAGED-ROOT-FINALIZATION",
+        "SIBLING-MANAGED-FAILURE-ROOT-WIDE-FINALIZATION",
+        "AGGREGATE-MULTIPLAN-FAILURE-CLOSURE",
+        "DEPENDENCY-BLOCKED-NO-OVERTAKE",
+        "POLICY-BLOCKED-LIVE-DRAIN-WITHOUT-PENDING-WORK",
+        "BLOCKED-LIVE-DRAINS-PRIOR-DESCENDANTS",
+        "NO-RECIPIENT-ONE-STEP-DRAIN",
+        "CYCLE-CONTRACTS-TERMINATING",
+        "CYCLE-ZERO-EFFECT",
+        "CYCLE-BRANCHING",
+        "CROSS-INVOCATION-FEEDBACK-PAUSE",
+        "GAS-BOUNDARY",
+        "CANONICAL-SEMANTIC-INTEGER",
+        "SAME-APPLICATION-COMMIT-RACE",
+        "ORDERED-LATER-CAUSE",
+        "RESOURCE-AUTHORITATIVE-NOT-FOUND",
+        "RESOURCE-RETRY-EXPIRY",
+        "REALM-NEGATIVE-ISOLATION",
+        "RESOURCE-SUPPLY-REGISTER-RACE",
+        "INDEX-COHERENT-OMISSION",
+        "DOMAIN-SEMANTIC-REVISION-FENCE",
+        "EVIDENCE-ONE-DEMAND-PER-ROUND",
+        "BEX-COMPILE-MISS-STORM",
+        "COMMIT-UNKNOWN-BOTH-LOCK-ORDERS",
+        "OUTBOX-REVERSE-PUBLISH-ACK-LOSS",
+        "OUTBOX-BOUNDED-SUCCESSOR",
+        "CANONICAL-HOST-TIMESTAMP-ROUNDTRIP",
+        "DIRECT-SINGLETON-LIVE-PROTOCOL",
+        "APPLICATION-PLAN-A-SCALING",
+        "SHARED-N-SOURCE-STAGES",
+        "SHARED-N-FANOUT-FAULT",
+        "LOCALITY-CONNECTED-DAG"
+      ]
+    },
+    "requiredSubcaseId": {
+      "enum": [
+        "SOURCE-PROVENANCE-EQUAL-ORDER",
+        "SOURCE-PROVENANCE-PAST-ORDER-CUTOFF",
+        "NEXT-RECEIPT-PAYLOAD-UNAVAILABLE",
+        "SIGNED-CONTRACT-DECLARATION-ORDER",
+        "SEQUENTIAL-R1-R2-R3-REPLAY",
+        "CONTROL-STATE-MULTICOMMIT-GROWTH",
+        "SAME-DOMAIN-ADMISSION-CONTENTION",
+        "QUEUED-MANAGED-EXECUTION-CUT",
+        "EXISTING-READY-SHARED-TARGET-JOIN"
+      ]
+    },
+    "controlGrowthDimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "committedStepCount",
+        "distinctOwnedObligationCount"
+      ],
+      "properties": {
+        "committedStepCount": {
+          "type": "integer",
+          "enum": [
+            10,
+            100,
+            1000
+          ]
+        },
+        "distinctOwnedObligationCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "$comment": "Counts apply to the measured finite computation, excluding fixture setup. CONTROL-STATE-MULTICOMMIT-GROWTH uses A=1, covers all three step counts and strictly increasing independently audited distinct owned-obligation counts. Existing counters measure total control-state work across commits."
+    }
+  },
+  "$comment": "Revision-15.12 selected processing kernel; schema validity is not execution, equivalence or trusted-query proof. Preserve the 53 schedules and nine named subcases with applicable EQ1-EQ8 variants. Distinguish external-entry epochs from one-invocation FIFO; use authenticated observation programs, ordered placements, vertex-simple cyclic routes and complete shared-gas feedback scope. Canonical source-local initialization plus FULL_HISTORY and separate fixed source/parent meters replace promoter-dependent origin and cold combined gas. After terminal managed gas or recognized semantic runtime failure, the next operation aligns the actual successful pin to the source before-view with ordinary update/lifecycle/gas effects, then interprets the exact source program; no failed-event replay, forged source receipt or skipped unattempted range. Include event-before-patch, eventless/net-zero, both-fail-then-detach and fixed-cut COMPLETED_WITH_FAILURES controls. Relevant Timeline membership is directed per-operation evidence separate from the configured trusted universe; no reverse-observer completeness barrier or same-provider creation reset. Host temporal/ready/reverse-wait indexes support bounded complete queries at million-document/thousands-active-per-user scale; required 1k/10k/100k reactions may take increasing time. Measurement samples join original cause to semantic operation/owned scope: one entry targeting two independent sources counts two, one coupled A/B operation counts one. Aggregate reporting is optional. Censored durations are lower bounds; unknown quantiles remain NOT_RUN/null unless determined, and lower bounds may prove FAIL but never false upper-bound PASS. Library constructors, host mechanics and semantic verifier remain implementation/conformance work, not further specification profiles. Same-origin work follows frozen pre-origin seed order. First touch adds readiness, not ownership. Charge the admission check locally before a returning edge; combine distinct current group meters only when their sum fits the identical frozen policy limit. Otherwise fail only the initiating current group with recognized semantic AtomicScopeGasAdmissionFailure, actual gas and a required-sum diagnostic. Stable seed-local event identities survive joining; no retroactive shared-meter replay. All lawfully consumed gaps, including composite external-policy outcomes, require exact original-kind/classification/policy and settlement evidence. Unknown exceptions, internal bugs, IO/timeout/cancellation never become consumed semantic outcomes; owning-library classification repair precedes acceptance. Failed initialization remains unusable. Host quotas pause without semantic failure or input skip. J/L witness variants cover these laws; general interruption of an endless valid import sequence and inherited cross-operation fuel are outside the first POC."
+}
