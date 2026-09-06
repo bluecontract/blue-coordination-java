@@ -127,7 +127,7 @@ final class PublicTemporalFeederIntegrationTest {
 
             target.registerTimeline(ALICE_TIMELINE, "alice");
             ExactValue retainedRequest = target.exactValue("amount: 3");
-            assertEquals(canonical.exactRequest().orElseThrow().blueId(),
+            assertEquals(canonical.request().orElseThrow().blueId(),
                     retainedRequest.blueId());
             target.startDocument(COUNTER_A, counterYaml(COUNTER_A));
             target.startDocument(COUNTER_B, counterYaml(COUNTER_B));
