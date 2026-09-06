@@ -1422,9 +1422,10 @@ def inspectImmutableDevelopmentContractsRepository = {
             failures << "payload checksum companion differs for ${lookup}"
         }
     }
-    if (records.size() != 12 || records.size() != expectedRecords.size()) {
+    int expectedArtifactCount = localRc ? 28 : 12
+    if (records.size() != expectedArtifactCount || records.size() != expectedRecords.size()) {
         failures << ('manifest has ' + records.size()
-                + ' artifact records; expected 12')
+                + ' artifact records; expected ' + expectedArtifactCount)
     }
     def actualFiles = [] as Set
     def stream = java.nio.file.Files.walk(repository.toPath())
