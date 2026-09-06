@@ -83,6 +83,52 @@ final class ManagedSourceReferenceRewriteTest {
         assertFalse(noRows);
     }
 
+    @Test void rejectsDuplicatePriorRowsHidingUnmatchedSuccessor() {
+        // given
+        Node before = parent(OLD.clone());
+        Node after = parent(NEW.clone());
+        ManagedOccurrenceBinding unexpected = secondRow(NEW_ID);
+        // when
+        boolean accepted = ManagedSourceReferenceRewrite.verifies(before, after,
+                List.of(row(OLD_ID), row(OLD_ID)), List.of(row(NEW_ID), unexpected));
+        // then
+        assertFalse(accepted);
+    }
+
+    @Test void rejectsRepeatedOccurrenceEvenWhenBothInventoriesRepeatIt() {
+        // given
+        Node before = parent(OLD.clone());
+        Node after = parent(NEW.clone());
+        // when
+        boolean accepted = ManagedSourceReferenceRewrite.verifies(before, after,
+                List.of(row(OLD_ID), row(OLD_ID)), List.of(row(NEW_ID), row(NEW_ID)));
+        // then
+        assertFalse(accepted);
+    }
+
+    @Test void authenticatesEveryChildInUnorderedMultiOccurrenceInventory() {
+        // given
+        Node before = new Node().name("unchanged parent").properties(Map.of(
+                "child", OLD.clone(), "second", new Node().blueId(OLD_ID)));
+        Node after = new Node().name("unchanged parent").properties(Map.of(
+                "child", new Node().blueId(NEW_ID), "second", NEW.clone()));
+        Node forged = new Node().name("unchanged parent").properties(Map.of(
+                "child", new Node().blueId(NEW_ID), "second", NEW.clone().name("forged")));
+        List<ManagedOccurrenceBinding> prior = List.of(row(OLD_ID), secondRow(OLD_ID));
+        List<ManagedOccurrenceBinding> next = List.of(secondRow(NEW_ID), row(NEW_ID));
+        // when
+        boolean valid = ManagedSourceReferenceRewrite.verifies(before, after, prior, next);
+        boolean invalid = ManagedSourceReferenceRewrite.verifies(before, forged, prior, next);
+        // then
+        assertTrue(valid);
+        assertFalse(invalid);
+    }
+
+    private static ManagedOccurrenceBinding secondRow(String exact) {
+        return ManagedOccurrenceBinding.derived(POLICY, new DocumentId("parent"),
+                ScopeAddress.embedded("/second", 1), new DocumentId("child"), exact, true, null);
+    }
+
     private static Node parent(Node child) {
         return new Node().name("unchanged parent").properties(Map.of("child", child));
     }

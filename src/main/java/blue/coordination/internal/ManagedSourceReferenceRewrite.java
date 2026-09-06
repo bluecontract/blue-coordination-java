@@ -6,6 +6,7 @@ import blue.language.identity.NodeToBlueIdInput;
 import blue.language.snapshot.FrozenNode;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 
@@ -17,13 +18,16 @@ final class ManagedSourceReferenceRewrite {
             List<ManagedOccurrenceBinding> prior,
             List<ManagedOccurrenceBinding> next) {
         if (prior.isEmpty() || prior.size() != next.size()) return false;
+        var unmatched = new HashMap<String, ManagedOccurrenceBinding>();
+        for (ManagedOccurrenceBinding row : next) {
+            if (unmatched.put(row.occurrenceIdentity(), row) != null) return false;
+        }
         Node normalizedBefore = before.clone();
         Node normalizedAfter = after.clone();
         for (ManagedOccurrenceBinding row : prior) {
-            ManagedOccurrenceBinding successor = next.stream()
-                    .filter(candidate -> candidate.occurrenceIdentity()
-                            .equals(row.occurrenceIdentity()))
-                    .findFirst().orElse(null);
+            // Consume each successor once: duplicate prior rows cannot hide
+            // missing or additional evidence in equal-sized inventories.
+            ManagedOccurrenceBinding successor = unmatched.remove(row.occurrenceIdentity());
             if (successor == null
                     || !successor.sourceDocumentId().equals(row.sourceDocumentId())
                     || !successor.bindingPolicyIdentity().equals(row.bindingPolicyIdentity())
