@@ -777,7 +777,7 @@ def verifyResolvedUpstreamArtifacts = {
             .collectEntries { record ->
         [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
     }
-    if (bindings.mode == 'immutable-staged-contracts') {
+    if (bindings.mode in ['immutable-staged-contracts', 'immutable-local-rc-contracts']) {
         expectedLanguage = expectedLanguage.findAll { coordinate, ignored ->
             !coordinate.startsWith('blue.language:blue-conformance:')
         }
@@ -1467,6 +1467,40 @@ def verifyCoordinationStagingLanePolicyLogic = tasks.register(
         if (resolvedBexRuntimeIdentities(bexResolution).size() != 3) {
             throw new GradleException(
                     'Direct staging filtered an unexpected resolved BEX module')
+        }
+        // Full releases include the independently verified conformance fixture
+        // archive. Only the six declared Language modules belong to runtime.
+        ['immutable-staged-contracts', 'immutable-local-rc-contracts',
+         'immutable-development-contracts'].each { mode ->
+            def runtime = developmentLanguageArtifacts.collect { artifact ->
+                [coordinate: 'blue.language:' + artifact + ':test',
+                 kind: 'runtime', sha256: identity]
+            }
+            def upstream = new ArrayList(runtime)
+            def conformance = [coordinate: 'blue.language:blue-conformance:test',
+                               kind: 'runtime', sha256: identity]
+            if (mode != 'immutable-development-contracts') upstream.add(conformance)
+            def bex = selectedDevelopmentBexArtifacts.collect { artifact ->
+                [coordinate: 'blue.bex:' + artifact + ':test', kind: 'runtime', sha256: identity]
+            }
+            def catalog = [[coordinate: 'blue.repo:blue-repo-java:test',
+                            kind: 'runtime', sha256: identity]]
+            def bindings = [mode: mode, contracts: [manifest: [artifacts: upstream]],
+                            bex: [manifest: [artifacts: bex]], catalog: [manifest: [artifacts: catalog]]]
+            def dependencies = runtime + bex + catalog
+            verifyResolvedUpstreamArtifacts(bindings, dependencies)
+            def wrongHash = dependencies.collect { new LinkedHashMap(it) }
+            wrongHash[0].sha256 = 'sha256:' + ('f' * 64)
+            def missingHash = dependencies.collect { new LinkedHashMap(it) }
+            missingHash[0].sha256 = null
+            [wrongHash, missingHash, dependencies.drop(1), dependencies + conformance,
+             dependencies + [coordinate: 'blue.language:unexpected:test', sha256: identity]].each { mutated ->
+                boolean rejected = false
+                try { verifyResolvedUpstreamArtifacts(bindings, mutated) }
+                catch (GradleException expected) { rejected = true }
+                if (!rejected) throw new GradleException(
+                        'Runtime artifact mutation was accepted in ' + mode)
+            }
         }
     }
 }
