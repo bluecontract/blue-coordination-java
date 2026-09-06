@@ -1,0 +1,30 @@
+diff --git a/build.gradle b/build.gradle
+index b33013b..23c7f9f 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -143,6 +143,13 @@ java {
+ sourceSets {
+     testSupport
+     integrationTest
++    pocTest {
++        resources.setSrcDirs(['src/test/resources'])
++        // Reuse the existing locked test configurations, not an unpinned new
++        // dependency graph. Only the testClassesDirs select the POC lane.
++        compileClasspath = sourceSets.test.compileClasspath
++        runtimeClasspath = output + sourceSets.test.runtimeClasspath
++    }
+     scenarioTest {
+         resources.setSrcDirs([
+                 'src/scenarioTest/resources',
+@@ -319,6 +326,11 @@ def registerVerificationSuite = {
+ def integrationTest = registerVerificationSuite(
+         'integrationTest', sourceSets.integrationTest,
+         'Runs the complete compact-engine correctness and atomicity suite.')
++// Explicit Phase-1 requirements, including red counterexamples for behavior not
++// implemented yet. No ignored failures or inverted "known bug" expectations.
++def pocSemanticTest = registerVerificationSuite(
++        'pocSemanticTest', sourceSets.pocTest,
++        'Runs the isolated MyOS POC semantic requirements against real Coordination and Contracts; failure blocks G1.')
+ def consumerTest = registerVerificationSuite(
+         'consumerTest', sourceSets.consumerTest,
+         'Runs public-API scenarios compiled against the built JAR only.')

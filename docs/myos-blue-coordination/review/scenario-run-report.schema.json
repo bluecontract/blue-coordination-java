@@ -1,0 +1,977 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blue:myos-coordination-poc:scenario-run-report:1",
+  "title": "Blue MyOS Coordination POC ScenarioRunReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reportSchema",
+    "reportIdentity",
+    "manifestIdentity",
+    "manifestFileSha256",
+    "runId",
+    "startedAt",
+    "finishedAt",
+    "environmentResult",
+    "artifacts",
+    "rows"
+  ],
+  "properties": {
+    "reportSchema": {
+      "const": "blue.myos-coordination-poc.scenario-run-report/1"
+    },
+    "reportIdentity": {
+      "$ref": "#/$defs/digest"
+    },
+    "manifestIdentity": {
+      "$ref": "#/$defs/digest"
+    },
+    "manifestFileSha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "runId": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "environmentResult": {
+      "$ref": "#/$defs/environmentResult"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifactMap"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "rows": {
+            "contains": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "PASS",
+                    "FAIL"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          }
+        },
+        "required": [
+          "rows"
+        ]
+      },
+      "then": {
+        "properties": {
+          "environmentResult": {
+            "properties": {
+              "status": {
+                "const": "PASS"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifactKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "path"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmpty"
+        }
+      }
+    },
+    "artifactMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/artifactKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "nullableArtifactKey": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/artifactKey"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "environmentResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary",
+        "evidenceArtifactKey"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "evidenceArtifactKey": {
+          "$ref": "#/$defs/nullableArtifactKey"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "NOT_RUN"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "comparisonResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidenceArtifactKeys"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "evidenceArtifactKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactKey"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKeys": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "NOT_RUN"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKeys": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "forbiddenResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcomeId",
+        "status",
+        "evidenceArtifactKeys"
+      ],
+      "properties": {
+        "outcomeId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "evidenceArtifactKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactKey"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKeys": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "NOT_RUN"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidenceArtifactKeys": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "budgetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budgetId",
+        "status",
+        "observedValue",
+        "unit",
+        "evidenceArtifactKeys"
+      ],
+      "properties": {
+        "budgetId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "observedValue": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "const": "UNDEFINED_ZERO_DENOMINATOR"
+            },
+            {
+              "const": "INVALID_OBSERVATION"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "evidenceArtifactKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactKey"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "PASS"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "observedValue": {
+                "type": "number"
+              },
+              "evidenceArtifactKeys": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "FAIL"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "observedValue": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "enum": [
+                      "UNDEFINED_ZERO_DENOMINATOR",
+                      "INVALID_OBSERVATION"
+                    ]
+                  }
+                ]
+              },
+              "evidenceArtifactKeys": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "NOT_RUN"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "observedValue": {
+                "type": "null"
+              },
+              "evidenceArtifactKeys": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rowId",
+        "status",
+        "reason",
+        "observedCoreResultArtifactKey",
+        "observedSemanticTraceArtifactKey",
+        "observedDurablePostStateArtifactKey",
+        "datasetStatus",
+        "observedDatasetArtifactKey",
+        "comparisons",
+        "forbiddenResults",
+        "budgetResults",
+        "rawEvidenceArtifactKeys"
+      ],
+      "properties": {
+        "rowId": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "observedCoreResultArtifactKey": {
+          "$ref": "#/$defs/nullableArtifactKey"
+        },
+        "observedSemanticTraceArtifactKey": {
+          "$ref": "#/$defs/nullableArtifactKey"
+        },
+        "observedDurablePostStateArtifactKey": {
+          "$ref": "#/$defs/nullableArtifactKey"
+        },
+        "datasetStatus": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_RUN"
+          ]
+        },
+        "observedDatasetArtifactKey": {
+          "$ref": "#/$defs/nullableArtifactKey"
+        },
+        "comparisons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coreResult",
+            "semanticTrace",
+            "durablePostState"
+          ],
+          "properties": {
+            "coreResult": {
+              "$ref": "#/$defs/comparisonResult"
+            },
+            "semanticTrace": {
+              "$ref": "#/$defs/comparisonResult"
+            },
+            "durablePostState": {
+              "$ref": "#/$defs/comparisonResult"
+            }
+          }
+        },
+        "forbiddenResults": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/forbiddenResult"
+          }
+        },
+        "budgetResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/budgetResult"
+          }
+        },
+        "rawEvidenceArtifactKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactKey"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "comparisons": {
+                "properties": {
+                  "coreResult": {
+                    "$ref": "#/$defs/executedStatus"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "observedCoreResultArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observedCoreResultArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "comparisons": {
+                "properties": {
+                  "semanticTrace": {
+                    "$ref": "#/$defs/executedStatus"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "observedSemanticTraceArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observedSemanticTraceArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "comparisons": {
+                "properties": {
+                  "durablePostState": {
+                    "$ref": "#/$defs/executedStatus"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "observedDurablePostStateArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observedDurablePostStateArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "datasetStatus": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              }
+            },
+            "required": [
+              "datasetStatus"
+            ]
+          },
+          "then": {
+            "properties": {
+              "observedDatasetArtifactKey": {
+                "$ref": "#/$defs/artifactKey"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observedDatasetArtifactKey": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "PASS"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "datasetStatus": {
+                "const": "PASS"
+              },
+              "comparisons": {
+                "properties": {
+                  "coreResult": {
+                    "properties": {
+                      "status": {
+                        "const": "PASS"
+                      }
+                    }
+                  },
+                  "semanticTrace": {
+                    "properties": {
+                      "status": {
+                        "const": "PASS"
+                      }
+                    }
+                  },
+                  "durablePostState": {
+                    "properties": {
+                      "status": {
+                        "const": "PASS"
+                      }
+                    }
+                  }
+                }
+              },
+              "forbiddenResults": {
+                "items": {
+                  "properties": {
+                    "status": {
+                      "const": "PASS"
+                    }
+                  }
+                }
+              },
+              "budgetResults": {
+                "items": {
+                  "properties": {
+                    "status": {
+                      "const": "PASS"
+                    }
+                  }
+                }
+              },
+              "rawEvidenceArtifactKeys": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "FAIL"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "datasetStatus": {
+                    "const": "FAIL"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "coreResult": {
+                        "$ref": "#/$defs/failedStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "semanticTrace": {
+                        "$ref": "#/$defs/failedStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "durablePostState": {
+                        "$ref": "#/$defs/failedStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "forbiddenResults": {
+                    "contains": {
+                      "$ref": "#/$defs/failedStatus"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "budgetResults": {
+                    "contains": {
+                      "$ref": "#/$defs/failedStatus"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "NOT_RUN"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "datasetStatus": {
+                "enum": [
+                  "PASS",
+                  "NOT_RUN"
+                ]
+              },
+              "comparisons": {
+                "properties": {
+                  "coreResult": {
+                    "$ref": "#/$defs/nonFailureStatus"
+                  },
+                  "semanticTrace": {
+                    "$ref": "#/$defs/nonFailureStatus"
+                  },
+                  "durablePostState": {
+                    "$ref": "#/$defs/nonFailureStatus"
+                  }
+                }
+              },
+              "forbiddenResults": {
+                "items": {
+                  "$ref": "#/$defs/nonFailureStatus"
+                }
+              },
+              "budgetResults": {
+                "items": {
+                  "$ref": "#/$defs/nonFailureStatus"
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "datasetStatus": {
+                    "const": "NOT_RUN"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "coreResult": {
+                        "$ref": "#/$defs/notRunStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "semanticTrace": {
+                        "$ref": "#/$defs/notRunStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "comparisons": {
+                    "properties": {
+                      "durablePostState": {
+                        "$ref": "#/$defs/notRunStatus"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "forbiddenResults": {
+                    "contains": {
+                      "$ref": "#/$defs/notRunStatus"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "budgetResults": {
+                    "contains": {
+                      "$ref": "#/$defs/notRunStatus"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "executedStatus": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "failedStatus": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "FAIL"
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "notRunStatus": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "NOT_RUN"
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "nonFailureStatus": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "NOT_RUN"
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ]
+    }
+  },
+  "$comment": "Revision-15.12 selected processing kernel; schema validity is not execution, equivalence or trusted-query proof. Preserve the 53 schedules and nine named subcases with applicable EQ1-EQ8 variants. Distinguish external-entry epochs from one-invocation FIFO; use authenticated observation programs, ordered placements, vertex-simple cyclic routes and complete shared-gas feedback scope. Canonical source-local initialization plus FULL_HISTORY and separate fixed source/parent meters replace promoter-dependent origin and cold combined gas. After terminal managed gas or recognized semantic runtime failure, the next operation aligns the actual successful pin to the source before-view with ordinary update/lifecycle/gas effects, then interprets the exact source program; no failed-event replay, forged source receipt or skipped unattempted range. Include event-before-patch, eventless/net-zero, both-fail-then-detach and fixed-cut COMPLETED_WITH_FAILURES controls. Relevant Timeline membership is directed per-operation evidence separate from the configured trusted universe; no reverse-observer completeness barrier or same-provider creation reset. Host temporal/ready/reverse-wait indexes support bounded complete queries at million-document/thousands-active-per-user scale; required 1k/10k/100k reactions may take increasing time. Measurement samples join original cause to semantic operation/owned scope: one entry targeting two independent sources counts two, one coupled A/B operation counts one. Aggregate reporting is optional. Censored durations are lower bounds; unknown quantiles remain NOT_RUN/null unless determined, and lower bounds may prove FAIL but never false upper-bound PASS. Library constructors, host mechanics and semantic verifier remain implementation/conformance work, not further specification profiles. Same-origin work follows frozen pre-origin seed order. First touch adds readiness, not ownership. Charge the admission check locally before a returning edge; combine distinct current group meters only when their sum fits the identical frozen policy limit. Otherwise fail only the initiating current group with recognized semantic AtomicScopeGasAdmissionFailure, actual gas and a required-sum diagnostic. Stable seed-local event identities survive joining; no retroactive shared-meter replay. All lawfully consumed gaps, including composite external-policy outcomes, require exact original-kind/classification/policy and settlement evidence. Unknown exceptions, internal bugs, IO/timeout/cancellation never become consumed semantic outcomes; owning-library classification repair precedes acceptance. Failed initialization remains unusable. Host quotas pause without semantic failure or input skip. J/L witness variants cover these laws; general interruption of an endless valid import sequence and inherited cross-operation fuel are outside the first POC."
+}

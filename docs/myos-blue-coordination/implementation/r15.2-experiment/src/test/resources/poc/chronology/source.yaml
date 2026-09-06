@@ -1,0 +1,27 @@
+name: Chronology source B
+counter: 0
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: poc/chronology/b
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  setCounter:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      amount: {type: Integer}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val: {$binding: event/message/request/amount}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Chronology/Counter Changed
+          - $return: true

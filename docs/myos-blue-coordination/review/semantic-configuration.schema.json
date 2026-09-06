@@ -1,0 +1,537 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:blue:myos-coordination-poc:semantic-configuration:1",
+  "title": "Blue MyOS Coordination POC SemanticConfiguration revision 1 (design 15.12)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "configurationSchema",
+    "configurationIdentity",
+    "closureEnvironment",
+    "canonicalJournalDomainId",
+    "trustedTimelineUniverse",
+    "externalInputDispositionPolicy",
+    "sourceInitializationExecutionPolicy"
+  ],
+  "properties": {
+    "configurationSchema": {
+      "const": "blue.myos-coordination-poc.semantic-configuration/1"
+    },
+    "configurationIdentity": {
+      "$ref": "#/$defs/sha256Identity"
+    },
+    "closureEnvironment": {
+      "$ref": "#/$defs/closureEnvironment"
+    },
+    "canonicalJournalDomainId": {
+      "$ref": "#/$defs/nonEmpty"
+    },
+    "trustedTimelineUniverse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "universeIdentity",
+        "canonicalAuthorizationPolicy"
+      ],
+      "properties": {
+        "universeIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalAuthorizationPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        }
+      },
+      "description": "TrustedTimelineUniverse projection: supported provider/type/exact-identity and tenant/environment/domain authorization rules, not an exhaustive list of concrete Timelines. Semantic preflight decodes and re-encodes the canonical authorization policy, verifies the owning constructor identity and scope binding. New authorized same-provider Timelines require no stack reset. Exact directed operation-relevant membership, topology/lifecycle basis and complete normalized per-member coverage are operation evidence rather than configuration. Missing a genuinely relevant member cannot be ignored."
+    },
+    "externalInputDispositionPolicy": {
+      "$ref": "#/$defs/externalInputDispositionPolicy"
+    },
+    "sourceInitializationExecutionPolicy": {
+      "$ref": "#/$defs/frozenExecutionPolicy",
+      "description": "Fixed source-local execution policy for canonical initialization plus FULL_HISTORY under the selected processing kernel. Source origin and gas scope do not depend on the promoting parent, physical admission, cache or worker. Parent consumption has its own gas scope even when cold; preparation alone grants no publication or settlement authority. This selected owning-library change still requires implementation and conformance proof."
+    }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256Identity": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeSafeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "canonicalBytes": {
+      "type": "string",
+      "minLength": 4,
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+    },
+    "frozenExecutionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assertedPolicyIdentity",
+        "canonicalExecutionPolicy"
+      ],
+      "properties": {
+        "assertedPolicyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalExecutionPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        }
+      },
+      "description": "Exact FrozenExecutionPolicy projection for the selected canonical source-local initialization. Semantic preflight decodes the complete Contracts ExecutionPolicy and verifies canonical bytes, owning-constructor identity and gas-manifest/environment binding. Source80 and parent20 with separate fixed limits90 pass identically cold and warm; do not compare that target ownership to the former combined100 invocation. Canonical source gas is settled once on authoritative publication, never again on rebuild; parent logical import/update/handler charges are cache-independent. Failed initialization cannot be made successful by a different promoter budget. Structural validity supplies neither execution proof nor publication authority."
+    },
+    "processorStatusDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "disposition"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "CONSUME_EXTERNAL_INPUT",
+            "BLOCK_EXTERNAL_INPUT"
+          ]
+        }
+      }
+    },
+    "externalInputDispositionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyIdentity",
+        "canonicalStatusDispositions",
+        "canonicalPolicy"
+      ],
+      "properties": {
+        "policyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalStatusDispositions": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/successDisposition"
+            },
+            {
+              "$ref": "#/$defs/noMatchDisposition"
+            },
+            {
+              "$ref": "#/$defs/staleDisposition"
+            },
+            {
+              "$ref": "#/$defs/terminatedDisposition"
+            },
+            {
+              "$ref": "#/$defs/invalidProcessingDocumentDisposition"
+            },
+            {
+              "$ref": "#/$defs/capabilityFailureDisposition"
+            },
+            {
+              "$ref": "#/$defs/runtimeFatalDisposition"
+            },
+            {
+              "$ref": "#/$defs/gasLimitExceededDisposition"
+            },
+            {
+              "$ref": "#/$defs/portableLimitExceededDisposition"
+            },
+            {
+              "$ref": "#/$defs/subscriptionSurfaceInvalidDisposition"
+            }
+          ],
+          "items": false
+        },
+        "canonicalPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        }
+      },
+      "description": "Status disposition for original external input and HISTORICAL_EXTERNAL_REPLAY of that same input only. CONSUME_EXTERNAL_INPUT records terminal input handling, never fictitious business epoch/checkpoint or successful managed-source cursor advance. MANAGED_RECEIPT_IMPORT follows fixed rollback/progress laws; operation-kind/result joins are checked by semantic validation."
+    },
+    "successDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "SUCCESS"
+            },
+            "disposition": {
+              "const": "CONSUME_EXTERNAL_INPUT"
+            }
+          }
+        }
+      ]
+    },
+    "noMatchDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "NO_MATCH"
+            }
+          }
+        }
+      ]
+    },
+    "staleDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "STALE"
+            }
+          }
+        }
+      ]
+    },
+    "terminatedDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "TERMINATED"
+            }
+          }
+        }
+      ]
+    },
+    "invalidProcessingDocumentDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "INVALID_PROCESSING_DOCUMENT"
+            }
+          }
+        }
+      ]
+    },
+    "capabilityFailureDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "CAPABILITY_FAILURE"
+            }
+          }
+        }
+      ]
+    },
+    "runtimeFatalDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "RUNTIME_FATAL"
+            }
+          }
+        }
+      ]
+    },
+    "gasLimitExceededDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "GAS_LIMIT_EXCEEDED"
+            }
+          }
+        }
+      ]
+    },
+    "portableLimitExceededDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "PORTABLE_LIMIT_EXCEEDED"
+            }
+          }
+        }
+      ]
+    },
+    "subscriptionSurfaceInvalidDisposition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processorStatusDisposition"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "SUBSCRIPTION_SURFACE_INVALID"
+            },
+            "disposition": {
+              "const": "BLOCK_EXTERNAL_INPUT"
+            }
+          }
+        }
+      ]
+    },
+    "portableLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effectiveContractsPerParticipatingScope",
+        "externalChannelsPerScope",
+        "handlersBoundToOneDelivery",
+        "subscriptionKeysPerChannel",
+        "preselectedExternalOccurrencesPerEvent",
+        "participatingScopesPerEvent",
+        "processEmbeddedPathsPerScope",
+        "embeddedDepth",
+        "runtimePointerSegments",
+        "normalizedRuntimePointerUtf8Bytes",
+        "contractKeyCodePoints",
+        "contractKeyUtf8Bytes",
+        "directObjectEntriesMaterializedOrRebuilt",
+        "directListItemsMaterializedOrRebuilt",
+        "directCanonicalIdentityInputBytes",
+        "typeChainEdges",
+        "patchesPerContractExecutionResult",
+        "eventsPerContractExecutionResult",
+        "internalEventOccurrencesPerInvocation",
+        "rootEventsReturned",
+        "nestedDocumentUpdateCascadeDepth",
+        "runtimeChildLedgerCounterKinds",
+        "directObjectKeyCodePoints",
+        "directInlineIdentityTextCodePoints",
+        "managedDocumentsPerClosure",
+        "processEmbeddedEdgesPerClosure",
+        "cyclicMembersPerComponent",
+        "cyclicEdgesPerComponent",
+        "cyclicCanonicalBytesPerComponent",
+        "closureGraphChangesPerInvocation",
+        "closureExpansionsPerInvocation",
+        "closureWorkOccurrencesPerInvocation",
+        "closureTentativeFinalizationsPerInvocation"
+      ],
+      "properties": {
+        "effectiveContractsPerParticipatingScope": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "externalChannelsPerScope": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "handlersBoundToOneDelivery": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "subscriptionKeysPerChannel": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "preselectedExternalOccurrencesPerEvent": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "participatingScopesPerEvent": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "processEmbeddedPathsPerScope": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "embeddedDepth": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "runtimePointerSegments": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "normalizedRuntimePointerUtf8Bytes": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "contractKeyCodePoints": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "contractKeyUtf8Bytes": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "directObjectEntriesMaterializedOrRebuilt": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "directListItemsMaterializedOrRebuilt": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "directCanonicalIdentityInputBytes": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "typeChainEdges": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "patchesPerContractExecutionResult": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "eventsPerContractExecutionResult": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "internalEventOccurrencesPerInvocation": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "rootEventsReturned": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "nestedDocumentUpdateCascadeDepth": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "runtimeChildLedgerCounterKinds": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "directObjectKeyCodePoints": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "directInlineIdentityTextCodePoints": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "managedDocumentsPerClosure": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "processEmbeddedEdgesPerClosure": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "cyclicMembersPerComponent": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "cyclicEdgesPerComponent": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "cyclicCanonicalBytesPerComponent": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "closureGraphChangesPerInvocation": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "closureExpansionsPerInvocation": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "closureWorkOccurrencesPerInvocation": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        },
+        "closureTentativeFinalizationsPerInvocation": {
+          "$ref": "#/$defs/nonNegativeSafeInteger"
+        }
+      }
+    },
+    "closureEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentIdentity",
+        "blueLanguageSpecificationIdentity",
+        "contractsSpecificationIdentity",
+        "runtimeRegistryIdentity",
+        "gasManifestIdentity",
+        "managedDocumentIdentityPolicyIdentity",
+        "canonicalManagedDocumentIdentityPolicy",
+        "managedBindingPolicyIdentity",
+        "canonicalManagedBindingPolicy",
+        "exactNodeProviderDomainIdentity",
+        "canonicalExactNodeProviderDomain",
+        "externalOrderPolicyIdentity",
+        "canonicalExternalOrderPolicy",
+        "portableLimitPolicyIdentity",
+        "canonicalPortableLimitPolicy",
+        "portableLimits",
+        "cyclicFinalizerIdentity",
+        "cyclicProofVerifierIdentity",
+        "canonicalClosureEnvironment"
+      ],
+      "properties": {
+        "environmentIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "blueLanguageSpecificationIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "contractsSpecificationIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "runtimeRegistryIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "gasManifestIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "managedDocumentIdentityPolicyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalManagedDocumentIdentityPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        },
+        "managedBindingPolicyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalManagedBindingPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        },
+        "exactNodeProviderDomainIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalExactNodeProviderDomain": {
+          "$ref": "#/$defs/canonicalBytes"
+        },
+        "externalOrderPolicyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalExternalOrderPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        },
+        "portableLimitPolicyIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalPortableLimitPolicy": {
+          "$ref": "#/$defs/canonicalBytes"
+        },
+        "portableLimits": {
+          "$ref": "#/$defs/portableLimits"
+        },
+        "cyclicFinalizerIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "cyclicProofVerifierIdentity": {
+          "$ref": "#/$defs/sha256Identity"
+        },
+        "canonicalClosureEnvironment": {
+          "$ref": "#/$defs/canonicalBytes"
+        }
+      }
+    }
+  },
+  "$comment": "Revision-15.12 selected processing kernel, not implemented proof. The current complete Contracts environment and fixed source execution policy participate in configurationIdentity together with the trusted Timeline authorization universe. Exact directed operation-relevant Timeline membership is per-operation evidence, not a domain-wide bootstrap completeness set. Canonical source origin is initialization plus FULL_HISTORY independent of promoter/cache/admission time; source initialization and parent consumption have separate fixed gas scopes. ExternalInputDispositionPolicy applies only to original EXTERNAL_INPUT and HISTORICAL_EXTERNAL_REPLAY. Managed GAS_LIMIT_EXCEEDED or recognized semantic RUNTIME_FATAL leaves actual successful view/epoch unchanged while recording the exact terminal delivery. The next operation aligns the actual pin to its exact source before-view with ordinary update/lifecycle/gas effects, then interprets the authenticated observation program. No fake source receipt or failed-event replay; no skipping unattempted ranges. The selected kernel also defines FIFO, placement routing, owned feedback scope and zero/one/many publication projections. Constructors, runtime behavior and conformance tests remain implementation work, not further specification profiles. Host indexes, fences, leases, scheduling and resource availability are not portable semantic configuration; signed declaration order retains its own field domain. Same-origin work follows frozen pre-origin seed order. First touch adds readiness, not ownership. Charge the admission check locally before a returning edge; combine distinct current group meters only when their sum fits the identical frozen policy limit. Otherwise fail only the initiating current group with recognized semantic AtomicScopeGasAdmissionFailure, actual gas and a required-sum diagnostic. Stable seed-local event identities survive joining; no retroactive shared-meter replay. All lawfully consumed gaps, including composite external-policy outcomes, require exact original-kind/classification/policy and settlement evidence. Unknown exceptions, internal bugs, IO/timeout/cancellation never become consumed semantic outcomes; owning-library classification repair precedes acceptance. Failed initialization remains unusable. Host quotas pause without semantic failure or input skip. J/L witness variants cover these laws; general interruption of an endless valid import sequence and inherited cross-operation fuel are outside the first POC."
+}
