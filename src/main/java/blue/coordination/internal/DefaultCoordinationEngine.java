@@ -1889,9 +1889,30 @@ public final class DefaultCoordinationEngine
                 new ContractsRootFeederWindow(
                         contractsRecoveryState.feederWindow),
                 contractsClosureAdapter::executeAndPublish,
-                invocation -> invocation.existingMemberSet().stream()
-                        .noneMatch(member -> documents.require(member).status()
-                                == SessionStatus.CATCHING_UP));
+                this::eligibleThroughCatchUpFrontier);
+    }
+
+    private boolean eligibleThroughCatchUpFrontier(
+            ContractsClosureAdapter.CohortInvocation invocation) {
+        CatchUpPlanStore plans = documents.catchUpPlansSnapshot();
+        for (DocumentId member : invocation.existingMemberSet()) {
+            if (documents.require(member).status() == SessionStatus.CATCHING_UP) {
+                return false;
+            }
+            // An inactive historical occurrence already creates a temporal
+            // dependency. A future source entry cannot extend its captured
+            // attachment cutoff or overtake an earlier waiting consumer entry.
+            for (ManagedOccurrenceCatchUpPlan plan : plans.plansForSource(member).plans()) {
+                ManagedCatchUpBarrier barrier = plans.barrier(plan.barrierIdentity()).barrier();
+                if (plan.status() != blue.coordination.api.ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED
+                        && barrier.status() != blue.coordination.api.ManagedCatchUpBarrierStatus.COMPLETE
+                        && invocation.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause
+                        && cause.sourceOrder().compareTo(barrier.causeOrder()) > 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private ProcessingDrainReceipt drainContracts(

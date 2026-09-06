@@ -93,10 +93,16 @@ The consumer becomes READY only after every live plan reaches its required
 frontier or an incomplete plan is deterministically cancelled because its
 occurrence retired. Completed plan snapshots remain unchanged historical audit.
 
-An open plan has a moving frontier. A genuine new source epoch committed while
-catch-up is active extends `requiredThroughSourceEpoch` atomically. The
-consumer must apply that epoch before promotion to READY, and a direct consumer
-Timeline entry cannot overtake the barrier. Unrelated lanes may still progress.
+The attaching entry's full canonical source order bounds historical catch-up.
+Future source entries beyond that boundary wait while the affected consumer
+barrier is open, including when the historical occurrence is not active yet.
+The captured suffix completes before promotion to READY; then root and embedded
+Timeline entries resume in canonical timestamp order. For an attachment at
+16:00, B's 12:00 and 15:30 receipts catch up first, A's 16:30 entry runs next,
+and B's queued 17:00 entry runs afterward through ordinary closure processing.
+An eligible source commit within the boundary can still extend an open plan
+atomically. Unrelated lanes may progress, and no source receipt is replayed or
+rewritten to perform catch-up.
 
 ### Bounded continuation, failure, and response loss
 
@@ -106,11 +112,12 @@ receipts remain in the live in-memory store, so continuation begins at the
 exact next epoch. The budget cannot preempt one frozen PROCESS or INITIALIZE
 invocation and is not a wall-clock timeout.
 
-The retained external/managed lane turn prevents a continuing finite source
-stream from starving catch-up under repeated `DrainBudget(1, 1)` calls. Both the
-source frontier and cursor advance; once finite traffic stops the consumer
-eventually becomes READY. An unbounded stream remains `CATCHING_UP`, and direct
-consumer work remains behind the barrier.
+The retained external/managed lane turn prevents runnable unrelated traffic
+from starving catch-up under repeated `DrainBudget(1, 1)` calls. Future source
+traffic cannot extend an attachment beyond its captured temporal boundary.
+Once the retained suffix completes, the consumer becomes READY and queued
+root/source entries proceed in canonical order. Direct consumer work stays
+behind the barrier until that point.
 
 A missing required receipt produces `WAITING_FOR_HISTORY`; malformed or
 mismatched receipt/transition evidence produces `BLOCKED`. Both retain the
