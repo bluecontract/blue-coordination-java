@@ -66,6 +66,7 @@ final class SdkDeveloperGuideTest {
                     .from(sales)
                     .call("confirm")
                     .through("salesChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(confirmed);
 
@@ -73,6 +74,7 @@ final class SdkDeveloperGuideTest {
                     .from(sales)
                     .call("complete")
                     .through("salesChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(completed);
 
@@ -129,6 +131,7 @@ final class SdkDeveloperGuideTest {
                     .from(receiptWorker)
                     .call("markSent")
                     .through("workerChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(sent);
 

@@ -352,8 +352,11 @@ var result = blue.operations()
         .from(sales)
         .call("confirm")
         .through("salesChannel")
+        .requestYaml("{}")
         .execute();
 ```
+
+The `confirm`, `complete` and `markSent` declarations in this guide require a present empty-object request. Use `.requestYaml("{}")` explicitly. Omitting the request preserves absence and returns `NO_MATCH` for those declarations; it is not an alias for `{}`. Operations with no request constraint can still accept an absent request.
 
 ### Inspect the result and coherent state
 
@@ -412,6 +415,7 @@ requireApplied(blue.operations()
         .from(sales)
         .call("confirm")
         .through("salesChannel")
+        .requestYaml("{}")
         .execute());
 
 requireApplied(blue.operations()
@@ -419,6 +423,7 @@ requireApplied(blue.operations()
         .from(sales)
         .call("complete")
         .through("salesChannel")
+        .requestYaml("{}")
         .execute());
 
 requireApplied(blue.operations()
@@ -564,6 +569,7 @@ requireApplied(blue.operations()
         .from(receiptWorker)
         .call("markSent")
         .through("workerChannel")
+        .requestYaml("{}")
         .execute());
 ```
 
