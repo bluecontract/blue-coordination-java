@@ -429,11 +429,7 @@ final class ManagedEpochApplicationExecutor {
                                         result, before, after, transition);
                 if (changed
                         && entry.getKey().equals(work.sourceDocumentId())
-                        && !componentRepresentationRebind
-                        && !isVerifiedRetainedSourceReferenceAdvance(
-                                invocation, result, entry.getKey(), before,
-                                after, transition, current.occurrenceInventory(),
-                                resultingInventory)) {
+                        && !componentRepresentationRebind) {
                     throw new ContractsClosureAdapter
                             .ProjectionUnavailableException(
                             "A retained managed application cannot append or "
@@ -797,43 +793,6 @@ final class ManagedEpochApplicationExecutor {
      * revision lane; an indirect member may only change its representation
      * at the same own epoch under one exact eventless Contracts transition.
      */
-    /** Allows only a new eventless revision of an indirect current source. */
-    private static boolean isVerifiedRetainedSourceReferenceAdvance(
-            ContractsClosureAdapter.CohortInvocation invocation,
-            ClosureProcessResult result,
-            DocumentId documentId,
-            ContractsClosureAdapter.CapturedDocument before,
-            ResultingDocument after,
-            ManagedDocumentTransitionReceipt transition,
-            ManagedOccurrenceInventory prior,
-            ManagedOccurrenceInventory next) {
-        if (!result.commits()
-                || !before.initialized()
-                || before.terminated()
-                || !after.initialized()
-                || after.terminated()
-                || invocation.publicationIdentityMembers().contains(documentId)
-                || after.epoch() != Math.addExact(before.head().epoch(), 1L)
-                || !after.beforeBlueId().equals(before.head().blueId())
-                || after.afterBlueId().equals(before.head().blueId())
-                || transition == null
-                || !transition.documentId().value().equals(documentId.value())
-                || !transition.sourceInvocationIdentity().equals(
-                        result.invocationIdentity())
-                || !transition.beforeBlueId().equals(before.head().blueId())
-                || !transition.afterBlueId().equals(after.afterBlueId())
-                || !transition.emittedRootEvents().isEmpty()) {
-            return false;
-        }
-        // The existing publication path has already verified the complete
-        // result, commit companion, exact input/current-head fences and source
-        // receipt. Authenticate both complete occurrence inventories and all
-        // other parent fields before permitting an ordinary appended revision.
-        return ManagedSourceReferenceRewrite.verifies(
-                before.current().copyNode(), after.document(),
-                prior.rowsFrom(documentId), next.rowsFrom(documentId));
-    }
-
     private static boolean isIndirectComponentRepresentationRebind(
             ContractsClosureAdapter.CohortInvocation invocation,
             DocumentId documentId,
