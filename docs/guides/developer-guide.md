@@ -573,15 +573,12 @@ requireApplied(blue.operations()
         .execute());
 ```
 
-This ordering is part of the current forward-only profile. A directly selected
-embedded member without typed incoming demand can advance without opening its
-ancestors. The current scalar graph-generation contract does not subsequently
-merge that advanced forward closure back into a wider ancestor invocation. Run
-any remaining ancestor operation before independently advancing a descendant,
-or model the required upstream participation with explicit typed demand.
-Advancing the descendant also does not mutate the ancestor's exact embedded
-value behind its back: that occurrence remains the version the ancestor last
-published until an authorized ancestor transition replaces it.
+Promotion preserves the active embedded occurrence. A later successful operation
+on the promoted child publishes its new exact state through the containing
+parents, advancing each changed parent's history once. Typed listener demand
+controls event delivery; it is not required for exact embedded-state publication.
+Promotion itself still leaves all document heads, histories and Timeline entries
+unchanged, as the complete executable example verifies.
 
 Use a helper that reports diagnostics instead of assuming success:
 
