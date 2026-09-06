@@ -125,24 +125,34 @@ final class ManagedSourceReferenceRewriteTest {
     }
 
     @Test void authenticatesRetiredRowsWithoutNormalizingTheirAbsentPaths() {
+        // given
         var oldRetired = retired(OLD_ID);
         var newRetired = retired(NEW_ID);
-        assertTrue(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+        // when
+        boolean valid = ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
                 List.of(row(OLD_ID), oldRetired), List.of(row(NEW_ID), newRetired),
-                Map.of("retired-child", OLD), Map.of("retired-child", NEW)));
-        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
-                List.of(row(OLD_ID), oldRetired), List.of(row(NEW_ID), newRetired)), "Missing member evidence must fail closed");
+                Map.of("retired-child", OLD), Map.of("retired-child", NEW));
+        boolean missingEvidence = ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+                List.of(row(OLD_ID), oldRetired), List.of(row(NEW_ID), newRetired));
+        // then
+        assertTrue(valid);
+        assertFalse(missingEvidence, "Missing member evidence must fail closed");
     }
 
     @Test void rejectsForgedRetiredTargetAndUnreviewedRetiredPathBytes() {
+        // given
         var prior = List.of(row(OLD_ID), retired(OLD_ID));
         var next = List.of(row(NEW_ID), retired(NEW_ID));
-        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
-                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", OLD)));
+        // when
+        boolean forgedTarget = ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), parent(NEW.clone()),
+                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", OLD));
         var changed = parent(NEW.clone());
         changed.getProperties().put("retired", new Node().value("unexpected"));
-        assertFalse(ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), changed,
-                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", NEW)));
+        boolean changedPath = ManagedSourceReferenceRewrite.verifies(parent(OLD.clone()), changed,
+                prior, next, Map.of("retired-child", OLD), Map.of("retired-child", NEW));
+        // then
+        assertFalse(forgedTarget);
+        assertFalse(changedPath);
     }
 
     private static ManagedOccurrenceBinding retired(String exact) {

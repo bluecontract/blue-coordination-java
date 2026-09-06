@@ -188,6 +188,7 @@ class ManagedRepresentationHistoryTest {
                 }
                 assertEquals(1, blue.processing().drainManagedEpochApplication(work.workIdentity()).managedEpochApplications().size());
             }
+            // then
             assertTrue(processorProofRan, "the real reconnect must exercise the independently verified position chain");
             assertTrue(pairReady(blue, originals));
         }

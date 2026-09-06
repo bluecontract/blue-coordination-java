@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 final class HistoricalRepresentationApplicationIntegrationTest {
     @Test
     void savedOriginalPairReconnectPublishesEachHistoricalPosition() throws Exception {
+        // given
         try (Graph graph = new Graph("A", "B")) {
             graph.attach("A", "b", "B");
             graph.attach("B", "a", "A");
@@ -19,7 +20,9 @@ final class HistoricalRepresentationApplicationIntegrationTest {
             graph.operation("B", "emit", "{to: A, next: stop}");
             long emittedBefore = graph.sourceEvents("B");
             graph.verifyRepresentationPublicationFailures = true;
+            // when
             graph.attach("A", "b", "B");
+            // then
             assertTrue(graph.representationApplications > 0, "the actual historical gap must use explicit positional work");
             assertEquals(emittedBefore, graph.sourceEvents("B"), "catch-up must not replay the source emission");
             graph.assertEdge("A", "b", "B");
@@ -32,11 +35,14 @@ final class HistoricalRepresentationApplicationIntegrationTest {
 
     @Test
     void savedOriginalFigureEightPublishesBothLoops() throws Exception {
+        // given
         try (Graph graph = new Graph("A", "B", "C")) {
             graph.attach("A", "b", "B");
             graph.attach("B", "a", "A");
             graph.attach("A", "c", "C");
+            // when
             graph.attach("C", "a", "A");
+            // then
             assertTrue(graph.representationApplications > 0);
             graph.assertEdge("A", "b", "B");
             graph.assertEdge("B", "a", "A");
@@ -51,15 +57,18 @@ final class HistoricalRepresentationApplicationIntegrationTest {
 
     @Test
     void savedOriginalJoinSplitRetainsIndependentLoops() throws Exception {
+        // given
         try (Graph g = new Graph("A", "B", "C", "D")) {
             g.attach("A", "b", "B"); g.attach("B", "a", "A");
             g.attach("C", "d", "D"); g.attach("D", "c", "C");
+            // when
             g.attach("B", "bridge", "C"); g.attach("D", "bridge", "A");
             g.emit("C", "B", "stop", Map.of("B", 1L));
             g.detach("D", "bridge"); g.detach("B", "bridge");
             g.emit("C", "B", "stop", Map.of());
             g.emit("B", "A", "stop", Map.of("A", 1L));
             g.emit("D", "C", "stop", Map.of("C", 1L));
+            // then
             g.assertEdge("A", "b", "B"); g.assertEdge("B", "a", "A");
             g.assertEdge("C", "d", "D"); g.assertEdge("D", "c", "C");
         }
@@ -67,6 +76,7 @@ final class HistoricalRepresentationApplicationIntegrationTest {
 
     @Test
     void savedOriginalRingDuplicateChordAndReconnectPreserveEvents() throws Exception {
+        // given
         try (Graph g = new Graph("A", "B", "C")) {
             g.budgetFromRetainedHistory = true;
             g.attach("A", "b", "B"); g.attach("B", "c", "C"); g.attach("C", "a", "A");
@@ -78,7 +88,9 @@ final class HistoricalRepresentationApplicationIntegrationTest {
             var counts = g.counts();
             var events = new LinkedHashMap<String, Long>();
             g.originals.keySet().forEach(name -> events.put(name, g.sourceEvents(name)));
+            // when
             g.attach("C", "a", "A");
+            // then
             assertEquals(counts.get("A"), g.observed("A"));
             assertEquals(counts.get("B") + 1L, g.observed("B"));
             assertEquals(counts.get("C") + 2L, g.observed("C"));
