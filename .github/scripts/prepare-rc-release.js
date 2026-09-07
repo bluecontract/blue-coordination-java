@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 
 const CZ_TOML = '.cz.toml';
-const RELEASE_AUTHORITY = 'docs/releases/3.0.0-rc.5.md';
+const RELEASE_AUTHORITY = 'docs/releases/3.0.0-rc.6.md';
 const MAIN_REF = process.env.RC_BASE_REF || 'origin/main';
 const VALID_BUMPS = new Set(['major', 'minor', 'patch']);
 

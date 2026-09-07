@@ -17,7 +17,7 @@ def immutableDevelopmentContracts =
         localRc || dependencyMode == 'immutable-development-contracts'
 def immutableContractsRepository =
         immutableStagedContracts || immutableDevelopmentContracts
-def publishedLanguageVersion = '3.1.0-rc.23'
+def publishedLanguageVersion = '3.1.0-rc.24'
 def immutableStagedLanguageVersion = providers.gradleProperty(
         'blueContractsVersion').orNull
 if (immutableContractsRepository
@@ -35,7 +35,7 @@ def stagedContractsManifestIdentity = providers.gradleProperty(
         'blueContractsManifestSha256').orNull
 def developmentContractsSourceCommit = providers.gradleProperty(
         'blueContractsSourceCommit').orNull
-def publishedBexVersion = '1.1.0-rc.4'
+def publishedBexVersion = '1.1.0-rc.5'
 def immutableDevelopmentBexVersion = providers.gradleProperty(
         'blueBexVersion').orNull
 def immutableDevelopmentBex = immutableDevelopmentContracts
@@ -83,7 +83,7 @@ if (immutableDevelopmentContracts
 }
 
 def developmentCatalog = immutableDevelopmentContracts ? gradle.ext.blueCatalogDevelopmentBinding : null
-def activeRepositoryVersion = developmentCatalog?.version ?: '3.0.0-rc.21'
+def activeRepositoryVersion = developmentCatalog?.version ?: '3.0.0-rc.22'
 
 def publishedBlueCoordinates = [
         'blue.language:blue-language-model': publishedLanguageVersion,
@@ -92,7 +92,7 @@ def publishedBlueCoordinates = [
         'blue.language:blue-language-ipfs': publishedLanguageVersion,
         'blue.language:blue-language-java': publishedLanguageVersion,
         'blue.language:blue-contracts-core': publishedLanguageVersion,
-        'blue.repo:blue-repo-java': '3.0.0-rc.21',
+        'blue.repo:blue-repo-java': '3.0.0-rc.22',
         'blue.bex:blue-bex-core': publishedBexVersion,
         'blue.bex:blue-bex-contracts': publishedBexVersion
 ]
@@ -260,7 +260,7 @@ if (immutableDevelopmentContracts) {
     String developmentLock = selectedDependencyLockFile.asFile
             .getText('UTF-8').split('\n', -1).collect { line ->
         if (line.startsWith('blue.language:')) {
-            def match = line =~ /^(blue\.language:[^:]+:)3\.1\.0-rc\.23(=.*)$/
+            def match = line =~ /^(blue\.language:[^:]+:)3\.1\.0-rc\.24(=.*)$/
             if (!match.matches()) {
                 throw new GradleException(
                         'Unexpected Language coordinate in the DEVELOPMENT lock template')
@@ -269,7 +269,7 @@ if (immutableDevelopmentContracts) {
             return match.group(1) + immutableStagedLanguageVersion + match.group(2)
         }
         if (line.startsWith('blue.bex:')) {
-            def match = line =~ /^(blue\.bex:[^:]+:)1\.1\.0-rc\.4(=.*)$/
+            def match = line =~ /^(blue\.bex:[^:]+:)1\.1\.0-rc\.5(=.*)$/
             if (!match.matches()) {
                 throw new GradleException(
                         'Unexpected BEX coordinate in the DEVELOPMENT lock template')
@@ -278,10 +278,10 @@ if (immutableDevelopmentContracts) {
             return match.group(1) + immutableDevelopmentBexVersion + match.group(2)
         }
         if (line.startsWith('blue.repo:')) {
-            if (!line.startsWith('blue.repo:blue-repo-java:3.0.0-rc.21='))
+            if (!line.startsWith('blue.repo:blue-repo-java:3.0.0-rc.22='))
                 throw new GradleException('Unexpected catalog coordinate in DEVELOPMENT lock template')
             replacedCatalogCoordinates++
-            return line.replace('blue.repo:blue-repo-java:3.0.0-rc.21=',
+            return line.replace('blue.repo:blue-repo-java:3.0.0-rc.22=',
                     'blue.repo:blue-repo-java:' + activeRepositoryVersion + '=')
         }
         line
@@ -2205,6 +2205,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.6.md',
                 'docs/releases/3.0.0-rc.5.md',
                 'docs/releases/3.0.0-rc.4.md',
                 'docs/releases/3.0.0-rc.3.md',
@@ -5293,7 +5294,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'docs/releases/3.0.0-rc.5.md')
+            'docs/releases/3.0.0-rc.6.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -5311,12 +5312,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.5-readiness.json')
+            'reports/release/3.0.0-rc.6-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.5') {
-            failures << "release version is ${version}; expected 3.0.0-rc.5"
+        if (version.toString() != '3.0.0-rc.6') {
+            failures << "release version is ${version}; expected 3.0.0-rc.6"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -5339,6 +5340,8 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochIndirectComponentRebindTest.java',
+                'src/test/java/blue/coordination/internal/ManagedRepresentationHistoryTest.java',
+                'src/test/java/blue/coordination/internal/HistoricalRepresentationApplicationIntegrationTest.java',
                 'src/test/java/blue/coordination/internal/ManagedSameStateEpochPublicationTest.java',
                 'src/test/java/blue/coordination/internal/RepositoryExactNodeProviderLocalityTest.java',
                 'src/test/java/blue/coordination/internal/VerifiedApplicationCyclicProviderTest.java',
@@ -5353,20 +5356,20 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             if (!testSource.isFile()
                     || !(testSource.getText('UTF-8') =~
                             /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
-                failures << "required rc.5 capability evidence is missing ${source}"
+                failures << "required rc.6 capability evidence is missing ${source}"
             }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.5.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.6.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC5_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC6_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC5_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC6_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC5_PUBLIC_ARTIFACT_READY: true')
+                'RC6_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC5_PRODUCTION_READY: false')) {
-            failures << 'rc.5 release notes do not state the exact release tier'
+                'RC6_PRODUCTION_READY: false')) {
+            failures << 'rc.6 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -5414,7 +5417,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence: 'complete current releaseCheck plus '
-                                + 'the rc.5 capability test inventory',
+                                + 'the rc.6 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -5431,7 +5434,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.5'
+    dependsOn(version.toString() == '3.0.0-rc.6'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -5446,7 +5449,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.5'
+    dependsOn(version.toString() == '3.0.0-rc.6'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'
