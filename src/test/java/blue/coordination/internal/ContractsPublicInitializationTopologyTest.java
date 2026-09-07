@@ -715,12 +715,12 @@ final class ContractsPublicInitializationTopologyTest {
                         type:
                           blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
                         order: 0
-                        event:
-                          type:
-                            blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                       initialize:
                         type: Coordination/Sequential Workflow
                         channel: lifecycle
+                        event:
+                          type:
+                            blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                         order: 0
                         steps:
                           - type: Coordination/Compute
@@ -743,12 +743,12 @@ final class ContractsPublicInitializationTopologyTest {
                     type:
                       blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -769,12 +769,12 @@ final class ContractsPublicInitializationTopologyTest {
                     type:
                       blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initializeTopology:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -801,12 +801,12 @@ final class ContractsPublicInitializationTopologyTest {
                     type:
                       blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   onInit:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute

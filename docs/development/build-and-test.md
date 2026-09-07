@@ -8,24 +8,27 @@ Java 21.
 
 ## Dependency graph
 
-`blueDependencyMode=published-artifact` is the rc.5 build and release default.
+`blueDependencyMode=published-artifact` is the rc.6 build and release default.
 It resolves exact Maven Central artifacts and rejects sibling composites,
 Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
-| Modules | Rc.5 release lane |
+| Modules | Rc.6 release lane |
 | --- | --- |
-| `blue.language:*` | Maven Central `3.1.0-rc.23` |
-| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.4` |
-| `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.21` |
+| `blue.language:*` | Maven Central `3.1.0-rc.24` |
+| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.5` |
+| `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.22` |
 
-Repository rc.21 advertises `blue-language-java:3.1.0-rc.20`. Coordination
-excludes that stale transitive edge, directly owns Language rc.23, records the
-same exclusion in its published POM, and locks the exact graph in
-`gradle/published-artifact.lockfile`.
+Coordination directly owns the complete Language rc.24 graph, retains the
+Repository and BEX transitive exclusions in its published POM, and locks the
+exact graph in `gradle/published-artifact.lockfile`.
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
-remain available only for non-published upstream handoffs. They are not
-release evidence once rc.23 is published.
+remain available only for non-published upstream handoffs. They are not public
+release authority for rc.6. The development lane is valid
+candidate-verification evidence when every input and the Coordination version
+are commit-bound. It can bind separate, immutable Language/Contracts and BEX
+repositories; it never obtains either dependency from a sibling checkout or
+Maven Local.
 
 The staged lane accepts only the non-overwriting repository exported by the
 Contracts release gate. Its absolute path and exact manifest identity are both
@@ -34,7 +37,7 @@ required:
 ```bash
 ./gradlew --no-daemon verifyActiveDependencyLane dependencyPreflight \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
+  -PblueContractsVersion=3.1.0-rc.24 \
   -PblueContractsRepository=/absolute/path/to/contracts-maven-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```
@@ -53,7 +56,7 @@ In staged mode, Gradle uses repository-exclusive content routing for the
 Gradle plugins, and third-party dependencies. There is no fallback if a staged
 Language artifact is absent or different.
 
-For rc.5, verify fresh remote availability and the
+For rc.6, verify fresh remote availability and the
 conflict-free Maven Central graph with:
 
 ```bash
@@ -64,9 +67,41 @@ conflict-free Maven Central graph with:
 For a non-published development handoff, use the manifest-pinned command above;
 do not reuse a warmed dependency cache as substitute evidence.
 
+For a coordinated Language/Contracts and BEX development handoff, bind both
+commit-addressed repositories explicitly:
+
+```bash
+./gradlew --no-daemon verifyActiveDependencyLane \
+  dependencyPreflight writeDevelopmentResolvedDependencies \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<40-lowercase-commit> \
+  -PblueContractsRepository=/absolute/path/to/contracts-development-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueContractsSourceCommit=<40-lowercase-commit> \
+  -PblueBexVersion=1.1.0-dev.<40-lowercase-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueBexSourceCommit=<40-lowercase-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<coordination-commit>
+```
+
+The BEX repository manifest must use
+`blue-bex-development-repository/1.0`, bind its version to its source commit,
+and bind the exact selected Language version, source commit, and repository
+manifest identity. Both development manifests record `DEVELOPMENT`,
+`releaseReadinessClaimed=false`, JDK 17, a 40-hex commit and tree, and a clean
+source state; dirty/tree-version aliases are not accepted by the handoff. BEX
+contains runtime, POM, sources, and Javadoc artifacts
+for `blue-bex-core`, `blue-bex-contracts`, and `blue-bex-java`, with a checksum
+companion for every payload and no unlisted files or symbolic links.
+Coordination resolves only `blue-bex-core` and `blue-bex-contracts`, then
+compares the resolved JAR bytes with the BEX manifest. The canonical resolved
+dependency report is written to
+`build/reports/development-stage/resolved-dependencies.json`.
+
 ## Verification
 
-Rc.5 uses the Maven-Central-only release gate:
+Rc.6 uses the Maven-Central-only release gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
@@ -74,7 +109,7 @@ Rc.5 uses the Maven-Central-only release gate:
 ```
 
 Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
-evidence, but does not itself publish rc.5 or make it production-ready.
+evidence, but does not itself publish rc.6 or make it production-ready.
 The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |
@@ -83,6 +118,35 @@ The suites remain separate because each protects a different boundary:
 | `integrationTest` | In-memory engine behavior, retries, topology, and atomicity | `check` and `releaseCheck` |
 | `consumerTest` | Compilation and execution against the built production JAR | `check` and `releaseCheck` |
 | `scenarioTest` | Slow complete-lifecycle, convergence, and scale scenarios | `releaseCheck` |
+
+For a clean commit-bound Coordination candidate against commit-bound Language
+and BEX artifacts, run the same complete gate with the exact development lane:
+
+```bash
+./gradlew --no-daemon --no-build-cache clean releaseCheck \
+  dependencyPreflight \
+  -PtestJavaVersion=17 \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/contracts-development-repository \
+  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<coordination-commit>
+```
+
+Repeat with `-PtestJavaVersion=21`. Generate the canonical resolved-dependency
+report once under JDK 17 with `writeDevelopmentResolvedDependencies`. The
+`blueDevelopmentVersion=3.0.0-dev.<coordination-commit>` property is mandatory
+and must identify the clean Coordination `HEAD`; it has no default. The
+extracted-source smoke receives the same version, repositories, manifest
+identities, and source commits and therefore cannot fall back to the published
+Language or BEX artifacts. This validates a development candidate; it does not
+change either upstream manifest's `releaseReadinessClaimed: false`, authorize
+`stageRelease`, or create public-release evidence.
 
 The standard development gate is:
 
@@ -115,19 +179,24 @@ isolation, source-archive hygiene, and an extracted source-archive build.
 
 ## RC readiness
 
-`verifyRcReadiness` is the rc.5 release-readiness gate:
+`verifyRcReadiness` is the rc.6 release-readiness gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 ```
 
-The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.5
+The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.6
 release authority and explicit non-claims, then records the
 fresh artifact hashes in
-`build/reports/release/3.0.0-rc.5-readiness.json`. It validates version
-`3.0.0-rc.5`, the published-artifact lane, and the focused rc.5 capability
+`build/reports/release/3.0.0-rc.6-readiness.json`. It validates version
+`3.0.0-rc.6`, the published-artifact lane, and the focused rc.6 capability
 inventory in addition to the complete current suite.
+
+The Build workflow prepares and seals the exact rc.6 version in its isolated
+checkout before this gate. Keep the preceding released version in the feature
+branch's `.cz.toml`; the release workflow owns the final version commit. A
+local readiness run requires the same preparation in a validation checkout.
 
 The source distribution and checksum can be built independently with:
 
@@ -136,28 +205,42 @@ The source distribution and checksum can be built independently with:
 ./gradlew verifyExtractedSourceArchive
 ```
 
-The extracted archive resolves the same Maven Central graph and never reaches
-an adjacent checkout or Maven Local.
+The extracted archive resolves the same selected isolated graph. In the
+published lane that is Maven Central; in staged or development mode it is the
+same exact manifest-pinned external repository set supplied to the parent
+build. It never reaches an adjacent checkout or Maven Local. The distribution
+also contains the canonical Coordination specification candidate under
+`specifications/`; extracted verification requires that copy to be a regular
+file and byte-identical to the canonical source file before the isolated build
+starts.
 
-For a downstream development handoff after the rc.5 gates pass on a clean
+For a downstream development handoff after the rc.6 gates pass on a clean
 committed source tree, export a separate
 invocation-owned immutable Coordination repository with:
 
 ```bash
 ./gradlew --no-daemon dynamicEvolutionCoordinationHandoff \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/language-development-repository \
+  -PblueContractsManifestSha256=sha256:<language-manifest> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<bex-manifest> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<exact-clean-coordination-head> \
   -PcoordinationSourceCommit=<exact-clean-coordination-head> \
   -PcoordinationStagedRepository=/absolute/path/to/invocation-owned/coordination-repository
 ```
 
 The target is non-overwriting and outside the source tree. The handoff binds
 the clean source commit, resolved dependency identities, artifact bytes, and
-the upstream Contracts manifest, then runs an isolated staged consumer. See
-[Immutable Coordination handoff](immutable-staged-coordination.md). It is a
-downstream integration stage, not a Maven Central publication.
+both exact upstream manifests, then runs an isolated staged consumer. The
+Language and BEX manifest identities are read from the invocation-owned
+repositories rather than frozen in this source tree. See [Immutable
+Coordination handoff](immutable-staged-coordination.md). It is a downstream
+integration stage, not a Maven Central publication.
 
 The staged consumer is a mandatory two-runtime gate. The aggregate
 `stagedCoordinationConsumer` task runs
@@ -184,4 +267,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.5 decision](../releases/3.0.0-rc.5.md).
+[3.0.0-rc.6 decision](../releases/3.0.0-rc.6.md).

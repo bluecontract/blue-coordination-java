@@ -9,6 +9,9 @@ import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
+import blue.language.processor.closure.ManagedRepresentationCause;
+import blue.language.provider.CyclicSetProof;
+import java.util.function.Function;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -56,6 +59,21 @@ final class ManagedCatchUpPlanner {
             HeadLookup heads,
             ReceiptLookup receipts,
             GraphGenerationLookup graphGenerations) {
+        return afterPublication(beforePlans, beforeInventory, afterInventory, affectedSources, committedSourceReceipts, causedByIdentity, causeOrder, heads, receipts, graphGenerations, null, null);
+    }
+
+    static PlanningResult afterPublication(
+            CatchUpPlanStore beforePlans,
+            ManagedOccurrenceInventory beforeInventory,
+            ManagedOccurrenceInventory afterInventory,
+            Collection<DocumentId> affectedSources,
+            Collection<ManagedEpochReceipt> committedSourceReceipts,
+            String causedByIdentity,
+            ExternalOrderKey causeOrder,
+            HeadLookup heads,
+            ReceiptLookup receipts,
+            GraphGenerationLookup graphGenerations,
+            ManagedRepresentationHistory representationHistory, Function<String, CyclicSetProof> cyclicProofs) {
         CatchUpPlanStore plans = Objects.requireNonNull(
                 beforePlans, "beforePlans");
         ManagedOccurrenceInventory prior = Objects.requireNonNull(
@@ -116,7 +134,10 @@ final class ManagedCatchUpPlanner {
                 DocumentId source = DocumentId.of(
                         row.targetDocumentId().value());
                 Head sourceHead = headLookup.require(source);
-                if (admitted >= sourceHead.epoch()) {
+                boolean pendingTail = admitted == sourceHead.epoch() && representationHistory != null
+                        && representationHistory.atCaptured(source, admitted, row.pendingRepresentationCursor())
+                            .next(row.pendingRepresentationCursor(), row.expectedTargetBlueId()).isPresent();
+                if (admitted >= sourceHead.epoch() && !pendingTail) {
                     if (admitted == sourceHead.epoch()
                             && row.expectedTargetBlueId().equals(
                                     sourceHead.blueId())) {
@@ -250,8 +271,7 @@ final class ManagedCatchUpPlanner {
                     || plan.status()
                             == ManagedCatchUpStatus
                                     .CANCELLED_OCCURRENCE_RETIRED
-                    || plan.nextSourceEpoch()
-                            > plan.requiredThroughSourceEpoch()) {
+) {
                 continue;
             }
             if (plan.status() == ManagedCatchUpStatus.BLOCKED) {
@@ -263,8 +283,25 @@ final class ManagedCatchUpPlanner {
                 consumersWithPendingWork.add(plan.consumerDocumentId());
                 continue;
             }
+            ManagedOccurrenceBinding occurrence = resulting.find(plan.consumerDocumentId(), plan.targetPath()).orElse(null);
+            ManagedRepresentationCause representationCause = null;
+            if (representationHistory != null && occurrence != null && !occurrence.active()
+                    && occurrence.pendingHistoricalEpoch() != null && occurrence.pendingHistoricalEpoch() >= 0L) {
+                var chain = representationHistory.atCaptured(plan.sourceDocumentId(), occurrence.pendingHistoricalEpoch(),
+                        occurrence.pendingRepresentationCursor());
+                var nextPosition = chain.next(occurrence.pendingRepresentationCursor(), occurrence.expectedTargetBlueId());
+                if (nextPosition.isPresent()) {
+                    var transition = nextPosition.orElseThrow();
+                    representationCause = new ManagedRepresentationCause(occurrence.occurrenceIdentity(), transition,
+                            chain.targetPositionIdentity(), chain.nextRevisionReceiptIdentity(),
+                            cyclicProofs.apply(transition.transitionReceipt().afterBlueId()));
+                }
+            }
+            if (representationCause == null && plan.nextSourceEpoch() > plan.requiredThroughSourceEpoch()) {
+                throw new IllegalStateException("Pending historical tail has no independently authenticated next step");
+            }
             ManagedEpochReceipt sourceReceipt = receiptLookup.find(
-                    plan.sourceDocumentId(), plan.nextSourceEpoch());
+                    plan.sourceDocumentId(), representationCause == null ? plan.nextSourceEpoch() : representationCause.fromEpoch());
             if (sourceReceipt == null) {
                 plans = plans.withWaitingForHistory(
                         plan.planIdentity(),
@@ -292,6 +329,7 @@ final class ManagedCatchUpPlanner {
                             consumerHead.blueId(),
                             graphLookup.require(
                                     plan.consumerDocumentId()));
+            if (representationCause != null) work = ManagedEpochApplicationWork.identifiedRepresentation(work, representationCause);
             ManagedCatchUpBarrier barrier = plans
                     .barrier(plan.barrierIdentity()).barrier();
             if (barrier == null) {

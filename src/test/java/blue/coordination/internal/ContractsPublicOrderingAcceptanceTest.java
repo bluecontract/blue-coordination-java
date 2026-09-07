@@ -331,10 +331,10 @@ final class ContractsPublicOrderingAcceptanceTest {
             ContractsClosureAdapter.FrozenBatch initial = engine
                     .contractsClosureAdapter().capture(entry);
             assertEquals(1, initial.invocations().size());
-            assertEquals(List.of(B), initial.invocations().get(0).members());
-            assertTrue(initial.invocations().get(0).input().snapshot()
-                    .occurrences().isEmpty());
-            assertEquals(List.of(B.value()), initial.invocations().get(0)
+            assertEquals(List.of(A, B), initial.invocations().get(0).members());
+            assertEquals(List.of(aToB), initial.invocations().get(0).input().snapshot()
+                    .occurrences());
+            assertEquals(List.of(B.value(), A.value()), initial.invocations().get(0)
                     .input().snapshot().components().stream()
                     .flatMap(component -> component
                             .orderedMemberDocumentIds().stream())
@@ -406,11 +406,13 @@ final class ContractsPublicOrderingAcceptanceTest {
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS));
-            assertEquals(3L, metricDelta(
+            // Both active members are captured in each of the two attempts.
+            assertEquals(4L, metricDelta(
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.COMPONENT_STATES_READ));
-            assertEquals(4L, metricDelta(
+            // The connected active parent contributes one reverse occurrence row.
+            assertEquals(5L, metricDelta(
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
@@ -456,7 +458,7 @@ final class ContractsPublicOrderingAcceptanceTest {
                     ENTRY_TIME);
             ContractsClosureAdapter.FrozenBatch initial = engine
                     .contractsClosureAdapter().capture(entry);
-            assertEquals(List.of(B), initial.invocations().get(0).members());
+            assertEquals(List.of(A, B), initial.invocations().get(0).members());
             EngineMetrics.MetricsSnapshot metricsBefore = engine
                     .engineMetrics().snapshot();
 
@@ -491,11 +493,13 @@ final class ContractsPublicOrderingAcceptanceTest {
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.UNRELATED_DOCUMENT_OPENS));
-            assertEquals(3L, metricDelta(
+            // Both active members are captured in each of the two attempts.
+            assertEquals(4L, metricDelta(
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.COMPONENT_STATES_READ));
-            assertEquals(4L, metricDelta(
+            // The connected active parent contributes one reverse occurrence row.
+            assertEquals(5L, metricDelta(
                     metricsBefore,
                     metricsAfter,
                     ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));

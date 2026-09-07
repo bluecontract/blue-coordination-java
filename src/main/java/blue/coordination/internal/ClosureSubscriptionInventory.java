@@ -1,16 +1,17 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.language.model.wire.JsonPointer;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.EffectiveContractSnapshotConstants;
+import blue.language.processor.ManagedRootChannelOccurrence;
+import blue.language.processor.ManagedRootSubscriptionSurface;
 import blue.language.processor.closure.ClosureCommitCompanion;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
-import blue.language.processor.EffectiveContractSnapshot;
-import blue.language.processor.ManagedRootChannelOccurrence;
-import blue.language.processor.ManagedRootSubscriptionSurface;
 import blue.language.processor.registry.RuntimeBlueIds;
-import blue.language.snapshot.FrozenNode;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -314,11 +315,13 @@ final class ClosureSubscriptionInventory {
                 demands, "demands")) {
             EmbeddedDemand selected = Objects.requireNonNull(
                     demand, "embedded demand");
-            if (replacement.containsKey(selected.sourcePath())) {
-                continue;
+            if (replacement.containsKey(selected.rawChannelKey())) {
+                throw new IllegalArgumentException(
+                        "Duplicate embedded demand Channel key "
+                                + selected.rawChannelKey());
             }
             replacement = replacement.put(
-                    selected.sourcePath(), selected).map();
+                    selected.rawChannelKey(), selected).map();
         }
         PersistentOrderedMap<DocumentId,
                 PersistentOrderedMap<String, EmbeddedDemand>> updated =
@@ -341,20 +344,161 @@ final class ClosureSubscriptionInventory {
         PersistentOrderedMap<String, EmbeddedDemand> bucket =
                 embeddedDemandsByDocument.get(Objects.requireNonNull(
                         documentId, "documentId"));
-        return bucket != null && bucket.containsKey(Objects.requireNonNull(
-                sourcePath, "sourcePath"));
+        if (bucket == null) {
+            return false;
+        }
+        String candidate = Objects.requireNonNull(sourcePath, "sourcePath");
+        for (EmbeddedDemand demand : bucket.values()) {
+            if (demand.matches(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    record EmbeddedDemand(
-            String rawChannelKey,
-            String sourcePath,
-            String effectiveRuntimeContributionBlueId) {
-        EmbeddedDemand {
-            rawChannelKey = requireText(rawChannelKey, "rawChannelKey");
-            sourcePath = requireText(sourcePath, "sourcePath");
-            effectiveRuntimeContributionBlueId = requireText(
+    List<EmbeddedDemand> embeddedDemandsFor(DocumentId documentId) {
+        PersistentOrderedMap<String, EmbeddedDemand> bucket =
+                embeddedDemandsByDocument.get(Objects.requireNonNull(
+                        documentId, "documentId"));
+        return bucket == null ? List.of() : bucket.values();
+    }
+
+    enum EmbeddedDemandMode {
+        EXACT,
+        ALL_DESCENDANTS,
+        COLLECTION_DIRECT,
+        COLLECTION_DESCENDANTS
+    }
+
+    /** One authenticated internal Channel selector retained by its Root. */
+    static final class EmbeddedDemand {
+        private final String rawChannelKey;
+        private final String selectorPath;
+        private final List<String> selectorSegments;
+        private final EmbeddedDemandMode mode;
+        private final String effectiveRuntimeContributionBlueId;
+
+        EmbeddedDemand(
+                String rawChannelKey,
+                String selectorPath,
+                EmbeddedDemandMode mode,
+                String effectiveRuntimeContributionBlueId) {
+            this.rawChannelKey = requireText(
+                    rawChannelKey, "rawChannelKey");
+            this.mode = Objects.requireNonNull(mode, "mode");
+            this.selectorPath = canonicalSelectorPath(
+                    selectorPath, this.mode);
+            this.selectorSegments = List.copyOf(
+                    JsonPointer.split(this.selectorPath));
+            this.effectiveRuntimeContributionBlueId = requireText(
                     effectiveRuntimeContributionBlueId,
                     "effectiveRuntimeContributionBlueId");
+        }
+
+        String rawChannelKey() {
+            return rawChannelKey;
+        }
+
+        String selectorPath() {
+            return selectorPath;
+        }
+
+        EmbeddedDemandMode mode() {
+            return mode;
+        }
+
+        String effectiveRuntimeContributionBlueId() {
+            return effectiveRuntimeContributionBlueId;
+        }
+
+        boolean matches(String candidatePath) {
+            List<String> candidate = JsonPointer.split(requireText(
+                    candidatePath, "candidatePath"));
+            int cursor = advance(0, candidate);
+            return cursor >= 0 && accepts(cursor);
+        }
+
+        int advance(int cursor, List<String> decodedSegments) {
+            if (cursor < 0) {
+                throw new IllegalArgumentException(
+                        "demand cursor must be non-negative");
+            }
+            int selected = cursor;
+            for (String segment : Objects.requireNonNull(
+                    decodedSegments, "decodedSegments")) {
+                if (mode == EmbeddedDemandMode.EXACT) {
+                    if (selected >= selectorSegments.size()
+                            || !selectorSegments.get(selected)
+                                    .equals(segment)) {
+                        return -1;
+                    }
+                    selected++;
+                } else if (mode
+                        == EmbeddedDemandMode.COLLECTION_DIRECT) {
+                    if (selected < selectorSegments.size()
+                            && !selectorSegments.get(selected)
+                                    .equals(segment)) {
+                        return -1;
+                    }
+                    if (selected >= selectorSegments.size() + 1) {
+                        return -1;
+                    }
+                    selected++;
+                } else if (mode
+                        == EmbeddedDemandMode.COLLECTION_DESCENDANTS) {
+                    if (selected < selectorSegments.size()
+                            && !selectorSegments.get(selected)
+                                    .equals(segment)) {
+                        return -1;
+                    }
+                    selected = Math.min(
+                            selected + 1, selectorSegments.size() + 1);
+                } else {
+                    selected = 1;
+                }
+            }
+            return selected;
+        }
+
+        boolean accepts(int cursor) {
+            return switch (mode) {
+                case EXACT -> cursor == selectorSegments.size();
+                case ALL_DESCENDANTS -> cursor > 0;
+                case COLLECTION_DIRECT ->
+                        cursor == selectorSegments.size() + 1;
+                case COLLECTION_DESCENDANTS ->
+                        cursor > selectorSegments.size();
+            };
+        }
+
+        boolean canContinue(int cursor) {
+            return switch (mode) {
+                case EXACT -> cursor < selectorSegments.size();
+                case ALL_DESCENDANTS, COLLECTION_DESCENDANTS -> true;
+                case COLLECTION_DIRECT ->
+                        cursor < selectorSegments.size() + 1;
+            };
+        }
+
+        private static String canonicalSelectorPath(
+                String supplied,
+                EmbeddedDemandMode suppliedMode) {
+            EmbeddedDemandMode selectedMode = Objects.requireNonNull(
+                    suppliedMode, "mode");
+            String path = requireText(supplied, "selectorPath");
+            String canonical = JsonPointer.toPointer(JsonPointer.split(path));
+            if (!path.equals(canonical)) {
+                throw new IllegalArgumentException(
+                        "selectorPath must be a canonical absolute pointer: "
+                                + path);
+            }
+            boolean root = JsonPointer.ROOT.equals(canonical);
+            if (root != (selectedMode
+                    == EmbeddedDemandMode.ALL_DESCENDANTS)) {
+                throw new IllegalArgumentException(
+                        "Only ALL_DESCENDANTS uses the Root selector path");
+            }
+            return canonical;
         }
     }
 
@@ -371,34 +515,74 @@ final class ClosureSubscriptionInventory {
         ArrayList<EmbeddedDemand> result = new ArrayList<>();
         for (EffectiveContractSnapshot contract
                 : projected.effectiveRootContracts()) {
-            if (!RuntimeBlueIds.EMBEDDED_NODE_CHANNEL.equals(
-                    contract.effectiveTypeBlueId())) {
+            boolean embeddedNode = RuntimeBlueIds.EMBEDDED_NODE_CHANNEL.equals(
+                    contract.effectiveTypeBlueId());
+            boolean embeddedCollection =
+                    isEmbeddedCollectionDemandContract(contract);
+            if (!embeddedNode && !embeddedCollection) {
                 continue;
             }
             ManagedRootChannelOccurrence channel = channels.get(
                     contract.key());
             if (channel == null
                     || !channel.effectiveTypeBlueId().equals(
-                            contract.effectiveTypeBlueId())) {
+                            contract.effectiveTypeBlueId())
+                    || channel.externalSource()
+                    || !EffectiveContractSnapshotConstants.Role
+                            .PROCESSOR_CHANNEL.equals(contract.role())) {
                 throw new IllegalArgumentException(
-                        "Embedded Node Channel projection is incomplete at "
+                        "Embedded Channel projection is incomplete at "
                                 + contract.key());
             }
-            FrozenNode sourcePath = contract.headerFields().get(
-                    "sourcePath");
-            if (sourcePath == null
-                    || !(sourcePath.getValue() instanceof String path)
-                    || path.isBlank()) {
+            if (embeddedNode) {
+                String sourcePath = contract.dispatchFields().get(
+                        "sourcePath");
+                result.add(new EmbeddedDemand(
+                        channel.rawChannelKey(),
+                        sourcePath == null
+                                ? JsonPointer.ROOT : sourcePath,
+                        sourcePath == null
+                                ? EmbeddedDemandMode.ALL_DESCENDANTS
+                                : EmbeddedDemandMode.EXACT,
+                        channel.effectiveRuntimeContributionBlueId()));
+                continue;
+            }
+            String collectionPath = contract.dispatchFields().get(
+                    "collectionPath");
+            if (collectionPath == null || collectionPath.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Embedded Node Channel has no exact sourcePath at "
-                                + contract.key());
+                        "Embedded Collection Event Channel is missing "
+                                + "collectionPath at " + contract.key());
+            }
+            String descendants = contract.dispatchFields().get(
+                    "includeDescendants");
+            boolean includeDescendants;
+            if (descendants == null || "false".equals(descendants)) {
+                includeDescendants = false;
+            } else if ("true".equals(descendants)) {
+                includeDescendants = true;
+            } else {
+                throw new IllegalArgumentException(
+                        "Embedded Collection Event Channel has invalid "
+                                + "includeDescendants at " + contract.key());
             }
             result.add(new EmbeddedDemand(
                     channel.rawChannelKey(),
-                    path,
+                    collectionPath,
+                    includeDescendants
+                            ? EmbeddedDemandMode.COLLECTION_DESCENDANTS
+                            : EmbeddedDemandMode.COLLECTION_DIRECT,
                     channel.effectiveRuntimeContributionBlueId()));
         }
         return List.copyOf(result);
+    }
+
+    static boolean isEmbeddedCollectionDemandContract(
+            EffectiveContractSnapshot contract) {
+        EffectiveContractSnapshot selected = Objects.requireNonNull(
+                contract, "contract");
+        return RuntimeBlueIds.EMBEDDED_COLLECTION_EVENT_CHANNEL.equals(
+                selected.effectiveTypeBlueId());
     }
 
     private static PersistentOrderedMap<DocumentId,

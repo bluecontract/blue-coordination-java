@@ -19,18 +19,67 @@ import org.gradle.api.tasks.GradleBuild
 
 def coordinationStageSchema =
         'blue-coordination-staged-dependency-repository/1.0'
+def languageDevelopmentRepositorySchema =
+        'blue-development-maven-repository/1.0'
+def bexDevelopmentRepositorySchema =
+        'blue-bex-development-repository/1.0'
 def coordinationStageGroup = 'blue.coordination'
 def coordinationStageArtifact = 'blue-coordination-java'
 def coordinationStageVersion = project.version.toString()
+def coordinationDependencyMode = providers.gradleProperty(
+        'blueDependencyMode').getOrElse('published-artifact').trim()
+def localRc = coordinationDependencyMode == 'immutable-local-rc-contracts'
+def stagedLanguageArtifacts = [
+        'blue-language-model',
+        'blue-language-core',
+        'blue-language-mapping',
+        'blue-language-ipfs',
+        'blue-contracts-core',
+        'blue-conformance',
+        'blue-language-java'
+] as Set
+def developmentLanguageArtifacts = [
+        'blue-language-model',
+        'blue-language-core',
+        'blue-language-mapping',
+        'blue-language-ipfs',
+        'blue-contracts-core',
+        'blue-language-java'
+] as Set
+def developmentBexArtifacts = [
+        'blue-bex-contracts',
+        'blue-bex-core',
+        'blue-bex-java'
+] as Set
+def selectedDevelopmentBexArtifacts = [
+        'blue-bex-contracts',
+        'blue-bex-core'
+] as Set
 def acceptedCompatibilityCoordinate =
         'blue.coordination:blue-coordination-java:3.0.0-rc.4'
 def acceptedCompatibilityJarSha256 =
         'a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34'
 def acceptedCompatibilitySourceCommit =
         'acf02f3ce7c141e4fc9eabb6f19dacde471e30f4'
-def coordinationUsesImmutableContracts = providers.gradleProperty(
-        'blueDependencyMode').getOrElse('published-artifact').trim()
-        == 'immutable-staged-contracts'
+def requiresImmutableCandidateCompatibility = { String dependencyMode ->
+    dependencyMode in [
+            'immutable-staged-contracts',
+            'immutable-development-contracts',
+            'immutable-local-rc-contracts'
+    ]
+}
+def stagedConsumerProtectedGroupsFor = { String dependencyMode ->
+    if (dependencyMode == 'immutable-staged-contracts') {
+        return ['blue.coordination', 'blue.language'] as Set
+    }
+    if ((dependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        return ['blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set
+    }
+    [] as Set
+}
+def coordinationUsesImmutableContracts =
+        requiresImmutableCandidateCompatibility(
+                coordinationDependencyMode)
 
 configurations.runtimeClasspath.resolutionStrategy.failOnVersionConflict()
 
@@ -136,6 +185,9 @@ def checkedAbsoluteRepository = { String propertyName ->
     if (!path.isAbsolute()) {
         throw new GradleException("${propertyName} must be an absolute path")
     }
+    if (Files.isSymbolicLink(path.toPath())) {
+        throw new GradleException("${propertyName} must not be a symbolic link")
+    }
     path.canonicalFile
 }
 def checkedSha256Property = { String propertyName ->
@@ -145,6 +197,165 @@ def checkedSha256Property = { String propertyName ->
                 "-${'P'}${propertyName}=sha256:<64 lowercase hex> is required")
     }
     value
+}
+def manifestEnvelope = {
+        String repositoryProperty, String identityProperty, String label ->
+    File repository = checkedAbsoluteRepository(repositoryProperty)
+    String expectedIdentity = checkedSha256Property(identityProperty)
+    File manifestFile = new File(repository, 'artifact-manifest.json')
+    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+    List<String> failures = []
+    if (!Files.isDirectory(repository.toPath(), LinkOption.NOFOLLOW_LINKS)
+            || Files.isSymbolicLink(repository.toPath())) {
+        failures << "${label} repository is not a regular directory"
+    }
+    if (repository.toPath().startsWith(rootDir.canonicalFile.toPath())) {
+        failures << "${label} repository must be outside the Coordination source tree"
+    }
+    if (!regularFile(manifestFile) || !regularFile(sidecar)) {
+        failures << "${label} repository lacks its regular manifest and checksum"
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                "${label} repository failed:\n - "
+                        + failures.join('\n - '))
+    }
+    String actualIdentity = sha256IdentityFor(manifestFile)
+    if (actualIdentity != expectedIdentity) {
+        failures << ("${label} manifest identity is ${actualIdentity}; "
+                + "expected ${expectedIdentity}")
+    }
+    String expectedSidecar = (sha256Hex(manifestFile)
+            + '  artifact-manifest.json\n')
+    if (sidecar.getText('UTF-8') != expectedSidecar) {
+        failures << "${label} manifest checksum companion differs"
+    }
+    def manifest
+    try {
+        manifest = new JsonSlurper().parse(manifestFile)
+    } catch (RuntimeException exception) {
+        throw new GradleException(
+                "Cannot parse ${label} repository manifest", exception)
+    }
+    if (!(manifest instanceof Map)) {
+        failures << "${label} repository manifest is not an object"
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                "${label} repository failed:\n - "
+                        + failures.join('\n - '))
+    }
+    [
+            repository: repository,
+            manifest: manifest,
+            manifestIdentity: actualIdentity
+    ]
+}
+def expectedRepositoryRecords = {
+        String group, String version, Set<String> artifacts,
+        Map<String, String> kinds ->
+    List<Map<String, String>> result = []
+    artifacts.toList().sort().each { artifact ->
+        kinds.keySet().toList().sort().each { kind ->
+            String base = (group.replace('.', '/') + '/' + artifact + '/'
+                    + version + '/' + artifact + '-' + version)
+            result << [
+                    coordinate: group + ':' + artifact + ':' + version,
+                    kind: kind,
+                    path: base + kinds[kind],
+                    checksumPath: base + kinds[kind] + '.sha256'
+            ]
+        }
+    }
+    result
+}
+def verifyClosedUpstreamRepository = {
+        Map envelope, List<Map<String, String>> expectedRecords,
+        int expectedFileCount, String label ->
+    File repository = envelope.repository
+    Map manifest = envelope.manifest
+    List<String> failures = []
+    def records = manifest.artifacts instanceof List
+            ? manifest.artifacts : []
+    if (!(manifest.artifacts instanceof List)) {
+        failures << "${label} manifest artifacts must be a list"
+    }
+    Set<String> recordFields = [
+            'coordinate',
+            'kind',
+            'path',
+            'checksumPath',
+            'sha256',
+            'bytes'
+    ] as Set
+    Set<String> expectedFiles = [
+            'artifact-manifest.json',
+            'artifact-manifest.json.sha256'
+    ] as Set
+    expectedRecords.eachWithIndex { expected, index ->
+        def record = index < records.size() ? records[index] : null
+        Set<String> actualFields = record instanceof Map
+                ? record.keySet() as Set : [] as Set
+        if (!(record instanceof Map) || actualFields != recordFields) {
+            failures << ("${label} artifact record ${index} fields differ; "
+                    + "expected ${recordFields.toList().sort()}")
+            return
+        }
+        if (record.coordinate != expected.coordinate
+                || record.kind != expected.kind
+                || record.path != expected.path
+                || record.checksumPath != expected.checksumPath) {
+            failures << "${label} artifact record ${index} is noncanonical"
+            return
+        }
+        expectedFiles.add(expected.path)
+        expectedFiles.add(expected.checksumPath)
+        File payload = new File(repository, expected.path).canonicalFile
+        File checksum = new File(repository, expected.checksumPath)
+                .canonicalFile
+        if (!payload.toPath().startsWith(repository.toPath())
+                || !checksum.toPath().startsWith(repository.toPath())) {
+            failures << "${label} artifact path escapes the repository at ${index}"
+            return
+        }
+        if (!regularFile(payload) || !regularFile(checksum)) {
+            failures << "${label} artifact payload/checksum is missing at ${index}"
+            return
+        }
+        String payloadIdentity = sha256IdentityFor(payload)
+        if (record.sha256 != payloadIdentity) {
+            failures << "${label} artifact digest differs at ${index}"
+        }
+        if (!(record.bytes instanceof Number)
+                || record.bytes.toString() != payload.length().toString()) {
+            failures << "${label} artifact byte count differs at ${index}"
+        }
+        String expectedChecksum = (sha256Hex(payload)
+                + '  ' + payload.name + '\n')
+        if (checksum.getText('UTF-8') != expectedChecksum) {
+            failures << "${label} artifact checksum differs at ${index}"
+        }
+    }
+    if (records.size() != expectedRecords.size()) {
+        failures << ("${label} manifest has ${records.size()} artifact records; "
+                + "expected ${expectedRecords.size()}")
+    }
+    if (expectedFiles.size() != expectedFileCount) {
+        failures << ("${label} expected closure has ${expectedFiles.size()} "
+                + "files; expected ${expectedFileCount}")
+    }
+    Set<String> actualFiles = relativeFiles(repository, failures)
+    if (actualFiles != expectedFiles) {
+        failures << ("${label} repository closure differs; missing "
+                + (expectedFiles - actualFiles).toList().sort()
+                + ', unexpected '
+                + (actualFiles - expectedFiles).toList().sort())
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                "${label} repository failed:\n - "
+                        + failures.join('\n - '))
+    }
 }
 def checkedSourceCommit = {
     String expected = providers.gradleProperty(
@@ -174,46 +385,343 @@ def checkedSourceCommit = {
     }
     expected
 }
-def inspectContractsBinding = {
-    if (providers.gradleProperty('blueDependencyMode')
-            .getOrElse('published-artifact').trim()
-            != 'immutable-staged-contracts') {
+def checkedCoordinationSourceProvenance = {
+    String sourceCommit = checkedSourceCommit()
+    Map<String, Object> provenance = [sourceCommit: sourceCommit]
+    if ((coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        if (JavaVersion.current() != JavaVersion.VERSION_17) {
+            throw new GradleException(
+                    'Development Coordination staging requires JDK 17; current JVM is '
+                            + JavaVersion.current())
+        }
+        if (!(sourceCommit ==~ /[0-9a-f]{40}/)
+                || !(localRc ? coordinationStageVersion ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : coordinationStageVersion == '3.0.0-dev.' + sourceCommit)) {
+            throw new GradleException(
+                    'Development Coordination version must bind the clean 40-hex HEAD')
+        }
+        Process treeProcess = new ProcessBuilder(
+                'git', 'rev-parse', '--verify', 'HEAD^{tree}')
+                .directory(rootDir).redirectErrorStream(true).start()
+        String sourceTree = treeProcess.inputStream.getText('UTF-8').trim()
+        if (treeProcess.waitFor() != 0
+                || !(sourceTree ==~ /[0-9a-f]{40}/)) {
+            throw new GradleException(
+                    'Cannot identify the exact Coordination source tree')
+        }
+        provenance.putAll([
+                stagePurpose: localRc ? 'LOCAL_RC' : 'DEVELOPMENT',
+                releaseReadinessClaimed: false,
+                builtWithJava: 17,
+                sourceTree: sourceTree,
+                sourceDirty: false
+        ])
+    }
+    provenance
+}
+def inspectStagedContractsBinding = {
+    if (coordinationDependencyMode != 'immutable-staged-contracts') {
         throw new GradleException(
-                'Coordination staging requires '
+                'Immutable RC Coordination staging requires '
                         + '-PblueDependencyMode=immutable-staged-contracts')
     }
-    File repository = checkedAbsoluteRepository('blueContractsRepository')
-    String expectedIdentity = checkedSha256Property(
-            'blueContractsManifestSha256')
-    File manifestFile = new File(repository, 'artifact-manifest.json')
-    File sidecar = new File(repository, 'artifact-manifest.json.sha256')
-    if (!regularFile(manifestFile) || !regularFile(sidecar)) {
-        throw new GradleException(
-                'Contracts repository lacks its regular manifest and checksum')
+    Map envelope = manifestEnvelope(
+            'blueContractsRepository',
+            'blueContractsManifestSha256',
+            'Immutable staged Contracts')
+    Map manifest = envelope.manifest
+    String expectedVersion = providers.gradleProperty(
+            'blueContractsVersion').orNull
+    List<String> failures = []
+    if (expectedVersion == null || expectedVersion.isBlank()) {
+        failures << 'blueContractsVersion is required for immutable staged Contracts'
     }
-    String actualIdentity = sha256IdentityFor(manifestFile)
-    if (actualIdentity != expectedIdentity
-            || sidecar.getText('UTF-8') != sha256Hex(manifestFile)
-            + '  artifact-manifest.json\n') {
-        throw new GradleException(
-                'Contracts manifest identity or checksum companion differs')
+    if (manifest.schema != 'blue-staged-dependency-repository/1.0') {
+        failures << "unexpected manifest schema ${manifest.schema}"
     }
-    def manifest = new JsonSlurper().parse(manifestFile)
-    if (manifest.schema != 'blue-staged-dependency-repository/1.0'
-            || manifest.groupId != 'blue.language'
+    if (manifest.groupId != 'blue.language') {
+        failures << "unexpected groupId ${manifest.groupId}"
+    }
+    if (manifest.version != expectedVersion) {
+        failures << "unexpected version ${manifest.version}"
+    }
+    if (!(manifest.sourceCommit instanceof String)
             || !(manifest.sourceCommit ==~ /[0-9a-f]{40}|[0-9a-f]{64}/)) {
-        throw new GradleException(
-                'Contracts repository is not an exact immutable handoff')
+        failures << 'sourceCommit is not an exact Git identity'
     }
     [
-            repository: repository,
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "${field} is not a SHA-256 identity"
+        }
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable staged Contracts repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    verifyClosedUpstreamRepository(
+            envelope,
+            expectedRepositoryRecords(
+                    'blue.language',
+                    expectedVersion,
+                    stagedLanguageArtifacts,
+                    [
+                            javadoc: '-javadoc.jar',
+                            pom: '.pom',
+                            runtime: '.jar',
+                            sources: '-sources.jar'
+                    ]),
+            58,
+            'Immutable staged Contracts')
+    [
+            repository: envelope.repository,
             manifest: manifest,
-            manifestIdentity: actualIdentity,
+            manifestIdentity: envelope.manifestIdentity,
             sourceCommit: manifest.sourceCommit,
             specificationIdentity: manifest.contractsSpecificationIdentity,
             fixturePackageIdentity: manifest.contractsFixturePackageIdentity,
             releaseIdentity: manifest.contractsReleaseIdentity
     ]
+}
+def inspectDevelopmentLanguageBinding = {
+    if (!(coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        throw new GradleException(
+                'Development Coordination staging requires '
+                        + '-PblueDependencyMode=immutable-development-contracts')
+    }
+    Map envelope = manifestEnvelope(
+            'blueContractsRepository',
+            'blueContractsManifestSha256',
+            'Immutable development Language')
+    Map manifest = envelope.manifest
+    String expectedVersion = providers.gradleProperty(
+            'blueContractsVersion').orNull
+    String expectedSourceCommit = providers.gradleProperty(
+            'blueContractsSourceCommit').orNull
+    Set<String> expectedFields = [
+            'schema',
+            'stagePurpose',
+            'releaseReadinessClaimed',
+            'builtWithJava',
+            'groupId',
+            'version',
+            'sourceCommit',
+            'sourceTree',
+            'sourceDirty',
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity',
+            'artifacts'
+    ] as Set
+    Set<String> actualFields = manifest.keySet() as Set
+    List<String> failures = []
+    if (actualFields != expectedFields) {
+        failures << ('manifest fields differ; missing '
+                + (expectedFields - actualFields).toList().sort()
+                + ', unexpected '
+                + (actualFields - expectedFields).toList().sort())
+    }
+    if (manifest.schema != (localRc ? 'blue-local-rc-maven-repository/1.0' : languageDevelopmentRepositorySchema)
+            || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
+            || manifest.releaseReadinessClaimed != false
+            || !(manifest.builtWithJava instanceof Number)
+            || manifest.builtWithJava.toString() != '17'
+            || manifest.groupId != 'blue.language') {
+        failures << 'manifest is not the canonical JDK 17 DEVELOPMENT Language handoff'
+    }
+    if (expectedVersion == null
+            || !(localRc ? expectedVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : expectedVersion ==~ /3\.1\.0-dev\.[0-9a-f]{40}/)
+            || manifest.version != expectedVersion) {
+        failures << 'blueContractsVersion is not the exact Language development version'
+    }
+    if (expectedSourceCommit == null
+            || !(expectedSourceCommit ==~ /[0-9a-f]{40}/)
+            || manifest.sourceCommit != expectedSourceCommit
+            || (!localRc && expectedVersion != '3.1.0-dev.' + expectedSourceCommit)) {
+        failures << 'Language version/sourceCommit binding differs'
+    }
+    if (!(manifest.sourceTree instanceof String)
+            || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+            || manifest.sourceDirty != false) {
+        failures << 'Language handoff must bind a clean 40-hex source tree'
+    }
+    [
+            'contractsSpecificationIdentity',
+            'contractsFixturePackageIdentity',
+            'contractsReleaseIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "${field} is not a SHA-256 identity"
+        }
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable development Language repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    verifyClosedUpstreamRepository(
+            envelope,
+            expectedRepositoryRecords(
+                    'blue.language',
+                    expectedVersion,
+                    localRc ? stagedLanguageArtifacts : developmentLanguageArtifacts,
+                    localRc ? [pom: '.pom', runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar'] : [pom: '.pom', runtime: '.jar']),
+            localRc ? 58 : 26,
+            'Immutable development Language')
+    [
+            repository: envelope.repository,
+            manifest: manifest,
+            manifestIdentity: envelope.manifestIdentity,
+            schema: manifest.schema,
+            version: manifest.version,
+            sourceCommit: manifest.sourceCommit,
+            sourceTree: manifest.sourceTree,
+            sourceDirty: manifest.sourceDirty,
+            builtWithJava: manifest.builtWithJava,
+            specificationIdentity: manifest.contractsSpecificationIdentity,
+            fixturePackageIdentity: manifest.contractsFixturePackageIdentity,
+            releaseIdentity: manifest.contractsReleaseIdentity
+    ]
+}
+def inspectDevelopmentBexBinding = { Map languageBinding ->
+    Map envelope = manifestEnvelope(
+            'blueBexRepository',
+            'blueBexManifestSha256',
+            'Immutable development BEX')
+    Map manifest = envelope.manifest
+    String expectedVersion = providers.gradleProperty(
+            'blueBexVersion').orNull
+    String expectedSourceCommit = providers.gradleProperty(
+            'blueBexSourceCommit').orNull
+    Set<String> expectedFields = [
+            'schema',
+            'stagePurpose',
+            'releaseReadinessClaimed',
+            'builtWithJava',
+            'groupId',
+            'version',
+            'sourceCommit',
+            'sourceTree',
+            'sourceDirty',
+            'bexSpecificationIdentity',
+            'bexFixturePackageIdentity',
+            'bexRegistryPackageIdentity',
+            'bexGasPackageIdentity',
+            'languageVersion',
+            'languageSourceCommit',
+            'languageRepositoryManifestIdentity',
+            'artifacts'
+    ] as Set
+    Set<String> actualFields = manifest.keySet() as Set
+    List<String> failures = []
+    if (actualFields != expectedFields) {
+        failures << ('manifest fields differ; missing '
+                + (expectedFields - actualFields).toList().sort()
+                + ', unexpected '
+                + (actualFields - expectedFields).toList().sort())
+    }
+    if (manifest.schema != (localRc ? 'blue-bex-local-rc-repository/1.0' : bexDevelopmentRepositorySchema)
+            || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
+            || manifest.releaseReadinessClaimed != false
+            || !(manifest.builtWithJava instanceof Number)
+            || manifest.builtWithJava.toString() != '17'
+            || manifest.groupId != 'blue.bex') {
+        failures << 'manifest is not the canonical JDK 17 DEVELOPMENT BEX handoff'
+    }
+    if (expectedVersion == null
+            || !(localRc ? expectedVersion ==~ /1\.1\.0-rc\.[1-9][0-9]*/ : expectedVersion ==~ /1\.1\.0-dev\.[0-9a-f]{40}/)
+            || manifest.version != expectedVersion) {
+        failures << 'blueBexVersion is not the exact BEX development version'
+    }
+    if (expectedSourceCommit == null
+            || !(expectedSourceCommit ==~ /[0-9a-f]{40}/)
+            || manifest.sourceCommit != expectedSourceCommit
+            || (!localRc && expectedVersion != '1.1.0-dev.' + expectedSourceCommit)) {
+        failures << 'BEX version/sourceCommit binding differs'
+    }
+    if (!(manifest.sourceTree instanceof String)
+            || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+            || manifest.sourceDirty != false) {
+        failures << 'BEX handoff must bind a clean 40-hex source tree'
+    }
+    [
+            'bexSpecificationIdentity',
+            'bexFixturePackageIdentity',
+            'bexRegistryPackageIdentity',
+            'bexGasPackageIdentity',
+            'languageRepositoryManifestIdentity'
+    ].each { field ->
+        if (!(manifest[field] instanceof String)
+                || !(manifest[field] ==~ /sha256:[0-9a-f]{64}/)) {
+            failures << "${field} is not a SHA-256 identity"
+        }
+    }
+    if (manifest.languageVersion != languageBinding.version
+            || manifest.languageSourceCommit != languageBinding.sourceCommit
+            || manifest.languageRepositoryManifestIdentity
+            != languageBinding.manifestIdentity) {
+        failures << 'BEX manifest does not bind the selected Language handoff'
+    }
+    if (!failures.empty) {
+        throw new GradleException(
+                'Immutable development BEX repository failed:\n - '
+                        + failures.join('\n - '))
+    }
+    verifyClosedUpstreamRepository(
+            envelope,
+            expectedRepositoryRecords(
+                    'blue.bex',
+                    expectedVersion,
+                    developmentBexArtifacts,
+                    [
+                            javadoc: '-javadoc.jar',
+                            pom: '.pom',
+                            runtime: '.jar',
+                            sources: '-sources.jar'
+                    ]),
+            26,
+            'Immutable development BEX')
+    [
+            repository: envelope.repository,
+            manifest: manifest,
+            manifestIdentity: envelope.manifestIdentity,
+            schema: manifest.schema,
+            version: manifest.version,
+            sourceCommit: manifest.sourceCommit,
+            sourceTree: manifest.sourceTree,
+            sourceDirty: manifest.sourceDirty,
+            builtWithJava: manifest.builtWithJava,
+            specificationIdentity: manifest.bexSpecificationIdentity,
+            fixturePackageIdentity: manifest.bexFixturePackageIdentity,
+            registryPackageIdentity: manifest.bexRegistryPackageIdentity,
+            gasPackageIdentity: manifest.bexGasPackageIdentity
+    ]
+}
+def inspectDependencyBindings = {
+    if (coordinationDependencyMode == 'immutable-staged-contracts') {
+        return [
+                mode: coordinationDependencyMode,
+                contracts: inspectStagedContractsBinding(),
+                bex: null
+        ]
+    }
+    if ((coordinationDependencyMode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        Map language = inspectDevelopmentLanguageBinding()
+        return [
+                mode: coordinationDependencyMode,
+                contracts: language,
+                bex: inspectDevelopmentBexBinding(language),
+                catalog: gradle.ext.blueCatalogDevelopmentBinding
+        ]
+    }
+    throw new GradleException(
+            'Coordination staging requires immutable-staged-contracts or '
+                    + 'immutable-development-contracts')
 }
 def publicationFiles = { File repository ->
     String base = coordinationStageGroup.replace('.', '/') +
@@ -255,27 +763,64 @@ def resolvedDependencyRecords = {
     }
     artifacts
 }
-def verifyResolvedContractsArtifacts = {
-    Map contractsBinding, List<Map<String, Object>> dependencies ->
-    Map<String, String> expected = contractsBinding.manifest.artifacts
+def resolvedBexRuntimeIdentities = { List<Map<String, Object>> dependencies ->
+    dependencies.findAll { record ->
+        record.coordinate.startsWith('blue.bex:')
+    }.collectEntries { record ->
+        [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
+    }
+}
+def verifyResolvedUpstreamArtifacts = {
+    Map bindings, List<Map<String, Object>> dependencies ->
+    Map<String, String> expectedLanguage = bindings.contracts.manifest.artifacts
             .findAll { record -> record.kind == 'runtime' }
             .collectEntries { record ->
         [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
     }
-    Map<String, String> actual = dependencies.findAll { record ->
+    if (bindings.mode in ['immutable-staged-contracts', 'immutable-local-rc-contracts']) {
+        expectedLanguage = expectedLanguage.findAll { coordinate, ignored ->
+            !coordinate.startsWith('blue.language:blue-conformance:')
+        }
+    }
+    Map<String, String> actualLanguage = dependencies.findAll { record ->
         record.coordinate.startsWith('blue.language:')
     }.collectEntries { record ->
         [(String.valueOf(record.coordinate)): String.valueOf(record.sha256)]
     }
-    if (actual.isEmpty() || actual.any { coordinate, identity ->
-        expected[coordinate] != identity
-    }) {
+    if (actualLanguage != expectedLanguage
+            || expectedLanguage.values().any { it == null }) {
         throw new GradleException(
-                'Resolved Language bytes differ from the immutable Contracts manifest')
+                'Resolved Language bytes differ from the exact upstream manifest')
+    }
+    if ((bindings.mode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        def expectedCatalog = bindings.catalog.manifest.artifacts.findAll { it.kind == 'runtime' }
+                .collectEntries { [(it.coordinate): it.sha256] }
+        def actualCatalog = dependencies.findAll { it.coordinate.startsWith('blue.repo:') }
+                .collectEntries { [(it.coordinate): it.sha256] }
+        if (actualCatalog != expectedCatalog || expectedCatalog.size() != 1)
+            throw new GradleException('Resolved catalog bytes differ from exact development manifest')
+        Map<String, String> expectedBex = bindings.bex.manifest.artifacts
+                .findAll { record ->
+            record.kind == 'runtime'
+                    && selectedDevelopmentBexArtifacts.any { artifact ->
+                record.coordinate.startsWith('blue.bex:' + artifact + ':')
+            }
+        }.collectEntries { record ->
+            [(String.valueOf(record.coordinate)):
+                     String.valueOf(record.sha256)]
+        }
+        Map<String, String> actualBex = resolvedBexRuntimeIdentities(
+                dependencies)
+        if (actualBex != expectedBex
+                || expectedBex.size() != 2
+                || expectedBex.values().any { it == null }) {
+            throw new GradleException(
+                    'Resolved BEX bytes differ from the exact development manifest')
+        }
     }
 }
 def expectedStageManifest = {
-    File repository, String sourceCommit, Map contractsBinding,
+    File repository, Map sourceProvenance, Map bindings,
     List<Map<String, Object>> dependencies ->
     List<Map<String, Object>> artifacts = publicationFiles(repository)
             .collect { value ->
@@ -299,24 +844,63 @@ def expectedStageManifest = {
                 ?: (left.kind <=> right.kind)
                 ?: (left.path <=> right.path)
     }
-    [
+    Map<String, Object> manifest = [
             schema: coordinationStageSchema,
             groupId: coordinationStageGroup,
             artifactId: coordinationStageArtifact,
             version: coordinationStageVersion,
-            sourceCommit: sourceCommit,
+            sourceCommit: sourceProvenance.sourceCommit,
             contracts: [
-                    manifestIdentity: contractsBinding.manifestIdentity,
-                    sourceCommit: contractsBinding.sourceCommit,
+                    manifestIdentity: bindings.contracts.manifestIdentity,
+                    sourceCommit: bindings.contracts.sourceCommit,
                     specificationIdentity:
-                            contractsBinding.specificationIdentity,
+                            bindings.contracts.specificationIdentity,
                     fixturePackageIdentity:
-                            contractsBinding.fixturePackageIdentity,
-                    releaseIdentity: contractsBinding.releaseIdentity
+                            bindings.contracts.fixturePackageIdentity,
+                    releaseIdentity: bindings.contracts.releaseIdentity
             ],
             dependencies: dependencies,
             artifacts: artifacts
     ]
+    if ((bindings.mode in ['immutable-development-contracts', 'immutable-local-rc-contracts'])) {
+        manifest.putAll([
+                stagePurpose: sourceProvenance.stagePurpose,
+                releaseReadinessClaimed:
+                        sourceProvenance.releaseReadinessClaimed,
+                builtWithJava: sourceProvenance.builtWithJava,
+                sourceTree: sourceProvenance.sourceTree,
+                sourceDirty: sourceProvenance.sourceDirty,
+                dependencyMode: bindings.mode
+        ])
+        manifest.contracts.putAll([
+                schema: bindings.contracts.schema,
+                version: bindings.contracts.version,
+                sourceTree: bindings.contracts.sourceTree,
+                sourceDirty: bindings.contracts.sourceDirty,
+                builtWithJava: bindings.contracts.builtWithJava
+        ])
+        manifest.catalog = [manifestIdentity: bindings.catalog.manifestIdentity]
+        ['schema', 'version', 'sourceCommit', 'sourceTree', 'catalogManifestIdentity',
+         'repositoryVersionBlueId', 'providerBundleIdentity', 'registryPackageIdentities'].each { field ->
+            manifest.catalog[field] = bindings.catalog.manifest[field]
+        }
+        manifest.bex = [
+                schema: bindings.bex.schema,
+                manifestIdentity: bindings.bex.manifestIdentity,
+                version: bindings.bex.version,
+                sourceCommit: bindings.bex.sourceCommit,
+                sourceTree: bindings.bex.sourceTree,
+                sourceDirty: bindings.bex.sourceDirty,
+                builtWithJava: bindings.bex.builtWithJava,
+                specificationIdentity: bindings.bex.specificationIdentity,
+                fixturePackageIdentity: bindings.bex.fixturePackageIdentity,
+                registryPackageIdentity: bindings.bex.registryPackageIdentity,
+                gasPackageIdentity: bindings.bex.gasPackageIdentity,
+                languageRepositoryManifestIdentity:
+                        bindings.contracts.manifestIdentity
+        ]
+    }
+    manifest
 }
 def verifyClosedStage = {
     File repository, Map expectedManifest ->
@@ -380,7 +964,7 @@ def prepareCoordinationMutableStaging = tasks.register(
 def stageCoordinationCandidatePublications = tasks.register(
         'stageCoordinationCandidatePublications') {
     group = 'publishing'
-    description = 'Builds the unpublished dynamic-evolution Maven payload without changing rc.3 release authority.'
+    description = 'Builds the unpublished Coordination handoff payload without changing published release authority.'
     dependsOn prepareCoordinationMutableStaging,
             tasks.named('jar'), tasks.named('sourcesJar'),
             tasks.named('javadocJar'),
@@ -429,8 +1013,8 @@ def assembleImmutableStagedCoordinationRepository = tasks.register(
     dependsOn stageCoordinationCandidatePublications
     outputs.upToDateWhen { false }
     doLast {
-        String sourceCommit = checkedSourceCommit()
-        Map contractsBinding = inspectContractsBinding()
+        Map sourceProvenance = checkedCoordinationSourceProvenance()
+        Map bindings = inspectDependencyBindings()
         File mutableRepository = layout.buildDirectory.dir(
                 'dynamic-evolution-staging').get().asFile.canonicalFile
         File target = checkedAbsoluteRepository(
@@ -447,8 +1031,7 @@ def assembleImmutableStagedCoordinationRepository = tasks.register(
         }
         List<Map<String, Object>> dependencyRecords =
                 resolvedDependencyRecords()
-        verifyResolvedContractsArtifacts(
-                contractsBinding, dependencyRecords)
+        verifyResolvedUpstreamArtifacts(bindings, dependencyRecords)
         File parent = target.parentFile
         if (parent == null) {
             throw new GradleException(
@@ -474,7 +1057,7 @@ def assembleImmutableStagedCoordinationRepository = tasks.register(
                 writeChecksum(output)
             }
             Map manifest = expectedStageManifest(
-                    temporary, sourceCommit, contractsBinding,
+                    temporary, sourceProvenance, bindings,
                     dependencyRecords)
             File manifestFile = new File(
                     temporary, 'artifact-manifest.json')
@@ -505,14 +1088,14 @@ def verifyImmutableStagedCoordinationRepository = tasks.register(
     dependsOn assembleImmutableStagedCoordinationRepository
     outputs.upToDateWhen { false }
     doLast {
-        String sourceCommit = checkedSourceCommit()
-        Map contractsBinding = inspectContractsBinding()
+        Map sourceProvenance = checkedCoordinationSourceProvenance()
+        Map bindings = inspectDependencyBindings()
         File repository = checkedAbsoluteRepository(
                 'coordinationStagedRepository')
         List<Map<String, Object>> dependencies = resolvedDependencyRecords()
-        verifyResolvedContractsArtifacts(contractsBinding, dependencies)
+        verifyResolvedUpstreamArtifacts(bindings, dependencies)
         Map expected = expectedStageManifest(
-                repository, sourceCommit, contractsBinding, dependencies)
+                repository, sourceProvenance, bindings, dependencies)
         String manifestIdentity = verifyClosedStage(repository, expected)
         File report = layout.buildDirectory.file(
                 'reports/dynamic-evolution/coordination-staged-repository.json')
@@ -521,10 +1104,13 @@ def verifyImmutableStagedCoordinationRepository = tasks.register(
         report.setText(canonicalJson([
                 schema: 'blue-coordination-staged-repository-verification/1.0',
                 status: 'PASS',
-                sourceCommit: sourceCommit,
+                dependencyMode: bindings.mode,
+                sourceCommit: sourceProvenance.sourceCommit,
                 manifestIdentity: manifestIdentity,
                 contractsManifestIdentity:
-                        contractsBinding.manifestIdentity,
+                        bindings.contracts.manifestIdentity,
+                bexManifestIdentity: bindings.bex == null
+                        ? null : bindings.bex.manifestIdentity,
                 dependencyArtifacts: dependencies.size(),
                 stagedArtifacts: expected.artifacts.size()
         ]), 'UTF-8')
@@ -556,8 +1142,8 @@ def registerStagedCoordinationConsumer = {
         String taskName, int javaVersion ->
     tasks.register(taskName, GradleBuild) {
         group = 'verification'
-        description = 'Resolves and executes the isolated staged consumer on Java '
-                + javaVersion + '.'
+        description = ('Resolves and executes the isolated staged consumer on Java '
+                + javaVersion + '.')
         dependsOn verifyImmutableStagedCoordinationRepository,
                 purgeStagedConsumerReceipts
         dir = file('smoke-tests/staged-coordination')
@@ -569,25 +1155,41 @@ def registerStagedCoordinationConsumer = {
                     'coordinationStagedRepository')
             File coordinationManifest = new File(
                     coordinationRepository, 'artifact-manifest.json')
-            Map contractsBinding = inspectContractsBinding()
+            Map bindings = inspectDependencyBindings()
             File report = stagedConsumerReport(javaVersion)
             delete report
-            startParameter.projectProperties = [
+            Map<String, String> properties = [
+                    dependencyMode: bindings.mode,
                     coordinationRepository:
                             coordinationRepository.absolutePath,
                     coordinationManifestSha256:
                             sha256IdentityFor(coordinationManifest),
                     coordinationVersion: coordinationStageVersion,
                     contractsRepository:
-                            contractsBinding.repository.absolutePath,
+                            bindings.contracts.repository.absolutePath,
                     contractsManifestSha256:
-                            contractsBinding.manifestIdentity,
+                            bindings.contracts.manifestIdentity,
+                    protectedGroups: stagedConsumerProtectedGroupsFor(
+                            bindings.mode).toList().sort().join(','),
                     testJavaVersion: String.valueOf(javaVersion),
                     consumerBuildDirectory: layout.buildDirectory.dir(
                             'staged-consumer/java' + javaVersion)
                             .get().asFile.absolutePath,
                     smokeReport: report.absolutePath
             ]
+            if (bindings.catalog != null) {
+                properties.putAll([catalogRepository: bindings.catalog.repository.absolutePath,
+                    catalogManifestSha256: bindings.catalog.manifestIdentity])
+            }
+            if (bindings.bex != null) {
+                properties.putAll([
+                        bexRepository:
+                                bindings.bex.repository.absolutePath,
+                        bexManifestSha256:
+                                bindings.bex.manifestIdentity
+                ])
+            }
+            startParameter.projectProperties = properties
         }
     }
 }
@@ -817,9 +1419,96 @@ def verifyAcceptedBaseApiCompatibility = tasks.register(
     }
 }
 
+def verifyCoordinationStagingLanePolicyLogic = tasks.register(
+        'verifyCoordinationStagingLanePolicyLogic') {
+    group = 'verification'
+    description = 'Regression-tests compatibility coverage for immutable candidate lanes.'
+    doLast {
+        Map<String, Boolean> vectors = [
+                'published-artifact': false,
+                'immutable-staged-contracts': true,
+                'immutable-development-contracts': true,
+                'immutable-local-rc-contracts': true,
+                'unsupported': false
+        ]
+        vectors.each { mode, expected ->
+            boolean actual = requiresImmutableCandidateCompatibility(mode)
+            if (actual != expected) {
+                throw new GradleException(
+                        "Immutable candidate compatibility policy differs for ${mode}")
+            }
+        }
+        Map<String, Set<String>> protectedGroupVectors = [
+                'immutable-staged-contracts': [
+                        'blue.coordination', 'blue.language'] as Set,
+                'immutable-development-contracts': [
+                        'blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set,
+                'immutable-local-rc-contracts': [
+                        'blue.coordination', 'blue.language', 'blue.bex', 'blue.repo'] as Set,
+                'published-artifact': [] as Set,
+                'unsupported': [] as Set
+        ]
+        protectedGroupVectors.each { mode, expected ->
+            Set<String> actual = stagedConsumerProtectedGroupsFor(mode)
+            if (actual != expected) {
+                throw new GradleException(
+                        "Staged-consumer protected groups differ for ${mode}: ${actual}")
+            }
+        }
+        String identity = 'sha256:' + ('a' * 64)
+        List<Map<String, Object>> bexResolution = [
+                [coordinate: 'blue.bex:blue-bex-core:1.1.0-dev.'
+                        + ('b' * 40), sha256: identity],
+                [coordinate: 'blue.bex:blue-bex-contracts:1.1.0-dev.'
+                        + ('b' * 40), sha256: identity],
+                [coordinate: 'blue.bex:unexpected-module:1.0.0',
+                        sha256: identity]
+        ]
+        if (resolvedBexRuntimeIdentities(bexResolution).size() != 3) {
+            throw new GradleException(
+                    'Direct staging filtered an unexpected resolved BEX module')
+        }
+        // Full releases include the independently verified conformance fixture
+        // archive. Only the six declared Language modules belong to runtime.
+        ['immutable-staged-contracts', 'immutable-local-rc-contracts',
+         'immutable-development-contracts'].each { mode ->
+            def runtime = developmentLanguageArtifacts.collect { artifact ->
+                [coordinate: 'blue.language:' + artifact + ':test',
+                 kind: 'runtime', sha256: identity]
+            }
+            def upstream = new ArrayList(runtime)
+            def conformance = [coordinate: 'blue.language:blue-conformance:test',
+                               kind: 'runtime', sha256: identity]
+            if (mode != 'immutable-development-contracts') upstream.add(conformance)
+            def bex = selectedDevelopmentBexArtifacts.collect { artifact ->
+                [coordinate: 'blue.bex:' + artifact + ':test', kind: 'runtime', sha256: identity]
+            }
+            def catalog = [[coordinate: 'blue.repo:blue-repo-java:test',
+                            kind: 'runtime', sha256: identity]]
+            def bindings = [mode: mode, contracts: [manifest: [artifacts: upstream]],
+                            bex: [manifest: [artifacts: bex]], catalog: [manifest: [artifacts: catalog]]]
+            def dependencies = runtime + bex + catalog
+            verifyResolvedUpstreamArtifacts(bindings, dependencies)
+            def wrongHash = dependencies.collect { new LinkedHashMap(it) }
+            wrongHash[0].sha256 = 'sha256:' + ('f' * 64)
+            def missingHash = dependencies.collect { new LinkedHashMap(it) }
+            missingHash[0].sha256 = null
+            [wrongHash, missingHash, dependencies.drop(1), dependencies + conformance,
+             dependencies + [coordinate: 'blue.language:unexpected:test', sha256: identity]].each { mutated ->
+                boolean rejected = false
+                try { verifyResolvedUpstreamArtifacts(bindings, mutated) }
+                catch (GradleException expected) { rejected = true }
+                if (!rejected) throw new GradleException(
+                        'Runtime artifact mutation was accepted in ' + mode)
+            }
+        }
+    }
+}
+
 tasks.register('verifyCoordinationStagingTooling') {
     group = 'verification'
     description = 'Protects the isolated, fail-closed staged-consumer boundary.'
+    dependsOn verifyCoordinationStagingLanePolicyLogic
     inputs.files('gradle/coordination-staging.gradle',
             fileTree('smoke-tests/staged-coordination'))
     doLast {
@@ -847,6 +1536,14 @@ tasks.register('verifyCoordinationStagingTooling') {
                 'verifyAcceptedBaseApiCompatibility',
                 'coordinationSourceCommit',
                 'coordinationStagedRepository',
+                'blue-development-maven-repository/1.0',
+                'blue-bex-development-repository/1.0',
+                'blueBexRepository',
+                'blueBexManifestSha256',
+                'blueBexSourceCommit',
+                'releaseReadinessClaimed',
+                'sourceDirty',
+                'expectedFileCount',
                 'blue.coordination:blue-coordination-java:3.0.0-rc.4',
                 'a8dc99f5bcc62902496ee3bdb5e8f085b78d9781e7928ef20f5a83b65581cd34',
                 'acf02f3ce7c141e4fc9eabb6f19dacde471e30f4',
@@ -867,7 +1564,8 @@ tasks.register('verifyCoordinationStagingTooling') {
             }
         }
         if (!fixture.contains("includeGroup 'blue.coordination'")
-                || !fixture.contains("includeGroup 'blue.language'")) {
+                || !fixture.contains("includeGroup 'blue.language'")
+                || !fixture.contains("includeGroup 'blue.bex'")) {
             failures << 'consumer repositories are not group-exclusive'
         }
         [

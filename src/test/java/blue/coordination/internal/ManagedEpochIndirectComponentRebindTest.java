@@ -196,7 +196,9 @@ final class ManagedEpochIndirectComponentRebindTest {
 
     @Test
     void componentMergeThatWouldAdvanceSourceEpochFailsClosed() {
-        try (Scenario scenario = prepared()) {
+        // Reference-only finalization no longer advances the historical target.
+        // This negative must actually change that target's local business state.
+        try (Scenario scenario = prepared(false, true)) {
             // given
             DefaultCoordinationEngine engine = scenario.engine();
             InMemoryDocumentStore documents = engine.documents();
@@ -434,6 +436,11 @@ final class ManagedEpochIndirectComponentRebindTest {
     }
 
     private static Scenario prepared(boolean advanceBeforeAttachment) {
+        return prepared(advanceBeforeAttachment, false);
+    }
+
+    private static Scenario prepared(
+            boolean advanceBeforeAttachment, boolean mutateHistoricalSource) {
         BlueCoordination coordination = BlueCoordination.inMemory();
         try {
             TimelineHandle aTimeline = coordination.timelines().register(
@@ -441,12 +448,12 @@ final class ManagedEpochIndirectComponentRebindTest {
             TimelineHandle bTimeline = coordination.timelines().register(
                     B_TIMELINE, ACTOR);
             DocumentHandle a = coordination.documents().admit(
-                    ManagedDocument.yaml(A, consumerYaml())
+                    ManagedDocument.yaml(A, consumerYaml(mutateHistoricalSource))
                             .publicRoot()
                             .fromNow());
             ClosureHandle sourceClosure = coordination.documents().admit(
                     ManagedClosure.builder()
-                            .document("b", B, sourceYaml())
+                            .document("b", B, sourceYaml(mutateHistoricalSource))
                             .document("c", C, peerYaml())
                             .bindOccurrence("b", "/peer", "c")
                             .bindOccurrence("c", "/peer", "b")
@@ -569,6 +576,36 @@ final class ManagedEpochIndirectComponentRebindTest {
                     "Cannot inspect retained invocation boundary",
                     inaccessible);
         }
+    }
+
+    private static String consumerYaml(boolean mutateHistoricalSource) {
+        String yaml = consumerYaml();
+        return mutateHistoricalSource ? yaml.replace(
+                "val: {$add: [{$document: /finiteReactions}, 1]}",
+                "val: {$add: [{$document: /finiteReactions}, 1]}\n"
+                        + "          - $appendEvent: {type: Coordination/Event, kind: Cycle/Mutation}")
+                : yaml;
+    }
+
+    private static String sourceYaml(boolean mutateHistoricalSource) {
+        return sourceYaml() + (mutateHistoricalSource ? """
+                  mutationFromParent:
+                    type: Embedded Node Channel
+                    sourcePath: /parent
+                    event: {type: Coordination/Event, kind: Cycle/Mutation}
+                  mutateSource:
+                    type: Coordination/Sequential Workflow
+                    channel: mutationFromParent
+                    event: {type: Coordination/Event, kind: Cycle/Mutation}
+                    steps:
+                      - type: Coordination/Compute
+                        do:
+                          - $appendChange:
+                              op: replace
+                              path: /counter
+                              val: {$add: [{$document: /counter}, 1]}
+                          - $return: true
+                """ : "");
     }
 
     private static String consumerYaml() {

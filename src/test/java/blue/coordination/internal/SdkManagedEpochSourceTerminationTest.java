@@ -61,7 +61,7 @@ final class SdkManagedEpochSourceTerminationTest {
             componentStateIdentityMethod();
 
     @Test
-    void productionTerminationLaneRemainsFailClosed() {
+    void productionTerminationPublishesOneTerminalEpochAndEvent() {
         // given
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
@@ -81,19 +81,25 @@ final class SdkManagedEpochSourceTerminationTest {
                     .execute();
 
             // then
-            assertEquals(EntryDisposition.REJECTED, finished.disposition(),
-                    finished.diagnostic().toString());
-            assertEquals("RUNTIME_EXECUTION_FAILURE",
-                    finished.diagnostic().code());
-            assertTrue(finished.diagnostic().message().contains(
-                    "Termination requires the lifecycle and marker batch lane"));
-            assertEquals(SessionStatus.READY,
+            assertEquals(EntryDisposition.APPLIED, finished.disposition(),
+                    String.valueOf(finished.diagnostic()));
+            assertEquals(SessionStatus.TERMINATED,
                     coordination.advanced().auditDocument(SOURCE).status());
-            assertEquals(List.of(0L), coordination.advanced()
+            assertEquals(List.of(0L, 1L), coordination.advanced()
                     .auditManagedEpochs(SOURCE).stream()
                     .map(ManagedEpochReceipt::epoch)
                     .toList());
-            assertEquals(1, source.history().size());
+            assertEquals(2, source.history().size());
+            ManagedEpochReceipt terminal = coordination.advanced()
+                    .auditManagedEpoch(SOURCE, 1L).orElseThrow();
+            assertEquals(1, terminal.emittedEvents().size());
+            assertTrue(terminal.sourceEntry().isPresent());
+            com.fasterxml.jackson.databind.JsonNode exact =
+                    blue.language.codec.jackson.UncheckedObjectMapper.JSON_MAPPER
+                            .readTree(source.exact().json());
+            assertTrue(exact.at("/finished/value").asBoolean());
+            assertEquals(TERMINATED_MARKER_BLUE_ID,
+                    exact.at("/contracts/terminated/type/blueId").asText());
         }
     }
 
@@ -376,16 +382,16 @@ final class SdkManagedEpochSourceTerminationTest {
                         0L,
                         contractsDocumentId,
                         occurrenceIdentity,
-                        event.blueId(),
-                        event.copyNode(),
+                        IntegrationEventEvidence.verify(
+                                event.copyNode(), event.blueId()),
                         true);
         PublicEventOccurrence publicEvent = new PublicEventOccurrence(
                 0L,
                 0L,
                 contractsDocumentId,
                 occurrenceIdentity,
-                event.blueId(),
-                event.copyNode());
+                IntegrationEventEvidence.verify(
+                        event.copyNode(), event.blueId()));
         ManagedDocumentTransitionReceipt transition = transition(
                 invocationIdentity,
                 contractsDocumentId,
@@ -405,8 +411,8 @@ final class SdkManagedEpochSourceTerminationTest {
                 .sourceOrderKey().orElseThrow();
         TimelineEntry sourceEntry = new TimelineEntry(
                 event,
-                ExactValue.verified(new Node().value(
-                        "retained-terminal-fixture")),
+                java.util.Optional.of(ExactValue.verified(new Node().value(
+                        "retained-terminal-fixture"))),
                 sourceOrder,
                 sourceOrder,
                 new Timeline("synthetic/terminal/source", "fixture"),

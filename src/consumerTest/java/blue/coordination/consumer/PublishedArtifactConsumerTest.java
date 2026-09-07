@@ -7,6 +7,9 @@ import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.Timeline;
 import org.junit.jupiter.api.Test;
+import blue.coordination.sdk.BlueCoordination;
+import blue.coordination.sdk.DocumentHandle;
+import blue.coordination.sdk.ManagedDocument;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,10 +25,46 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>The SDK-first consumer examples live in {@link SdkBuiltJarConsumerTest}
  * and {@link SdkDeveloperGuideTest}. This class retains representative legacy
  * engine flows whose runtime dependencies must also work from the packaged
- * artifact.
+ * artifact. The typed SDK admission failure also crosses this public exception API.
  */
 final class PublishedArtifactConsumerTest {
     private static final long T0 = 1_700_000_000_000_000L;
+
+    @Test
+    void missingSdkAdmissionTypeWaitsAndResumesAgainstBuiltJar() {
+        // given
+        blue.coordination.sdk.ExactBlueValue definition;
+        try (BlueCoordination seed = BlueCoordination.inMemory()) {
+            definition = seed.values().providerContentYaml("name: Consumer label type\ntype: Text\n");
+        }
+        String source = "label:\n  type:\n    blueId: " + definition.blueId()
+                + "\n  value: ready\n";
+        for (String admission : java.util.List.of("document", "closure", "static")) {
+            java.util.Map<String, String> content = new java.util.LinkedHashMap<>();
+            try (BlueCoordination coordination = BlueCoordination.builder()
+                    .exactNodeProvider(id -> java.util.Optional.ofNullable(content.get(id))).build()) {
+                // when
+                java.util.function.Supplier<DocumentHandle> admit = () -> switch (admission) {
+                    case "static" -> coordination.documents().admitStaticProcessEmbedded(source).document("root");
+                    case "closure" -> coordination.documents().admit(blue.coordination.sdk.ManagedClosure.builder()
+                            .document("root", blue.coordination.api.DocumentId.of("consumer-label"), source)
+                            .publicRoot("root").fromNow().build()).document("root");
+                    default -> coordination.documents().admit(ManagedDocument.yaml("consumer-label", source)
+                            .publicRoot().fromNow());
+                };
+                // then
+                blue.coordination.api.CoordinationException blocked = org.junit.jupiter.api.Assertions.assertThrows(
+                        blue.coordination.api.CoordinationException.class, admit::get);
+                assertEquals(blue.coordination.api.CoordinationErrorCode.NEEDS_RESOURCES, blocked.code());
+                assertEquals(definition.blueId(), blocked.details().get("blueId"));
+                content.put(definition.blueId(), definition.json());
+                DocumentHandle document = admit.get();
+                assertEquals(0L, document.snapshot().epoch());
+                assertEquals("ready", document.snapshot().textAt("/label"));
+                assertEquals(1, document.history().size());
+            }
+        }
+    }
 
     @Test
     void counterExternalApiExample() throws Exception {

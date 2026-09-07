@@ -1,6 +1,9 @@
 package blue.coordination.api;
 
 import blue.language.identity.BlueIds;
+import blue.language.processor.closure.ManagedRepresentationCursor;
+import java.util.Optional;
+import java.util.LinkedHashMap;
 
 import java.util.Map;
 import java.util.Objects;
@@ -10,6 +13,10 @@ public final class ManagedEpochApplicationReceipt {
     private static final String IDENTITY_DOMAIN =
             "blue-coordination-managed-epoch-application-receipt/1.0";
 
+    private static final String REPRESENTATION_DOMAIN =
+            "blue-coordination-managed-representation-application-receipt/1.0";
+    private final String representationCauseIdentity;
+    private final ManagedRepresentationCursor resultingRepresentationCursor;
     private final String applicationReceiptIdentity;
     private final String workIdentity;
     private final String planIdentity;
@@ -37,6 +44,40 @@ public final class ManagedEpochApplicationReceipt {
             String consumerRevisionReceiptIdentity,
             String consumerCommittedBlueId,
             long resultingSourceCursor) {
+        this(applicationReceiptIdentity,
+                workIdentity,
+                planIdentity,
+                sourceReceiptIdentity,
+                contractsInvocationIdentity,
+                contractsResultIdentity,
+                commitCompanionIdentity,
+                consumerDocumentId,
+                consumerRevisionEpoch,
+                consumerRevisionReceiptIdentity,
+                consumerCommittedBlueId,
+                resultingSourceCursor, null, null);
+    }
+
+    private ManagedEpochApplicationReceipt(
+            String applicationReceiptIdentity,
+            String workIdentity,
+            String planIdentity,
+            String sourceReceiptIdentity,
+            String contractsInvocationIdentity,
+            String contractsResultIdentity,
+            String commitCompanionIdentity,
+            DocumentId consumerDocumentId,
+            long consumerRevisionEpoch,
+            String consumerRevisionReceiptIdentity,
+            String consumerCommittedBlueId,
+            long resultingSourceCursor,
+            String representationCauseIdentity, ManagedRepresentationCursor resultingRepresentationCursor) {
+        this.representationCauseIdentity = representationCauseIdentity == null ? null
+                : ManagedIdentity.requireSha256(representationCauseIdentity, "representationCauseIdentity");
+        this.resultingRepresentationCursor = resultingRepresentationCursor;
+        if (representationCauseIdentity == null && resultingRepresentationCursor != null) {
+            throw new IllegalArgumentException("A positional cursor requires a representation application");
+        }
         this.workIdentity = ManagedIdentity.requireSha256(
                 workIdentity, "workIdentity");
         this.planIdentity = ManagedIdentity.requireSha256(
@@ -62,7 +103,7 @@ public final class ManagedEpochApplicationReceipt {
                 resultingSourceCursor, "resultingSourceCursor");
         this.applicationReceiptIdentity = ManagedIdentity.verify(
                 applicationReceiptIdentity,
-                IDENTITY_DOMAIN,
+                representationCauseIdentity == null ? IDENTITY_DOMAIN : REPRESENTATION_DOMAIN,
                 identityValue(),
                 "applicationReceiptIdentity");
     }
@@ -107,6 +148,36 @@ public final class ManagedEpochApplicationReceipt {
                 resultingSourceCursor);
     }
 
+    /** Records exactly one applied representation position under its own receipt identity domain. */
+    public static ManagedEpochApplicationReceipt identifiedRepresentation(
+            ManagedEpochApplicationReceipt coordinates, ManagedEpochApplicationWork work,
+            ManagedRepresentationCursor resultingCursor) {
+        var cause = work.representationCause().orElseThrow();
+        if (!coordinates.workIdentity().equals(work.workIdentity())) throw new IllegalArgumentException("Representation receipt belongs to different work");
+        ManagedRepresentationCursor expected = cause.terminalPositionReached() ? null : new ManagedRepresentationCursor(
+                cause.transition().anchorReceiptIdentity(), cause.transition().positionIdentity(),
+                cause.targetPositionIdentity(), cause.nextRevisionReceiptIdentity());
+        if (!Objects.equals(expected, resultingCursor)) throw new IllegalArgumentException("Representation application did not commit exactly its next position");
+        Map<String, Object> value = new LinkedHashMap<>(coordinates.identityValue());
+        value.put("representationCauseIdentity", cause.causeIdentity());
+        value.put("resultingRepresentationCursor", resultingCursor == null ? null : resultingCursor.identityValue());
+        return new ManagedEpochApplicationReceipt(ManagedIdentity.identify(REPRESENTATION_DOMAIN, value),
+                coordinates.workIdentity(),
+                coordinates.planIdentity(),
+                coordinates.sourceReceiptIdentity(),
+                coordinates.contractsInvocationIdentity(),
+                coordinates.contractsResultIdentity(),
+                coordinates.commitCompanionIdentity(),
+                coordinates.consumerDocumentId(),
+                coordinates.consumerRevisionEpoch(),
+                coordinates.consumerRevisionReceiptIdentity(),
+                coordinates.consumerCommittedBlueId(),
+                coordinates.resultingSourceCursor(), cause.causeIdentity(), resultingCursor);
+    }
+
+    public Optional<String> representationCauseIdentity() { return Optional.ofNullable(representationCauseIdentity); }
+    public Optional<ManagedRepresentationCursor> resultingRepresentationCursor() { return Optional.ofNullable(resultingRepresentationCursor); }
+
     public String applicationReceiptIdentity() {
         return applicationReceiptIdentity;
     }
@@ -140,7 +211,7 @@ public final class ManagedEpochApplicationReceipt {
     public long resultingSourceCursor() { return resultingSourceCursor; }
 
     private Map<String, Object> identityValue() {
-        return identityValue(
+        Map<String, Object> value = new LinkedHashMap<>(identityValue(
                 workIdentity,
                 planIdentity,
                 sourceReceiptIdentity,
@@ -151,7 +222,12 @@ public final class ManagedEpochApplicationReceipt {
                 consumerRevisionEpoch,
                 consumerRevisionReceiptIdentity,
                 consumerCommittedBlueId,
-                resultingSourceCursor);
+                resultingSourceCursor));
+        if (representationCauseIdentity != null) {
+            value.put("representationCauseIdentity", representationCauseIdentity);
+            value.put("resultingRepresentationCursor", resultingRepresentationCursor == null ? null : resultingRepresentationCursor.identityValue());
+        }
+        return value;
     }
 
     private static Map<String, Object> identityValue(

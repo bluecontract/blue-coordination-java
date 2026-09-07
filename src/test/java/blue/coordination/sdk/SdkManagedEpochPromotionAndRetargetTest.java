@@ -810,7 +810,6 @@ final class SdkManagedEpochPromotionAndRetargetTest {
     private static String promotionAnchorYaml() {
         return """
                 documentId: %s
-                source: {}
                 contracts:
                   embedded:
                     type: Process Embedded
@@ -829,12 +828,12 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -1055,12 +1054,12 @@ final class SdkManagedEpochPromotionAndRetargetTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute

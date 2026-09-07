@@ -122,6 +122,9 @@ final class StagedCoordinationConsumerTest {
             assertTrue(admitted.managedEpochApplications().isEmpty());
             assertEquals(2L, consumer.snapshot().longAt(
                     "/observedChanges"));
+            assertEquals(source.snapshot().blueId(),
+                    consumer.snapshot().valueAt("/child").blueId());
+            assertEquals(1L, source.snapshot().longAt("/counter"));
             assertEquals(sourceHistory, source.history().stream()
                     .map(revision -> revision.after().blueId())
                     .toList(), "catch-up must not reprocess its source");
@@ -266,7 +269,6 @@ final class StagedCoordinationConsumerTest {
     private static String retainedConsumerYaml(String timelineId) {
         return """
                 documentId: staged-retained-consumer
-                child: {}
                 observedChanges: 0
                 contracts:
                   embedded:
@@ -282,9 +284,10 @@ final class StagedCoordinationConsumerTest {
                   onChanged:
                     type: Coordination/Sequential Workflow
                     channel: fromChild
-                    event:
-                      type: Coordination/Event
-                      kind: Staged/Changed
+                    onProcessingInitiated:
+                      event:
+                        type: Coordination/Event
+                        kind: Staged/Changed
                     steps:
                       - type: Coordination/Compute
                         do:
@@ -313,7 +316,7 @@ final class StagedCoordinationConsumerTest {
                       - type: Coordination/Compute
                         do:
                           - $appendChange:
-                              op: replace
+                              op: add
                               path: /child
                               val: {$binding: event/message/request/child}
                           - $return: true

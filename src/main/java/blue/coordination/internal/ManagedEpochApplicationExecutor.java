@@ -8,6 +8,7 @@ import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedEpochApplicationReceipt;
 import blue.coordination.api.ManagedEpochApplicationWork;
 import blue.coordination.api.ManagedEpochReceipt;
+import blue.coordination.api.SessionStatus;
 import blue.coordination.api.TimelineEntry;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
@@ -336,17 +337,26 @@ final class ManagedEpochApplicationExecutor {
             transaction.expectGraphGeneration(
                     document.documentId(), document.graphGeneration());
         }
-        invocation.input().snapshot().components().forEach(
-                transaction::expectComponentState);
-        if (inventoryDelta.changed()) {
+        invocation.newMemberSet().forEach(transaction::expectAbsent);
+        invocation.input().snapshot().components().stream()
+                .filter(component -> component.orderedMemberDocumentIds()
+                        .stream().allMatch(member -> invocation
+                                .existingMemberSet().contains(
+                                        DocumentId.of(member.value()))))
+                .forEach(transaction::expectComponentState);
+        if (invocation.managedExpansion() || inventoryDelta.changed()) {
             transaction.stageOccurrenceInventory(
                     resultingInventory,
                     resultingInventoryGeneration,
                     resultingComponentIndexGeneration);
         }
         transaction.stageComponentStates(result.resultingComponents());
-        transaction.stageClosureGraphGeneration(result);
-        transaction.stageClosureSubscriptionDeltas(result);
+        if (invocation.managedExpansion()) {
+            transaction.stageManagedExpansionResult(invocation.input(), result);
+        } else {
+            transaction.stageClosureGraphGeneration(result);
+            transaction.stageClosureSubscriptionDeltas(result);
+        }
         transaction.stageOutbox(result.publicEvents());
         transaction.stageCheckpointEvidence(result.checkpointWrites());
 
@@ -383,8 +393,16 @@ final class ManagedEpochApplicationExecutor {
                 ContractsClosureAdapter.CapturedDocument before =
                         invocation.documents().get(entry.getKey());
                 if (before == null) {
-                    throw new UnsupportedNestedNewLineageException(
-                            work, entry.getKey());
+                    ManagedEpochReceipt birth = stageNewLineage(
+                            capture, transaction, result, entry.getValue(),
+                            transitionReceipts.get(entry.getKey()),
+                            resultingClosureSubscriptions, routeReplacements,
+                            causalOrder, sourceCausalEntryBlueId);
+                    resultingHeads.put(entry.getKey(),
+                            new ManagedCatchUpPlanner.Head(0L,
+                                    birth.afterBlueId()));
+                    committedEpochReceipts.put(entry.getKey(), birth);
+                    continue;
                 }
                 ResultingDocument after = entry.getValue();
                 ManagedDocumentTransitionReceipt transition =
@@ -411,7 +429,11 @@ final class ManagedEpochApplicationExecutor {
                                         result, before, after, transition);
                 if (changed
                         && entry.getKey().equals(work.sourceDocumentId())
-                        && !componentRepresentationRebind) {
+                        && !componentRepresentationRebind
+                        && !isVerifiedRetainedSourceReferenceAdvance(
+                                invocation, result, entry.getKey(), before,
+                                after, transition, current.occurrenceInventory(),
+                                resultingInventory)) {
                     throw new ContractsClosureAdapter
                             .ProjectionUnavailableException(
                             "A retained managed application cannot append or "
@@ -426,15 +448,12 @@ final class ManagedEpochApplicationExecutor {
                         entry.getKey(),
                         ClosureSubscriptionInventory.embeddedDemands(
                                 projected));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                projected.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = stateChanged
                         ? layoutBuilder.retainVerifiedClosureRoot(
                                 result,
                                 entry.getKey(),
                                 before.layout(),
-                                routingSurface)
+                                projected)
                         : before.layout();
                 ContractsClosureAdapter.requireExactRootSubscriptionSurface(
                         entry.getKey(),
@@ -639,6 +658,17 @@ final class ManagedEpochApplicationExecutor {
                             consumerRevision.receiptIdentity(),
                             consumerRevision.afterBlueId(),
                             Math.addExact(work.sourceEpoch(), 1L));
+            if (work.isRepresentationApplication()) {
+                var completedOccurrence = resultingInventory.find(work.consumerDocumentId(), work.targetPath())
+                        .orElseThrow(() -> new IllegalStateException("Representation application lost its owning occurrence"));
+                var cause = work.representationCause().orElseThrow();
+                if (completedOccurrence.active() != cause.terminalPositionReached()
+                        || (!completedOccurrence.active() && !java.util.Objects.equals(completedOccurrence.pendingHistoricalEpoch(), cause.fromEpoch()))) {
+                    throw new IllegalStateException("Representation application changed the numbered cursor or activated before its captured tail");
+                }
+                application = ManagedEpochApplicationReceipt.identifiedRepresentation(application, work,
+                        completedOccurrence.pendingRepresentationCursor());
+            }
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
             ManagedCatchUpBarrier owningBarrier = beforeCatchUpPlans
@@ -678,7 +708,9 @@ final class ManagedEpochApplicationExecutor {
                             documentId -> invocation.memberSet().contains(
                                     documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -711,12 +743,114 @@ final class ManagedEpochApplicationExecutor {
         }
     }
 
+    /** Stages one Contracts-authenticated birth in the consumer transaction. */
+    private ManagedEpochReceipt stageNewLineage(
+            ManagedEpochInvocationCapturer.Capture capture,
+            MultiDocumentPublicationTransaction transaction,
+            ClosureProcessResult result,
+            ResultingDocument after,
+            ManagedDocumentTransitionReceipt transition,
+            ClosureSubscriptionInventory subscriptions,
+            List<OperationRouteIndex.Replacement> routeReplacements,
+            ExternalOrderKey causalOrder,
+            String sourceCausalEntryBlueId) {
+        DocumentId id = DocumentId.of(after.documentId().value());
+        ContractsManagedDraftPlan.ManagedDraft draft = capture.invocation()
+                .managedDraft(id);
+        // A resulting body alone does not prove INITIALIZE or its emissions.
+        // The Contracts receipt and companion must authenticate the birth,
+        // including an eventless initialization that preserves the BlueId.
+        if (draft == null || transition == null || after.epoch() != 0L
+                || !after.initialized()
+                || !draft.initial().blueId().equals(after.beforeBlueId())) {
+            throw new UnsupportedNestedNewLineageException(capture.work(), id);
+        }
+        ManagedRootSubscriptionSurface projected = contracts
+                .projectRootSubscriptionSurface(after.document());
+        transaction.stageEmbeddedDemands(id,
+                ClosureSubscriptionInventory.embeddedDemands(projected));
+        EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(
+                result, id, projected);
+        ContractsClosureAdapter.requireExactRootSubscriptionSurface(id,
+                projected, host.subscriptionStatesFor(subscriptions, id));
+        List<SubscriptionDelta.Entry> active = ContractsClosureAdapter
+                .activateInitialSubscriptions(
+                        projected.externalSubscriptions(), causalOrder);
+        CheckpointDomainEvidence.retainAll(active, objects);
+        ExactValue authored = objects.put(draft.initial(),
+                "retained-application-authored-birth");
+        ExactValue initialized = objects.put(layout.semanticRoot(),
+                "retained-application-initialized-birth");
+        ManagedEpochReceipt birth = ManagedEpochReceiptMapper.map(id, 0L,
+                DocumentRevision.Kind.INITIALIZATION, authored, initialized,
+                null, causalOrder, transition, result.platformCommitCompanion());
+        List<Node> emitted = result.publicEvents().stream()
+                .filter(event -> event.publicRootDocumentId().value()
+                        .equals(id.value()))
+                .map(PublicEventOccurrence::event).toList();
+        DocumentRevision revision = new DocumentRevision(id, 0L, 0L,
+                DocumentRevision.Kind.INITIALIZATION, authored, initialized,
+                null, causalOrder, sourceCausalEntryBlueId, null, emitted,
+                transition.admittedGas(), birth);
+        DocumentSession session = new DocumentSession(id, authored, layout,
+                active, causalOrder, revision);
+        session.restoreCoordinationState(after.terminated()
+                        ? SessionStatus.TERMINATED : SessionStatus.READY,
+                causalOrder, 0L, 0L);
+        transaction.stageNewSession(session);
+        transaction.stageManagedEpochReceipt(birth, transition);
+        routeReplacements.add(new OperationRouteIndex.Replacement(id,
+                layout.routingSurface(), active));
+        return birth;
+    }
+
     /**
      * Recognizes every existing member finalized indirectly by this retained
      * application. The directly delivered consumer remains on the ordinary
      * revision lane; an indirect member may only change its representation
      * at the same own epoch under one exact eventless Contracts transition.
      */
+    /** Allows only a new eventless revision of an indirect current source. */
+    private static boolean isVerifiedRetainedSourceReferenceAdvance(
+            ContractsClosureAdapter.CohortInvocation invocation,
+            ClosureProcessResult result,
+            DocumentId documentId,
+            ContractsClosureAdapter.CapturedDocument before,
+            ResultingDocument after,
+            ManagedDocumentTransitionReceipt transition,
+            ManagedOccurrenceInventory prior,
+            ManagedOccurrenceInventory next) {
+        if (!result.commits()
+                || !before.initialized()
+                || before.terminated()
+                || !after.initialized()
+                || after.terminated()
+                || invocation.publicationIdentityMembers().contains(documentId)
+                || after.epoch() != Math.addExact(before.head().epoch(), 1L)
+                || !after.beforeBlueId().equals(before.head().blueId())
+                || after.afterBlueId().equals(before.head().blueId())
+                || transition == null
+                || !transition.documentId().value().equals(documentId.value())
+                || !transition.sourceInvocationIdentity().equals(
+                        result.invocationIdentity())
+                || !transition.beforeBlueId().equals(before.head().blueId())
+                || !transition.afterBlueId().equals(after.afterBlueId())
+                || !transition.emittedRootEvents().isEmpty()) {
+            return false;
+        }
+        // The existing publication path has already verified the complete
+        // result, commit companion, exact input/current-head fences and source
+        // receipt. Authenticate both complete occurrence inventories and all
+        // other parent fields before permitting an ordinary appended revision.
+        return ManagedSourceReferenceRewrite.verifies(
+                before.current().copyNode(), after.document(),
+                prior.rowsFrom(documentId), next.rowsFrom(documentId),
+                invocation.documents().entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                        entry -> entry.getKey().value(), entry -> entry.getValue().current().copyNode())),
+                result.resultingDocuments().stream().collect(java.util.stream.Collectors.toMap(
+                        row -> row.documentId().value(), ResultingDocument::document)));
+    }
+
     private static boolean isIndirectComponentRepresentationRebind(
             ContractsClosureAdapter.CohortInvocation invocation,
             DocumentId documentId,

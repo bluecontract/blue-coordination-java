@@ -656,13 +656,12 @@ final class SdkManagedDraftAcceptanceTest {
             // then
             assertApplied(parentCreated);
             assertApplied(childCreated);
-            // The promoted parent is an independent Root. Its child command
-            // opens only the forward parent -> child closure; the host keeps
-            // the exact retained parent occurrence created by the first call.
-            assertEquals(parentBeforeChild,
+            // Promotion preserves the occurrence: later child creation
+            // propagates the parent's new exact state to its existing host.
+            assertEquals(parent.snapshot().blueId(),
                     host.snapshot().valueAt("/parents/primary").blueId());
-            assertEquals(hostBeforeChild, host.snapshot().blueId());
-            assertEquals(hostHistoryBeforeChild, host.history().size());
+            assertNotEquals(hostBeforeChild, host.snapshot().blueId());
+            assertEquals(hostHistoryBeforeChild + 1, host.history().size());
             assertEquals(child.snapshot().blueId(),
                     parent.snapshot().valueAt("/children/primary").blueId());
             assertNotEquals(parentBeforeChild, parent.snapshot().blueId());
@@ -1740,12 +1739,12 @@ final class SdkManagedDraftAcceptanceTest {
                         type:
                           blueId: %s
                         order: 0
-                        event:
-                          type:
-                            blueId: %s
                       onProcessingInitiated:
                         type: Coordination/Sequential Workflow
                         channel: lifecycleChannel
+                        event:
+                          type:
+                            blueId: %s
                         order: 0
                         steps:
                           - type: Coordination/Compute
@@ -1773,12 +1772,12 @@ final class SdkManagedDraftAcceptanceTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute

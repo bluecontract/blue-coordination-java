@@ -90,6 +90,11 @@ jobs:
         run: node --test .github/scripts/prepare-rc-release.test.js
 
       - name: Prepare RC version for verification
+        # Release commits on next already contain the version being verified.
+        if: >-
+          ${{ !(github.event_name == 'push'
+            && github.ref == 'refs/heads/next'
+            && startsWith(github.event.head_commit.message || '', 'chore: release ')) }}
         run: node .github/scripts/prepare-rc-release.js
 
       - name: Seal prepared RC verification worktree

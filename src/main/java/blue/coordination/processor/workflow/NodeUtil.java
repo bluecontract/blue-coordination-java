@@ -2,8 +2,6 @@ package blue.coordination.processor.workflow;
 
 import blue.language.model.Node;
 
-import java.util.Map;
-
 /**
  * Strict scalar and property accessors for mutable workflow input nodes.
  *
@@ -31,7 +29,7 @@ final class NodeUtil {
                 && node.getValueType() == null
                 && node.getValue() == null
                 && node.getItems() == null
-                && empty(node.getProperties())
+                && node.getProperties() == null
                 && node.getContracts() == null
                 && node.getBlueId() == null
                 && node.getSchema() == null
@@ -82,10 +80,6 @@ final class NodeUtil {
             return ((Boolean) raw).booleanValue();
         }
         throw new IllegalArgumentException("Expected Boolean scalar for " + key);
-    }
-
-    private static boolean empty(Map<?, ?> map) {
-        return map == null || map.isEmpty();
     }
 
 }

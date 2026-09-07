@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -184,10 +185,10 @@ final class ContractsManagedDraftExpansionTest {
 
             // then
             assertTrue(outcome.attempt().isComplete());
-            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+            assertEquals(ProcessorStatus.RUNTIME_FATAL,
                     outcome.attempt().processResult().status());
             assertEquals(ProcessorErrorCategory
-                            .ManagedOccurrenceBindingMissing,
+                            .ProtectedProcessorStateMutation,
                     outcome.attempt().processResult().diagnostic()
                             .category());
             assertFalse(outcome.attempt().processResult().commits());
@@ -219,6 +220,90 @@ final class ContractsManagedDraftExpansionTest {
     }
 
     @Test
+    void unmetOccurrenceRejectionIsAtomicExactAndReplaysItsOriginalAttempt() {
+        // given
+        try (DefaultCoordinationEngine engine = admittedHost("managed/unmet")) {
+            ExactValue target = engine.document(HOST).current();
+            ExactValue draft = draft(engine);
+            ContractsManagedDraftPlan expectation = plan(HOST, target, draft, "order", "/orders/missing");
+            TimelineEntry entry = engine.append(engine.timeline("managed/unmet", ACTOR),
+                    Operation.exact("createOrder", "ownerChannel", engine.referenceRequest("order", draft))
+                            .targeting(target, true), expectation);
+            ContractsClosureAdapter adapter = engine.contractsClosureAdapter();
+            var batch = adapter.capture(entry);
+            var invocation = batch.invocations().get(0);
+            var before = engine.documents().publicationSnapshot();
+            adapter.onStoreFailurePoint(point -> {
+                if (point == MultiDocumentPublicationTransaction.FailurePoint.BEFORE_SWAP) {
+                    throw new IllegalStateException("before-rejection-swap");
+                }
+            });
+
+            // when
+            var failure = assertThrows(IllegalStateException.class,
+                    () -> adapter.executeAndPublish(batch, invocation));
+            adapter.onStoreFailurePoint(ignored -> { });
+            var rolledBack = engine.documents().publicationSnapshot();
+            var rejected = adapter.executeAndPublish(batch, invocation);
+            var receipt = engine.documents().closurePublicationReceipt(rejected.publicationIdentity()).orElseThrow();
+            var replay = adapter.executeAndPublish(batch, invocation);
+            var after = engine.documents().publicationSnapshot();
+
+            // then
+            assertEquals("before-rejection-swap", failure.getMessage());
+            assertEquals(before.documentHeads(), rolledBack.documentHeads());
+            assertEquals(before.closurePublicationReceipts(), rolledBack.closurePublicationReceipts());
+            assertFalse(rejected.published());
+            assertTrue(rejected.attempt().processResult().commits());
+            assertSame(expectation, receipt.rejectedDraftPlan());
+            assertFalse(receipt.commits());
+            assertTrue(replay.replayed());
+            assertFalse(replay.published());
+            assertSame(rejected.attempt(), replay.attempt());
+            assertSame(rejected.attempt().processResult().gasTrace(), replay.attempt().processResult().gasTrace());
+            assertFalse(receipt.managedSurfaceEvidence().present());
+            assertEquals(before.documentHeads(), after.documentHeads());
+            assertEquals(before.outbox(), after.outbox());
+            assertEquals(before.checkpointEvidence(), after.checkpointEvidence());
+            assertEquals(before.occurrenceInventory().rows(), after.occurrenceInventory().rows());
+            assertEquals(before.componentStates(), after.componentStates());
+            assertTrue(engine.documents().find(DRAFT).isEmpty());
+            assertEquals(before.closurePublicationReceipts().size() + 1, after.closurePublicationReceipts().size());
+
+            // A receipt cannot invent an unmet path outside its captured input.
+            var forged = new ContractsClosurePublicationReceipt("forged-missing-path", receipt.documentIds(),
+                    receipt.attempt(), 0L, ManagedSurfacePublicationEvidence.empty(),
+                    plan(HOST, target, draft, "order", "/orders/never-captured"));
+            var invalid = rejectedTransaction(engine, invocation, forged);
+            assertThrows(IllegalStateException.class, invalid::commit);
+            // Even unchanged component values are forbidden semantic staging for this host decision.
+            var staged = new ContractsClosurePublicationReceipt("rejection-with-staged-effects", receipt.documentIds(),
+                    receipt.attempt(), 0L, ManagedSurfacePublicationEvidence.empty(), expectation);
+            var invalidEffects = rejectedTransaction(engine, invocation, staged);
+            invalidEffects.stageComponentStates(receipt.attempt().processResult().resultingComponents());
+            assertThrows(IllegalStateException.class, invalidEffects::commit);
+            assertEquals(after.closurePublicationReceipts(), engine.documents().publicationSnapshot().closurePublicationReceipts());
+            assertEquals(after.documentHeads(), engine.documents().publicationSnapshot().documentHeads());
+        }
+    }
+
+    private static MultiDocumentPublicationTransaction rejectedTransaction(
+            DefaultCoordinationEngine engine, ContractsClosureAdapter.CohortInvocation invocation,
+            ContractsClosurePublicationReceipt receipt) {
+        var state = engine.documents().publicationSnapshot();
+        var transaction = engine.documents().beginAtomicPublication(receipt.publicationIdentity(),
+                state.occurrenceInventoryGeneration(), state.componentIndexGeneration());
+        invocation.documents().forEach((id, captured) -> {
+            transaction.expectHead(id, captured.head().epoch(), captured.head().blueId());
+            transaction.expectGraphGeneration(id, captured.graphGeneration());
+        });
+        invocation.newMemberSet().forEach(transaction::expectAbsent);
+        transaction.stageManagedExpansionInput(invocation.input());
+        transaction.stageClosurePublicationReceipt(receipt);
+        return transaction;
+    }
+
+    @Test
     void virtualRollbackReceiptSurvivesLaterAdmissionOfSameLineage() {
         // given
 
@@ -242,7 +327,7 @@ final class ContractsManagedDraftExpansionTest {
 
             // then
             assertEquals(List.of(rejectedEntry), rejected.processedEntries());
-            assertEquals(ProcessorStatus.INVALID_PROCESSING_DOCUMENT,
+            assertEquals(ProcessorStatus.RUNTIME_FATAL,
                     rejected.contractsAttemptsFor(rejectedEntry.blueId())
                             .get(0).attempt().processResult().status());
             assertTrue(engine.documents().find(DRAFT).isEmpty());
@@ -1132,6 +1217,9 @@ final class ContractsManagedDraftExpansionTest {
                     steps:
                       - type: Coordination/Compute
                         do:
+                          - $appendChange:
+                              op: remove
+                              path: /contracts/initialized
                           - $return: true
                 """.formatted(timelineId);
     }

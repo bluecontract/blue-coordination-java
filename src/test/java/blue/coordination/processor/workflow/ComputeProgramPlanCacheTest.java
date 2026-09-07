@@ -278,7 +278,12 @@ class ComputeProgramPlanCacheTest {
                                                                         "do",
                                                                         new Node()
                                                                                 .items(
-                                                                                        new Node())))));
+                                                                                        new Node()
+                                                                                                .properties(
+                                                                                                        "$return",
+                                                                                                        new Node()
+                                                                                                                .value(
+                                                                                                                        "projected")))))));
         ComputeProgramNormalizer normalizer =
                 new ComputeProgramNormalizer();
 

@@ -74,6 +74,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Package-internal Contracts 1.0 execution and atomic-publication boundary.
@@ -184,7 +185,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 runtime.documentProcessor(), executionObserver);
         ManagedOccurrenceResolver occurrenceResolver =
                 new ManagedOccurrenceResolver(
-                        runtime.nodeProvider(), runtime.metrics());
+                        runtime.nodeProvider(), runtime.metrics(), new ManagedRepresentationHistory(documents));
         this.automaticResolutionCoordinator =
                 new AutomaticOccurrenceResolutionCoordinator<
                         CohortInvocation>(
@@ -272,8 +273,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     topology.componentIndex(),
                     topology.occurrenceInventory(),
                     selection,
-                    row -> hasTypedIncomingDemand(
-                            topology.closureSubscriptions(), row),
                     runtime.metrics());
             LinkedHashSet<DocumentId> selectedMembers = new LinkedHashSet<>();
             selectedCohorts.forEach(cohort -> selectedMembers.addAll(
@@ -578,15 +577,20 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 + attempt.processResult().diagnostic()
                                         .details());
             }
+            ContractsManagedDraftPlan rejected = attempt.processResult().commits()
+                    && executed.managedDraftPlan() != null
+                    && executed.managedDraftPlan().missingExpectedOccurrence(attempt.processResult())
+                    ? executed.managedDraftPlan() : null;
+            if (rejected != null) requireCommitFences(executed, attempt.processResult());
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
                     executed.members(),
                     attempt,
                     automatic.expansionCount(),
-                    attempt.processResult().commits()
+                    attempt.processResult().commits() && rejected == null
                             ? ManagedSurfacePublicationEvidence.committed(
                                     executed, attempt.processResult())
-                            : ManagedSurfacePublicationEvidence.empty());
+                            : ManagedSurfacePublicationEvidence.empty(), rejected);
         } finally {
             runtime.metrics().addNanos(
                     RESULT_VALIDATION_PHASE,
@@ -633,7 +637,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 replayed,
                 receipt.automaticRetryCount(),
                 receipt.managedSurfaceEvidence(),
-                List.of());
+                List.of(), receipt.rejectedDraftPlan());
     }
 
     synchronized Optional<ContractsClosurePublicationReceipt>
@@ -729,9 +733,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Process receipt identity does not identify this cohort");
         }
         requireTerminalResult(invocation, result);
-        if (result.commits()) {
+        if (receipt.commits()) {
             throw new IllegalArgumentException(
-                    "Receipt-only publication requires a non-commit result");
+                    "Receipt-only publication requires a non-commit decision");
         }
         InMemoryDocumentStore.ClosureSnapshot current =
                 documents.closureSnapshot(invocation.existingMemberSet());
@@ -847,7 +851,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 componentIndex,
                 occurrenceInventory,
                 selection,
-                ignored -> false,
                 null);
     }
 
@@ -855,21 +858,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ProcessEmbeddedComponentIndex componentIndex,
             ManagedOccurrenceInventory occurrenceInventory,
             OperationRouteIndex.FrozenDirectDeliverySelection selection,
-            EngineMetrics metrics) {
-        return partitionSelection(
-                componentIndex,
-                occurrenceInventory,
-                selection,
-                ignored -> false,
-                metrics);
-    }
-
-    private static List<CohortSelection> partitionSelection(
-            ProcessEmbeddedComponentIndex componentIndex,
-            ManagedOccurrenceInventory occurrenceInventory,
-            OperationRouteIndex.FrozenDirectDeliverySelection selection,
-            java.util.function.Predicate<ManagedOccurrenceBinding>
-                    incomingDemand,
             EngineMetrics metrics) {
         ProcessEmbeddedComponentIndex index = Objects.requireNonNull(
                 componentIndex, "componentIndex");
@@ -888,7 +876,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 continue;
             }
             ConnectedSelection connected = connectedSelection(
-                    inventory, incomingDemand, directTarget);
+                    inventory, directTarget);
             connected = mergeIntersecting(groups, connected);
             groups.add(connected);
             occurrenceRowsExamined = Math.addExact(
@@ -922,8 +910,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private static ConnectedSelection connectedSelection(
             ManagedOccurrenceInventory inventory,
-            java.util.function.Predicate<ManagedOccurrenceBinding>
-                    incomingDemand,
             DocumentId start) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
@@ -932,38 +918,48 @@ final class ContractsClosureAdapter implements AutoCloseable {
         pending.addLast(start);
         Map<String, ManagedOccurrenceBinding> occurrences =
                 new LinkedHashMap<>();
+        // The captured inventory cannot change during selection. Retain the
+        // reverse frontier as publication adds parents and their forward branches;
+        // each ancestor's incoming rows need to be opened only once.
+        TreeMap<DocumentId, Boolean> reverseReachable = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
         long rowsExamined = 0L;
-        while (!pending.isEmpty()) {
-            DocumentId current = pending.removeFirst();
-            for (ManagedOccurrenceBinding row : inventory.rowsFrom(current)) {
-                if (occurrences.putIfAbsent(
-                        row.occurrenceIdentity(), row) != null) {
-                    continue;
-                }
-                rowsExamined = Math.addExact(rowsExamined, 1L);
-                DocumentId target = coordinationId(row.targetDocumentId());
-                if (discovered.putIfAbsent(target, Boolean.TRUE) == null) {
-                    pending.addLast(target);
+        while (true) {
+            while (!pending.isEmpty()) {
+                DocumentId current = pending.removeFirst();
+                for (ManagedOccurrenceBinding row
+                        : inventory.rowsFrom(current)) {
+                    if (occurrences.putIfAbsent(
+                            row.occurrenceIdentity(), row) != null) {
+                        continue;
+                    }
+                    rowsExamined = Math.addExact(rowsExamined, 1L);
+                    DocumentId target = coordinationId(
+                            row.targetDocumentId());
+                    if (discovered.putIfAbsent(
+                            target, Boolean.TRUE) == null) {
+                        pending.addLast(target);
+                    }
                 }
             }
-            for (ManagedOccurrenceBinding row
-                    : inventory.rowsTouching(current)) {
-                DocumentId target = coordinationId(row.targetDocumentId());
-                if (!target.equals(current)) {
+
+            extendReverseReachableThroughActiveOccurrences(
+                    inventory, discovered.keySet(), reverseReachable);
+            boolean addedSource = false;
+            for (DocumentId source : reverseReachable.keySet()) {
+                if (discovered.containsKey(source)) {
                     continue;
                 }
-                DocumentId source = coordinationId(row.sourceDocumentId());
-                if (source.equals(current)
-                        || !row.active()
-                        || !incomingDemand.test(row)
-                        || occurrences.putIfAbsent(
-                                row.occurrenceIdentity(), row) != null) {
-                    continue;
-                }
-                rowsExamined = Math.addExact(rowsExamined, 1L);
-                if (discovered.putIfAbsent(source, Boolean.TRUE) == null) {
-                    pending.addLast(source);
-                }
+                // Every active occurrence owns an exact embedded value that
+                // must be republished with its child. Typed listener demands
+                // govern event delivery inside Contracts, not this state
+                // publication boundary.
+                discovered.put(source, Boolean.TRUE);
+                pending.addLast(source);
+                addedSource = true;
+            }
+            if (!addedSource) {
+                break;
             }
         }
         ArrayList<ManagedOccurrenceBinding> canonicalOccurrences =
@@ -977,27 +973,43 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /**
      * Selects the ordinary affected closure for one managed-revision seed.
-     * Forward occurrences retain their existing descendants, while active
-     * reverse parents join only when their published typed demand observes the
-     * changed child.
+     * Forward occurrences retain authoritative reservations and descendants; active
+     * reverse parents retain every occurrence of the changed child. Listener
+     * matching remains owned by Contracts during event delivery.
      */
     static ConnectedSelection initialConnectedSelection(
             ManagedOccurrenceInventory inventory,
             ClosureSubscriptionInventory subscriptions,
             DocumentId start) {
-        ClosureSubscriptionInventory selectedSubscriptions =
-                Objects.requireNonNull(subscriptions, "subscriptions");
-        return connectedSelection(
-                inventory,
-                row -> hasTypedIncomingDemand(selectedSubscriptions, row),
-                start);
+        Objects.requireNonNull(subscriptions, "subscriptions");
+        return connectedSelection(inventory, start);
     }
 
-    private static boolean hasTypedIncomingDemand(
-            ClosureSubscriptionInventory subscriptions,
-            ManagedOccurrenceBinding row) {
-        DocumentId source = coordinationId(row.sourceDocumentId());
-        return subscriptions.hasEmbeddedDemand(source, row.sourcePath());
+    private static void extendReverseReachableThroughActiveOccurrences(
+                    ManagedOccurrenceInventory inventory,
+                    Collection<DocumentId> selectedMembers,
+                    TreeMap<DocumentId, Boolean> result) {
+        Deque<DocumentId> pending = new ArrayDeque<>();
+        for (DocumentId selected : selectedMembers) {
+            if (result.putIfAbsent(selected, Boolean.TRUE) == null) {
+                pending.addLast(selected);
+            }
+        }
+        while (!pending.isEmpty()) {
+            DocumentId current = pending.removeFirst();
+            for (ManagedOccurrenceBinding row
+                    : inventory.rowsTouching(current)) {
+                if (!row.active()
+                        || !coordinationId(row.targetDocumentId())
+                                .equals(current)) {
+                    continue;
+                }
+                DocumentId source = coordinationId(row.sourceDocumentId());
+                if (result.putIfAbsent(source, Boolean.TRUE) == null) {
+                    pending.addLast(source);
+                }
+            }
+        }
     }
 
     private static ConnectedSelection mergeIntersecting(
@@ -1309,7 +1321,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     + plan.targetDocumentId());
         }
         result.set(selected, augmentWithManagedDrafts(
-                base, plan, entry.exactRequest()));
+                base,
+                plan,
+                entry.request().orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Managed expansion requires a present exact request"))));
         return List.copyOf(result);
     }
 
@@ -1647,7 +1663,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     blue.language.processor.closure.DocumentId target =
                             closureId(occurrence.targetDocumentId());
                     if (historicalEpoch != null
-                            && !retained.targetDocumentId().equals(target)
                             && current.input().snapshot()
                                     .managedDocument(target) != null) {
                         ManagedOccurrenceEvidenceResolution exact =
@@ -2333,14 +2348,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             entry.getKey(),
                             ClosureSubscriptionInventory.embeddedDemands(
                                     projected));
-                    RoutingSurface routingSurface = RoutingSurface
-                            .fromManagedRootContracts(
-                                    projected.effectiveRootContracts());
                     EmbeddedOnlyLayout layout = layoutBuilder
                             .retainVerifiedClosureRoot(
                                     result,
                                     entry.getKey(),
-                                    routingSurface);
+                                    projected);
                     requireExactRootSubscriptionSurface(
                             entry.getKey(),
                             projected,
@@ -2449,15 +2461,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         entry.getKey(),
                         ClosureSubscriptionInventory.embeddedDemands(
                                 projected));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                projected.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = stateChanged
                         ? layoutBuilder.retainVerifiedClosureRoot(
                                 result,
                                 entry.getKey(),
                                 before.layout(),
-                                routingSurface)
+                                projected)
                         : before.layout();
                 requireExactRootSubscriptionSurface(
                         entry.getKey(),
@@ -2607,7 +2616,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             documentId -> invocation.memberSet().contains(
                                     documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             requireRouteSelectionCurrent(batch, invocation);
@@ -2662,18 +2673,18 @@ final class ContractsClosureAdapter implements AutoCloseable {
     static void requirePublishableResult(
             CohortInvocation invocation,
             ClosureProcessResult result) {
+        requireCommitFences(invocation, result);
+        if (invocation.managedExpansion()) requireManagedExpansionResult(invocation, result);
+        if (invocation.automaticExpansion() != null) requireAutomaticOccurrenceResults(invocation, result);
+    }
+
+    private static void requireCommitFences(CohortInvocation invocation, ClosureProcessResult result) {
         if (!result.commits()
                 || result.platformCommitCompanion() == null) {
             throw new IllegalArgumentException(
                     "Only a committing result can be published");
         }
-        if (!result.invocationIdentity().equals(
-                invocation.executionInvocationIdentity())
-                || !result.inputClosureIdentity().equals(
-                invocation.input().snapshot().closureIdentity())) {
-            throw new IllegalStateException(
-                    "Closure result does not belong to the captured input");
-        }
+        requireTerminalResult(invocation, result);
         ClosureCommitCompanion companion = result.platformCommitCompanion();
         if (companion.expectedInputGraphGeneration()
                 != invocation.input().snapshot().graphGeneration()) {
@@ -2705,12 +2716,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                         + "expansion input " + documentId);
                     }
                 });
-        if (invocation.managedExpansion()) {
-            requireManagedExpansionResult(invocation, result);
-        }
-        if (invocation.automaticExpansion() != null) {
-            requireAutomaticOccurrenceResults(invocation, result);
-        }
     }
 
     private static void requireManagedExpansionResult(
@@ -2735,48 +2740,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (invocation.managedDraftPlan() == null) {
             return;
         }
-        ResultingDocument source = documents.get(
-                invocation.managedDraftPlan().targetDocumentId());
-        for (ContractsManagedDraftPlan.ExpectedOccurrence expectation
-                : invocation.managedDraftPlan().expectedOccurrences()) {
-            ResultingDocument target = documents.get(
-                    expectation.targetDocumentId());
-            List<ManagedOccurrenceBinding> prospectiveRows = invocation.input()
-                    .snapshot().occurrences().stream()
-                    .filter(row -> !row.active()
-                            && row.sourceDocumentId().value().equals(
-                                    source.documentId().value())
-                            && row.sourcePath().equals(expectation.path())
-                            && row.targetDocumentId().value().equals(
-                                    expectation.targetDocumentId().value()))
-                    .toList();
-            if (prospectiveRows.size() != 1) {
-                throw new IllegalStateException(
-                        "Managed expansion input has no unique prospective "
-                                + "occurrence at " + expectation.path());
-            }
-            ManagedOccurrenceBinding prospective = prospectiveRows.get(0);
-            List<ManagedOccurrenceBinding> matches = result
-                    .occurrenceBindings().stream()
-                    .filter(row -> row.sourceDocumentId().value().equals(
-                            source.documentId().value())
-                            && row.sourcePath().equals(expectation.path()))
-                    .toList();
-            Node exact = NodePathEditor.getOrNull(
-                    source.document(), expectation.path());
-            if (matches.size() != 1
-                    || !matches.get(0).active()
-                    || !matches.get(0).occurrenceIdentity().equals(
-                            prospective.occurrenceIdentity())
-                    || !matches.get(0).targetDocumentId().value().equals(
-                            expectation.targetDocumentId().value())
-                    || !matches.get(0).expectedTargetBlueId().equals(
-                            target.afterBlueId())
-                    || exact == null
-                    || !target.afterBlueId().equals(exact.getBlueId())) {
-                throw new IllegalStateException(
-                        "Managed occurrence was not established exactly at "
-                                + expectation.path());
+        ContractsManagedDraftPlan plan = invocation.managedDraftPlan();
+        if (plan.missingExpectedOccurrence(result)) {
+            throw new IllegalStateException("Expected managed occurrence was not established");
+        }
+        for (ContractsManagedDraftPlan.ExpectedOccurrence expectation : plan.expectedOccurrences()) {
+            ManagedOccurrenceBinding prospective = plan.prospectiveOccurrence(invocation.input(), expectation);
+            ManagedOccurrenceBinding established = result.occurrenceBindings().stream()
+                    .filter(row -> row.sourceDocumentId().value().equals(plan.targetDocumentId().value())
+                            && row.sourcePath().equals(expectation.path())).findFirst().orElseThrow();
+            if (!established.occurrenceIdentity().equals(prospective.occurrenceIdentity())) {
+                throw new IllegalStateException("Managed occurrence does not preserve its unique prospective identity");
             }
         }
     }
@@ -2944,7 +2918,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return new SubscriptionDelta(added, removed);
     }
 
-    private static List<SubscriptionDelta.Entry> activateInitialSubscriptions(
+    static List<SubscriptionDelta.Entry> activateInitialSubscriptions(
             List<SubscriptionDelta.Entry> desired,
             blue.language.processor.ExternalOrderKey frontier) {
         ArrayList<SubscriptionDelta.Entry> result = new ArrayList<>();
@@ -3706,6 +3680,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
     }
 
+
+
     record CohortInvocation(
             List<DocumentId> members,
             List<DirectLogicalDelivery> directDeliveries,
@@ -3978,7 +3954,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
             long automaticRetryCount,
             ManagedSurfacePublicationEvidence managedSurfaceEvidence,
             List<ManagedOccurrenceResolver.UnresolvedDemand>
-                    unresolvedDemands) {
+                    unresolvedDemands,
+            ContractsManagedDraftPlan rejectedDraftPlan) {
+        CohortOutcome(List<DocumentId> members, List<DocumentId> publicationMembers,
+                ClosureAttemptResult attempt, boolean published, String publicationIdentity,
+                boolean replayed, long retries, ManagedSurfacePublicationEvidence evidence,
+                List<ManagedOccurrenceResolver.UnresolvedDemand> demands) {
+            this(members, publicationMembers, attempt, published, publicationIdentity,
+                    replayed, retries, evidence, demands, null);
+        }
+
         CohortOutcome(
                 List<DocumentId> members,
                 ClosureAttemptResult attempt,
@@ -3999,6 +3984,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         CohortOutcome {
+            if (rejectedDraftPlan != null && (published || publicationIdentity == null
+                    || !attempt.isComplete() || !attempt.processResult().commits()
+                    || !rejectedDraftPlan.missingExpectedOccurrence(attempt.processResult()))) {
+                throw new IllegalArgumentException("Unpublished success requires its exact managed draft rejection");
+            }
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
             publicationMembers = List.copyOf(Objects.requireNonNull(
@@ -4070,14 +4060,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     static long maximumCapturedGraphGeneration(
             Collection<CapturedDocument> documents) {
-        long maximum = -1L;
-        for (CapturedDocument document : Objects.requireNonNull(
-                documents, "documents")) {
-            maximum = Math.max(
-                    maximum,
-                    Objects.requireNonNull(document, "document")
-                            .graphGeneration());
-        }
+        long maximum = Objects.requireNonNull(documents, "documents").stream()
+                .mapToLong(document -> Objects.requireNonNull(document, "document").graphGeneration())
+                .max().orElse(-1L);
         if (maximum < 0L) {
             throw new IllegalArgumentException(
                     "A captured graph-generation cohort must not be empty");
@@ -4113,7 +4098,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             String targetDocumentId,
             String expectedTargetBlueId,
             boolean active,
-            Long pendingHistoricalEpoch) {
+            Long pendingHistoricalEpoch,
+            blue.language.processor.closure.ManagedRepresentationCursor pendingRepresentationCursor) {
         static OccurrenceProjection from(ManagedOccurrenceBinding row) {
             return new OccurrenceProjection(
                     row.occurrenceIdentity(),
@@ -4125,7 +4111,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     row.targetDocumentId().value(),
                     row.expectedTargetBlueId(),
                     row.active(),
-                    row.pendingHistoricalEpoch());
+                    row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
         }
     }
 

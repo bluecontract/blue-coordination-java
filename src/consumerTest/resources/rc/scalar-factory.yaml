@@ -1,0 +1,181 @@
+name: Tutorial Order Factory Host
+documentId: tutorial-order-factory-host
+initializedOrderCount: 0
+lastInitializedOrder: none
+orders: {}
+
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths:
+      - /orders
+
+  merchantChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: tutorial/order-factory/merchant
+    actor:
+      type: MyOS/Principal Actor
+      accountId: merchant
+
+  createOrder01:
+    name: Create Order 01
+    description: Construct a managed Order from required customerReference and quantity scalars.
+    type: Coordination/Sequential Workflow Operation
+    channel: merchantChannel
+    request:
+      customerReference:
+        type: Text
+        schema:
+          required: true
+      quantity:
+        type: Integer
+        schema:
+          required: true
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /orders/order-01
+              val:
+                $objectSet:
+                  object:
+                    $objectSet:
+                      object:
+                        $literal:
+                          name: Tutorial Order
+                          documentId: tutorial-order
+                          customerReference: customer-42
+                          quantity: 3
+                          status: draft
+                          initializedState: pending
+
+                          contracts:
+                            lifecycle:
+                              type: Lifecycle Event Channel
+                              order: 0
+
+                            initialize:
+                              type: Coordination/Sequential Workflow
+                              channel: lifecycle
+                              order: 0
+                              steps:
+                                - type: Coordination/Compute
+                                  do:
+                                    - $appendChange:
+                                        op: replace
+                                        path: /initializedState
+                                        val: initialized
+
+                                    - $appendEvent:
+                                        type: Coordination/Event
+                                        kind: Tutorial/Order Initialized
+                                        orderDocumentId:
+                                          $document: /documentId
+
+                                    - $return: true
+
+                            ownerChannel:
+                              type: Coordination/Timeline Channel
+                              timeline:
+                                type: MyOS/MyOS Timeline
+                                timelineId: tutorial/orders/alice
+                              actor:
+                                type: MyOS/Principal Actor
+                                accountId: alice
+
+                            markReady:
+                              type: Coordination/Sequential Workflow Operation
+                              channel: ownerChannel
+                              request: {}
+                              steps:
+                                - type: Coordination/Compute
+                                  do:
+                                    - $appendChange:
+                                        op: replace
+                                        path: /status
+                                        val: ready
+
+                                    - $appendEvent:
+                                        type: Coordination/Event
+                                        kind: Tutorial/Order Ready
+
+                                    - $return: true
+
+                            merchantChannel:
+                              type: Coordination/Timeline Channel
+                              timeline:
+                                type: MyOS/MyOS Timeline
+                                timelineId: tutorial/order-factory/merchant
+                              actor:
+                                type: MyOS/Principal Actor
+                                accountId: merchant
+
+                            approve:
+                              name: Approve Order
+                              type: Coordination/Sequential Workflow Operation
+                              channel: merchantChannel
+                              request: {}
+                              steps:
+                                - type: Coordination/Compute
+                                  do:
+                                    - $appendChange:
+                                        op: replace
+                                        path: /status
+                                        val: approved
+
+                                    - $appendEvent:
+                                        type: Coordination/Event
+                                        kind: Tutorial/Order Approved
+                                        orderDocumentId:
+                                          $document: /documentId
+
+                                    - $return: true
+                      key: customerReference
+                      val:
+                        $binding: event/message/request/customerReference
+                  key: quantity
+                  val:
+                    $binding: event/message/request/quantity
+
+          - $return: true
+
+  fromOrderInitialized:
+    type: Embedded Node Channel
+    sourcePath: /orders/order-01
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Initialized
+
+  recordOrderInitialization:
+    type: Coordination/Sequential Workflow
+    channel: fromOrderInitialized
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Initialized
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /initializedOrderCount
+              val:
+                $add:
+                  - $document: /initializedOrderCount
+                  - 1
+
+          - $appendChange:
+              op: replace
+              path: /lastInitializedOrder
+              val:
+                $document: /orders/order-01/documentId
+
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Tutorial/Host Observed Order Initialization
+              orderDocumentId:
+                $document: /orders/order-01/documentId
+
+          - $return: true

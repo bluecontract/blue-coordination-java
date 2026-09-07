@@ -66,6 +66,7 @@ final class SdkDeveloperGuideTest {
                     .from(sales)
                     .call("confirm")
                     .through("salesChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(confirmed);
 
@@ -73,6 +74,7 @@ final class SdkDeveloperGuideTest {
                     .from(sales)
                     .call("complete")
                     .through("salesChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(completed);
 
@@ -125,10 +127,13 @@ final class SdkDeveloperGuideTest {
                     promotedReceipt.history().size());
             assertEquals(entriesBeforePromotion,
                     blue.advanced().auditTimelineEntries().size());
+            int paymentHistoryBeforeSent = payment.history().size();
+            String paymentBeforeSent = payment.snapshot().blueId();
             EntryResult sent = blue.operations().on(promotedReceipt)
                     .from(receiptWorker)
                     .call("markSent")
                     .through("workerChannel")
+                    .requestYaml("{}")
                     .execute();
             requireApplied(sent);
 
@@ -159,12 +164,12 @@ final class SdkDeveloperGuideTest {
             assertTrue(shipment.snapshot().ready());
             assertTrue(route.snapshot().ready());
             assertTrue(receipt.snapshot().ready());
-            assertEquals(receiptBeforePromotion,
+            assertEquals(receipt.snapshot().blueId(),
                     payment.snapshot().valueAt(
                             "/receipts/primary").blueId());
-            assertFalse(receipt.snapshot().blueId().equals(
-                    payment.snapshot().valueAt(
-                            "/receipts/primary").blueId()));
+            assertFalse(receiptBeforePromotion.equals(receipt.snapshot().blueId()));
+            assertFalse(paymentBeforeSent.equals(payment.snapshot().blueId()));
+            assertEquals(paymentHistoryBeforeSent + 1, payment.history().size());
             assertFalse(order.exact().cyclicMember());
             assertFalse(payment.exact().cyclicMember());
             assertTrue(shipment.exact().cyclicMember());

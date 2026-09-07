@@ -15,7 +15,7 @@ final class ContractsRootSourceSurfaceTest {
     private static final String POLICY =
             "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     private static final String BLUE_ID =
-            "4ZMfXZbSNVnEaqHVwYyYFHSfJ4JYs6VbR2oLZNqNkScr";
+            "8M3d43KXskYr7rrdiaXPiPHmypFEjtU4uUyECtU7Tiyx";
     private static final DocumentId ROOT = DocumentId.of("root");
     private static final DocumentId CHILD = DocumentId.of("child");
     private static final DocumentId LEAF = DocumentId.of("leaf");
@@ -90,6 +90,68 @@ final class ContractsRootSourceSurfaceTest {
                 first.timelineIds());
         assertEquals(List.of(OTHER_ROOT), second.managedDocuments());
         assertEquals(Set.of("timeline/other"), second.timelineIds());
+    }
+
+    @Test
+    void prospectiveMemberUnderAbsentCollectionStaysOutsideActiveSurface() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(inactive(
+                        ROOT, "/orders/order-1", INACTIVE)));
+
+        // when
+        ContractsRootSourceSurface.Surface surface =
+                ContractsRootSourceSurface.resolve(
+                        ContractsRootFeederWindow.LaneId.publicRoots(
+                                List.of(ROOT)),
+                        inventory,
+                        document -> document.equals(ROOT)
+                                ? Set.of("timeline/root")
+                                : Set.of("timeline/inactive"));
+
+        // then
+        assertEquals(List.of(ROOT), surface.managedDocuments());
+        assertEquals(Set.of("timeline/root"), surface.timelineIds());
+    }
+
+    @Test
+    void committedActivationRecomputesTheRootSourceSurface() {
+        // given
+        ManagedOccurrenceInventory prospective =
+                ManagedOccurrenceInventory.of(List.of(inactive(
+                        ROOT, "/orders/order-1", CHILD)));
+        Map<DocumentId, Set<String>> timelines = Map.of(
+                ROOT, Set.of("timeline/root"),
+                CHILD, Set.of("timeline/order-1"));
+        ContractsRootFeederWindow.LaneId lane =
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(ROOT));
+        ContractsRootSourceSurface.Surface before =
+                ContractsRootSourceSurface.resolve(
+                        lane,
+                        prospective,
+                        document -> timelines.getOrDefault(
+                                document, Set.of()));
+
+        // when
+        ManagedOccurrenceInventory committed =
+                prospective.replaceSources(
+                        List.of(ROOT),
+                        List.of(active(
+                                ROOT, "/orders/order-1", CHILD)))
+                        .inventory();
+        ContractsRootSourceSurface.Surface after =
+                ContractsRootSourceSurface.resolve(
+                        lane,
+                        committed,
+                        document -> timelines.getOrDefault(
+                                document, Set.of()));
+
+        // then
+        assertEquals(List.of(ROOT), before.managedDocuments());
+        assertEquals(Set.of("timeline/root"), before.timelineIds());
+        assertEquals(List.of(CHILD, ROOT), after.managedDocuments());
+        assertEquals(Set.of("timeline/root", "timeline/order-1"),
+                after.timelineIds());
     }
 
     private static ManagedOccurrenceBinding active(

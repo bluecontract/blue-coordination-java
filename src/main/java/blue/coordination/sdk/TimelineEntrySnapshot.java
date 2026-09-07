@@ -6,6 +6,7 @@ import java.util.Optional;
 /** Immutable read-only audit view of one whole retained Timeline Entry. */
 public record TimelineEntrySnapshot(
         ExactBlueValue exact,
+        Optional<ExactBlueValue> request,
         TimelineHandle timeline,
         Optional<String> previousEntryBlueId,
         String operation,
@@ -16,6 +17,7 @@ public record TimelineEntrySnapshot(
     /** Validates exact entry evidence while retaining an immutable predecessor. */
     public TimelineEntrySnapshot {
         exact = Objects.requireNonNull(exact, "exact");
+        request = Objects.requireNonNull(request, "request");
         timeline = Objects.requireNonNull(timeline, "timeline");
         previousEntryBlueId = Objects.requireNonNull(
                 previousEntryBlueId, "previousEntryBlueId");
@@ -26,6 +28,21 @@ public record TimelineEntrySnapshot(
             throw new IllegalArgumentException(
                     "Timeline Entry coordinates must be positive");
         }
+    }
+
+    /** Accepted-base constructor; preserves request presence and its possibly collapsed envelope value. */
+    public TimelineEntrySnapshot(
+            ExactBlueValue exact, TimelineHandle timeline,
+            Optional<String> previousEntryBlueId, String operation, String channel,
+            long timestampMicros, long globalSequence, long timelineSequence) {
+        this(exact, requestIn(exact), timeline, previousEntryBlueId, operation, channel,
+                timestampMicros, globalSequence, timelineSequence);
+    }
+
+    private static Optional<ExactBlueValue> requestIn(ExactBlueValue exact) {
+        return Optional.ofNullable(blue.language.model.NodePathEditor.getOrNull(
+                Objects.requireNonNull(exact, "exact").copyNode(), "/message/request"))
+                .map(value -> ExactBlueValue.wrap(blue.coordination.api.ExactValue.verified(value)));
     }
 
     /** Exact content identity of {@link #exact()}. */

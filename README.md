@@ -14,17 +14,19 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.5'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.6'
 }
 ```
 
-`3.0.0-rc.5` is the bounded external-pilot candidate. It consumes Language
-`3.1.0-rc.23`, BEX `1.1.0-rc.4`, and Repository `3.0.0-rc.21` from Maven
-Central and is compiled with `--release 17`. It is not a stable or production
+`3.0.0-rc.6` is the bounded external-pilot candidate. Its required published
+dependency tuple is Language `3.1.0-rc.24`, BEX `1.1.0-rc.5`, and Repository
+`3.0.0-rc.22` from Maven Central. Coordination is compiled with `--release 17`.
+It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
 
-Rc.5 adds retained managed-epoch catch-up, proof-aware exact-node resolution,
+Rc.6 adds authenticated historical representation positions to retained
+managed-epoch catch-up. It retains proof-aware exact-node resolution,
 reference-transparent SDK execution, authoritative fair-lane audit, a
 non-mutating host journal availability hint, and targeted one-selection
 processing for host-preleased durable execution. Unsupported nested authored
@@ -133,7 +135,7 @@ effective occurrence with `expectOccurrence(...)`, and selects `fromNow`
 activation. One draft can bind several occurrences without duplicating the
 lineage. The runtime verifies the request fields, occurrence paths, exact
 values, and complete affected closure before one atomic publication; a
-terminal failure leaves no partial document or topology mutation. In rc.5,
+terminal failure leaves no partial document or topology mutation. In rc.6,
 imported draft state (`ManagedDocumentDraft.atEpoch(...)`) remains unsupported
 and fails closed. A distinct retained path provides automatic exact matching
 for existing current, authored-initial,
@@ -161,7 +163,8 @@ state to operational tooling.
 
 ## Build and verification
 
-The rc.5 release is verified through the Maven-Central-only artifact lane:
+The rc.6 release requires verification through the Maven-Central-only
+artifact lane:
 
 ```bash
 ./gradlew --no-daemon dependencyPreflight
@@ -179,11 +182,11 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 `verifyTestArchitecture`.
 
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
-Central. Repository rc.21 still advertises Language rc.20 transitively, so the
-build and published POM exclude that one edge and directly own Language
-rc.23. Local composites and Maven Local are rejected.
+Central. The build and published POM retain the Repository and BEX transitive
+exclusions and directly own the complete Language rc.24 graph. Local
+composites and Maven Local are rejected.
 
-The public rc.5 release lane uses the published-artifact mode by default. An
+The public rc.6 release lane uses the published-artifact mode by default. An
 invocation-owned immutable Contracts stage remains available only for
 development-candidate handoffs; when using it, pin its absolute repository and
 manifest identity explicitly:
@@ -192,7 +195,7 @@ manifest identity explicitly:
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17 \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
+  -PblueContractsVersion=3.1.0-rc.24 \
   -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```
@@ -202,15 +205,23 @@ routing prevents fallback for `blue.language`; Maven Local and composite
 substitution remain forbidden. This is the required invocation shape, not a
 substitute for the published-artifact release lane.
 
+A coordinated unpublished candidate instead uses
+`immutable-development-contracts` with exact commit-bound Language, BEX, and
+Coordination versions plus both immutable repository manifest identities. The
+complete `releaseCheck` replays those same pins inside the extracted source
+archive; it never substitutes the published Language or BEX versions. This is
+candidate-verification evidence only. `verifyRcReadiness`, `stageRelease`, and
+JReleaser remain restricted to the published rc.6 lane.
+
 Once those gates genuinely pass on a clean committed checkout, use the
 [immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
 to export and consumer-test an invocation-owned development Maven stage. A staged
 handoff is not a public release.
 
-The rc.5 release workflow runs the same gates, stages signed artifacts,
+The rc.6 release workflow runs the same gates, stages signed artifacts,
 publishes through JReleaser, and pushes its tag only after publication
 succeeds. See the [release procedure](docs/development/releasing.md) and
-[rc.5 release decision](docs/releases/3.0.0-rc.5.md).
+[rc.6 release decision](docs/releases/3.0.0-rc.6.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
@@ -223,7 +234,7 @@ limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
-[3.0.0-rc.5 decision](docs/releases/3.0.0-rc.5.md). The documents below are
+[3.0.0-rc.6 decision](docs/releases/3.0.0-rc.6.md). The documents below are
 retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
@@ -255,7 +266,8 @@ Developer references:
 - [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
-- [3.0.0-rc.5 release decision](docs/releases/3.0.0-rc.5.md)
+- [3.0.0-rc.6 release decision](docs/releases/3.0.0-rc.6.md)
+- [3.0.0-rc.5 historical release decision](docs/releases/3.0.0-rc.5.md)
 - [3.0.0-rc.4 historical release decision](docs/releases/3.0.0-rc.4.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
 - [Public API](docs/reference/public-api.md)

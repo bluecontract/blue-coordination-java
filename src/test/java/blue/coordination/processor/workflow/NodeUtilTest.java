@@ -19,10 +19,11 @@ class NodeUtilTest {
                     new Node().value("identity"));
 
     @Test
-    void shouldTreatOnlyAxisFreeMutableAndFrozenNodesAsEmpty() {
+    void shouldRetainExplicitContainersAndTreatOnlyAbsentBuildersAsEmpty() {
         // given
         Node empty = new Node();
-        FrozenNode frozenEmpty = FrozenNode.fromNode(new Node());
+        FrozenNode frozenEmpty = null;
+        assertThrows(IllegalArgumentException.class, () -> FrozenNode.fromNode(empty));
 
         // when
         boolean mutableEmpty = NodeUtil.isEmpty(empty);
@@ -31,6 +32,7 @@ class NodeUtilTest {
         // then
         assertTrue(mutableEmpty);
         assertTrue(immutableEmpty);
+        assertRetained(new Node().properties(Collections.emptyMap()));
         assertRetained(new Node().name("named"));
         assertRetained(new Node().type(
                 new Node().blueId(VALID_BLUE_ID)));
@@ -64,6 +66,59 @@ class NodeUtilTest {
                         false));
         assertThrows(ArithmeticException.class,
                 () -> FrozenNodeUtil.integer(oversizedInteger));
+    }
+
+    @Test
+    void shouldDefaultOnlyAbsentFrozenComputeControls() {
+        // given
+        FrozenNode absent = null;
+        FrozenNode emptyControls = FrozenNode.fromResolvedNode(
+                new Node()
+                        .properties(
+                                "entry",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "gasLimit",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "emitEvents",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap()))
+                        .properties(
+                                "returnResult",
+                                new Node().properties(
+                                        Collections.<String, Node>emptyMap())));
+
+        // when
+        String entry = FrozenNodeUtil.textProperty(absent, "entry");
+
+        // then
+        assertNull(entry);
+        assertNull(FrozenNodeUtil.integer(
+                FrozenNodeUtil.property(absent, "gasLimit")));
+        assertTrue(FrozenNodeUtil.booleanProperty(
+                absent, "emitEvents", true));
+        assertFalse(FrozenNodeUtil.booleanProperty(
+                absent, "returnResult", false));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.textProperty(emptyControls, "entry"));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.integer(
+                        FrozenNodeUtil.property(
+                                emptyControls,
+                                "gasLimit")));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        emptyControls,
+                        "emitEvents",
+                        true));
+        assertThrows(IllegalArgumentException.class,
+                () -> FrozenNodeUtil.booleanProperty(
+                        emptyControls,
+                        "returnResult",
+                        true));
     }
 
     private static void assertRetained(Node node) {

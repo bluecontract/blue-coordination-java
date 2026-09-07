@@ -120,18 +120,19 @@ public final class Contracts10AuthoredClosureCompiler {
         try (BlueRuntime verificationRuntime = BlueRuntime.create(
                 verificationObjects,
                 verificationMetrics,
-                engine.applicationExactNodeProvider())) {
+                engine.retainedExactNodeProvider())) {
+            List<ExactValue> sourceTypeEvidence = new ArrayList<>();
             LinkedHashMap<DocumentId, Node> resolved = resolveDocuments(
                     input.documents(), verificationRuntime,
                     verificationObjects,
-                    Objects.requireNonNull(identityMode, "identityMode"));
+                    Objects.requireNonNull(identityMode, "identityMode"), sourceTypeEvidence);
             validateDeclarationsAndCoverage(
                     index, resolved, verificationRuntime,
                     verificationObjects);
             LinkedHashMap<DocumentId, Node> authored =
                     installAndVerifyPreliminaryReferences(
                             index, resolved, identityMode);
-            return finalizeClosure(input, index, authored);
+            return finalizeClosure(input, index, authored, sourceTypeEvidence);
         }
     }
 
@@ -139,13 +140,14 @@ public final class Contracts10AuthoredClosureCompiler {
             List<AuthoredDocument> documents,
             BlueRuntime runtime,
             WholeObjectStore objects,
-            DocumentIdentityMode identityMode) {
+            DocumentIdentityMode identityMode,
+            List<ExactValue> sourceTypeEvidence) {
         LinkedHashMap<DocumentId, Node> result = new LinkedHashMap<>();
         for (AuthoredDocument document : documents) {
-            ExactValue exact = runtime.exactSource(
+            ExactValue exact = runtime.exactProcessingSource(
                     document.authoredYaml(),
                     objects,
-                    "contracts10-authored-compiler-source");
+                    "contracts10-authored-compiler-source", sourceTypeEvidence);
             Node body = exact.copyNode();
             switch (identityMode) {
                 case EXPLICIT_LINEAGE -> requireOrWriteDocumentId(
@@ -299,7 +301,8 @@ public final class Contracts10AuthoredClosureCompiler {
     private CompiledClosure finalizeClosure(
             CompilationRequest request,
             RequestIndex index,
-            LinkedHashMap<DocumentId, Node> authored) {
+            LinkedHashMap<DocumentId, Node> authored,
+            List<ExactValue> sourceTypeEvidence) {
         ContractsClosureAdmissionAdapter adapter =
                 engine.contractsClosureAdmissionAdapter();
         ClosureEnvironment environment = adapter.environment();
@@ -367,7 +370,8 @@ public final class Contracts10AuthoredClosureCompiler {
                 representedBodies,
                 finalization,
                 canonicalBindings,
-                independentlyVerifiedMasters);
+                independentlyVerifiedMasters,
+                sourceTypeEvidence);
     }
 
     private static List<ManagedOccurrenceBinding> bindings(
@@ -879,6 +883,7 @@ public final class Contracts10AuthoredClosureCompiler {
     /** Immutable result retained by the future SDK runtime bridge. */
     public static final class CompiledClosure {
         private final ClosureInvocationInput invocation;
+        private final List<ExactValue> inlineTypeEvidence;
         private final ActivationInputs activationInputs;
         private final Map<DocumentId, Node> authoredDocuments;
         private final Map<DocumentId, Node> finalizedDocuments;
@@ -895,7 +900,9 @@ public final class Contracts10AuthoredClosureCompiler {
                 Map<blue.language.processor.closure.DocumentId, Node> bodies,
                 ComponentFinalizationResult finalization,
                 List<ManagedOccurrenceBinding> bindings,
-                Map<String, String> verifiedMasters) {
+                Map<String, String> verifiedMasters,
+                List<ExactValue> sourceTypeEvidence) {
+            this.inlineTypeEvidence = List.copyOf(sourceTypeEvidence);
             this.invocation = Objects.requireNonNull(
                     invocation, "invocation");
             this.activationInputs = Objects.requireNonNull(
@@ -944,6 +951,10 @@ public final class Contracts10AuthoredClosureCompiler {
             }
             this.independentlyVerifiedMasters =
                     Collections.unmodifiableMap(masters);
+        }
+
+        void retainInlineTypeEvidence(WholeObjectStore objects) {
+            inlineTypeEvidence.forEach(value -> objects.put(value, "compiled Source inline type"));
         }
 
         public ClosureInvocationInput invocation() {

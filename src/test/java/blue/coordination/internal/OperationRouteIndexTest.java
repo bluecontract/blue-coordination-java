@@ -8,6 +8,7 @@ import blue.coordination.processor.TimelineProviderSupport;
 import blue.language.model.Node;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.SubscriptionDelta;
+import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -142,6 +143,46 @@ final class OperationRouteIndexTest {
         // then
         assertEquals(List.of(DOCUMENT), index.route(entry(
                 "timeline-a", "alice")));
+    }
+
+    @Test
+    void explicitEmptyAggregateDocumentTargetIsNotTreatedAsAbsent() {
+        // given
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        RoutingSurface surface = surface("timeline-a", "alice");
+        index.replace(DOCUMENT, surface, List.of(active(
+                "timeline-a", "alice")));
+
+        // when
+        List<DocumentId> selected = index.route(entryWithEnvelopeField(
+                "message",
+                FrozenNode.fromNode(blue.language.model.Nodes.emptyObject()).withProperty(
+                        "document", emptyList())));
+
+        // then
+        assertEquals(List.of(), selected,
+                "an exact empty aggregate target must be checked, not widened "
+                        + "to an untargeted operation");
+    }
+
+    @Test
+    void explicitEmptyAggregateMandateValueIsNotTreatedAsAbsent() {
+        // given
+        OperationRouteIndex index = new OperationRouteIndex(
+                new EngineMetrics());
+        RoutingSurface surface = surface("timeline-a", "alice");
+        index.replace(DOCUMENT, surface, List.of(active(
+                "timeline-a", "alice")));
+
+        // when
+        List<DocumentId> selected = index.route(entryWithEnvelopeField(
+                "onBehalfOf", emptyList()));
+
+        // then
+        assertEquals(List.of(), selected,
+                "a present empty aggregate Mandate must remain unsupported until an "
+                        + "exact Mandate resolver authorizes it");
     }
 
     @Test
@@ -584,7 +625,7 @@ final class OperationRouteIndexTest {
         ExactValue request = ExactValue.verified(new Node().value("request"));
         return new TimelineEntry(
                 event,
-                request,
+                java.util.Optional.of(request),
                 order,
                 order,
                 new Timeline(timeline, actor),
@@ -593,5 +634,24 @@ final class OperationRouteIndexTest {
                 1L,
                 1L,
                 1L);
+    }
+
+    private static TimelineEntry entryWithEnvelopeField(
+            String field,
+            FrozenNode value) {
+        ExactValue event = ExactValue.fromFrozen(
+                FrozenNode.fromNode(blue.language.model.Nodes.emptyObject()).withProperty(field, value));
+        ExternalOrderKey order = ExternalOrderKey.of(List.of(
+                1L, "timeline-a", event.blueId()));
+        return entry(
+                "timeline-a",
+                "alice",
+                "ownerChannel",
+                event,
+                order);
+    }
+
+    private static FrozenNode emptyList() {
+        return FrozenNode.fromNode(new Node().items(List.of()));
     }
 }

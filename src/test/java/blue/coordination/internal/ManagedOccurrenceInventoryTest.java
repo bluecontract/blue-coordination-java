@@ -26,15 +26,15 @@ final class ManagedOccurrenceInventoryTest {
     private static final String POLICY =
             "sha256:c1e8d880499cbafc595e1fb213ee73acc6ddb8d1d9850c7ddff2224c88a03d35";
     private static final String INPUT_MASTER =
-            "4ZMfXZbSNVnEaqHVwYyYFHSfJ4JYs6VbR2oLZNqNkScr";
+            "8M3d43KXskYr7rrdiaXPiPHmypFEjtU4uUyECtU7Tiyx";
     private static final String INPUT_A = INPUT_MASTER + "#0";
     private static final String INPUT_B = INPUT_MASTER + "#1";
     private static final String AFTER_REMOVE_A =
-            "D2pJsHeSPWSRkCPwNDJxNeYWmGETw6jtd35e3yyfJpjs";
+            "2eq5Wawn5JrCBBPArt1nvKSiNkDsH8VJ9KtADk4vff1R";
     private static final String AFTER_REMOVE_B =
-            "8JUt1dEDU1yTVwiNzmW84yecWT7sZsrovRknkrw1CDR5";
+            "9QHL8pTcMNzazZLUBfjjTU6tkqdzGrPQgoR5o1DWvMZN";
     private static final String AFTER_READD_MASTER =
-            "9Sov32cJbfoBc2NvjLBtkkgPVrMV7sJ8sBksik5e8ps8";
+            "B9FqJVgNt86vcgxd4tdFdgWnGXmpeACguqvPuTWr9UNg";
     private static final String AFTER_READD_A = AFTER_READD_MASTER + "#0";
     private static final String AFTER_READD_B = AFTER_READD_MASTER + "#1";
 
@@ -44,11 +44,11 @@ final class ManagedOccurrenceInventoryTest {
 
         ManagedOccurrenceBinding aToB = asserted(
                 "sha256:f5d1cd1ca17ac4fa6547d53f85dadb18f4b37e1bca42588f5cb4fb9090023eca",
-                "sha256:8e0adfdc7abea06d373ff4aa63d4b828da81abc01479d4a94cc7afdfe7b0e6e8",
+                "sha256:3fbebd6496cb09548de8512b0806acc9bc98d2b0b32cbff3556954adace09af2",
                 A, "/b", 1L, B, INPUT_B, true, null);
         ManagedOccurrenceBinding bToA = asserted(
                 "sha256:f1e82f9a16ec41c5b9d4c5d37d0e412f4c0cdf05a639cc507aedfee2e8d3f232",
-                "sha256:54757271a216624fb69f85769c3da699585f8efea9b4600fd494c3f3f1a4e515",
+                "sha256:683b26af18275f82fabd752be26097c433234024945c3683534d486c4d05337a",
                 B, "/a", 1L, A, INPUT_A, true, null);
         ManagedOccurrenceInventory input =
                 ManagedOccurrenceInventory.of(List.of(bToA, aToB));
@@ -71,7 +71,7 @@ final class ManagedOccurrenceInventoryTest {
                 "sha256:e6af3ab7752ec65f1c992ec9d6626d5f29b5902f9b0b618b0e05ef3ff3eb8dd7",
                 successor.occurrenceIdentity());
         assertEquals(
-                "sha256:77e1b695e1628933af18ce0456f20a19bd2fc723b7a7b0d833cc49a0f2cb4fe3",
+                "sha256:7c9087e856669611efe88d97e9e913c84ea6d0ed5cc73e2651eb82f4500b84d5",
                 successor.bindingIdentity());
         assertNotEquals(aToB.occurrenceIdentity(),
                 successor.occurrenceIdentity());
@@ -102,7 +102,7 @@ final class ManagedOccurrenceInventoryTest {
         assertEquals(successor.occurrenceIdentity(),
                 readded.occurrenceIdentity());
         assertEquals(
-                "sha256:c2ab3c3f234687987ce2f7deb2712b202d280c08f17454e771b12015cc8c6c8d",
+                "sha256:daf77351142cdfaeef8e50cd6086c9904f74cc9ab3534748a4294ad9d2214547",
                 readded.bindingIdentity());
         assertNotEquals(successor.bindingIdentity(),
                 readded.bindingIdentity());
@@ -306,7 +306,7 @@ final class ManagedOccurrenceInventoryTest {
         String expectedOccurrenceIdentity =
                 "sha256:f5d1cd1ca17ac4fa6547d53f85dadb18f4b37e1bca42588f5cb4fb9090023eca";
         String expectedBindingIdentity =
-                "sha256:8e0adfdc7abea06d373ff4aa63d4b828da81abc01479d4a94cc7afdfe7b0e6e8";
+                "sha256:3fbebd6496cb09548de8512b0806acc9bc98d2b0b32cbff3556954adace09af2";
 
         // when
         ManagedOccurrenceBinding exact = row(

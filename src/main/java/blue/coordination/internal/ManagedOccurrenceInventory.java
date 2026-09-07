@@ -578,7 +578,7 @@ final class ManagedOccurrenceInventory {
                 current.targetDocumentId(),
                 expectedTargetBlueId,
                 current.active(),
-                current.pendingHistoricalEpoch());
+                current.pendingHistoricalEpoch()).withRepresentationCursor(current.pendingRepresentationCursor());
         if (!rebound.occurrenceIdentity().equals(
                 current.occurrenceIdentity())) {
             throw new IllegalStateException(
@@ -1114,7 +1114,7 @@ final class ManagedOccurrenceInventory {
                 selected.targetDocumentId(),
                 selected.expectedTargetBlueId(),
                 selected.active(),
-                selected.pendingHistoricalEpoch());
+                selected.pendingHistoricalEpoch()).withRepresentationCursor(selected.pendingRepresentationCursor());
     }
 
     private static boolean sameRow(
@@ -1124,7 +1124,8 @@ final class ManagedOccurrenceInventory {
                 && left.bindingIdentity().equals(right.bindingIdentity())
                 && left.active() == right.active()
                 && Objects.equals(left.pendingHistoricalEpoch(),
-                        right.pendingHistoricalEpoch());
+                        right.pendingHistoricalEpoch())
+                && Objects.equals(left.pendingRepresentationCursor(), right.pendingRepresentationCursor());
     }
 
     private static boolean sameRows(

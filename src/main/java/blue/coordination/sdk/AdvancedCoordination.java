@@ -2,6 +2,8 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.RetainedHistoryProvider;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.api.ManagedCatchUpBarrier;
 import blue.coordination.api.ManagedDocumentReadiness;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
@@ -22,6 +24,16 @@ public final class AdvancedCoordination {
     /** Returns the low-level engine owned by this SDK environment. */
     public CoordinationEngine rawEngine() {
         return runtime.engine();
+    }
+
+    /**
+     * Exports bounded signed pages of already committed source history.
+     * The receiving host must pin this producer's public key independently.
+     * This evidence transport does not install receipts in another engine.
+     */
+    public RetainedHistoryProvider retainedHistoryProvider(
+            java.security.KeyPair producerKeys) {
+        return RetainedHistoryProvider.from(this, producerKeys);
     }
 
     /** Reads a non-READY snapshot for audit and recovery tooling. */
@@ -141,6 +153,13 @@ public final class AdvancedCoordination {
     /** Reads the current processor-compiled external operation routes. */
     public List<OperationRouteSnapshot> auditOperationRoutes(DocumentId id) {
         return runtime.auditOperationRoutes(
+                Objects.requireNonNull(id, "id"));
+    }
+
+    /** Reads the exact collection-presence plan retained at the current head. */
+    public List<EmbeddedCollectionPlanningAudit> auditEmbeddedCollections(
+            DocumentId id) {
+        return runtime.auditEmbeddedCollections(
                 Objects.requireNonNull(id, "id"));
     }
 

@@ -479,9 +479,6 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                     type:
                       blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
                     order: 0
-                    event:
-                      type:
-                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                   initializedEvent:
                     type:
                       blueId: %s
@@ -491,6 +488,9 @@ final class SdkStaticProcessEmbeddedAdmissionTest {
                   initialize:
                     type: Coordination/Sequential Workflow
                     channel: lifecycle
+                    event:
+                      type:
+                        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
                     order: 0
                     steps:
                       - type: Coordination/Compute

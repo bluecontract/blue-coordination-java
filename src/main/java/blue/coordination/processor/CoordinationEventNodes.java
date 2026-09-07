@@ -2,6 +2,7 @@ package blue.coordination.processor;
 
 import blue.language.model.Node;
 import blue.language.model.Schema;
+import blue.language.snapshot.FrozenNode;
 import blue.language.processor.ContractMatchingService;
 import blue.language.processor.ExternalChannelFunctionContext;
 import blue.language.processor.GasChargeContext;
@@ -416,8 +417,6 @@ final class CoordinationEventNodes {
             Node event,
             ExternalChannelFunctionContext context,
             CoordinationSemanticTypeIdentities identities) {
-        String originalEventBlueId =
-                exactIdentity(event);
         Node projectedEvent =
                 materializeIfReference(event, context);
         if (projectedEvent == null) {
@@ -450,9 +449,9 @@ final class CoordinationEventNodes {
                 CoordinationProcessHeaderBridge
                         .canonicalExactCopy(payload);
         if (hasSemanticOutputBoundary(context)
-                && originalEventBlueId.equals(
-                DirectBlueIdCalculator.calculateBlueId(
-                        exactPayload))) {
+                && FrozenNode.fromResolvedNode(
+                        CoordinationProcessHeaderBridge.canonicalExactCopy(projectedEvent))
+                        .sameResolvedStructure(FrozenNode.fromResolvedNode(exactPayload))) {
             /*
              * ChannelRunner carries the exact PROCESS event into the hosted
              * output boundary under this identity. Returning that identity
@@ -461,7 +460,7 @@ final class CoordinationEventNodes {
              * a direct fragment.
              */
             return new Node().blueId(
-                    originalEventBlueId);
+                    context.exactEventBlueId());
         }
         return exactPayload;
     }
@@ -485,19 +484,6 @@ final class CoordinationEventNodes {
                 projectOperationRequestFields(
                         projectedMessage, context));
         return payload;
-    }
-
-    private static String exactIdentity(Node node) {
-        Node exact =
-                CoordinationProcessHeaderBridge
-                        .canonicalExactCopy(
-                                java.util.Objects.requireNonNull(
-                                        node, "node"));
-        if (exact.isReferenceOnly()) {
-            return exact.getBlueId();
-        }
-        return DirectBlueIdCalculator.calculateBlueId(
-                exact);
     }
 
     static boolean matchesOperationRequest(

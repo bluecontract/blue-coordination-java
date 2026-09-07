@@ -35,6 +35,13 @@ final class ComputeDefinitionResolver {
                        StepExecutionContext context,
                        BexProcessingMetrics invocationMetrics) {
         FrozenNode definition = FrozenNodeUtil.property(stepNode, "definition");
+        /*
+         * BEX defines the separate definition as optional executable input.
+         * An exact empty object remains a present empty execution definition.
+         * Its identity is retained just like other exact input. The authored step is
+         * still retained in the Compute plan key; this projection must not
+         * collapse its exact identity or audit representation.
+         */
         if (definition == null || FrozenNodeUtil.isEmpty(definition)) {
             return null;
         }

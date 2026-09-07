@@ -1,0 +1,240 @@
+package blue.coordination.internal;
+
+import blue.coordination.api.ExactValue;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
+import blue.language.identity.DirectBlueIdCalculator;
+import blue.language.model.Node;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.SubscriptionSurfaceInvalidException;
+import blue.language.processor.registry.RuntimeBlueIds;
+import blue.language.provider.NodeProvider;
+import blue.language.provider.NodeProviderResult;
+import org.junit.jupiter.api.Test;
+
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Exact collection-presence behavior at Coordination's layout boundary. */
+final class EmbeddedCollectionPlanningPresenceTest {
+
+    @Test
+    void coordCollection01And02PreserveAbsentVersusEmptyAtSameLineage() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        ExactValue absent = objects.put(
+                root("same-document", null), "absent-collection-root");
+        ExactValue empty = objects.put(
+                root("same-document", emptyObject()),
+                "empty-collection-root");
+        ExactValue members = objects.put(
+                root("same-document", new Node().properties(
+                        "game-1", new Node().properties(
+                                "documentId",
+                                new Node().value("game-1")))),
+                "member-collection-root");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            EmbeddedOnlyLayoutBuilder layouts =
+                    new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
+
+            // when
+            EmbeddedOnlyLayout absentLayout = layouts.build(absent);
+            EmbeddedOnlyLayout emptyLayout = layouts.build(empty);
+            EmbeddedOnlyLayout refreshedEmpty = layouts.rebuild(
+                    empty, absentLayout);
+            EmbeddedOnlyLayout refreshedAbsent = layouts.rebuild(
+                    absent, emptyLayout);
+            EmbeddedOnlyLayout refreshedMembers = layouts.rebuild(
+                    members, absentLayout);
+
+            // then
+            assertEquals(List.of(), absentLayout.boundaries());
+            assertEquals(List.of(), emptyLayout.boundaries());
+            assertEquals(1, absentLayout.physicalObjectCount());
+            assertEquals(1, emptyLayout.physicalObjectCount());
+            assertNotEquals(absentLayout.rootBlueId(), emptyLayout.rootBlueId(),
+                    "present exact {} must remain content even with zero members");
+            assertEquals(List.of("/games"), absentLayout.plan()
+                    .rulesByScope().get("/").collectionAbsolutePaths());
+            assertEquals(List.of("/games"), emptyLayout.plan()
+                    .rulesByScope().get("/").collectionAbsolutePaths());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
+                    absentLayout.plan().collectionAudits().get(0).state());
+            assertEquals(0, absentLayout.plan().collectionAudits().get(0)
+                    .currentMemberCount());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_EMPTY,
+                    emptyLayout.plan().collectionAudits().get(0).state());
+            assertEquals(0, emptyLayout.plan().collectionAudits().get(0)
+                    .currentMemberCount());
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_EMPTY,
+                    refreshedEmpty.plan().collectionAudits().get(0).state(),
+                    "a reused contract plan must refresh current presence");
+            assertEquals(EmbeddedCollectionPlanningAudit.State.ABSENT,
+                    refreshedAbsent.plan().collectionAudits().get(0).state(),
+                    "a reused contract plan must not retain stale presence");
+            assertEquals(EmbeddedCollectionPlanningAudit.State.PRESENT_MEMBERS,
+                    refreshedMembers.plan().collectionAudits().get(0).state());
+            assertEquals(1, refreshedMembers.plan().collectionAudits().get(0)
+                    .currentMemberCount());
+        }
+    }
+
+    @Test
+    void unavailableCollectionEvidenceBlocksInsteadOfPlanningZero() {
+        // given
+        String unavailableBlueId = DirectBlueIdCalculator.calculateBlueId(
+                new Node().properties("providerFixture",
+                        new Node().value("unavailable-collection")));
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        ExactValue referenced = objects.put(
+                root("unavailable", new Node().blueId(unavailableBlueId)),
+                "unavailable-collection-root");
+        NodeProvider unavailable = new NodeProvider() {
+            @Override
+            public List<Node> fetchByBlueId(String blueId) {
+                return List.of();
+            }
+
+            @Override
+            public NodeProviderResult fetchResultByBlueId(String blueId) {
+                return unavailableBlueId.equals(blueId)
+                        ? NodeProviderResult.unavailable(
+                                "collection provider offline")
+                        : NodeProviderResult.notFound();
+            }
+        };
+
+        try (BlueRuntime runtime = BlueRuntime.create(
+                objects, metrics, unavailable)) {
+            EmbeddedOnlyLayoutBuilder layouts =
+                    new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> layouts.build(referenced));
+
+            // then
+            ExecutionEvidenceUnavailableException incomplete =
+                    assertInstanceOf(
+                            ExecutionEvidenceUnavailableException.class,
+                            failure);
+            assertEquals(List.of(unavailableBlueId),
+                    incomplete.requiredExactBlueIds());
+            assertTrue(incomplete.getMessage().contains(
+                    "collection provider offline"));
+        }
+    }
+
+    @Test
+    void presentWrongKindCollectionFailsInsteadOfPlanningZero() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        ExactValue scalar = objects.put(
+                root("wrong-kind", new Node().value("not-an-object")),
+                "wrong-kind-collection-root");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            EmbeddedOnlyLayoutBuilder layouts =
+                    new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
+
+            // when
+            SubscriptionSurfaceInvalidException failure = assertThrows(
+                    SubscriptionSurfaceInvalidException.class,
+                    () -> layouts.build(scalar));
+
+            // then
+            assertEquals(
+                    ProcessorErrorCategory.EmbeddedCollectionMustBeObject,
+                    failure.diagnostic().category());
+            assertTrue(failure.getMessage().contains(
+                    "Embedded collection must be an object"));
+        }
+    }
+
+    @Test
+    void presentEmptyDirectChildIsValidatedInsteadOfTreatedAsAbsent() {
+        // given
+        EngineMetrics metrics = new EngineMetrics();
+        WholeObjectStore objects = new WholeObjectStore(metrics);
+        ExactValue emptyChild = objects.put(
+                emptyObject(), "present-empty-direct-child");
+        ExactValue initial = objects.put(
+                rootWithDirectChild(new Node().properties(
+                        "documentId", new Node().value("child"))),
+                "initial-direct-child-root");
+        ExactValue presentEmpty = objects.put(
+                rootWithDirectChild(new Node().blueId(
+                        emptyChild.blueId())),
+                "present-empty-direct-child-root");
+
+        try (BlueRuntime runtime = BlueRuntime.create(objects, metrics)) {
+            EmbeddedOnlyLayoutBuilder layouts =
+                    new EmbeddedOnlyLayoutBuilder(runtime, objects, metrics);
+            EmbeddedOnlyLayout initialLayout = layouts.build(initial);
+
+            // when
+            RuntimeException failure = assertThrows(
+                    RuntimeException.class,
+                    () -> layouts.rebuild(presentEmpty, initialLayout));
+
+            // then
+            assertTrue(failure.getMessage().contains(
+                            "Process Embedded materialization changed Root identity")
+                            || failure.getMessage().contains(
+                            "Every managed Root and Process Embedded document"),
+                    "present exact empty content must reach semantic or "
+                            + "managed-document validation");
+        }
+    }
+
+    private static ExactValue root(String documentId, Node collection) {
+        Node root = new Node()
+                .properties("documentId", new Node().value(documentId))
+                .contracts(new Node().properties(
+                        "embedded",
+                        new Node()
+                                .type(new Node().blueId(
+                                        RuntimeBlueIds.PROCESS_EMBEDDED))
+                                .properties(
+                                        "collectionPaths",
+                                        new Node().items(List.of(
+                                                new Node().value(
+                                                        "/games"))))));
+        if (collection != null) {
+            root.properties("games", collection);
+        }
+        return ExactValue.verified(root);
+    }
+
+    private static Node emptyObject() {
+        return new Node().properties(Collections.emptyMap());
+    }
+
+    private static ExactValue rootWithDirectChild(Node child) {
+        return ExactValue.verified(new Node()
+                .properties(
+                        "documentId", new Node().value("parent"),
+                        "child", child)
+                .contracts(new Node().properties(
+                        "embedded",
+                        new Node()
+                                .type(new Node().blueId(
+                                        RuntimeBlueIds.PROCESS_EMBEDDED))
+                                .properties(
+                                        "paths",
+                                        new Node().items(List.of(
+                                                new Node().value(
+                                                        "/child")))))));
+    }
+}

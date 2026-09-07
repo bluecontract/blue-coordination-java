@@ -410,7 +410,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     NodeProvider exactNodes) {
         ManagedOccurrenceResolver resolver = new ManagedOccurrenceResolver(
                 Objects.requireNonNull(exactNodes, "exactNodes"),
-                runtime.metrics());
+                runtime.metrics(), new ManagedRepresentationHistory(documents));
         return new AutomaticOccurrenceResolutionCoordinator<>(
                 resolver,
                 runtime.metrics(),
@@ -555,7 +555,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             }
         }
 
-        Set<DocumentId> existingMembers = forwardExistingMembers(
+        Set<DocumentId> existingMembers = connectedExistingMembers(
                 current.existingMembers(),
                 selected.existingTargets(),
                 indexed.occurrenceInventory());
@@ -824,7 +824,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         }
     }
 
-    private static Set<DocumentId> forwardExistingMembers(
+    private static Set<DocumentId> connectedExistingMembers(
             Collection<DocumentId> original,
             Collection<DocumentId> targets,
             ManagedOccurrenceInventory inventory) {
@@ -849,18 +849,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     pending.addLast(target);
                 }
             }
-        }
-        Set<DocumentId> selected = discovered.keySet();
-        for (DocumentId target : selected) {
-            for (ManagedOccurrenceBinding row : inventory.rowsTouching(target)) {
-                DocumentId source = coordinationId(row.sourceDocumentId());
+            // Active containing occurrences participate in the same exact
+            // publication. Inactive reservations retain forward evidence but
+            // do not make their containing documents live participants.
+            for (ManagedOccurrenceBinding row : inventory.rowsTouching(source)) {
+                DocumentId parent = coordinationId(row.sourceDocumentId());
                 if (row.active()
-                        && coordinationId(row.targetDocumentId()).equals(target)
-                        && !selected.contains(source)) {
-                    throw new AdmissionProjectionUnavailableException(
-                            "Automatic forward admission expansion cannot "
-                                    + "merge a target with an external active "
-                                    + "incoming occurrence");
+                        && coordinationId(row.targetDocumentId()).equals(source)
+                        && discovered.putIfAbsent(parent, Boolean.TRUE) == null) {
+                    pending.addLast(parent);
                 }
             }
         }
@@ -1159,12 +1156,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         documentId,
                         ClosureSubscriptionInventory.embeddedDemands(
                                 rootSurface));
-                RoutingSurface routingSurface = RoutingSurface
-                        .fromManagedRootContracts(
-                                rootSurface.effectiveRootContracts());
                 EmbeddedOnlyLayout layout = layoutBuilder
                         .retainVerifiedClosureRoot(
-                                result, documentId, routingSurface);
+                                result, documentId, rootSurface);
                 ExactValue initialized = objects.put(
                         layout.semanticRoot(),
                         "closure-admission-initialization-revision");
@@ -1276,7 +1270,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                             },
                             documentId -> memberSet.contains(documentId)
                                     ? result.graphGeneration()
-                                    : documents.graphGeneration(documentId));
+                                    : documents.graphGeneration(documentId),
+                            new ManagedRepresentationHistory(documents),
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -1938,7 +1934,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             String targetDocumentId,
             String expectedTargetBlueId,
             boolean active,
-            Long pendingHistoricalEpoch) {
+            Long pendingHistoricalEpoch,
+            blue.language.processor.closure.ManagedRepresentationCursor pendingRepresentationCursor) {
         static OccurrenceProjection from(ManagedOccurrenceBinding row) {
             return new OccurrenceProjection(
                     row.occurrenceIdentity(),
@@ -1950,7 +1947,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     row.targetDocumentId().value(),
                     row.expectedTargetBlueId(),
                     row.active(),
-                    row.pendingHistoricalEpoch());
+                    row.pendingHistoricalEpoch(), row.pendingRepresentationCursor());
         }
     }
 

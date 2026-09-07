@@ -70,7 +70,6 @@ final class ContractsClosureAdapterTest {
               reject:
                 type: Coordination/Sequential Workflow Operation
                 channel: aliceChannel
-                request: {}
                 steps:
                   - type: Coordination/Compute
                     do:
@@ -140,7 +139,7 @@ final class ContractsClosureAdapterTest {
     }
 
     @Test
-    void incomingOccurrenceDoesNotOpenItsSourceWithoutTypedDemand() {
+    void incomingOccurrenceSelectsItsSourceForExactPublicationWithoutTypedDemand() {
         // given
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
                 List.of(occurrence("a-to-b", A, B, true)));
@@ -164,10 +163,208 @@ final class ContractsClosureAdapterTest {
 
         // then
         assertEquals(1, selected.size());
-        assertEquals(List.of(B), selected.get(0).members());
-        assertTrue(selected.get(0).occurrences().isEmpty());
-        assertEquals(0L, metrics.counter(
+        assertEquals(List.of(A, B), selected.get(0).members());
+        assertEquals(1, selected.get(0).occurrences().size());
+        assertEquals(1L, metrics.counter(
                 ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED));
+    }
+
+    @Test
+    void livePublicationIncludesBothOccurrencesAndAllParentsWithoutListeners() {
+        // given
+        DocumentId otherParent = DocumentId.of("other-parent");
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
+                occurrence("first", A, "/first", B, true),
+                occurrence("second", A, "/second", B, true),
+                occurrence("other", otherParent, "/child", B, true),
+                occurrence("inactive", C, "/old", B, false)));
+        // when
+        var selected = ContractsClosureAdapter.initialConnectedSelection(
+                inventory, ClosureSubscriptionInventory.empty(), B);
+        // then
+        assertEquals(List.of(A, B, otherParent), selected.members());
+        assertEquals(3, selected.occurrences().size());
+        assertEquals(3L, selected.rowsExamined());
+    }
+
+    @Test
+    void collectionDirectDemandDoesNotSuppressAncestorStatePublication() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(
+                        occurrence(
+                                "a-to-b", A, "/orders/o1", B, true),
+                        occurrence(
+                                "b-to-c", B, "/payment", C, true)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(
+                A,
+                demand(
+                        "orders",
+                        "/orders",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode
+                                .COLLECTION_DIRECT));
+
+        // when
+        ContractsClosureAdapter.ConnectedSelection direct =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, B);
+        ContractsClosureAdapter.ConnectedSelection nested =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, C);
+
+        // then
+        assertEquals(List.of(A, B, C), direct.members());
+        assertEquals(2, direct.occurrences().size());
+        assertEquals(List.of(A, B, C), nested.members());
+        assertEquals(2, nested.occurrences().size());
+    }
+
+    @Test
+    void collectionDescendantDemandSelectsParentAcrossIntermediateMember() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(
+                        occurrence(
+                                "a-to-b", A, "/orders/o1", B, true),
+                        occurrence(
+                                "b-to-c", B, "/payment", C, true)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(
+                A,
+                demand(
+                        "orders",
+                        "/orders",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode
+                                .COLLECTION_DESCENDANTS));
+
+        // when
+        ContractsClosureAdapter.ConnectedSelection selected =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, C);
+
+        // then
+        assertEquals(List.of(A, B, C), selected.members());
+        assertEquals(2, selected.occurrences().size());
+    }
+
+    @Test
+    void exactAndAllDescendantDemandsTraverseContainingPath() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(
+                        occurrence(
+                                "a-to-b", A, "/orders/o1", B, true),
+                        occurrence(
+                                "b-to-c", B, "/payment", C, true)));
+        ClosureSubscriptionInventory exact = subscriptions(
+                A,
+                demand(
+                        "exact",
+                        "/orders/o1/payment",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT));
+        ClosureSubscriptionInventory all = subscriptions(
+                A,
+                demand(
+                        "all",
+                        "/",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode
+                                .ALL_DESCENDANTS));
+
+        // when
+        ContractsClosureAdapter.ConnectedSelection exactSelection =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, exact, C);
+        ContractsClosureAdapter.ConnectedSelection allSelection =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, all, C);
+
+        // then
+        assertEquals(List.of(A, B, C), exactSelection.members());
+        assertEquals(List.of(A, B, C), allSelection.members());
+    }
+
+    @Test
+    void collectionListenerPathDoesNotSuppressSiblingStatePublication() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(
+                        occurrence(
+                                "escaped", A,
+                                "/groups/a~1b/member", B, true),
+                        occurrence(
+                                "unrelated", A,
+                                "/groups/a~1b-old/member", C, true)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(
+                A,
+                demand(
+                        "escaped-groups",
+                        "/groups/a~1b",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode
+                                .COLLECTION_DESCENDANTS));
+
+        // when
+        ContractsClosureAdapter.ConnectedSelection escaped =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, B);
+        ContractsClosureAdapter.ConnectedSelection unrelated =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, C);
+
+        // then
+        assertEquals(List.of(A, B, C), escaped.members());
+        assertEquals(List.of(A, B, C), unrelated.members());
+    }
+
+    @Test
+    void reverseFrontierExtendsWhenAnObservingParentIntroducesAnotherBranch() {
+        // given
+        DocumentId observer = DocumentId.of("observer");
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
+                occurrence("ab", A, "/child", B, true),
+                occurrence("ac", A, "/sibling", C, true),
+                occurrence("oc", observer, "/peer", C, true)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(A,
+                demand("all", "/", ClosureSubscriptionInventory.EmbeddedDemandMode.ALL_DESCENDANTS))
+                .replaceEmbeddedDemands(observer, List.of(demand("peer", "/peer",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT)));
+
+        // when
+        var selected = ContractsClosureAdapter.initialConnectedSelection(
+                inventory, subscriptions, B);
+
+        // then
+        assertEquals(List.of(A, B, C, observer), selected.members());
+        assertEquals(3, selected.occurrences().size());
+        assertEquals(3L, selected.rowsExamined());
+    }
+
+    @Test
+    void inactiveReservationIsRetainedForwardWithoutSelectingItsParentInReverse() {
+        // given
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(
+                List.of(occurrence(
+                        "prospective", A, "/orders/o1", B, false)));
+        ClosureSubscriptionInventory subscriptions = subscriptions(
+                A,
+                demand(
+                        "orders",
+                        "/orders",
+                        ClosureSubscriptionInventory.EmbeddedDemandMode
+                                .COLLECTION_DIRECT));
+
+        // when
+        ContractsClosureAdapter.ConnectedSelection fromChild =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, B);
+        ContractsClosureAdapter.ConnectedSelection fromParent =
+                ContractsClosureAdapter.initialConnectedSelection(
+                        inventory, subscriptions, A);
+
+        // then
+        assertEquals(List.of(B), fromChild.members());
+        assertTrue(fromChild.occurrences().isEmpty());
+        assertEquals(List.of(A, B), fromParent.members());
+        assertEquals(1, fromParent.occurrences().size());
+        assertFalse(fromParent.occurrences().get(0).active());
     }
 
     @Test
@@ -513,7 +710,7 @@ final class ContractsClosureAdapterTest {
                 1L, timeline, event.blueId()));
         return new TimelineEntry(
                 event,
-                request,
+                java.util.Optional.of(request),
                 order,
                 order,
                 new Timeline(timeline, actor),
@@ -529,17 +726,45 @@ final class ContractsClosureAdapterTest {
             DocumentId source,
             DocumentId target,
             boolean active) {
+        return occurrence(
+                identity, source, "/" + identity, target, active);
+    }
+
+    private static ManagedOccurrenceBinding occurrence(
+            String identity,
+            DocumentId source,
+            String sourcePath,
+            DocumentId target,
+            boolean active) {
         ExactValue targetValue = ExactValue.verified(
                 new Node().value("state-" + identity));
         return ManagedOccurrenceBinding.derived(
                 SHA_A,
                 new blue.language.processor.closure.DocumentId(
                         source.value()),
-                ScopeAddress.embedded("/" + identity, 1L),
+                ScopeAddress.embedded(sourcePath, 1L),
                 new blue.language.processor.closure.DocumentId(
                         target.value()),
                 targetValue.blueId(),
                 active,
                 null);
+    }
+
+    private static ClosureSubscriptionInventory subscriptions(
+            DocumentId documentId,
+            ClosureSubscriptionInventory.EmbeddedDemand... demands) {
+        return ClosureSubscriptionInventory.empty().replaceEmbeddedDemands(
+                documentId, List.of(demands));
+    }
+
+    private static ClosureSubscriptionInventory.EmbeddedDemand demand(
+            String channelKey,
+            String selectorPath,
+            ClosureSubscriptionInventory.EmbeddedDemandMode mode) {
+        return new ClosureSubscriptionInventory.EmbeddedDemand(
+                channelKey,
+                selectorPath,
+                mode,
+                "embedded-contribution-" + channelKey);
     }
 }

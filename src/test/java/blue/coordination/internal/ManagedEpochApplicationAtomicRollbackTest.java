@@ -40,123 +40,124 @@ final class ManagedEpochApplicationAtomicRollbackTest {
             "Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C";
 
     @Test
-    void beforeSwapFailureRollsBackEveryManagedSurfaceAndRetryCommitsOnce() {
-        try (Scenario scenario = prepared()) {
-            // given
-            DefaultCoordinationEngine engine = scenario.engine();
-            InMemoryDocumentStore documents = engine.documents();
-            ContractsClosureAdapter adapter = engine.contractsClosureAdapter();
-            ManagedEpochApplicationWork work = scenario.work();
-            DurableEvidence before = DurableEvidence.capture(scenario);
-            CatchUpPlanStore plansBefore = documents.catchUpPlansSnapshot();
-            long processCallsBefore = counter(
-                    engine, ManagedEpochApplicationExecutor.PROCESS_CALLS);
-            long externalProcessCallsBefore = counter(
-                    engine, "EXTERNAL_PROCESS_CALLS");
+    void everyPublicationBoundaryRollsBackEveryManagedSurfaceAndRetryCommitsOnce() {
+        for (var failurePoint : MultiDocumentPublicationTransaction.FailurePoint.values()) {
+            try (Scenario scenario = prepared()) {
+                // given
+                DefaultCoordinationEngine engine = scenario.engine();
+                InMemoryDocumentStore documents = engine.documents();
+                ContractsClosureAdapter adapter = engine.contractsClosureAdapter();
+                ManagedEpochApplicationWork work = scenario.work();
+                DurableEvidence before = DurableEvidence.capture(scenario);
+                CatchUpPlanStore plansBefore = documents.catchUpPlansSnapshot();
+                long processCallsBefore = counter(
+                        engine, ManagedEpochApplicationExecutor.PROCESS_CALLS);
+                long externalProcessCallsBefore = counter(
+                        engine, "EXTERNAL_PROCESS_CALLS");
 
-            adapter.onStoreFailurePoint(point -> {
-                if (point == MultiDocumentPublicationTransaction.FailurePoint
-                        .BEFORE_SWAP) {
-                    throw new IllegalStateException(
-                            "injected managed catch-up failure before swap");
+                adapter.onStoreFailurePoint(point -> {
+                    if (point == failurePoint) {
+                        throw new IllegalStateException(
+                                "injected managed catch-up failure at " + failurePoint);
+                    }
+                });
+
+                // when
+                // PROCESS completes, but no durable store image is swapped.
+                IllegalStateException failure;
+                try {
+                    failure = assertThrows(
+                            IllegalStateException.class,
+                            adapter::processNextManagedEpochApplication);
+                } finally {
+                    adapter.onStoreFailurePoint(ignored -> { });
                 }
-            });
 
-            // when
-            // PROCESS completes, but no durable store image is swapped.
-            IllegalStateException failure;
-            try {
-                failure = assertThrows(
-                        IllegalStateException.class,
-                        adapter::processNextManagedEpochApplication);
-            } finally {
-                adapter.onStoreFailurePoint(ignored -> { });
+                // rollback checkpoint: every durable surface remains unchanged
+                assertEquals(
+                        "injected managed catch-up failure at " + failurePoint,
+                        failure.getMessage());
+                assertEquals(before, DurableEvidence.capture(scenario));
+                assertSame(plansBefore, documents.catchUpPlansSnapshot(),
+                        "the cursor, plan, work, and application indexes swap "
+                                + "only with the consumer revision");
+                assertEquals(processCallsBefore + 1L, counter(
+                        engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
+                assertEquals(externalProcessCallsBefore, counter(
+                        engine, "EXTERNAL_PROCESS_CALLS"));
+                assertEquals(0L, counter(
+                        engine,
+                        ManagedEpochApplicationExecutor.SOURCE_PROCESS_CALLS));
+                assertEquals(work.workIdentity(), documents.nextCatchUpWork()
+                        .orElseThrow().workIdentity());
+
+                // Retry the exact retained work.
+                Optional<ContractsClosureAdapter.ManagedApplicationOutcome>
+                        retried = adapter.processNextManagedEpochApplication();
+
+                // then
+                // The retry commits once and becomes the sole retained application.
+                ContractsClosureAdapter.ManagedApplicationOutcome outcome =
+                        retried.orElseThrow();
+                assertTrue(outcome.published());
+                assertFalse(outcome.replayed(),
+                        "a pre-swap rollback has no committed response to replay");
+                ManagedEpochApplicationReceipt application = outcome.receipt()
+                        .orElseThrow();
+                assertEquals(work.workIdentity(), application.workIdentity());
+                assertEquals(2L, application.resultingSourceCursor());
+                assertEquals(processCallsBefore + 2L, counter(
+                        engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
+                assertEquals(externalProcessCallsBefore, counter(
+                        engine, "EXTERNAL_PROCESS_CALLS"));
+                assertEquals(0L, counter(
+                        engine,
+                        ManagedEpochApplicationExecutor.SOURCE_PROCESS_CALLS));
+                assertEquals(scenario.sourceHistory(), sourceHistory(scenario));
+                assertEquals(scenario.sourceReceiptIdentities(),
+                        receiptIdentities(documents, scenario.sourceId()));
+
+                ManagedOccurrenceCatchUpPlan completed = documents.catchUpPlan(
+                        work.planIdentity()).orElseThrow();
+                ManagedCatchUpBarrier completedBarrier = documents.catchUpBarrier(
+                        work.barrierIdentity()).orElseThrow();
+                assertEquals(2L, completed.nextSourceEpoch());
+                assertTrue(completed.status().terminal());
+                assertEquals(
+                        ManagedCatchUpBarrierStatus.COMPLETE,
+                        completedBarrier.status());
+                assertEquals(before.consumerHistory().size() + 1,
+                        engine.history(scenario.consumerId()).size());
+                assertEquals(before.consumerReceipts().size() + 1,
+                        documents.managedEpochReceipts(
+                                scenario.consumerId()).size());
+                assertEquals(before.consumerEventCount() + 1L,
+                        consumerEventCount(scenario));
+                assertEquals(before.outbox().size() + 1,
+                        outboxEvidence(documents).size());
+                assertEquals(
+                        application.applicationReceiptIdentity(),
+                        documents.catchUpApplicationByWork(work.workIdentity())
+                                .orElseThrow().applicationReceiptIdentity());
+                assertEquals(before.applicationCount() + 1,
+                        documents.catchUpPlansSnapshot().applicationCount());
+                assertTrue(documents.closurePublicationReceipt(
+                        work.workIdentity()).orElseThrow().commits());
+                assertEquals(1L, documents.publicationSnapshot()
+                        .publicationReceipts().stream()
+                        .filter(work.workIdentity()::equals)
+                        .count());
+                assertTrue(documents.nextCatchUpWork().isEmpty());
+
+                // and: another drain cannot duplicate the committed application
+                assertTrue(adapter.processNextManagedEpochApplication().isEmpty());
+                assertEquals(before.applicationCount() + 1,
+                        documents.catchUpPlansSnapshot().applicationCount());
+                assertEquals(before.consumerEventCount() + 1L,
+                        consumerEventCount(scenario));
+                assertEquals(processCallsBefore + 2L, counter(
+                        engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
             }
-
-            // rollback checkpoint: every durable surface remains unchanged
-            assertEquals(
-                    "injected managed catch-up failure before swap",
-                    failure.getMessage());
-            assertEquals(before, DurableEvidence.capture(scenario));
-            assertSame(plansBefore, documents.catchUpPlansSnapshot(),
-                    "the cursor, plan, work, and application indexes swap "
-                            + "only with the consumer revision");
-            assertEquals(processCallsBefore + 1L, counter(
-                    engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
-            assertEquals(externalProcessCallsBefore, counter(
-                    engine, "EXTERNAL_PROCESS_CALLS"));
-            assertEquals(0L, counter(
-                    engine,
-                    ManagedEpochApplicationExecutor.SOURCE_PROCESS_CALLS));
-            assertEquals(work.workIdentity(), documents.nextCatchUpWork()
-                    .orElseThrow().workIdentity());
-
-            // Retry the exact retained work.
-            Optional<ContractsClosureAdapter.ManagedApplicationOutcome>
-                    retried = adapter.processNextManagedEpochApplication();
-
-            // then
-            // The retry commits once and becomes the sole retained application.
-            ContractsClosureAdapter.ManagedApplicationOutcome outcome =
-                    retried.orElseThrow();
-            assertTrue(outcome.published());
-            assertFalse(outcome.replayed(),
-                    "a pre-swap rollback has no committed response to replay");
-            ManagedEpochApplicationReceipt application = outcome.receipt()
-                    .orElseThrow();
-            assertEquals(work.workIdentity(), application.workIdentity());
-            assertEquals(2L, application.resultingSourceCursor());
-            assertEquals(processCallsBefore + 2L, counter(
-                    engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
-            assertEquals(externalProcessCallsBefore, counter(
-                    engine, "EXTERNAL_PROCESS_CALLS"));
-            assertEquals(0L, counter(
-                    engine,
-                    ManagedEpochApplicationExecutor.SOURCE_PROCESS_CALLS));
-            assertEquals(scenario.sourceHistory(), sourceHistory(scenario));
-            assertEquals(scenario.sourceReceiptIdentities(),
-                    receiptIdentities(documents, scenario.sourceId()));
-
-            ManagedOccurrenceCatchUpPlan completed = documents.catchUpPlan(
-                    work.planIdentity()).orElseThrow();
-            ManagedCatchUpBarrier completedBarrier = documents.catchUpBarrier(
-                    work.barrierIdentity()).orElseThrow();
-            assertEquals(2L, completed.nextSourceEpoch());
-            assertTrue(completed.status().terminal());
-            assertEquals(
-                    ManagedCatchUpBarrierStatus.COMPLETE,
-                    completedBarrier.status());
-            assertEquals(before.consumerHistory().size() + 1,
-                    engine.history(scenario.consumerId()).size());
-            assertEquals(before.consumerReceipts().size() + 1,
-                    documents.managedEpochReceipts(
-                            scenario.consumerId()).size());
-            assertEquals(before.consumerEventCount() + 1L,
-                    consumerEventCount(scenario));
-            assertEquals(before.outbox().size() + 1,
-                    outboxEvidence(documents).size());
-            assertEquals(
-                    application.applicationReceiptIdentity(),
-                    documents.catchUpApplicationByWork(work.workIdentity())
-                            .orElseThrow().applicationReceiptIdentity());
-            assertEquals(before.applicationCount() + 1,
-                    documents.catchUpPlansSnapshot().applicationCount());
-            assertTrue(documents.closurePublicationReceipt(
-                    work.workIdentity()).orElseThrow().commits());
-            assertEquals(1L, documents.publicationSnapshot()
-                    .publicationReceipts().stream()
-                    .filter(work.workIdentity()::equals)
-                    .count());
-            assertTrue(documents.nextCatchUpWork().isEmpty());
-
-            // and: another drain cannot duplicate the committed application
-            assertTrue(adapter.processNextManagedEpochApplication().isEmpty());
-            assertEquals(before.applicationCount() + 1,
-                    documents.catchUpPlansSnapshot().applicationCount());
-            assertEquals(before.consumerEventCount() + 1L,
-                    consumerEventCount(scenario));
-            assertEquals(processCallsBefore + 2L, counter(
-                    engine, ManagedEpochApplicationExecutor.PROCESS_CALLS));
         }
     }
 
@@ -384,12 +385,12 @@ final class ManagedEpochApplicationAtomicRollbackTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute

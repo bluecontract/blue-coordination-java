@@ -156,7 +156,12 @@ final class SdkDrainResultMapper {
                                         .PublicationFailureCode.valueOf(
                                                 failure.code().name()),
                                 failure.message(),
-                                failure.details())));
+                                failure.details())),
+                retained.published()
+                        ? managedSurfaceEvidence(retained.attempt().processResult(),
+                                retained.managedOccurrenceResolutions(), retained.inputComponents(),
+                                retained.operationRouteChanges())
+                        : ManagedSurfaceEvidence.empty());
     }
 
     private static ManagedEpochApplicationAttempt
@@ -284,7 +289,15 @@ final class SdkDrainResultMapper {
                 work.activationGeneration(),
                 work.expectedConsumerCommittedEpoch(),
                 work.expectedConsumerCommittedBlueId(),
-                work.expectedGraphGeneration());
+                work.expectedGraphGeneration(),
+                work.representationCause().map(cause -> new ManagedEpochApplicationWork.RepresentationStep(
+                        cause.causeIdentity(), cause.beforeBlueId(), cause.afterBlueId(),
+                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                                cause.transition().predecessorPositionIdentity(), cause.targetPositionIdentity(),
+                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())),
+                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                                cause.transition().positionIdentity(), cause.targetPositionIdentity(),
+                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())), cause.terminalPositionReached())));
     }
 
     private static ManagedEpochApplicationReceipt
@@ -303,7 +316,10 @@ final class SdkDrainResultMapper {
                 receipt.consumerRevisionEpoch(),
                 receipt.consumerRevisionReceiptIdentity(),
                 receipt.consumerCommittedBlueId(),
-                receipt.resultingSourceCursor());
+                receipt.resultingSourceCursor(), receipt.representationCauseIdentity(),
+                receipt.resultingRepresentationCursor().map(cursor -> new ManagedEpochApplicationWork.Position(
+                        cursor.anchorReceiptIdentity(), cursor.positionIdentity(), cursor.targetPositionIdentity(),
+                        Optional.ofNullable(cursor.nextRevisionReceiptIdentity()))));
     }
 
     private EntryResult mapEntry(
@@ -327,6 +343,12 @@ final class SdkDrainResultMapper {
             closures.add(mapClosure(entry, attempts.get(index), index));
         }
         EntryDisposition disposition = aggregateDisposition(closures);
+        if (disposition == EntryDisposition.APPLIED
+                && attempts.stream().allMatch(attempt -> operationDisposition(
+                        attempt.attempt().processResult(), runtime.intent(entry.blueId()))
+                        == EntryDisposition.NO_MATCH)) {
+            disposition = EntryDisposition.NO_MATCH;
+        }
         List<PublicEvent> publicEvents = closures.stream()
                 .flatMap(closure -> closure.publicEvents().stream())
                 .toList();
@@ -369,13 +391,19 @@ final class SdkDrainResultMapper {
         }
 
         ClosureProcessResult result = attempt.processResult();
-        EntryDisposition disposition = disposition(result.status());
-        List<PublicEvent> events = publicEvents(result);
+        boolean hostRejected = result.commits() && !retained.published();
+        if (hostRejected && retained.publicationIdentity() == null) {
+            throw new IllegalStateException("Unpublished committing attempt has no durable host decision");
+        }
+        EntryDisposition disposition = hostRejected ? EntryDisposition.REJECTED : disposition(result.status());
+        List<PublicEvent> events = hostRejected ? List.of() : publicEvents(result);
         List<DocumentChange> changes = retained.published()
                 ? changes(entry, retained, result, events)
                 : List.of();
         ProcessingStats stats = stats(result, retained, changes);
-        Diagnostic diagnostic = diagnostic(result);
+        Diagnostic diagnostic = hostRejected
+                ? new Diagnostic("MANAGED_OCCURRENCE_BINDING_MISSING", "Expected managed occurrence was not established; no effects were published", Map.of())
+                : diagnostic(result);
         return new ClosureResult(
                 closureId(entry, retained, index),
                 disposition,
@@ -437,47 +465,28 @@ final class SdkDrainResultMapper {
     private static ManagedSurfaceEvidence managedSurfaceEvidence(
             ContractsClosureDispatchAttempt retained,
             ClosureProcessResult result) {
+        return managedSurfaceEvidence(result, retained.managedOccurrenceResolutions(),
+                retained.inputComponents(), retained.operationRouteChanges());
+    }
+
+    private static ManagedSurfaceEvidence managedSurfaceEvidence(
+            ClosureProcessResult result,
+            List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution> retainedResolutions,
+            List<ComponentSnapshot> inputComponents,
+            List<ContractsClosureDispatchAttempt.OperationRouteChange> operationRouteChanges) {
         if (!result.commits()) {
             return ManagedSurfaceEvidence.empty();
         }
-        List<ManagedSurfaceEvidence.OccurrenceResolution> resolutions =
-                retained.managedOccurrenceResolutions().stream()
-                        .map(SdkDrainResultMapper::occurrenceResolution)
-                        .toList();
-        List<ManagedSurfaceEvidence.GraphChange> graphChanges = result
-                .graphChanges()
-                .stream()
-                .map(SdkDrainResultMapper::graphChange)
-                .toList();
-        List<ManagedSurfaceEvidence.ComponentTransition> components =
-                componentTransitions(
-                        retained.inputComponents(),
-                        result.resultingComponents());
-        List<ManagedSurfaceEvidence.SubscriptionChange> subscriptions =
-                result.subscriptionDeltas().stream()
-                        .map(SdkDrainResultMapper::subscriptionChange)
-                        .toList();
-        List<ManagedSurfaceEvidence.DocumentTransition> transitions = result
-                .documentTransitionEvidence()
-                .stream()
-                .map(SdkDrainResultMapper::documentTransition)
-                .toList();
-        List<ManagedSurfaceEvidence.OperationRouteChange> routeChanges =
-                new ArrayList<>();
-        for (int index = 0;
-                index < retained.operationRouteChanges().size();
-                index++) {
-            routeChanges.add(operationRouteChange(
-                    index, retained.operationRouteChanges().get(index)));
-        }
         return new ManagedSurfaceEvidence(
                 result.graphGeneration(),
-                resolutions,
-                graphChanges,
-                components,
-                subscriptions,
-                transitions,
-                routeChanges);
+                retainedResolutions.stream().map(SdkDrainResultMapper::occurrenceResolution).toList(),
+                result.graphChanges().stream().map(SdkDrainResultMapper::graphChange).toList(),
+                componentTransitions(inputComponents, result.resultingComponents()),
+                result.subscriptionDeltas().stream().map(SdkDrainResultMapper::subscriptionChange).toList(),
+                result.documentTransitionEvidence().stream().map(SdkDrainResultMapper::documentTransition).toList(),
+                java.util.stream.IntStream.range(0, operationRouteChanges.size())
+                        .mapToObj(index -> operationRouteChange(index, operationRouteChanges.get(index)))
+                        .toList());
     }
 
     private static ManagedSurfaceEvidence.OperationRouteChange
@@ -621,12 +630,7 @@ final class SdkDrainResultMapper {
     private static boolean overlaps(
             ComponentSnapshot before,
             ComponentSnapshot after) {
-        Set<String> members = before.orderedMemberDocumentIds().stream()
-                .map(blue.language.processor.closure.DocumentId::value)
-                .collect(java.util.stream.Collectors.toSet());
-        return after.orderedMemberDocumentIds().stream()
-                .map(blue.language.processor.closure.DocumentId::value)
-                .anyMatch(members::contains);
+        return !Collections.disjoint(componentMembers(before), componentMembers(after));
     }
 
     private static ManagedSurfaceEvidence.ComponentTransition
@@ -777,6 +781,10 @@ final class SdkDrainResultMapper {
             List<PublicEvent> events) {
         ArrayList<DocumentChange> changes = new ArrayList<>();
         for (DocumentId documentId : retained.documentIds()) {
+            List<PublicEvent> documentEvents = events.stream()
+                    .filter(event -> event.sourceDocument().filter(documentId::equals).isPresent())
+                    .toList();
+
             List<blue.coordination.api.DocumentRevision> matching =
                     engine.history(documentId).stream()
                             .filter(revision -> revision.causalEntryBlueId()
@@ -788,11 +796,6 @@ final class SdkDrainResultMapper {
                         matching.get(0);
                 blue.coordination.api.DocumentRevision last =
                         matching.get(matching.size() - 1);
-                List<PublicEvent> documentEvents = events.stream()
-                        .filter(event -> event.sourceDocument()
-                                .filter(documentId::equals)
-                                .isPresent())
-                        .toList();
                 changes.add(new DocumentChange(
                         documentId,
                         last.epoch(),
@@ -815,11 +818,7 @@ final class SdkDrainResultMapper {
                             ExactBlueValue.wrap(
                                     ExactValue.fromVerifiedClosureResult(
                                             result, documentId)),
-                            events.stream()
-                                    .filter(event -> event.sourceDocument()
-                                            .filter(documentId::equals)
-                                            .isPresent())
-                                    .toList())));
+                            documentEvents)));
         }
         return List.copyOf(changes);
     }
@@ -959,6 +958,26 @@ final class SdkDrainResultMapper {
         return new TargetOutcome(
                 EntryDisposition.REJECTED,
                 new Diagnostic(code, message, details));
+    }
+
+    private static EntryDisposition operationDisposition(
+            ClosureProcessResult result,
+            SdkCoordinationRuntime.EntryIntent intent) {
+        EntryDisposition status = disposition(result.status());
+        if (status != EntryDisposition.APPLIED || !intent.targeted()) {
+            return status;
+        }
+        // A successful channel transition can commit its checkpoint even when
+        // the requested operation's payload pattern rejected the event. The
+        // complete authenticated trace records handler admission independently
+        // of business mutations, so an executed no-op still reports APPLIED.
+        boolean operationCalled = result.gasTrace().stream().anyMatch(charge ->
+                charge.namespace() == GasTraceEntry.Namespace.PROCESSOR
+                        && "handlerCall".equals(charge.counter())
+                        && intent.operation().equals(charge.contractKey())
+                        && charge.documentId() != null
+                        && intent.targetId().value().equals(charge.documentId().value()));
+        return operationCalled ? EntryDisposition.APPLIED : EntryDisposition.NO_MATCH;
     }
 
     private static EntryDisposition disposition(ProcessorStatus status) {

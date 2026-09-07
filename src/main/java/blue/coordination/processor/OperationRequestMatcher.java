@@ -10,10 +10,12 @@ import blue.repo.coordination.SequentialWorkflowOperation;
  * Timeline-wrapped Operation Request.
  *
  * <p>The operation key and selected channel are immutable dispatch headers.
- * An authored {@code request} is an additional payload pattern; an empty Node
- * intentionally means that no payload constraint was declared. All provider
- * evidence and event matching remain owned by the supplied Contracts
- * context.</p>
+ * An authored {@code request} is an additional payload pattern. Absence means
+ * that no payload constraint was declared; an exact empty object is a present
+ * pattern and therefore requires a present request. Object cardinality, when
+ * relevant, remains an explicit schema constraint such as {@code minFields}.
+ * All provider evidence and event matching remain owned by the supplied
+ * Contracts context.</p>
  */
 final class OperationRequestMatcher {
     private final CoordinationSemanticTypeIdentities identities;
@@ -53,40 +55,43 @@ final class OperationRequestMatcher {
             return false;
         }
         Node requestPattern = contract.getRequest();
+        if (isInheritedRequestMetadataOnly(requestPattern)) {
+            requestPattern = null;
+        }
         boolean requestMatches =
                 CoordinationEventNodes.matchesOperationRequest(
                 context.occurrenceEvent(),
                 operationKey,
                 channelKey,
-                requestPattern == null
-                        || isEmptyRequestPattern(requestPattern)
-                        ? null
-                        : requestPattern,
+                requestPattern,
                 context,
                 identities);
         return requestMatches;
     }
 
-    private boolean isEmptyRequestPattern(Node requestPattern) {
-        /*
-         * Repository resolution contributes descriptive metadata from
-         * Operation.request even when the document authored request: {}.
-         * Name and description are documentation, not payload constraints.
-         */
-        return requestPattern.getType() == null
-                && requestPattern.getItemType() == null
-                && requestPattern.getKeyType() == null
-                && requestPattern.getValueType() == null
-                && requestPattern.getValue() == null
-                && requestPattern.getItems() == null
-                && (requestPattern.getProperties() == null || requestPattern.getProperties().isEmpty())
-                && requestPattern.getContracts() == null
-                && requestPattern.getBlueId() == null
-                && requestPattern.getSchema() == null
-                && requestPattern.getMergePolicy() == null
-                && requestPattern.getPreviousBlueId() == null
-                && requestPattern.getPosition() == null
-                && requestPattern.getBlue() == null;
+    /**
+     * Resolution materializes the base Operation's descriptive request field
+     * even when the concrete contract omitted a request constraint. An exact
+     * empty-object contribution is different: Language retains its explicit
+     * empty properties map, so only a node with no payload marker at all is
+     * inherited metadata rather than an authored request pattern.
+     */
+    private static boolean isInheritedRequestMetadataOnly(Node pattern) {
+        return pattern != null
+                && pattern.getType() == null
+                && pattern.getItemType() == null
+                && pattern.getKeyType() == null
+                && pattern.getValueType() == null
+                && pattern.getValue() == null
+                && pattern.getItems() == null
+                && pattern.getProperties() == null
+                && pattern.getContracts() == null
+                && pattern.getBlueId() == null
+                && pattern.getSchema() == null
+                && pattern.getMergePolicy() == null
+                && pattern.getPreviousBlueId() == null
+                && pattern.getPosition() == null
+                && pattern.getBlue() == null;
     }
 
     private static String nonBlank(String value) {

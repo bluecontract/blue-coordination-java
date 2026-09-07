@@ -25,7 +25,10 @@ public record ManagedEpochApplicationAttempt(
                 automaticResolutionStopReason,
         List<ManagedOccurrenceResolutionIssue>
                 managedOccurrenceResolutionIssues,
-        Optional<PublicationFailure> publicationFailure) {
+        Optional<PublicationFailure> publicationFailure,
+        List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution> managedOccurrenceResolutions,
+        List<blue.language.processor.closure.ComponentSnapshot> inputComponents,
+        List<ContractsClosureDispatchAttempt.OperationRouteChange> operationRouteChanges) {
 
     /**
      * Preserves the original constructor for hosts that do not retain
@@ -54,16 +57,9 @@ public record ManagedEpochApplicationAttempt(
             long automaticRetryCount,
             List<ManagedOccurrenceResolutionIssue>
                     managedOccurrenceResolutionIssues) {
-        this(
-                work,
-                attempt,
-                published,
-                replayed,
-                receipt,
-                automaticRetryCount,
+        this(work, attempt, published, replayed, receipt, automaticRetryCount,
                 inferredStopReason(managedOccurrenceResolutionIssues),
-                managedOccurrenceResolutionIssues,
-                Optional.empty());
+                managedOccurrenceResolutionIssues, Optional.empty());
     }
 
     /**
@@ -80,16 +76,23 @@ public record ManagedEpochApplicationAttempt(
                     automaticResolutionStopReason,
             List<ManagedOccurrenceResolutionIssue>
                     managedOccurrenceResolutionIssues) {
-        this(
-                work,
-                attempt,
-                published,
-                replayed,
-                receipt,
-                automaticRetryCount,
-                automaticResolutionStopReason,
-                managedOccurrenceResolutionIssues,
+        this(work, attempt, published, replayed, receipt, automaticRetryCount,
+                automaticResolutionStopReason, managedOccurrenceResolutionIssues,
                 Optional.empty());
+    }
+
+    /** Preserves the constructor preceding committed managed-surface evidence. */
+    public ManagedEpochApplicationAttempt(
+            ManagedEpochApplicationWork work, ClosureAttemptResult attempt,
+            boolean published, boolean replayed,
+            Optional<ManagedEpochApplicationReceipt> receipt,
+            long automaticRetryCount,
+            Optional<AutomaticResolutionStopReason> automaticResolutionStopReason,
+            List<ManagedOccurrenceResolutionIssue> managedOccurrenceResolutionIssues,
+            Optional<PublicationFailure> publicationFailure) {
+        this(work, attempt, published, replayed, receipt, automaticRetryCount,
+                automaticResolutionStopReason, managedOccurrenceResolutionIssues,
+                publicationFailure, List.of(), List.of(), List.of());
     }
 
     /** Validates the relationship between processor and publication evidence. */
@@ -106,6 +109,14 @@ public record ManagedEpochApplicationAttempt(
                 Objects.requireNonNull(
                         managedOccurrenceResolutionIssues,
                         "managedOccurrenceResolutionIssues"));
+        managedOccurrenceResolutions = List.copyOf(Objects.requireNonNull(
+                managedOccurrenceResolutions, "managedOccurrenceResolutions"));
+        inputComponents = List.copyOf(Objects.requireNonNull(inputComponents, "inputComponents"));
+        operationRouteChanges = List.copyOf(Objects.requireNonNull(operationRouteChanges, "operationRouteChanges"));
+        if (!published && (!managedOccurrenceResolutions.isEmpty()
+                || !inputComponents.isEmpty() || !operationRouteChanges.isEmpty())) {
+            throw new IllegalArgumentException("Unpublished managed attempts cannot expose committed surface evidence");
+        }
         if (automaticRetryCount < 0L) {
             throw new IllegalArgumentException(
                     "automaticRetryCount must be non-negative");

@@ -1,0 +1,13 @@
+---
+type:
+  blueId: 8eHxH2MmvpRLFkatvGU4hggBkuvX59UqJSYpXnjwG5hL
+unit:
+  currency:
+    val:
+      type:
+        blueId: GX7CFUmSDrE2MzptunLCCdZwnuwwrenRQqEnHL4x3uoC
+      value: USD
+val:
+  type:
+    blueId: 9eWaHYz2vKrFofdHTHAizNNu8xP6QE3WQ5y7DGrGZvyJ
+  value: 1000000.25

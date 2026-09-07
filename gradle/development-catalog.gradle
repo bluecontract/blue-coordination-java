@@ -1,0 +1,87 @@
+import groovy.json.JsonSlurper
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.security.MessageDigest
+
+// Settings-time verification keeps catalog resolution closed before compilation.
+def required = { String name ->
+    String value = providers.gradleProperty(name).orNull
+    if (!value) throw new GradleException("Development catalog requires -P${name}")
+    value
+}
+def digest = { File file -> 'sha256:' + MessageDigest.getInstance('SHA-256').digest(file.bytes).encodeHex() }
+def regular = { File file ->
+    if (!Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file.toPath()))
+        throw new GradleException("Expected regular catalog artifact: ${file}")
+}
+boolean localRc = providers.gradleProperty('blueDependencyMode').orNull == 'immutable-local-rc-contracts'
+String version = required('blueRepositoryVersion')
+String commit = required('blueRepositorySourceCommit')
+String identity = required('blueRepositoryManifestSha256')
+String location = required('blueRepositoryRepository')
+if (!(commit ==~ /[0-9a-f]{40}/) || !(localRc ? version ==~ /3\.0\.0-rc\.[1-9][0-9]*/ : version == '3.0.0-dev.' + commit)
+        || !(identity ==~ /sha256:[0-9a-f]{64}/) || !new File(location).isAbsolute())
+    throw new GradleException('Invalid exact development catalog selection')
+File repository = new File(location)
+if (!repository.isDirectory() || Files.isSymbolicLink(repository.toPath()))
+    throw new GradleException('Catalog repository must be a regular directory')
+File manifestFile = new File(repository, 'artifact-manifest.json')
+File sidecar = new File(repository, 'artifact-manifest.json.sha256')
+regular(manifestFile)
+regular(sidecar)
+if (digest(manifestFile) != identity || sidecar.getText('UTF-8') != identity.substring(7) + '  artifact-manifest.json\n')
+    throw new GradleException('Development catalog manifest identity differs')
+def manifest = new JsonSlurper().parse(manifestFile)
+if (manifest.schema != (localRc ? 'blue-repository-local-rc-repository/1.0' : 'blue-repository-development-repository/1.0')
+        || manifest.groupId != 'blue.repo' || manifest.version != version
+        || manifest.sourceCommit != commit || !(manifest.sourceTree ==~ /[0-9a-f]{40}/)
+        || manifest.sourceDirty != false || manifest.stagePurpose != (localRc ? 'LOCAL_RC' : 'DEVELOPMENT')
+        || manifest.releaseReadinessClaimed != false || manifest.builtWithJava != 17)
+    throw new GradleException('Catalog manifest does not describe selected clean development source')
+File languageFile = new File(required('blueContractsRepository'), 'artifact-manifest.json')
+regular(languageFile)
+def language = new JsonSlurper().parse(languageFile)
+if (digest(languageFile) != required('blueContractsManifestSha256')
+        || manifest.languageVersion != required('blueContractsVersion')
+        || manifest.languageSourceCommit != required('blueContractsSourceCommit')
+        || manifest.languageSourceTree != language.sourceTree
+        || manifest.languageRepositoryManifestIdentity != digest(languageFile))
+    throw new GradleException('Catalog does not bind the selected Language manifest')
+Set<String> expected = ['artifact-manifest.json', 'artifact-manifest.json.sha256'] as Set
+def kinds = [runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar', pom: '.pom']
+if (!(manifest.artifacts instanceof List) || manifest.artifacts.size() != 4
+        || manifest.artifacts.collect { it.kind }.toSet() != kinds.keySet())
+    throw new GradleException('Catalog must contain exactly four publication records')
+manifest.artifacts.each { record ->
+    String filename = 'blue-repo-java-' + version + kinds[record.kind]
+    String relative = 'blue/repo/blue-repo-java/' + version + '/' + filename
+    if (record.coordinate != 'blue.repo:blue-repo-java:' + version
+            || record.path != relative || record.checksumPath != relative + '.sha256'
+            || !expected.add(relative) || !expected.add(record.checksumPath))
+        throw new GradleException('Catalog artifact coordinate/path inventory differs')
+    File payload = new File(repository, relative)
+    File checksum = new File(repository, record.checksumPath)
+    regular(payload)
+    regular(checksum)
+    if (payload.length() != record.bytes || digest(payload) != record.sha256
+            || checksum.getText('UTF-8') != record.sha256.substring(7) + '  ' + filename + '\n')
+        throw new GradleException('Catalog artifact bytes differ: ' + relative)
+}
+Set<String> actual = [] as Set
+Files.walk(repository.toPath()).withCloseable { paths -> paths.forEach { path ->
+    if (Files.isSymbolicLink(path)) throw new GradleException('Symbolic link in catalog repository')
+    if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) actual.add(repository.toPath().relativize(path).toString())
+} }
+if (actual != expected) throw new GradleException('Catalog repository file closure differs')
+gradle.ext.blueCatalogDevelopmentBinding = [repository: repository.canonicalFile,
+    manifest: manifest, manifestIdentity: identity, version: version, sourceCommit: commit,
+    sourceTree: manifest.sourceTree]
+
+// The SDK's release/closure fixture identifiers are declared by the authenticated
+// Language manifest; they are not the similarly named runtime registry fixtures.
+Properties sdkProfile = new Properties()
+new File(settingsDir, 'src/main/resources/blue/coordination/sdk/contracts-1.0-release.properties')
+        .withInputStream { sdkProfile.load(it) }
+if (sdkProfile.getProperty('contractsRelease') != language.contractsReleaseIdentity
+        || sdkProfile.getProperty('fixturePackage') != language.contractsFixturePackageIdentity)
+    throw new GradleException('SDK profile does not bind selected Contracts release and aggregate fixture package')

@@ -59,7 +59,7 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
         Objects.requireNonNull(provider, "provider");
         Contracts10AuthoredClosureCompiler.ActivationInputs selectedActivation =
                 Objects.requireNonNull(activation, "activation");
-        ExactValue authored = engine.exactValue(requireText(
+        ExactValue authored = engine.exactProcessingSource(requireText(
                 authoredYaml, "authoredYaml"));
         DocumentId rootDocumentId = DocumentId.of(authored.blueId());
         blue.language.processor.closure.DocumentId closureRoot =

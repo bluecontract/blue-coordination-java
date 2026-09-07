@@ -60,7 +60,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
             "managedEpoch.catchUp.providerReferenceSubstitutions";
 
     @Test
-    void multiChildBarrierExtendsBeforeReadyAndPreventsDirectOvertaking() {
+    void multiChildBarrierFinishesAtAttachmentCutoffBeforeLaterTimelineEntries() {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
@@ -179,30 +179,19 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     "the direct A entry must remain behind its active barrier");
             assertFalse(extension.find(directById).isPresent(),
                     "id-selected A work must remain behind the same barrier");
-            assertEquals(EntryDisposition.APPLIED,
-                    extension.entry(bThree).disposition(),
-                    extension.entry(bThree).diagnostic().toString());
-            assertTrue(extension.managedEpochApplications().isEmpty(),
-                    "the one-transition budget belongs to genuine B3");
-            expectedApplicationOrder.add(
-                    receiptIdentity(coordination, B, 3L));
-            List<String> bHistoryAfterExtension = historyBlueIds(b);
-            assertEquals(bHistoryBeforeAttachment.size() + 1,
-                    bHistoryAfterExtension.size());
+            assertTrue(extension.find(bThree).isEmpty(),
+                    "future B3 cannot extend the attachment cutoff");
+            recordOnlyApplication(extension, actualApplicationOrder);
+            assertEquals(bHistoryBeforeAttachment, historyBlueIds(b));
             assertEquals(cHistoryBeforeAttachment, historyBlueIds(c));
-            ManagedOccurrenceCatchUpPlan extendedB = planFor(
-                    coordination, B);
-            assertEquals(2L, extendedB.nextSourceEpoch());
-            assertEquals(3L, extendedB.requiredThroughSourceEpoch(),
-                    "the active B plan must extend in the B3 commit");
-            assertEquals(2L, planFor(coordination, C)
-                    .requiredThroughSourceEpoch());
+            assertEquals(2L, planFor(coordination, B).nextSourceEpoch());
+            assertEquals(2L, planFor(coordination, B).requiredThroughSourceEpoch());
+            assertEquals(2L, planFor(coordination, C).requiredThroughSourceEpoch());
             assertCatchingUp(coordination, barrierIdentity);
             CoordinationTestControl.MetricsSnapshot afterExtension =
                     control.metricsSnapshot();
-            assertEquals(1L, publicCounterDelta(
-                    beforeCatchUp,
-                    afterExtension,
+            assertEquals(0L, publicCounterDelta(
+                    beforeCatchUp, afterExtension,
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
 
             boolean observedPartialActivation = false;
@@ -218,8 +207,8 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     assertCatchingUp(coordination, barrierIdentity);
                 }
                 if (!observedPartialActivation
-                        && planFor(coordination, C).status().terminal()
-                        && !planFor(coordination, B).status().terminal()) {
+                        && planFor(coordination, B).status().terminal()
+                        && !planFor(coordination, C).status().terminal()) {
                     blue.coordination.api.DocumentSnapshot partial =
                             coordination.advanced().rawEngine().document(A);
                     assertEquals(readyBeforeAttachment.blueId(),
@@ -260,15 +249,15 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
             assertEquals(expectedApplicationOrder, actualApplicationOrder,
                     "B/C epochs must interleave by original source order");
             assertTrue(observedPartialActivation,
-                    "C must activate while B still holds the shared barrier");
+                    "B must activate while C still holds the shared barrier");
             ManagedOccurrenceCatchUpPlan completedB = planFor(
                     coordination, B);
             ManagedOccurrenceCatchUpPlan completedC = planFor(
                     coordination, C);
             assertTrue(completedB.status().terminal());
             assertTrue(completedC.status().terminal());
-            assertEquals(4L, completedB.nextSourceEpoch());
-            assertEquals(3L, completedB.requiredThroughSourceEpoch());
+            assertEquals(3L, completedB.nextSourceEpoch());
+            assertEquals(2L, completedB.requiredThroughSourceEpoch());
             assertEquals(3L, completedC.nextSourceEpoch());
             assertEquals(2L, completedC.requiredThroughSourceEpoch());
             assertEquals(ManagedCatchUpBarrierStatus.COMPLETE,
@@ -279,11 +268,11 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     .auditManagedDocumentReadiness(A).orElseThrow();
             assertTrue(ready.ready());
             assertTrue(ready.activeBarrierIdentities().isEmpty());
-            assertEquals(3L, a.snapshot().longAt("/bChanges"));
+            assertEquals(2L, a.snapshot().longAt("/bChanges"));
             assertEquals(2L, a.snapshot().longAt("/cChanges"));
             assertEquals(0L, a.snapshot().longAt("/directCount"));
             assertEquals(1L, b.snapshot().longAt("/initializationCount"));
-            assertEquals(3L, b.snapshot().longAt("/counter"));
+            assertEquals(2L, b.snapshot().longAt("/counter"));
             assertEquals(1L, c.snapshot().longAt("/initializationCount"));
             assertEquals(2L, c.snapshot().longAt("/counter"));
             assertEquals(Map.of(
@@ -292,7 +281,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     coordination.advanced().rawEngine().document(A)
                             .embeddedChildren(),
                     "the complete barrier publishes body and topology together");
-            assertEquals(bHistoryAfterExtension, historyBlueIds(b),
+            assertEquals(bHistoryBeforeAttachment, historyBlueIds(b),
                     "managed delivery must not append or reprocess B");
             assertEquals(cHistoryBeforeAttachment, historyBlueIds(c),
                     "managed delivery must not append or reprocess C");
@@ -300,20 +289,17 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
             CoordinationTestControl.MetricsSnapshot afterCatchUp =
                     control.metricsSnapshot();
             assertCatchUpMetrics(
-                    beforeCatchUp,
-                    afterFirstApplication,
-                    afterExtension,
-                    afterCatchUp);
-            assertEquals(1L, publicCounterDelta(
+                    beforeCatchUp, afterCatchUp);
+            assertEquals(0L, publicCounterDelta(
                     beforeCatchUp,
                     afterCatchUp,
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS),
-                    "only genuine B3 may add a source external PROCESS");
-            assertEquals(5L, publicCounterDelta(
+                    "future B3 must remain unprocessed until catch-up completes");
+            assertEquals(4L, publicCounterDelta(
                     beforeCatchUp,
                     afterCatchUp,
                     CoordinationMetrics.Counter.EMBEDDED_EPOCH_PROCESS_CALLS));
-            assertEquals(5L, publicCounterDelta(
+            assertEquals(4L, publicCounterDelta(
                     beforeCatchUp,
                     afterCatchUp,
                     CoordinationMetrics.Counter.PARENT_EPOCH_APPLICATIONS));
@@ -338,17 +324,29 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     directByIdDrain.entry(directById).disposition(),
                     directByIdDrain.entry(directById).diagnostic().toString());
             assertEquals(2L, a.snapshot().longAt("/directCount"));
+            assertEquals(2L, b.snapshot().longAt("/counter"),
+                    "both earlier A entries must run before B3");
+            DrainResult sourceDrain = coordination.processing().drain(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED, sourceDrain.entry(bThree).disposition());
+            assertTrue(sourceDrain.managedEpochApplications().isEmpty());
+            assertEquals(3L, a.snapshot().longAt("/bChanges"));
+            assertEquals(3L, b.snapshot().longAt("/counter"));
+            assertEquals(1L, b.snapshot().longAt("/initializationCount"));
+            assertEquals(bHistoryBeforeAttachment,
+                    historyBlueIds(b).subList(0, bHistoryBeforeAttachment.size()));
+            assertEquals(bHistoryBeforeAttachment.size() + 1, b.history().size());
+            assertEquals(2L, planFor(coordination, B).requiredThroughSourceEpoch(),
+                    "completed historical plan remains immutable after ordinary B3");
             assertEquals(3L, publicCounterDelta(
                     beforeCatchUp,
                     control.metricsSnapshot(),
                     CoordinationMetrics.Counter.EXTERNAL_PROCESS_CALLS));
-            assertEquals(bHistoryAfterExtension, historyBlueIds(b));
             assertEquals(cHistoryBeforeAttachment, historyBlueIds(c));
         }
     }
 
     @Test
-    void boundedDrainsFairlyAdvanceContinuingSourceTrafficAndCatchUp() {
+    void boundedDrainsCompleteCapturedSuffixBeforeContinuingFutureSourceTraffic() {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
@@ -369,6 +367,9 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
             assertApplied(increment(coordination, b, bTimeline).execute());
             assertApplied(increment(coordination, b, bTimeline).execute());
 
+            // when
+
+            // attach the retained state, then queue direct and future source work.
             EntryHandle attachment = coordination.operations()
                     .on(a)
                     .from(aTimeline)
@@ -383,105 +384,57 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     attached.entry(attachment).diagnostic().toString());
             ManagedOccurrenceCatchUpPlan admitted = planFor(coordination, B);
             String barrierIdentity = admitted.barrierIdentity();
-            long expectedCursor = admitted.nextSourceEpoch();
-            long expectedFrontier = admitted.requiredThroughSourceEpoch();
+            List<String> originalSourceHistory = historyBlueIds(b);
             assertCatchingUp(coordination, barrierIdentity);
+            EntryHandle direct = coordination.operations().on(a).from(aTimeline)
+                    .call("markDirect").through("ownerChannel")
+                    .request(request -> { }).submit();
+            EntryHandle future = increment(coordination, b, bTimeline).submit();
 
-            EntryHandle direct = coordination.operations()
-                    .on(a)
-                    .from(aTimeline)
-                    .call("markDirect")
-                    .through("ownerChannel")
-                    .request(request -> { })
-                    .submit();
-            ArrayList<EntryHandle> continuingSourceEntries = new ArrayList<>();
-            continuingSourceEntries.add(
-                    increment(coordination, b, bTimeline).submit());
-
-            // when
-            for (int turn = 0; turn < 6; turn++) {
-                DrainResult one = coordination.processing().drain(
-                        new DrainBudget(1L, 1L));
-                assertFalse(one.find(direct).isPresent(),
-                        "direct consumer work cannot cross the active barrier");
-                if (turn % 2 == 0) {
-                    expectedCursor = Math.addExact(expectedCursor, 1L);
-                    assertEquals(1, one.managedEpochApplications().size());
-                } else {
-                    expectedFrontier = Math.addExact(expectedFrontier, 1L);
-                    assertTrue(one.managedEpochApplications().isEmpty());
-                }
-                ManagedOccurrenceCatchUpPlan current = planFor(
-                        coordination, B);
-                String turnDiagnostic = "turn=" + turn
-                        + ", entries=" + one.entries()
-                        + ", applications="
-                        + one.managedEpochApplications()
-                        + ", attempts="
-                        + one.managedEpochApplicationAttempts()
-                        + ", status=" + current.status()
-                        + ", cursor=" + current.nextSourceEpoch()
-                        + ", frontier="
-                        + current.requiredThroughSourceEpoch()
-                        + ", occurrence=" + coordination.advanced()
-                                .auditManagedOccurrence(A, "/children/b")
-                        + ", readiness=" + coordination.advanced()
-                                .auditManagedDocumentReadiness(A);
-                assertEquals(expectedCursor, current.nextSourceEpoch(),
-                        turnDiagnostic);
-                assertEquals(expectedFrontier,
-                        current.requiredThroughSourceEpoch(), turnDiagnostic);
-                assertCatchingUp(coordination, barrierIdentity);
-                if (turn == 1) {
+            for (int turn = 0; turn < 2; turn++) {
+                DrainResult one = coordination.processing().drain(new DrainBudget(1L, 1L));
+                assertTrue(one.find(direct).isEmpty());
+                assertTrue(one.find(future).isEmpty());
+                assertEquals(1, one.managedEpochApplications().size());
+                ManagedOccurrenceCatchUpPlan current = planFor(coordination, B);
+                assertEquals(admitted.nextSourceEpoch() + turn + 1, current.nextSourceEpoch());
+                assertEquals(2L, current.requiredThroughSourceEpoch());
+                assertEquals(originalSourceHistory, historyBlueIds(b));
+                if (turn == 0) {
+                    assertCatchingUp(coordination, barrierIdentity);
                     control.restartFromStores();
                 }
-                if (turn % 2 == 1 && turn < 5) {
-                    // SDK targets are exact at submission. Keep one valid
-                    // source call pending across the intervening managed turn.
-                    continuingSourceEntries.add(
-                            increment(coordination, b, bTimeline).submit());
-                }
             }
-
-            int settlingDrains = 0;
-            while (!coordination.advanced()
-                    .auditManagedDocumentReadiness(A)
-                    .orElseThrow().ready()
-                    && settlingDrains < 32) {
-                DrainResult one = coordination.processing().drain(
-                        new DrainBudget(1L, 1L));
-                assertFalse(one.find(direct).isPresent());
-                settlingDrains++;
-            }
-            ManagedOccurrenceCatchUpPlan completed = planFor(coordination, B);
-            DrainResult directDrain = coordination.processing().drain(
-                    new DrainBudget(1L, 1L));
-
             // then
-            assertEquals(3, continuingSourceEntries.size());
-            assertEquals(admitted.nextSourceEpoch() + 3L, expectedCursor,
-                    "catch-up receives every other contested bounded turn");
-            assertEquals(admitted.requiredThroughSourceEpoch() + 3L,
-                    expectedFrontier,
-                    "source commits receive every other contested turn");
-            assertTrue(settlingDrains < 32,
-                    "a finite source stream must eventually settle");
-            assertTrue(coordination.advanced()
-                    .auditManagedDocumentReadiness(A)
-                    .orElseThrow().ready());
-            assertEquals(ManagedCatchUpBarrierStatus.COMPLETE,
-                    coordination.advanced()
-                            .auditManagedCatchUpBarrier(barrierIdentity)
-                            .orElseThrow().status());
+            // bounded drains finish the captured suffix before either queued entry.
+            ManagedOccurrenceCatchUpPlan completed = planFor(coordination, B);
             assertTrue(completed.status().terminal());
-            assertEquals(6L, completed.nextSourceEpoch());
-            assertEquals(5L, completed.requiredThroughSourceEpoch());
-            assertEquals(5L, b.snapshot().longAt("/counter"));
-            assertEquals(5L, a.snapshot().longAt("/bChanges"));
-            assertEquals(EntryDisposition.APPLIED,
-                    directDrain.entry(direct).disposition(),
-                    directDrain.entry(direct).diagnostic().toString());
+            assertEquals(3L, completed.nextSourceEpoch());
+            assertEquals(2L, completed.requiredThroughSourceEpoch());
+            assertTrue(coordination.advanced().auditManagedDocumentReadiness(A).orElseThrow().ready());
+            assertEquals(ManagedCatchUpBarrierStatus.COMPLETE, coordination.advanced()
+                    .auditManagedCatchUpBarrier(barrierIdentity).orElseThrow().status());
+            assertEquals(2L, a.snapshot().longAt("/bChanges"));
+            control.restartFromStores();
+            DrainResult directDrain = coordination.processing().drain(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED, directDrain.entry(direct).disposition());
+            assertTrue(directDrain.find(future).isEmpty());
             assertEquals(1L, a.snapshot().longAt("/directCount"));
+            assertEquals(2L, b.snapshot().longAt("/counter"));
+
+            for (int turn = 0; turn < 3; turn++) {
+                DrainResult one = coordination.processing().drain(new DrainBudget(1L, 1L));
+                assertEquals(EntryDisposition.APPLIED, one.entry(future).disposition());
+                assertTrue(one.managedEpochApplications().isEmpty());
+                assertEquals(3L + turn, b.snapshot().longAt("/counter"));
+                assertEquals(3L + turn, a.snapshot().longAt("/bChanges"));
+                assertEquals(1L, b.snapshot().longAt("/initializationCount"));
+                assertEquals(originalSourceHistory,
+                        historyBlueIds(b).subList(0, originalSourceHistory.size()));
+                assertEquals(2L, planFor(coordination, B).requiredThroughSourceEpoch());
+                if (turn < 2) future = increment(coordination, b, bTimeline).submit();
+            }
+            assertEquals(6, b.history().size());
         }
     }
 
@@ -768,25 +721,15 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
 
     private static void assertCatchUpMetrics(
             CoordinationTestControl.MetricsSnapshot before,
-            CoordinationTestControl.MetricsSnapshot afterFirstApplication,
-            CoordinationTestControl.MetricsSnapshot afterExtension,
             CoordinationTestControl.MetricsSnapshot after) {
-        assertEquals(5L, delta(before, after, SOURCE_RECEIPTS_READ));
-        assertEquals(5L, delta(before, after, PLANS_OPENED));
-        assertEquals(5L, delta(before, after, OCCURRENCES_ADVANCED));
-        assertEquals(15L, delta(before, after, AFFECTED_DOCUMENTS_OPENED));
-        assertEquals(5L, delta(before, after, PROCESS_CALLS));
+        assertEquals(4L, delta(before, after, SOURCE_RECEIPTS_READ));
+        assertEquals(4L, delta(before, after, PLANS_OPENED));
+        assertEquals(4L, delta(before, after, OCCURRENCES_ADVANCED));
+        assertEquals(12L, delta(before, after, AFFECTED_DOCUMENTS_OPENED));
+        assertEquals(4L, delta(before, after, PROCESS_CALLS));
         assertEquals(0L, delta(before, after, SOURCE_PROCESS_CALLS));
-        assertEquals(0L, delta(
-                before, after, UNRELATED_DOCUMENTS_SCANNED));
-        long catchUpFinalizations = Math.addExact(
-                delta(before,
-                        afterFirstApplication,
-                        CONTRACTS_COMPONENT_FINALIZATIONS),
-                delta(afterExtension,
-                        after,
-                        CONTRACTS_COMPONENT_FINALIZATIONS));
-        assertEquals(catchUpFinalizations,
+        assertEquals(0L, delta(before, after, UNRELATED_DOCUMENTS_SCANNED));
+        assertEquals(delta(before, after, CONTRACTS_COMPONENT_FINALIZATIONS),
                 delta(before, after, COMPONENT_FINALIZATIONS));
     }
 
@@ -1216,12 +1159,12 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute

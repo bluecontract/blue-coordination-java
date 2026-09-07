@@ -8,6 +8,9 @@ import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.language.model.Node;
 import blue.language.processor.ProcessorExecutionContext;
+import blue.language.processor.ExactEventIdentityEvidence;
+import blue.language.processor.registry.RuntimeBlueIds;
+import java.util.Collections;
 import blue.language.snapshot.FrozenNode;
 
 import java.util.Map;
@@ -89,7 +92,9 @@ public final class BexWorkflowContextFactory {
         ProcessorExecutionContext processorContext = context.processorContext();
         FrozenNode exactHandlerEvent = processorContext.frozenEvent();
         BexValue event = exactHandlerEvent != null
-                ? BexValues.frozen(exactHandlerEvent)
+                ? handlerEventBinding(
+                        exactHandlerEvent,
+                        processorContext.exactOccurrenceEventIdentityEvidence())
                 : BexValues.nodeSnapshot(context.eventRef());
         BexValue currentContract = currentContractBinding(context);
         BexStepResults steps = stepResults(context.stepResults());
@@ -121,6 +126,27 @@ public final class BexWorkflowContextFactory {
                 .gasLedgerHost(context.bexGasLedgerHost())
                 .gasLimit(gasLimit)
                 .build();
+    }
+
+    static BexValue handlerEventBinding(FrozenNode handler, ExactEventIdentityEvidence occurrence) {
+        FrozenNode type = handler.getType();
+        FrozenNode reference = handler.getProperties() == null
+                ? null : handler.getProperties().get("event");
+        if (occurrence == null || type == null
+                || !RuntimeBlueIds.EMBEDDED_EVENT_DELIVERY.equals(type.getReferenceBlueId())
+                || reference == null || !reference.isReferenceOnly()
+                || !reference.getReferenceBlueId().equals(occurrence.eventBlueId())
+                || occurrence.frozenEvent().isReferenceOnly()) {
+            return BexValues.frozen(handler);
+        }
+        // Contracts has already authenticated this occurrence. Its content is
+        // invocation input and need not exist in an external provider. Keep the
+        // canonical wrapper/reference intact; supply the body only as the
+        // semantic cursor used by BEX member reads.
+        BexValue payload = BexValues.exact(occurrence.frozenEvent(),
+                occurrence.frozenEvent(), occurrence.eventBlueId());
+        return BexValues.admittedExact(handler, handler.blueId(),
+                BexValues.map(Collections.singletonMap("event", payload)));
     }
 
     public BexStepResults stepResults(Map<String, Object> workflowStepResults) {

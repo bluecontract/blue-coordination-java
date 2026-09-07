@@ -5,6 +5,8 @@ import blue.coordination.processor.CoordinationProcessorOptions;
 import blue.coordination.processor.CoordinationProcessors;
 import blue.language.api.BlueCachePolicy;
 import blue.language.api.BlueCacheStats;
+import blue.language.api.BlueOperationOutcome;
+import blue.language.api.BlueOperationResult;
 import blue.language.api.NodeProviderOutcome;
 import blue.language.codec.BlueFormat;
 import blue.language.conformance.ConformanceEngine;
@@ -18,19 +20,23 @@ import blue.language.processor.ContractProcessorRegistryBuilder;
 import blue.language.processor.DocumentProcessingResult;
 import blue.language.processor.DocumentProcessor;
 import blue.language.processor.EffectiveFragmentationCatalog;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ExternalDeliveryPlan;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.InvalidExecutionEvidenceException;
 import blue.language.processor.PlatformProcessInvocation;
 import blue.language.processor.PlatformProcessingResult;
 import blue.language.processor.SubscriptionDelta;
 import blue.language.processor.registry.BlueRuntimeTypeRegistry;
 import blue.language.processor.registry.RuntimeTypeAliases;
 import blue.language.provider.CyclicAwareNodeProvider;
+import blue.language.registry.BlueCoreTypeRegistry;
 import blue.language.provider.CyclicSetProofResult;
 import blue.language.provider.NodeProvider;
 import blue.language.provider.NodeProviderResult;
 import blue.language.provider.SequentialNodeProvider;
 import blue.language.runtime.BlueLanguage;
+import blue.language.runtime.LanguageProcessing;
 import blue.language.snapshot.FrozenNode;
 import blue.repo.BlueRepository;
 import java.util.ArrayDeque;
@@ -99,6 +105,7 @@ final class BlueRuntime implements AutoCloseable {
         providers.add(metered(
                 Objects.requireNonNull(wholeObjects, "wholeObjects"),
                 metrics));
+        providers.add(metered(BlueCoreTypeRegistry.INSTANCE.verifiedProvider(), metrics));
         providers.add(metered(BlueRuntimeTypeRegistry.getDefault()
                 .asProcessorSnapshotProvider(), metrics));
         RepositoryNodeProviders repositoryProviders =
@@ -114,13 +121,13 @@ final class BlueRuntime implements AutoCloseable {
                 new CyclicAwareSequentialNodeProvider(providers);
 
         Map<String, String> imports = new LinkedHashMap<>();
-        imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
         imports.putAll(repository.preprocessingAliases());
+        imports.putAll(RuntimeTypeAliases.AGGREGATE_NAME_TO_BLUE_ID);
         BlueLanguage language = BlueLanguage.builder()
                 .nodeProvider(nodeProvider)
                 .preprocessingAliases(imports)
                 .environmentImports(imports)
-                .cachePolicy(BlueCachePolicy.highThroughputDefaults())
+                .cachePolicy(BlueCachePolicy.boundedDefaults())
                 .build();
         CoordinationProcessorOptions options =
                 CoordinationProcessorOptions.builder()
@@ -175,6 +182,11 @@ final class BlueRuntime implements AutoCloseable {
         return language.snapshots().resolve(source);
     }
 
+    ResolvedSnapshot processingSourceSnapshot(Node source) {
+        ensureOpen();
+        return contracts.processingSourceSnapshot(source);
+    }
+
     ResolvedSnapshot resolveToSnapshotPreservingPaths(
             Node source,
             Collection<String> paths) {
@@ -183,14 +195,40 @@ final class BlueRuntime implements AutoCloseable {
     }
 
     ResolvedSnapshot loadExactSnapshot(String blueId) {
+        return loadExactSnapshot(blueId, false);
+    }
+
+    ResolvedSnapshot loadExactProcessingSnapshot(String blueId) {
+        return loadExactSnapshot(blueId, true);
+    }
+
+    private ResolvedSnapshot loadExactSnapshot(String blueId, boolean processingSource) {
         ensureOpen();
         FrozenNode reference = FrozenNode.fromNode(new Node().blueId(
                 Objects.requireNonNull(blueId, "blueId")));
-        FrozenNode materialized = contracts.runtimeAccess()
-                .materializeVerifiedExactReference(reference)
-                .requireEstablished();
-        return contracts.runtimeAccess().resolveTransient(
-                materialized.toNode());
+        BlueOperationResult<FrozenNode> result = contracts.runtimeAccess()
+                .materializeVerifiedExactReference(reference);
+        BlueOperationOutcome outcome = result.outcome();
+        String reason = result.reason().orElse(
+                "Exact provider content could not be established for "
+                        + blueId);
+        if (outcome == BlueOperationOutcome.INCOMPLETE) {
+            throw new ExecutionEvidenceUnavailableException(
+                    reason, result.outstandingBlueIds());
+        }
+        if (outcome != BlueOperationOutcome.ESTABLISHED) {
+            throw new InvalidExecutionEvidenceException(reason);
+        }
+        FrozenNode materialized = result.requireEstablished();
+        if (!processingSource) {
+            return contracts.runtimeAccess().resolveTransient(materialized.toNode());
+        }
+        ResolvedSnapshot snapshot = processingSourceSnapshot(materialized.toNode());
+        if (!blueId.equals(snapshot.blueId())) {
+            throw new InvalidExecutionEvidenceException(
+                    "Exact processing snapshot identity differs from its authenticated reference");
+        }
+        return snapshot;
     }
 
     ResolvedSnapshot cache(ResolvedSnapshot snapshot) {
@@ -296,6 +334,31 @@ final class BlueRuntime implements AutoCloseable {
                 cache(resolveToSnapshot(preprocessed)), purpose);
     }
 
+    ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose) {
+        return exactProcessingSource(yaml, objects, purpose, new ArrayList<>());
+    }
+
+    ExactValue exactProcessingSource(String yaml, WholeObjectStore objects, String purpose,
+                                     Collection<ExactValue> retainedTypes) {
+        Node preprocessed = preprocess(parseSourceYaml(yaml));
+        // A pure reference already states its identity. Its content is an
+        // execution demand; identity inspection must not eagerly require it.
+        if (preprocessed.isReferenceOnly()) {
+            return objects.put(preprocessed, purpose);
+        }
+        ResolvedSnapshot snapshot = processingSourceSnapshot(preprocessed);
+        for (ExactValue definition : ProcessingSourceTypeEvidence.from(snapshot)) {
+            retainedTypes.add(objects.put(definition, "processing Source inline type"));
+        }
+        try (LanguageProcessing.Scope scope = language.processing().openScope()) {
+            for (ExactValue definition : ProcessingSourceTypeEvidence.fromCanonicalizedSource(
+                    snapshot.canonicalRoot(), preprocessed, scope)) {
+                retainedTypes.add(objects.put(definition, "processing Source exact-field inline type"));
+            }
+        }
+        return objects.put(snapshot, purpose);
+    }
+
     /**
      * Parses direct provider content under this runtime's preprocessing
      * aliases without resolving the declared type as an instance.
@@ -309,6 +372,12 @@ final class BlueRuntime implements AutoCloseable {
         }
         String blueId = DirectBlueIdCalculator.calculateBlueId(preprocessed);
         return ExactValue.verified(blueId, preprocessed);
+    }
+
+    static NodeProvider retainedExactProvider(
+            WholeObjectStore objects, NodeProvider applicationProvider) {
+        return new CyclicAwareSequentialNodeProvider(applicationProvider == null
+                ? List.of(objects) : List.of(objects, applicationProvider));
     }
 
     NodeProvider nodeProvider() {

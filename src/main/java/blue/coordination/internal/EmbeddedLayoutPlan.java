@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.ExactValue;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 
 import blue.language.processor.EmbeddedScopePlanView;
 import blue.language.processor.EffectiveFragmentationCatalog;
@@ -38,11 +39,13 @@ final class EmbeddedLayoutPlan {
     private final Map<String, AuthoredScopeIdentity> identitiesByScope;
     private final RoutingSurface routingSurface;
     private final Map<String, ScopeRule> rulesByScope;
+    private final List<EmbeddedCollectionPlanningAudit> collectionAudits;
 
     private EmbeddedLayoutPlan(
             Map<String, AuthoredScopeIdentity> identitiesByScope,
             RoutingSurface routingSurface,
-            Map<String, ScopeRule> rulesByScope) {
+            Map<String, ScopeRule> rulesByScope,
+            List<EmbeddedCollectionPlanningAudit> collectionAudits) {
         this.identitiesByScope = Collections.unmodifiableMap(
                 new LinkedHashMap<>(Objects.requireNonNull(
                         identitiesByScope, "identitiesByScope")));
@@ -51,6 +54,9 @@ final class EmbeddedLayoutPlan {
         this.rulesByScope = Collections.unmodifiableMap(
                 new LinkedHashMap<>(Objects.requireNonNull(
                         rulesByScope, "rulesByScope")));
+        this.collectionAudits = Collections.unmodifiableList(
+                new ArrayList<>(Objects.requireNonNull(
+                        collectionAudits, "collectionAudits")));
     }
 
     public static EmbeddedLayoutPlan compile(
@@ -65,8 +71,12 @@ final class EmbeddedLayoutPlan {
                     "Fragmentation catalog belongs to another Root");
         }
         Map<String, ScopeRule> rules = new LinkedHashMap<>();
-        for (Map.Entry<String, EmbeddedScopePlanView> entry
-                : catalog.scopePlansByScope().entrySet()) {
+        List<Map.Entry<String, EmbeddedScopePlanView>> scopePlans =
+                catalog.scopePlansByScope().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey(
+                                EmbeddingBinding.TEXT_ORDER))
+                        .toList();
+        for (Map.Entry<String, EmbeddedScopePlanView> entry : scopePlans) {
             String scopePath = entry.getKey();
             EmbeddedScopePlanView view = entry.getValue();
             List<String> explicit = view.explicitDeclarationPaths().stream()
@@ -96,7 +106,8 @@ final class EmbeddedLayoutPlan {
         return new EmbeddedLayoutPlan(
                 identities,
                 RoutingSurface.from(catalog, managedBoundaries(catalog)),
-                rules);
+                rules,
+                collectionAudits(catalog, exactScopeAt));
     }
 
     /**
@@ -105,10 +116,17 @@ final class EmbeddedLayoutPlan {
      * fragmentation walk, owns every cross-document edge.
      */
     static EmbeddedLayoutPlan managedRoot(RoutingSurface routingSurface) {
+        return managedRoot(routingSurface, List.of());
+    }
+
+    static EmbeddedLayoutPlan managedRoot(
+            RoutingSurface routingSurface,
+            List<EmbeddedCollectionPlanningAudit> collectionAudits) {
         return new EmbeddedLayoutPlan(
                 Map.of(),
                 Objects.requireNonNull(routingSurface, "routingSurface"),
-                Map.of());
+                Map.of(),
+                collectionAudits);
     }
 
     public RoutingSurface routingSurface() {
@@ -117,6 +135,41 @@ final class EmbeddedLayoutPlan {
 
     public Map<String, ScopeRule> rulesByScope() {
         return rulesByScope;
+    }
+
+    /** Authenticated collection-presence projection in canonical path order. */
+    public List<EmbeddedCollectionPlanningAudit> collectionAudits() {
+        return collectionAudits;
+    }
+
+    /**
+     * Refreshes current member presence from a newly authenticated catalog
+     * while retaining the reusable contract and route plan.
+     */
+    EmbeddedLayoutPlan withCollectionAudits(
+            EffectiveFragmentationCatalog catalog,
+            Function<String, FrozenNode> exactScopeAt) {
+        List<EmbeddedCollectionPlanningAudit> refreshed = collectionAudits(
+                Objects.requireNonNull(catalog, "catalog"),
+                Objects.requireNonNull(exactScopeAt, "exactScopeAt"));
+        List<String> expected = collectionAudits.stream()
+                .map(EmbeddedCollectionPlanningAudit::collectionPath)
+                .sorted(EmbeddingBinding.TEXT_ORDER)
+                .toList();
+        List<String> actual = refreshed.stream()
+                .map(EmbeddedCollectionPlanningAudit::collectionPath)
+                .sorted(EmbeddingBinding.TEXT_ORDER)
+                .toList();
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException(
+                    "Authenticated collection declarations changed while "
+                            + "reusing an embedded layout plan");
+        }
+        return new EmbeddedLayoutPlan(
+                identitiesByScope,
+                routingSurface,
+                rulesByScope,
+                refreshed);
     }
 
     /** Checks only authored scopes owned by this processing Root. */
@@ -144,6 +197,45 @@ final class EmbeddedLayoutPlan {
                 .distinct()
                 .sorted(EmbeddingBinding.TEXT_ORDER)
                 .toList();
+    }
+
+    private static List<EmbeddedCollectionPlanningAudit> collectionAudits(
+            EffectiveFragmentationCatalog catalog,
+            Function<String, FrozenNode> exactScopeAt) {
+        List<EmbeddedCollectionPlanningAudit> audits = new ArrayList<>();
+        List<String> managed = managedBoundaries(catalog);
+        List<Map.Entry<String, EmbeddedScopePlanView>> scopePlans =
+                catalog.scopePlansByScope().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey(
+                                EmbeddingBinding.TEXT_ORDER))
+                        .toList();
+        for (Map.Entry<String, EmbeddedScopePlanView> entry : scopePlans) {
+            String scopePath = entry.getKey();
+            if (!owned(scopePath, managed)) {
+                continue;
+            }
+            EmbeddedScopePlanView view = entry.getValue();
+            List<String> declarations = new ArrayList<>(
+                    view.collectionDeclarationPaths());
+            declarations.sort(EmbeddingBinding.TEXT_ORDER);
+            for (String declaration : declarations) {
+                String absolutePath = PointerUtils.resolvePointer(
+                        scopePath, declaration);
+                List<String> memberKeys = view
+                        .collectionMemberKeysByDeclaration()
+                        .get(declaration);
+                if (memberKeys == null) {
+                    throw new IllegalStateException(
+                            "Authenticated collection plan has no member "
+                                    + "projection for " + absolutePath);
+                }
+                audits.add(EmbeddedCollectionPlanningAudit.completeObject(
+                        absolutePath,
+                        exactScopeAt.apply(absolutePath) != null,
+                        memberKeys.size()));
+            }
+        }
+        return Collections.unmodifiableList(audits);
     }
 
     private static String identity(FrozenNode node) {

@@ -479,7 +479,8 @@ final class ManagedCatchUpWorkIndex {
     private static void requireApplicationMatch(
             ManagedEpochApplicationWork work,
             ManagedEpochApplicationReceipt receipt) {
-        if (!receipt.workIdentity().equals(work.workIdentity())
+        if (!receipt.representationCauseIdentity().equals(work.representationCause().map(cause -> cause.causeIdentity()))
+                || !receipt.workIdentity().equals(work.workIdentity())
                 || !receipt.planIdentity().equals(work.planIdentity())
                 || !receipt.sourceReceiptIdentity().equals(
                         work.sourceReceiptIdentity())

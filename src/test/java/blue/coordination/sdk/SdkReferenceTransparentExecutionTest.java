@@ -29,6 +29,79 @@ final class SdkReferenceTransparentExecutionTest {
             "sdk/reference-transparent/alice";
 
     @Test
+    void missingAdmissionTypeIsTypedAndCanBeSuppliedForRetry() {
+        // given
+        ExactBlueValue definition = providerValue("name: Later SDK label\ntype: Text\n");
+        String source = "label:\n  type:\n    blueId: " + definition.blueId()
+                + "\n  value: ready\n";
+        for (String admission : List.of("document", "static", "closure")) {
+            RecordingProvider provider = new RecordingProvider();
+            try (BlueCoordination blue = coordination(provider)) {
+                // when
+                CoordinationException blocked = assertThrows(CoordinationException.class,
+                        () -> admitTypedLabel(blue, source, admission));
+                // then
+                assertEquals(CoordinationErrorCode.NEEDS_RESOURCES, blocked.code());
+                assertEquals(definition.blueId(), blocked.details().get("blueId"));
+                provider.put(definition);
+                DocumentHandle document = admitTypedLabel(blue, source, admission);
+                assertEquals(0L, document.snapshot().epoch());
+                assertEquals("ready", document.snapshot().textAt("/label"));
+                assertEquals(1, document.history().size());
+            }
+        }
+    }
+
+    private static DocumentHandle admitTypedLabel(BlueCoordination blue,
+                                                  String source, String admission) {
+        return switch (admission) {
+            case "static" -> blue.documents().admitStaticProcessEmbedded(source).document("root");
+            case "closure" -> blue.documents().admit(ManagedClosure.builder()
+                    .document("root", COUNTER, source).publicRoot("root").fromNow().build())
+                    .document("root");
+            default -> blue.documents().admit(ManagedDocument.yaml(COUNTER, source)
+                    .publicRoot().fromNow());
+        };
+    }
+
+    @Test
+    void referencedCatalogMoneyRetainsTypeEvidenceDuringNestedPatch() throws Exception {
+        // given
+        ExactBlueValue money = providerValue(resource("01-finos-money-content.yaml"));
+        RecordingProvider provider = new RecordingProvider().put(money);
+        // when
+        try (BlueCoordination blue = coordination(provider)) {
+            TimelineHandle timeline = timeline(blue);
+            String source = resource("02-finos-margin-host.yaml")
+                    .replace("finos-money-margin-proof", COUNTER.value())
+                    .replace("playtest/reference-transparent/finos-margin/alice", TIMELINE);
+            DocumentHandle host = blue.documents().admit(
+                    ManagedDocument.yaml(COUNTER, source).publicRoot().fromNow());
+            EntryResult result = blue.operations().on(host).from(timeline)
+                    .call("setMarginRequirement").through("ownerChannel")
+                    .requestYaml("amount: 1250000.0").execute();
+            // then
+            assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
+            assertEquals(0, new java.math.BigDecimal("1250000.0").compareTo(
+                    new java.math.BigDecimal(host.snapshot().exact()
+                            .scalarAt("/marginRequirement/val").toString())));
+            EntryResult invalid = blue.operations().on(host).from(timeline)
+                    .call("setMarginRequirement").through("ownerChannel")
+                    .requestYaml("amount: not-a-decimal").execute();
+            assertEquals(EntryDisposition.NO_MATCH, invalid.disposition());
+            assertEquals(0, new java.math.BigDecimal("1250000.0").compareTo(
+                    new java.math.BigDecimal(host.snapshot().exact()
+                            .scalarAt("/marginRequirement/val").toString())));
+        }
+    }
+
+    private String resource(String name) throws Exception {
+        try (var input = getClass().getResourceAsStream("/rc/" + name)) {
+            return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
     void missingCounterValueDemandsExactNodeAndSameEntryResumesAfterRestart() {
         // given
         ExactBlueValue counterValue = providerValue("7");
@@ -153,6 +226,10 @@ final class SdkReferenceTransparentExecutionTest {
             // then
             assertEquals(CoordinationErrorCode.NEEDS_RESOURCES,
                     blocked.code());
+            assertFalse(blocked.details().containsKey(
+                            "collectionPlanningState"),
+                    "generic provider unavailability must not be mislabeled "
+                            + "as collection planning");
             assertTrue(provider.reads(contracts.blueId()) > 0);
             assertThrows(CoordinationException.class,
                     () -> blue.documents().require(COUNTER));

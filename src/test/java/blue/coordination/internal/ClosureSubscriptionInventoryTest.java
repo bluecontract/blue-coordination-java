@@ -5,6 +5,8 @@ import blue.coordination.api.Operation;
 import blue.coordination.api.Timeline;
 import blue.coordination.api.TimelineEntry;
 import blue.language.model.Node;
+import blue.language.processor.EffectiveContractSnapshot;
+import blue.language.processor.EffectiveContractSnapshotConstants;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.ProcessorStatus;
 import blue.language.processor.closure.ChannelOccurrence;
@@ -15,6 +17,7 @@ import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.SubscriptionState;
+import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +37,7 @@ import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -462,6 +466,9 @@ final class ClosureSubscriptionInventoryTest {
                                         .EmbeddedDemand(
                                                 "fromChild",
                                                 "/child",
+                                                ClosureSubscriptionInventory
+                                                        .EmbeddedDemandMode
+                                                        .EXACT,
                                                 "embedded-contribution")));
 
         // when
@@ -477,6 +484,140 @@ final class ClosureSubscriptionInventoryTest {
         assertTrue(retained.statesFor(A).isEmpty(),
                 "processor-only demand must not require an external "
                         + "subscription row");
+    }
+
+    @Test
+    void embeddedDemandModesMatchDecodedPointerSegments() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand exact = demand(
+                "exact", "/orders/o1",
+                ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT);
+        ClosureSubscriptionInventory.EmbeddedDemand all = demand(
+                "all", "/",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .ALL_DESCENDANTS);
+        ClosureSubscriptionInventory.EmbeddedDemand direct = demand(
+                "direct", "/teams/a~1b",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+        ClosureSubscriptionInventory.EmbeddedDemand descendants = demand(
+                "descendants", "/teams/a~0b",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DESCENDANTS);
+
+        // when
+        boolean exactMember = exact.matches("/orders/o1");
+
+        // then
+        assertTrue(exactMember);
+        assertFalse(exact.matches("/orders/o1/payment"));
+        assertTrue(all.matches("/orders/o1/payment"));
+        assertFalse(all.matches("/"));
+        assertTrue(direct.matches("/teams/a~1b/member"));
+        assertFalse(direct.matches("/teams/a/b/member"));
+        assertFalse(direct.matches("/teams/a~1b/member/nested"));
+        assertTrue(descendants.matches("/teams/a~0b/member/nested"));
+        assertFalse(descendants.matches("/teams/a~0b"));
+        assertFalse(descendants.matches("/teams/a~0b-old/member"));
+    }
+
+    @Test
+    void sameCollectionPathRetainsEveryModeRegardlessOfInsertionOrder() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand direct = demand(
+                "direct", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+        ClosureSubscriptionInventory.EmbeddedDemand descendants = demand(
+                "descendants", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DESCENDANTS);
+
+        // when
+        ClosureSubscriptionInventory forward =
+                ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(direct, descendants));
+        ClosureSubscriptionInventory reverse =
+                ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(descendants, direct));
+
+        // then
+        assertEquals(2, forward.embeddedDemandsFor(A).size());
+        assertEquals(2, reverse.embeddedDemandsFor(A).size());
+        assertTrue(forward.hasEmbeddedDemand(
+                A, "/orders/o1/payment"));
+        assertTrue(reverse.hasEmbeddedDemand(
+                A, "/orders/o1/payment"));
+        assertFalse(forward.hasEmbeddedDemand(A, "/orders-old/o1"));
+        assertFalse(reverse.hasEmbeddedDemand(A, "/orders-old/o1"));
+    }
+
+    @Test
+    void duplicateEmbeddedDemandChannelKeyFailsClosed() {
+        // given
+        ClosureSubscriptionInventory.EmbeddedDemand exact = demand(
+                "same", "/orders/o1",
+                ClosureSubscriptionInventory.EmbeddedDemandMode.EXACT);
+        ClosureSubscriptionInventory.EmbeddedDemand collection = demand(
+                "same", "/orders",
+                ClosureSubscriptionInventory.EmbeddedDemandMode
+                        .COLLECTION_DIRECT);
+
+        // when
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> ClosureSubscriptionInventory.empty()
+                        .replaceEmbeddedDemands(
+                                A, List.of(exact, collection)));
+
+        // then
+        assertNotNull(failure);
+    }
+
+    @Test
+    void processorChannelCannotSpoofCollectionDemandWithDispatchField() {
+        // given
+        EffectiveContractSnapshot unrelatedProcessor =
+                EffectiveContractSnapshot.builder("/", "spoof")
+                        .sourceContribution("spoof-contribution")
+                        .effectiveTypeBlueId(
+                                RuntimeBlueIds.DOCUMENT_UPDATE_CHANNEL)
+                        .role(EffectiveContractSnapshotConstants.Role
+                                .PROCESSOR_CHANNEL)
+                        .dispatchField("collectionPath", "/orders")
+                        .dispatchField("includeDescendants", true)
+                        .build();
+
+        // when
+        boolean classified = ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(unrelatedProcessor);
+
+        // then
+        assertFalse(classified);
+    }
+
+    @Test
+    void registeredCollectionChannelCannotHideBehindMissingDispatchField() {
+        // given
+        EffectiveContractSnapshot malformedCollection =
+                EffectiveContractSnapshot.builder("/", "collection")
+                        .sourceContribution("collection-contribution")
+                        .effectiveTypeBlueId(
+                                RuntimeBlueIds
+                                        .EMBEDDED_COLLECTION_EVENT_CHANNEL)
+                        .role(EffectiveContractSnapshotConstants.Role
+                                .PROCESSOR_CHANNEL)
+                        .build();
+
+        // when
+        boolean classified = ClosureSubscriptionInventory
+                .isEmbeddedCollectionDemandContract(malformedCollection);
+
+        // then
+        assertTrue(classified,
+                "the exact runtime type must be classified before its "
+                        + "required dispatch fields are validated");
     }
 
     @Test
@@ -913,7 +1054,7 @@ final class ClosureSubscriptionInventoryTest {
             ExternalOrderKey sourceOrder) {
         return new TimelineEntry(
                 entry.exactEvent(),
-                entry.exactRequest(),
+                entry.request(),
                 sourceOrder,
                 sourceOrder,
                 entry.timeline(),
@@ -922,6 +1063,17 @@ final class ClosureSubscriptionInventoryTest {
                 entry.timestampMicros(),
                 entry.globalSequence(),
                 entry.timelineSequence());
+    }
+
+    private static ClosureSubscriptionInventory.EmbeddedDemand demand(
+            String rawChannelKey,
+            String selectorPath,
+            ClosureSubscriptionInventory.EmbeddedDemandMode mode) {
+        return new ClosureSubscriptionInventory.EmbeddedDemand(
+                rawChannelKey,
+                selectorPath,
+                mode,
+                "embedded-contribution-" + rawChannelKey);
     }
 
     private record Fixture(

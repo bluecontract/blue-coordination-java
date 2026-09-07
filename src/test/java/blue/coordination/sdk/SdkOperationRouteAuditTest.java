@@ -1,5 +1,7 @@
 package blue.coordination.sdk;
 
+import blue.language.model.wire.BlueLanguageConstants;
+
 import blue.coordination.api.DocumentId;
 import blue.language.model.Node;
 import org.junit.jupiter.api.Test;
@@ -7,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused acceptance for typed read-only compiled operation route metadata. */
 final class SdkOperationRouteAuditTest {
@@ -75,7 +79,9 @@ final class SdkOperationRouteAuditTest {
                     "/contracts/add/request").copyNode();
             assertEquals(declared.getProperties().keySet(),
                     effective.getProperties().keySet());
-            assertNotNull(effective.getDescription());
+            assertEquals(declared.getDescription(), effective.getDescription());
+            assertEquals(BlueLanguageConstants.INTEGER_TYPE_BLUE_ID,
+                    effective.getAsNode("/amount/type").getBlueId());
             assertEquals(entriesBefore, blue.advanced().rawEngine()
                     .metrics().journalEntryCount());
             assertThrows(UnsupportedOperationException.class,
@@ -138,6 +144,57 @@ final class SdkOperationRouteAuditTest {
             assertEquals(List.of(
                             new TimelineSourceSnapshot("alice", "alice")),
                     routes.get(1).acceptedSources());
+        }
+    }
+
+    @Test
+    void auditKeepsAbsentAndExactEmptyRequestPatternsDistinct() {
+        // given
+        DocumentId id = DocumentId.of("route-audit-request-presence");
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            admit(blue, id, """
+                    documentId: route-audit-request-presence
+                    contracts:
+                      ownerChannel:
+                        type: Coordination/Timeline Channel
+                        timeline:
+                          type: MyOS/MyOS Timeline
+                          timelineId: request-presence
+                        actor:
+                          type: MyOS/Principal Actor
+                          accountId: alice
+                      acceptAny:
+                        type: Coordination/Sequential Workflow Operation
+                        channel: ownerChannel
+                        steps:
+                          - type: Coordination/Compute
+                            do:
+                              - $return: true
+                      emptyOnly:
+                        type: Coordination/Sequential Workflow Operation
+                        channel: ownerChannel
+                        request: {}
+                        steps:
+                          - type: Coordination/Compute
+                            do:
+                              - $return: true
+                    """);
+
+            // when
+            List<OperationRouteSnapshot> routes = blue.advanced()
+                    .auditOperationRoutes(id);
+            OperationRouteSnapshot acceptAny = routes.stream()
+                    .filter(route -> route.operation().equals("acceptAny"))
+                    .findFirst()
+                    .orElseThrow();
+            OperationRouteSnapshot emptyOnly = routes.stream()
+                    .filter(route -> route.operation().equals("emptyOnly"))
+                    .findFirst()
+                    .orElseThrow();
+
+            // then
+            assertFalse(acceptAny.requestPattern().isPresent());
+            assertTrue(emptyOnly.requestPattern().isPresent());
         }
     }
 

@@ -974,9 +974,8 @@ final class OperationRouteIndex {
                 FrozenNode node, boolean typeCounts) {
             return node != null && (node.isReferenceOnly()
                     || node.getValue() != null
-                    || node.getItems() != null && !node.getItems().isEmpty()
+                    || node.getItems() != null
                     || node.getProperties() != null
-                    && !node.getProperties().isEmpty()
                     || typeCounts && node.getType() != null);
         }
 

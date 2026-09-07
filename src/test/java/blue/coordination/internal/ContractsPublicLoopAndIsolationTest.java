@@ -67,7 +67,8 @@ final class ContractsPublicLoopAndIsolationTest {
         // then
         assertEquals(first, secondRun);
         assertTrue(first.admittedGasEntries() > 0);
-        assertTrue(first.rejectedWorkOrdinal() > 0L);
+        assertTrue(first.admittedWorkOccurrences() > 1L,
+                "gas exhaustion must occur after several loop work occurrences");
         assertEquals("SHARED", first.applicableCap());
     }
 
@@ -209,8 +210,14 @@ final class ContractsPublicLoopAndIsolationTest {
             assertTrue(result.rollbackToInput());
             assertEquals(result.inputClosureIdentity(),
                     result.outputClosureIdentity());
-            assertNotNull(result.rejectedWorkOccurrence());
             assertNotNull(result.rejectedCharge());
+            assertEquals(blue.language.processor.closure.RejectedCharge.Owner.Kind.INVOCATION,
+                    result.rejectedCharge().owner().kind());
+            org.junit.jupiter.api.Assertions.assertNull(result.rejectedWorkOccurrence());
+            assertEquals("channelCandidateTested", result.rejectedCharge().counter());
+            assertEquals(3L, result.rejectedCharge().remainingBeforeCharge());
+            assertEquals(99_997L, result.totalGas());
+
 
             // A gas failure is a durable non-commit feeder disposition. The
             // second engine run above proves determinism, not durable retry.
@@ -233,8 +240,10 @@ final class ContractsPublicLoopAndIsolationTest {
                     result.totalGas(),
                     result.gasTrace().size(),
                     result.gasTraceIdentity(),
-                    result.rejectedWorkOccurrence().ordinal(),
-                    result.rejectedWorkOccurrence().workIdentity(),
+                    result.gasTrace().stream()
+                            .map(blue.language.processor.closure.GasTraceEntry::workOccurrenceId)
+                            .filter(java.util.Objects::nonNull).distinct().count(),
+                    result.rejectedCharge().owner().kind().name(),
                     result.rejectedCharge().rejectedChargeIdentity(),
                     result.rejectedCharge().counter(),
                     result.rejectedCharge().remainingBeforeCharge(),
@@ -574,8 +583,8 @@ final class ContractsPublicLoopAndIsolationTest {
             long totalGas,
             int admittedGasEntries,
             String gasTraceIdentity,
-            long rejectedWorkOrdinal,
-            String rejectedWorkIdentity,
+            long admittedWorkOccurrences,
+            String rejectedOwnerKind,
             String rejectedChargeIdentity,
             String rejectedCounter,
             long remainingBeforeRejectedCharge,

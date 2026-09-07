@@ -3,6 +3,18 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## 3.0.0-rc.6 - historical representation candidate
+
+- Add authenticated historical representation positions and exact cursor
+  evidence for retained managed catch-up, with reconnect, figure-eight,
+  joined/split loop, and ring/chord regression coverage.
+- Select the published Language `3.1.0-rc.24`, BEX `1.1.0-rc.5`, and
+  Repository `3.0.0-rc.22` tuple for the public release lane.
+- Bind publication readiness to the rc.6 declaration, the complete Java 17
+  and Java 21 release gates, and the historical-representation test inventory.
+  These are release requirements; this entry does not certify a passed run
+  or published artifact. The candidate remains a bounded external pilot.
+
 ## 3.0.0-rc.5 - retained execution and catch-up candidate
 
 ### Added

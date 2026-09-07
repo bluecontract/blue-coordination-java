@@ -41,8 +41,7 @@ final class FrozenNodeUtil {
                 && node.getValueType() == null
                 && node.getValue() == null
                 && node.getItems() == null
-                && (node.getProperties() == null
-                || node.getProperties().isEmpty())
+                && node.getProperties() == null
                 && node.getContracts() == null
                 && node.getReferenceBlueId() == null
                 && node.getSchema() == null
@@ -78,17 +77,27 @@ final class FrozenNodeUtil {
     }
 
     static String textProperty(FrozenNode node, String key) {
-        return text(property(node, key));
+        FrozenNode value = property(node, key);
+        if (value == null) {
+            return null;
+        }
+        Object raw = rawScalar(value);
+        if (!(raw instanceof String)) {
+            throw new IllegalArgumentException(
+                    "Expected Text scalar for " + key);
+        }
+        return (String) raw;
     }
 
     static boolean booleanProperty(
             FrozenNode node,
             String key,
             boolean defaultValue) {
-        Object raw = rawScalar(property(node, key));
-        if (raw == null) {
+        FrozenNode value = property(node, key);
+        if (value == null) {
             return defaultValue;
         }
+        Object raw = rawScalar(value);
         if (raw instanceof Boolean) {
             return ((Boolean) raw).booleanValue();
         }
@@ -96,6 +105,9 @@ final class FrozenNodeUtil {
     }
 
     static Long integer(FrozenNode node) {
+        if (node == null) {
+            return null;
+        }
         Object raw = rawScalar(node);
         if (raw instanceof BigInteger) {
             return Long.valueOf(((BigInteger) raw).longValueExact());
@@ -103,9 +115,6 @@ final class FrozenNodeUtil {
         if (raw instanceof Byte || raw instanceof Short
                 || raw instanceof Integer || raw instanceof Long) {
             return Long.valueOf(((Number) raw).longValue());
-        }
-        if (raw == null) {
-            return null;
         }
         throw new IllegalArgumentException("Expected Integer scalar");
     }

@@ -7,8 +7,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Owning-layer signal for the deliberately unsupported publication of a new
- * document lineage from retained managed-epoch processing.
+ * Owning-layer signal when a retained application cannot authenticate a new
+ * lineage's complete Contracts birth evidence.
  */
 final class UnsupportedNestedNewLineageException
         extends IllegalStateException {
@@ -20,8 +20,8 @@ final class UnsupportedNestedNewLineageException
     UnsupportedNestedNewLineageException(
             ManagedEpochApplicationWork work,
             DocumentId newDocumentId) {
-        super("Retained managed-epoch application cannot create a new nested "
-                + "document lineage "
+        super("Retained managed-epoch application requires complete Contracts "
+                + "birth evidence for new nested lineage "
                 + Objects.requireNonNull(newDocumentId, "newDocumentId"));
         this.work = Objects.requireNonNull(work, "work");
         this.newDocumentId = newDocumentId;

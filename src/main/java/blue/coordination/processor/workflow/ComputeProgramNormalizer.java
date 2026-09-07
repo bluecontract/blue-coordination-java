@@ -3,7 +3,6 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
-import blue.language.model.Nodes;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,7 +18,8 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v6|exact-definition-identity|canonical-bex-source";
+            "compute-program-v10|exact-definition-identity|canonical-bex-source"
+                    + "|strict-statements|exact-field-presence";
 
     private final BexProcessingMetrics metrics;
 
@@ -82,6 +82,11 @@ final class ComputeProgramNormalizer {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
         }
+        if (FrozenNodeUtil.rawScalar(definitionNode) != null
+                || definitionNode.getItems() != null) {
+            return FrozenNode.fromResolvedNode(
+                    canonicalStaticSource(definitionNode.toNode()));
+        }
         return FrozenNode.fromResolvedNode(
                 definitionSource(
                         frozenDefinitionInput(
@@ -92,18 +97,16 @@ final class ComputeProgramNormalizer {
         Node program = new Node();
         copyMetadata(program, stepNode);
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "expr", NodeUtil.property(stepNode, "expr"));
-        putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(stepNode, "do")));
+        putIfPresent(properties, "expr", NodeUtil.property(stepNode, "expr"));
+        putIfPresent(properties, "do", normalizeDo(NodeUtil.property(stepNode, "do")));
         putIfMeaningful(properties, "definition", NodeUtil.property(stepNode, "definition"));
-        putIfMeaningful(properties, "entry", NodeUtil.property(stepNode, "entry"));
-        putIfMeaningful(properties, "constants", authoredMap(NodeUtil.property(stepNode, "constants")));
-        putIfMeaningful(properties, "functions", normalizeFunctions(NodeUtil.property(stepNode, "functions")));
-        putIfMeaningful(properties, "gasLimit", NodeUtil.property(stepNode, "gasLimit"));
-        putIfMeaningful(properties, "emitEvents", NodeUtil.property(stepNode, "emitEvents"));
-        putIfMeaningful(properties, "returnResult", NodeUtil.property(stepNode, "returnResult"));
-        if (!properties.isEmpty()) {
-            program.properties(properties);
-        }
+        putIfPresent(properties, "entry", NodeUtil.property(stepNode, "entry"));
+        putIfPresent(properties, "constants", authoredMap(NodeUtil.property(stepNode, "constants")));
+        putIfPresent(properties, "functions", normalizeFunctions(NodeUtil.property(stepNode, "functions")));
+        putIfPresent(properties, "gasLimit", NodeUtil.property(stepNode, "gasLimit"));
+        putIfPresent(properties, "emitEvents", NodeUtil.property(stepNode, "emitEvents"));
+        putIfPresent(properties, "returnResult", NodeUtil.property(stepNode, "returnResult"));
+        program.properties(properties);
         return program;
     }
 
@@ -115,6 +118,10 @@ final class ComputeProgramNormalizer {
         if (definitionNode == null) {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
+        }
+        if (definitionNode.getValue() != null
+                || definitionNode.getItems() != null) {
+            return canonicalStaticSource(definitionNode);
         }
         Node definition = new Node();
         copyMetadata(definition, definitionNode);
@@ -134,9 +141,7 @@ final class ComputeProgramNormalizer {
                         NodeUtil.property(
                                 definitionNode,
                                 "functions")));
-        if (!properties.isEmpty()) {
-            definition.properties(properties);
-        }
+        definition.properties(properties);
         return definition;
     }
 
@@ -153,9 +158,7 @@ final class ComputeProgramNormalizer {
         copyFrozenProperty(properties, source, "gasLimit");
         copyFrozenProperty(properties, source, "emitEvents");
         copyFrozenProperty(properties, source, "returnResult");
-        if (!properties.isEmpty()) {
-            input.properties(properties);
-        }
+        input.properties(properties);
         return input;
     }
 
@@ -166,9 +169,7 @@ final class ComputeProgramNormalizer {
                 new LinkedHashMap<String, Node>();
         copyFrozenProperty(properties, source, "constants");
         copyFrozenProperty(properties, source, "functions");
-        if (!properties.isEmpty()) {
-            input.properties(properties);
-        }
+        input.properties(properties);
         return input;
     }
 
@@ -194,8 +195,11 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeFunctions(Node functions) {
-        if (functions == null || functions.getProperties() == null || functions.getProperties().isEmpty()) {
+        if (functions == null) {
             return null;
+        }
+        if (functions.getProperties() == null) {
+            return canonicalStaticSource(functions);
         }
         Map<String, Node> normalized = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : functions.getProperties().entrySet()) {
@@ -209,15 +213,18 @@ final class ComputeProgramNormalizer {
             return function != null ? function.clone() : new Node();
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        putIfMeaningful(properties, "args", authoredMap(NodeUtil.property(function, "args")));
-        putIfMeaningful(properties, "expr", NodeUtil.property(function, "expr"));
-        putIfMeaningful(properties, "do", normalizeDo(NodeUtil.property(function, "do")));
+        putIfPresent(properties, "args", authoredMap(NodeUtil.property(function, "args")));
+        putIfPresent(properties, "expr", NodeUtil.property(function, "expr"));
+        putIfPresent(properties, "do", normalizeDo(NodeUtil.property(function, "do")));
         return new Node().properties(properties);
     }
 
     private Node normalizeDo(Node doNode) {
-        if (doNode == null || doNode.getItems() == null || doNode.getItems().isEmpty()) {
+        if (doNode == null) {
             return null;
+        }
+        if (doNode.getItems() == null) {
+            return canonicalStaticSource(doNode);
         }
         java.util.List<Node> items = new java.util.ArrayList<Node>();
         for (Node item : doNode.getItems()) {
@@ -227,16 +234,18 @@ final class ComputeProgramNormalizer {
     }
 
     private Node normalizeStatement(Node statement) {
-        if (NodeUtil.isEmpty(statement)
-                || Nodes.isEmptyPlaceholder(statement)) {
-            return new Node().properties("$return", new Node());
-        }
+        // Empty statement objects are invalid BEX source. Preserve authored
+        // content so compilation rejects it; never turn it into executable
+        // behavior as a compatibility rewrite.
         return canonicalStaticSource(statement);
     }
 
     private Node authoredMap(Node node) {
-        if (node == null || node.getProperties() == null || node.getProperties().isEmpty()) {
+        if (node == null) {
             return null;
+        }
+        if (node.getProperties() == null) {
+            return canonicalStaticSource(node);
         }
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
         for (Map.Entry<String, Node> entry : node.getProperties().entrySet()) {
@@ -248,6 +257,17 @@ final class ComputeProgramNormalizer {
 
     private void putIfMeaningful(Map<String, Node> properties, String key, Node value) {
         if (hasAuthoredContent(value)) {
+            properties.put(key, canonicalStaticSource(value));
+        }
+    }
+
+    private void putIfPresent(Map<String, Node> properties,
+                              String key,
+                              Node value) {
+        // BEX selects expression bodies by field presence and accepts an
+        // ordinary empty object as a literal expression. Emptiness is not
+        // permission to substitute the default statement program.
+        if (value != null) {
             properties.put(key, canonicalStaticSource(value));
         }
     }

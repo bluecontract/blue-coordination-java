@@ -191,11 +191,11 @@ retained evidence: barrier cause order, source receipt order, source
 `DocumentId`/epoch, consumer `DocumentId`, path, and activation generation.
 Call submission order is not an alternate replay order.
 
-An active plan is a moving barrier until it reaches a quiescent source
-frontier. If the source commits a later genuine epoch while catch-up is open,
-that commit atomically extends `requiredThroughSourceEpoch`. The consumer must
-apply the extension before becoming READY. A direct consumer entry cannot
-overtake its active barrier, while unrelated document lanes may continue.
+The attaching entry’s canonical source order bounds its historical suffix. Future source
+traffic cannot extend an attachment beyond its captured temporal boundary.
+Once the retained suffix completes, the consumer becomes READY and queued
+root/source entries proceed in canonical order. Direct consumer work stays
+behind the barrier until that point.
 
 Candidate selection expands through the impacted consumer's plan index. A
 `WAITING_FOR_HISTORY` or `BLOCKED` barrier sibling suppresses new due work only
@@ -208,13 +208,14 @@ application receipts are durable within the in-memory store, so a later drain
 continues at the exact next epoch. One frozen INITIALIZE or PROCESS call is
 never preempted to satisfy a budget.
 
-The existing scheduler retains a fair external-versus-managed lane turn. If
-both lanes remain runnable, repeated `DrainBudget(1, 1)` calls give bounded
-progress to genuine source commits and to the catch-up cursor. If the managed
-lane is empty because evidence waits or blocks, the external lane proceeds. A
-finite source stream therefore eventually reaches READY after it stops; an
-unbounded stream keeps extending the frontier and remains truthfully
-`CATCHING_UP`. Direct work for that consumer remains behind the barrier.
+The scheduler retains a fair external-versus-managed lane turn among eligible
+work. Repeated `DrainBudget(1, 1)` calls advance the historical cursor while
+unrelated lanes may progress. An inactive historical occurrence still creates
+a dependency: source entries after its barrier cause order cannot execute
+until the barrier clears. Eligible source commits within the boundary retain
+atomic frontier extension. When catch-up completes, dependent root and embedded
+entries resume in full canonical source order, including tie-breakers for equal
+timestamps. A future source stream cannot keep extending an earlier cutoff.
 
 Durable hosts can mirror that exact private turn without guessing from the
 work index. `auditNextProcessingSelection()` considers retained state and
@@ -413,15 +414,22 @@ manifest to a different immutable Maven repository:
 
 ```bash
 ./gradlew --no-daemon dynamicEvolutionCoordinationHandoff \
-  -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.23 \
-  -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
-  -PblueContractsManifestSha256=sha256:<64-lowercase-hex> \
+  -PblueDependencyMode=immutable-development-contracts \
+  -PblueContractsVersion=3.1.0-dev.<language-commit> \
+  -PblueContractsRepository=/absolute/path/to/language-development-repository \
+  -PblueContractsManifestSha256=sha256:<language-manifest> \
+  -PblueContractsSourceCommit=<language-commit> \
+  -PblueBexVersion=1.1.0-dev.<bex-commit> \
+  -PblueBexRepository=/absolute/path/to/bex-development-repository \
+  -PblueBexManifestSha256=sha256:<bex-manifest> \
+  -PblueBexSourceCommit=<bex-commit> \
+  -PblueDevelopmentVersion=3.0.0-dev.<exact-clean-coordination-head> \
   -PcoordinationSourceCommit=<exact-clean-coordination-head> \
   -PcoordinationStagedRepository=/absolute/path/to/invocation-owned/coordination-repository
 ```
 
-The handoff rejects a dirty or mismatched source commit and a mutable/conflicting
-target. Its isolated consumer resolves Coordination and Language exclusively
-from their pinned stages and does not use Maven Local. See
+The handoff rejects dirty or mismatched source provenance and a
+mutable/conflicting target. Its isolated consumer resolves Coordination,
+Language, and BEX exclusively from their manifest-bound repositories and does
+not use Maven Local. See
 [Immutable Coordination handoff](../development/immutable-staged-coordination.md).

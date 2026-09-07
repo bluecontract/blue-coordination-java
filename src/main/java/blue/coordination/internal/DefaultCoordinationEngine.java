@@ -36,12 +36,16 @@ import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
 import blue.coordination.api.DocumentSnapshot;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.processor.TimelineProviderSupport;
 
 import blue.language.api.BlueCacheStats;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ProcessorErrorCategory;
+import blue.language.processor.SubscriptionSurfaceInvalidException;
 import blue.language.processor.closure.ClosureInvocationInput;
 
 import java.math.BigInteger;
@@ -543,6 +547,16 @@ public final class DefaultCoordinationEngine
                 input, selectedPolicy, frontier);
     }
 
+    /** Admits a compiler-authenticated closure with its supplied exact type bodies. */
+    public synchronized ContractsClosureAdmissionReceipt admitContractsClosure(
+            Contracts10AuthoredClosureCompiler.CompiledClosure compiled) {
+        ensureOpen();
+        Objects.requireNonNull(compiled, "compiled").retainInlineTypeEvidence(objects);
+        var activation = compiled.activationInputs();
+        return admitContractsClosure(compiled.invocation(), activation.policy(),
+                activation.verifiedFrontier());
+    }
+
     /**
      * SDK static-admission seam for resolving exact referenced occurrence
      * content without changing the provider used by ordinary operations.
@@ -663,7 +677,7 @@ public final class DefaultCoordinationEngine
 
     synchronized ExactValue registerType(String sourceYaml) {
         ensureOpen();
-        return runtime.exactSource(sourceYaml, objects, "test-type");
+        return runtime.exactProcessingSource(sourceYaml, objects, "test-type");
     }
 
     synchronized ExactValue exactRequest(String requestYaml) {
@@ -671,10 +685,15 @@ public final class DefaultCoordinationEngine
         return entryFactory.parseExactRequest(requestYaml);
     }
 
+    synchronized ExactValue exactProcessingSource(String sourceYaml) {
+        ensureOpen();
+        return runtime.exactProcessingSource(sourceYaml, objects, "static processing admission");
+    }
+
     @Override
     public synchronized ExactValue exactValue(String sourceYaml) {
         ensureOpen();
-        return runtime.exactSource(
+        return runtime.exactProcessingSource(
                 sourceYaml, objects, "external-exact-value");
     }
 
@@ -692,9 +711,10 @@ public final class DefaultCoordinationEngine
         return runtime.exactProviderSource(sourceYaml);
     }
 
-    /** Provider leaf shared with isolated authored-closure verification. */
-    blue.language.provider.NodeProvider applicationExactNodeProvider() {
-        return applicationExactNodeProvider;
+    /** Read-only exact content and cyclic proofs for isolated closure verification. */
+    blue.language.provider.NodeProvider retainedExactNodeProvider() {
+        ensureOpen();
+        return BlueRuntime.retainedExactProvider(objects, applicationExactNodeProvider);
     }
 
     synchronized ExactValue embeddedDocumentRequest(
@@ -1510,6 +1530,27 @@ public final class DefaultCoordinationEngine
         return documents.nextCatchUpWorkExcluding(Set.of());
     }
 
+    /** Projects only the exact receipt already published with this application. */
+    private ManagedSurfacePublicationEvidence committedManagedApplicationSurface(
+            ContractsClosureAdapter.ManagedApplicationOutcome outcome) {
+        if (!outcome.published()) {
+            return ManagedSurfacePublicationEvidence.empty();
+        }
+        ContractsClosurePublicationReceipt retained = documents
+                .closurePublicationReceipt(outcome.work().workIdentity())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Committed managed application is missing publication evidence"));
+        var application = outcome.receipt().orElseThrow();
+        var result = retained.attempt().processResult();
+        if (!retained.commits()
+                || !result.invocationIdentity().equals(application.contractsInvocationIdentity())
+                || !result.outputClosureIdentity().equals(application.contractsResultIdentity())
+                || !result.platformCommitCompanion().companionIdentity().equals(application.commitCompanionIdentity())) {
+            throw new IllegalStateException("Managed application publication evidence binding mismatch");
+        }
+        return retained.managedSurfaceEvidence();
+    }
+
     @Override
     public synchronized Optional<ManagedEpochApplicationReceipt>
             auditManagedEpochApplicationReceipt(
@@ -1579,6 +1620,17 @@ public final class DefaultCoordinationEngine
                                                 source.actorId()))
                                 .toList()))
                 .toList();
+    }
+
+    @Override
+    public synchronized List<EmbeddedCollectionPlanningAudit>
+            auditEmbeddedCollections(DocumentId documentId) {
+        ensureOpen();
+        return requireDocument(Objects.requireNonNull(
+                        documentId, "documentId"))
+                .layout()
+                .plan()
+                .collectionAudits();
     }
 
     private DocumentSession requireDocument(DocumentId documentId) {
@@ -1659,6 +1711,35 @@ public final class DefaultCoordinationEngine
     private static CoordinationException translateStartFailure(
             DocumentId documentId,
             RuntimeException failure) {
+        if (failure instanceof ExecutionEvidenceUnavailableException
+                unavailable) {
+            Map<String, String> details = new LinkedHashMap<>();
+            details.put("documentId", documentId.value());
+            if (!unavailable.requiredExactBlueIds().isEmpty()) {
+                details.put("requiredExactBlueIds", String.join(",",
+                        unavailable.requiredExactBlueIds()));
+            }
+            return new CoordinationException(
+                    CoordinationErrorCode.NEEDS_RESOURCES,
+                    unavailable.getMessage(),
+                    unavailable,
+                    details);
+        }
+        if (failure instanceof SubscriptionSurfaceInvalidException invalid
+                && invalid.diagnostic().category()
+                == ProcessorErrorCategory.EmbeddedCollectionMustBeObject) {
+            Map<String, String> details = new LinkedHashMap<>();
+            details.put("documentId", documentId.value());
+            details.put("collectionPlanningState",
+                    EmbeddedCollectionPlanningAudit.State.INVALID_KIND.name());
+            return new CoordinationException(
+                    CoordinationErrorCode.FROZEN_PROCESSING_FAILED,
+                    invalid.getMessage(),
+                    invalid,
+                    details,
+                    null,
+                    invalid.diagnostic());
+        }
         String message = failure.getMessage() == null
                 ? "Document admission failed"
                 : failure.getMessage();
@@ -1808,9 +1889,30 @@ public final class DefaultCoordinationEngine
                 new ContractsRootFeederWindow(
                         contractsRecoveryState.feederWindow),
                 contractsClosureAdapter::executeAndPublish,
-                invocation -> invocation.existingMemberSet().stream()
-                        .noneMatch(member -> documents.require(member).status()
-                                == SessionStatus.CATCHING_UP));
+                this::eligibleThroughCatchUpFrontier);
+    }
+
+    private boolean eligibleThroughCatchUpFrontier(
+            ContractsClosureAdapter.CohortInvocation invocation) {
+        CatchUpPlanStore plans = documents.catchUpPlansSnapshot();
+        for (DocumentId member : invocation.existingMemberSet()) {
+            if (documents.require(member).status() == SessionStatus.CATCHING_UP) {
+                return false;
+            }
+            // An inactive historical occurrence already creates a temporal
+            // dependency. A future source entry cannot extend its captured
+            // attachment cutoff or overtake an earlier waiting consumer entry.
+            for (ManagedOccurrenceCatchUpPlan plan : plans.plansForSource(member).plans()) {
+                ManagedCatchUpBarrier barrier = plans.barrier(plan.barrierIdentity()).barrier();
+                if (plan.status() != blue.coordination.api.ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED
+                        && barrier.status() != blue.coordination.api.ManagedCatchUpBarrierStatus.COMPLETE
+                        && invocation.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause
+                        && cause.sourceOrder().compareTo(barrier.causeOrder()) > 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private ProcessingDrainReceipt drainContracts(
@@ -1930,6 +2032,8 @@ public final class DefaultCoordinationEngine
                     contractsRecoveryState.managedEpochTurn = false;
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
+                    ManagedSurfacePublicationEvidence managedSurface =
+                            committedManagedApplicationSurface(outcome);
                     managedAttempts.add(new ManagedEpochApplicationAttempt(
                             outcome.work(),
                             outcome.attempt(),
@@ -1960,7 +2064,11 @@ public final class DefaultCoordinationEngine
                                             .PublicationFailure(
                                             failure.code(),
                                             failure.message(),
-                                            failure.details()))));
+                                            failure.details())),
+                            managedOccurrenceResolutions(managedSurface),
+                            managedSurface.inputComponents(),
+                            managedSurface.operationRouteChanges().stream()
+                                    .map(DefaultCoordinationEngine::operationRouteChange).toList()));
                     contractsRecoveryState.deferManagedEpochConsumer(
                             outcome.work().consumerDocumentId());
                     if (!outcome.published()) {
@@ -2020,22 +2128,7 @@ public final class DefaultCoordinationEngine
                         exact.publicationIdentity(),
                         exact.replayed(),
                         exact.automaticRetryCount(),
-                        exact.managedSurfaceEvidence()
-                                .resolvedOccurrences()
-                                .stream()
-                                .map(resolution -> new
-                                        ContractsClosureDispatchAttempt
-                                                .ManagedOccurrenceResolution(
-                                                resolution.demandIdentity(),
-                                                resolution.occurrence(),
-                                                ContractsClosureDispatchAttempt
-                                                        .TargetKind.valueOf(
-                                                        resolution.targetKind()
-                                                                .name()),
-                                                Optional.ofNullable(
-                                                        resolution
-                                                                .authoredInitial())))
-                                .toList(),
+                        managedOccurrenceResolutions(exact.managedSurfaceEvidence()),
                         exact.managedSurfaceEvidence().inputComponents(),
                             exact.managedSurfaceEvidence()
                                     .operationRouteChanges()
@@ -2169,6 +2262,16 @@ public final class DefaultCoordinationEngine
             contractsRecoveryState.restoreManagedEpochIsolation(isolated);
             throw failure;
         }
+    }
+
+    private static List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution>
+            managedOccurrenceResolutions(ManagedSurfacePublicationEvidence surface) {
+        return surface.resolvedOccurrences().stream()
+                .map(resolution -> new ContractsClosureDispatchAttempt.ManagedOccurrenceResolution(
+                        resolution.demandIdentity(), resolution.occurrence(),
+                        ContractsClosureDispatchAttempt.TargetKind.valueOf(resolution.targetKind().name()),
+                        Optional.ofNullable(resolution.authoredInitial())))
+                .toList();
     }
 
     private static ContractsClosureDispatchAttempt.OperationRouteChange

@@ -445,7 +445,7 @@ final class CatchUpPlanStore {
         }
         ManagedOccurrenceCatchUpPlan plan = requirePlan(
                 selectedWork.planIdentity());
-        if (plan.nextSourceEpoch() != selectedWork.sourceEpoch()
+        if (plan.nextSourceEpoch() != selectedWork.expectedNextSourceEpoch()
                 || plan.status() != ManagedCatchUpStatus.RUNNING) {
             throw new IllegalArgumentException(
                     "Committed work does not own the plan's exact next cursor");
@@ -456,6 +456,7 @@ final class CatchUpPlanStore {
         long cursor = receipt.resultingSourceCursor();
         ManagedCatchUpStatus status = cursor
                 == Math.addExact(plan.requiredThroughSourceEpoch(), 1L)
+                && (!selectedWork.isRepresentationApplication() || selectedWork.representationCause().orElseThrow().terminalPositionReached())
                 ? ManagedCatchUpStatus.COMPLETE
                 : ManagedCatchUpStatus.RUNNING;
         ManagedOccurrenceCatchUpPlan advanced = copyPlan(
@@ -465,7 +466,7 @@ final class CatchUpPlanStore {
                 status,
                 null,
                 null);
-        ManagedCatchUpPlanIndex changedPlans = plans.withPlan(advanced, true);
+        ManagedCatchUpPlanIndex changedPlans = plans.withPlan(advanced, !selectedWork.isRepresentationApplication());
         CatchUpPlanStore changed = new CatchUpPlanStore(
                 changedPlans,
                 barriers,
@@ -802,7 +803,7 @@ final class CatchUpPlanStore {
                         source.receiptIdentity())
                 || !work.sourceDocumentId().equals(plan.sourceDocumentId())
                 || !work.sourceDocumentId().equals(source.documentId())
-                || work.sourceEpoch() != plan.nextSourceEpoch()
+                || work.expectedNextSourceEpoch() != plan.nextSourceEpoch()
                 || work.sourceEpoch() != source.epoch()
                 || work.sourceEpoch() > plan.requiredThroughSourceEpoch()
                 || !work.consumerDocumentId().equals(
@@ -828,6 +829,11 @@ final class CatchUpPlanStore {
             ManagedEpochApplicationWork work,
             ManagedEpochReceipt source,
             ManagedOccurrenceCatchUpPlan plan) {
+        if (work.isRepresentationApplication()) {
+            var cause = work.representationCause().orElseThrow();
+            return source.epoch() == cause.fromEpoch()
+                    && source.receiptIdentity().equals(cause.transition().anchorReceiptIdentity());
+        }
         if (work.sourceEpoch()
                 != Math.addExact(plan.admittedSourceEpoch(), 1L)) {
             return true;
@@ -850,7 +856,7 @@ final class CatchUpPlanStore {
                 || !work.barrierIdentity().equals(
                         barrier.barrierIdentity())
                 || !work.sourceDocumentId().equals(plan.sourceDocumentId())
-                || work.sourceEpoch() != plan.nextSourceEpoch()
+                || work.expectedNextSourceEpoch() != plan.nextSourceEpoch()
                 || work.sourceEpoch() > plan.requiredThroughSourceEpoch()
                 || !work.consumerDocumentId().equals(
                         plan.consumerDocumentId())

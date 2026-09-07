@@ -442,12 +442,12 @@ final class SdkManagedEpochSharedFailureIsolationTest {
                     type:
                       blueId: %s
                     order: 0
-                    event:
-                      type:
-                        blueId: %s
                   onProcessingInitiated:
                     type: Coordination/Sequential Workflow
                     channel: lifecycleChannel
+                    event:
+                      type:
+                        blueId: %s
                     order: 0
                     steps:
                       - type: Coordination/Compute
@@ -506,7 +506,6 @@ final class SdkManagedEpochSharedFailureIsolationTest {
     private static String failingConsumerYaml() {
         return """
                 documentId: %s
-                peer: {}
                 observedChanges: 0
                 contracts:
                   embedded:
@@ -582,7 +581,6 @@ final class SdkManagedEpochSharedFailureIsolationTest {
     private static String loopPeerYaml() {
         return """
                 documentId: %s
-                peer: {}
                 contracts:
                   embedded:
                     type: Process Embedded

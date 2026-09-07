@@ -6,6 +6,7 @@ import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.CoordinationErrorCode;
 import blue.coordination.api.CoordinationException;
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.EmbeddedCollectionPlanningAudit;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Operation;
 import blue.coordination.api.ProcessingDrainReceipt;
@@ -22,6 +23,7 @@ import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.ProcessorDiagnostic;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ClosureResourceDemand;
@@ -190,6 +192,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 .toList();
     }
 
+    synchronized List<EmbeddedCollectionPlanningAudit>
+            auditEmbeddedCollections(DocumentId documentId) {
+        ensureOpen();
+        return engine.auditEmbeddedCollections(Objects.requireNonNull(
+                documentId, "documentId"));
+    }
+
     String languageSpecificationIdentity() {
         return languageSpecificationIdentity;
     }
@@ -285,14 +294,10 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         List.of(),
                         Set.of(selected.id()),
                         activationInputs(selected.activationPolicy()));
-        Contracts10AuthoredClosureCompiler.CompiledClosure compiled;
-        try {
-            compiled = contentDerivedDocumentIds
-                    ? compiler.compileContentIdentified(request)
-                    : compiler.compile(request);
-        } catch (ProviderUnavailableException unavailable) {
-            throw admissionNeedsResources(unavailable);
-        }
+        Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
+                prepareAdmission(() -> contentDerivedDocumentIds
+                        ? compiler.compileContentIdentified(request)
+                        : compiler.compile(request));
         admitCompiled(compiled, Set.of(selected.id()));
         return requireDocument(selected.id());
     }
@@ -338,11 +343,11 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ActivationPolicy activationPolicy,
             List<ManagedEpochSelector> selectors) {
         Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission
-                selected = staticCompiler.compile(
+                selected = prepareAdmission(() -> staticCompiler.compile(
                         Objects.requireNonNull(authoredYaml, "authoredYaml"),
                         exactNodeProvider,
                         activationInputs(Objects.requireNonNull(
-                                activationPolicy, "activationPolicy")));
+                                activationPolicy, "activationPolicy"))));
         DocumentId rootId = selected.rootDocumentId();
         engine.authorizeContractsPublicRoots(Set.of(rootId));
         Contracts10AuthoredClosureCompiler.ActivationInputs activation =
@@ -497,9 +502,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         roots,
                         activationInputs(selected.activationPolicy()));
         Contracts10AuthoredClosureCompiler.CompiledClosure compiled =
-                contentDerivedDocumentIds
+                prepareAdmission(() -> contentDerivedDocumentIds
                         ? compiler.compileContentIdentified(request)
-                        : compiler.compile(request);
+                        : compiler.compile(request));
         ContractsClosureAdmissionReceipt receipt = admitCompiled(
                 compiled, roots);
         LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
@@ -705,6 +710,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         : previous.blueId();
         return new TimelineEntrySnapshot(
                 ExactBlueValue.wrap(entry.exactEvent()),
+                entry.request().map(ExactBlueValue::wrap),
                 timelineHandle(entry),
                 Optional.ofNullable(previousBlueId),
                 entry.operation(),
@@ -771,13 +777,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             Contracts10AuthoredClosureCompiler.CompiledClosure compiled,
             Set<DocumentId> roots) {
         engine.authorizeContractsPublicRoots(roots);
-        Contracts10AuthoredClosureCompiler.ActivationInputs activation =
-                compiled.activationInputs();
         ContractsClosureAdmissionReceipt receipt =
-                engine.admitContractsClosure(
-                        compiled.invocation(),
-                        activation.policy(),
-                        activation.verifiedFrontier());
+                engine.admitContractsClosure(compiled);
         requirePublishedAdmission(receipt);
         return receipt;
     }
@@ -812,10 +813,21 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         throw admissionRejected(receipt.attempt().processResult());
     }
 
+    private static <T> T prepareAdmission(java.util.function.Supplier<T> preparation) {
+        try {
+            return preparation.get();
+        } catch (ProviderUnavailableException unavailable) {
+            throw admissionNeedsResources(unavailable.requiredExactBlueId()
+                    .orElseThrow(() -> unavailable), unavailable);
+        } catch (ExecutionEvidenceUnavailableException unavailable) {
+            if (unavailable.requiredExactBlueIds().isEmpty()) throw unavailable;
+            throw admissionNeedsResources(
+                    unavailable.requiredExactBlueIds().get(0), unavailable);
+        }
+    }
+
     private static CoordinationException admissionNeedsResources(
-            ProviderUnavailableException unavailable) {
-        String blueId = unavailable.requiredExactBlueId()
-                .orElseThrow(() -> unavailable);
+            String blueId, RuntimeException unavailable) {
         LinkedHashMap<String, String> details = new LinkedHashMap<>();
         details.put("blueId", blueId);
         return new CoordinationException(
@@ -855,17 +867,18 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         ManagedDraftEvidence managed = managedDraftEvidence(call);
         ContractsManagedEpochSelectionPlan epochSelections =
                 managedEpochSelectionPlan(call);
-        ExactValue request;
+        ExactValue request = null;
         if (call.requestYaml() != null) {
             request = engine.exactValue(call.requestYaml());
         } else if (call.request() != null) {
             request = call.request().exactRequest(engine);
-        } else {
-            request = engine.exactValue("{}");
         }
         TargetSelection target = call.target();
-        Operation operation = Operation.exact(
-                call.operation(), call.channel(), request)
+        Operation operation = (request == null
+                ? Operation.withoutRequest(
+                        call.operation(), call.channel())
+                : Operation.exact(
+                        call.operation(), call.channel(), request))
                 .targeting(
                         target.exact().unwrap(),
                         target.requireExactDocumentVersion());

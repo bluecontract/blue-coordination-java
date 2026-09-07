@@ -1,0 +1,78 @@
+{
+  "schema": "blue-historical-representation-prototype-case/1",
+  "status": "PROPOSED_NOT_RELEASED",
+  "existingTutorialCases": [
+    "Y09",
+    "Y12"
+  ],
+  "template": "/tutorial-graphs/node.template.json",
+  "saveOriginalsBeforeAnyInitialization": [
+    "A",
+    "B",
+    "C"
+  ],
+  "publicSetup": [
+    [
+      "A",
+      "b",
+      "B"
+    ],
+    [
+      "B",
+      "a",
+      "A"
+    ],
+    [
+      "A",
+      "c",
+      "C"
+    ]
+  ],
+  "terminalTail": {
+    "afterSetupOperation": 2,
+    "sourceEpoch": 2,
+    "representationSteps": 4
+  },
+  "intermediate": {
+    "sourceEpoch": 2,
+    "representationSteps": 4,
+    "nextNumberedEpoch": 3
+  },
+  "consumer": {
+    "kind": "independent processor conformance fixture",
+    "reaction": "one real Document Update increments observed for every exact reference step"
+  },
+  "assertions": [
+    "original committed publication membership",
+    "exact complete binding inventory and source body proof",
+    "wrong anchor/predecessor/epoch/goal/next receipt reject",
+    "wrong lineage and missing original transition reject",
+    "a later authentic position cannot skip the next position",
+    "an applied position cannot be reapplied against its successor cursor",
+    "missing successor cyclic proof rejects",
+    "current authoritative source head unchanged",
+    "one independently metered processor call per representation",
+    "one-unit gas rollback preserves the complete input closure",
+    "same exact input retries deterministically",
+    "terminal activation only at captured position",
+    "ordinary revision remains exactly +1 epoch",
+    "SDK store restart preserves original transition positions"
+  ],
+  "notEstablished": [
+    "fourth saved-original SDK/HTTP attachment",
+    "new cause scheduling and atomic host application receipt",
+    "MyOS durable representation cursor and fresh database replay",
+    "rebind-back authenticated positive",
+    "final release bindings and RC readiness"
+  ],
+  "reconnectProcessorProof": {
+    "template": "/historical-representation/reconnect.template.json",
+    "templateSha256": "7d6ae2aca6d7ea280b7fe5ab86403da97f8c78fc9f8c1f68be70ab9c80d0c0f2",
+    "source": "Exact maintained MyOS graph template, including Embedded Collection Event envelope paths /event/to and /event/next. The older SDK ring template is unchanged.",
+    "savedOriginalA": "EvDZ5SpjRrcYNbikhKvtPctuwoFXCMZvK9kpfc52owWy",
+    "savedOriginalB": "HbhBw4c8AU5fUSeEgqMVm2eZoH1j1FSSrMUr7rFNn61z",
+    "sameEpochSteps": 7,
+    "numberedSteps": 2,
+    "scope": "Traverse the actual SDK-blocked closure in the processor. No SDK publication or public reconnect success is claimed."
+  }
+}

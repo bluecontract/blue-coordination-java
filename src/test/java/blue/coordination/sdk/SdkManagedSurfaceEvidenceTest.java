@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
+import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumSet;
@@ -51,6 +52,10 @@ final class SdkManagedSurfaceEvidenceTest {
                         do:
                           - $return: true
                     """);
+            String channelUpdateBlueId = FrozenNode.fromResolvedNode(
+                    addedChannel.copyNode()).blueId();
+            String handlerUpdateBlueId = FrozenNode.fromResolvedNode(
+                    addedHandler.copyNode()).blueId();
             String before = document.snapshot().blueId();
 
             // when
@@ -121,10 +126,16 @@ final class SdkManagedSurfaceEvidenceTest {
                             "/contracts/retiringOperation",
                             "/contracts/retiringChannel"),
                     patches.keySet());
+            // Authored snapshots retain explicit empty declarations. Update
+            // evidence uses the processor's resolved snapshot identity lane.
+            assertEquals(addedChannel.blueId(), document.snapshot()
+                    .valueAt("/contracts/addedChannel").blueId());
+            assertEquals(addedHandler.blueId(), document.snapshot()
+                    .valueAt("/contracts/addedOperation").blueId());
             assertAdd(patches.get("/contracts/addedChannel"),
-                    addedChannel.blueId());
+                    addedChannel.blueId(), channelUpdateBlueId);
             assertAdd(patches.get("/contracts/addedOperation"),
-                    addedHandler.blueId());
+                    addedHandler.blueId(), handlerUpdateBlueId);
             assertRemove(patches.get("/contracts/retiringOperation"));
             assertRemove(patches.get("/contracts/retiringChannel"));
         }
@@ -241,15 +252,15 @@ final class SdkManagedSurfaceEvidenceTest {
 
     private static void assertAdd(
             ManagedSurfaceEvidence.ContractPatch patch,
-            String expectedAuthoredBlueId) {
+            String expectedAuthoredBlueId, String expectedUpdateBlueId) {
         assertEquals(ManagedSurfaceEvidence.ContractPatchOperation.ADD,
                 patch.operation());
         assertEquals(Optional.of(expectedAuthoredBlueId),
                 patch.authoredValueBlueId());
         assertTrue(patch.beforeValueBlueId().isEmpty());
         assertTrue(patch.afterValueBlueId().isPresent());
-        assertFalse(patch.authoredValueBlueId().equals(
-                patch.afterValueBlueId()));
+        assertEquals(Optional.of(expectedUpdateBlueId),
+                patch.afterValueBlueId());
     }
 
     private static void assertRemove(
