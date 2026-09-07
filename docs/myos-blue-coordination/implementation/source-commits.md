@@ -2,13 +2,25 @@
 
 > Updated 2026-09-07. Working branches, not releases or an API freeze.
 
-## Latest local repair candidate
+## Latest verified repair source set
 
 The [R1–R5 repairs](final-review-remediation.md) and subsequent [N1–N5 repairs](post-remediation-fixes.md)
-are local changes on the same branches, awaiting final verification and the authorized commit/push.
-Their exact base commits, source patches/new files and tested artifact
-hashes are retained in the linked verification archive. The tables below identify historical
-committed source sets, not these new fixes. R6 remains deferred and Phase3 has not started.
+were committed on the same working branches after 1866 affected library, 99 PostgreSQL host and
+7 actual-library/host checks passed. The user authorized delivery to those remote branches.
+The exact tested base commits, source patches/new files and artifact hashes remain in the linked
+verification archives; committing the same sources does not imply another test run.
+
+| Repository | Working branch | Verified repair implementation commit |
+|---|---|---|
+| `blue-coordination-java` | `codex/coordination-external-state-poc` | `294e60e9f5dc86772736c73cfe1c741805549a85` |
+| `blue-language-java` | `codex/coordination-external-state-poc` | `9dc72da8c3c858a75e8b9f16e15e07bd4f722ec5` |
+| `blue-bex-java` | `codex/coordination-external-state-poc` | `c74052bf700d048f51820c1a29a0e16973aee7dc` |
+| `myos-simple` | `feat/coordination-with-external-state` | `63e5890c5599f4e7143b0bb08136d10811fb4b64` |
+
+This source map is a subsequent documentation-only Coordination commit, so its branch tip is later
+than the implementation commit listed above. R6 remains deferred and Phase3 has not started. The
+tables below identify historical source sets, not a competing current candidate. No raw local build
+archives or the user's untracked MyOS example are included in the repair commits.
 
 ## Reviewed remediation source set
 
