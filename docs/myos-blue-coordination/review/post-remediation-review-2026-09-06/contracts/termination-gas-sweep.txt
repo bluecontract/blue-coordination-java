@@ -1,0 +1,9 @@
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+MODE SOURCE_TERMINATES cases=215 escapes=0
+MODE TWO_DIRECT_CHANNELS cases=220 escapes=0
+MODE JOINED_FATAL cases=90 escapes=0
+MODE OBSERVER_TERMINATES cases=196 escapes=0
+MODE TWO_EMBEDDED_CHANNELS cases=199 escapes=0
+TOTAL cases=920 escapes=0

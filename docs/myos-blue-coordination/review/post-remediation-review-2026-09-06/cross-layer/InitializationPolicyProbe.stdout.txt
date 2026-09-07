@@ -1,0 +1,23 @@
+independentPolicy=false, sourceStatus=SUCCESS, sourceGas=1248, sourceLimit=100000
+cold=false, parent=SUCCESS, gas=1518
+cold=true, parent=SUCCESS, gas=1518
+independentPolicy=true, sourceStatus=SUCCESS, sourceGas=1248, sourceLimit=5000
+cold=false, parent=IllegalArgumentException: Source initialization belongs to another complete environment or execution policy
+  at blue.language.processor.closure.SourceInitialization.verifySourceBasis(SourceInitialization.java:137)
+  at blue.language.processor.closure.SourceInitialization.verifyInstallationBasis(SourceInitialization.java:111)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:508)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:461)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:456)
+  at blue.coordination.external.InitializationPolicyProbe.run(InitializationPolicyProbe.java:46)
+  at blue.coordination.external.InitializationPolicyProbe.main(InitializationPolicyProbe.java:10)
+cold=true, parent=IllegalArgumentException: Source initialization belongs to another complete environment or execution policy
+  at blue.language.processor.closure.SourceInitialization.verifySourceBasis(SourceInitialization.java:137)
+  at blue.language.processor.closure.SourceInitialization.verifyInstallationBasis(SourceInitialization.java:111)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:508)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:461)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:456)
+  at blue.coordination.external.InitializationPolicyProbe.run(InitializationPolicyProbe.java:46)
+  at blue.coordination.external.InitializationPolicyProbe.main(InitializationPolicyProbe.java:10)
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.

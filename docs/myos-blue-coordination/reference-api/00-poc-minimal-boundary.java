@@ -94,11 +94,13 @@ final class PocMinimalBoundaryReference {
             Map<DocumentId, List<CoordinationCore.ReadFence>> fencesByOwner,
             List<SourceFrontierSelection> offeredFrontiers,
             Map<DocumentId, String> authenticatedProducerBases,
-            List<SourceInputAdmission> originalSourceAdmissions) {
+            List<SourceInputAdmission> originalSourceAdmissions,
+            Map<DocumentId, String> authenticatedOriginalProducerRoots) {
         /*
          * This is the actual full record constructor. Shorter constructors also exist.
          * withSourceInitializations, withOperationFences, withSourceFrontiers,
-         * withExpectedSourceBases and withSourceInputAdmissions return new evidence values;
+         * withExpectedSourceBases, withSourceInputAdmissions and withOriginalSourceInputRoots
+         * return new evidence values;
          * they are not separate evaluator entry points.
          *
          * Relevant membership is complete directed live membership, not arbitrary host choice.
@@ -107,16 +109,25 @@ final class PocMinimalBoundaryReference {
          * Retained source facts are offered evidence, not ambient activation or publication.
          * Expected producer bases come from independently trusted source context, not from
          * the offered result or the importing consumer's possibly different gas budget.
-         * Original admission records require separately authenticated roots in a history Request.
+         * This includes used initialization/borrowed-init capabilities and selected frontier views.
+         * A history Request authenticates the requested source's original root by Entry ID.
+         * Original producer roots here authenticate independent fresh producers by lineage for
+         * this selected Entry. Offered records alone never establish either authority.
+         * Missing authority yields a noncommitting need at actual fresh seed admission; the
+         * observer cannot supply its own choices or budget as an independent source's input.
          *
          * An owned group's mutable CAS fences are its owners' exact union. A consumed immutable
          * source operation is a dependency, not a stale mutable-source-head fence.
+         * Metadata progress uses only its target's attributed entry, even when explicitly empty.
+         * A partial owner map lacking the target yields a named need; only a wholly empty map
+         * retains the legacy metadata fallback. Never union independent source-head fences.
          */
         return new CoordinationCore.EvaluationEvidence(
                 directedReadCut, completeRelevantTimelineLocators, completePrefixes,
                 handledThrough, readFences, precedingOperations, retainedSourcePrograms,
                 gapsBySource, retainedSourceFailures, offeredInitializations,
-                fencesByOwner, offeredFrontiers, authenticatedProducerBases, originalSourceAdmissions);
+                fencesByOwner, offeredFrontiers, authenticatedProducerBases, originalSourceAdmissions,
+                authenticatedOriginalProducerRoots);
     }
 
     static CoordinationCore.EvaluationResult initialize(
@@ -299,6 +310,8 @@ final class PocMinimalBoundaryReference {
  *     retain every group and optional targetProgress. Publish prerequisite groups before dependents.
  *     Each group owns one atomic transaction across ALL its owned lineages, gas, effects and outbox;
  *     the container is NOT one global atomic transaction and is NOT a partial interpreter result.
+ *     SameOriginGroupEvidence separately binds interpreted initialization/frontier authority.
+ *     Those identity inputs are not external consumed-source operations or publication demands.
  *
  * Core's fixed operation laws:
  *   - INITIALIZATION needs a committing usable result; failure cannot publish initialized authority.

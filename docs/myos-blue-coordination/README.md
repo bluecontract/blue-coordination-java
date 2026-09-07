@@ -1,6 +1,6 @@
 # MyOS Mini and Coordination POC
 
-> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-06 · **Status:** final implementation review found five open blockers; Phase3 remains planned
+> **Design baseline:** 15.12 · **Documentation sync:** 2026-09-07 · **Status:** N1–N5 follow-up repairs verified; R6 deferred; Phase3 remains planned
 
 This package defines the first POC's processing algorithm, API shape, invariants and planned tests.
 The authorized Phase1/2 implementation passed its baseline integration-readiness checks; see the
@@ -9,8 +9,16 @@ The subsequent [code-review remediation](implementation/pre-phase-3-review-remed
 the completed repair gate and new verification, with F05 and complete F07 selection explicitly
 assigned to Phase3. Earlier green tests are not substituted for those new checks.
 The subsequent [final implementation review](review/final-implementation-review-2026-09-06.md)
-reproduces five further correctness/progress defects on that repaired candidate. Its report and
-separate Java witnesses qualify the earlier readiness claims; those defects are not repaired yet.
+reproduced five further correctness/progress defects on that candidate. Its report and separate
+Java witnesses remain historical evidence. The authorized
+[R1–R5 repair round](implementation/final-review-remediation.md) is implemented and verified locally:
+1059 affected library checks, 88 PostgreSQL foundation checks and 7 actual-library/host smoke checks.
+Stack/depth work (R6) is explicitly deferred. These results do not cover the full planned Phase3 catalog.
+The [post-remediation review](review/post-remediation-review-2026-09-07.md) identifies five additional
+bounded gaps. Their implementation, regression coverage and the identity correction exposed by
+cross-policy initialization tests are tracked in the [N1–N5 repair record](implementation/post-remediation-fixes.md).
+That repair gate passed 1866 library checks, 99 PostgreSQL host checks and 7 actual-library/host
+checks on matching artifacts. Passing earlier checks is not substituted for these new cases.
 [25](25-phase-3-integration-plan.md) plans the next phase; implementation of that phase has not begun.
 This is not a production release or formal acceptance of every scenario in the full catalog.
 Code and documentation are consolidated on `codex/coordination-external-state-poc`.

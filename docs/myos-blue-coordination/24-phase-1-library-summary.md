@@ -3,8 +3,10 @@
 > Baseline implementation handoff, 2026-09-06. Subsequent review repairs are tracked separately.
 > [Verification record](implementation/phase-1-2-readiness.md) · [Phase3 plan](25-phase-3-integration-plan.md)
 
-See [pre-Phase3 review remediation](implementation/pre-phase-3-review-remediation.md) for the
-authorized follow-up corrections and their verification. This summary describes the committed
+See [pre-Phase3 review remediation](implementation/pre-phase-3-review-remediation.md) and the
+[R1–R5 repair record](implementation/final-review-remediation.md), followed by the
+[N1–N5 repair record](implementation/post-remediation-fixes.md), for the authorized follow-up
+corrections and their verification. This summary describes the committed
 baseline, not a claim that its tests covered those later counterexamples.
 
 ## Phase1 outcome

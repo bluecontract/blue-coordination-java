@@ -23,8 +23,12 @@ or production-HA project is part of this phase.
 
 - Close R1–R5 from the [final implementation review](review/final-implementation-review-2026-09-06.md)
   before accepting their dependent integration paths: original producer context on fresh execution,
-  typed schema failures, retained-attempt recovery and blocked-prefix isolation. R6's deep-graph
-  capacity/control belongs in scale acceptance; it does not require another processing model.
+  typed schema failures, retained-attempt recovery and blocked-prefix isolation. Track their
+  implementation in [the R1–R5 repair record](implementation/final-review-remediation.md).
+  The user explicitly deferred R6 stack/depth work; it is not a gate for this repair round.
+- Include the [N1–N5 follow-up corrections](implementation/post-remediation-fixes.md): independent
+  initialization/frontier authority and its settlement binding, target metadata fences, cyclic
+  schema output validation, discovery retry isolation and retained-work release protection.
 - Close Phase1/2's known correctness failures and final regression/adapter handshake.
 - Verify the review repairs on the changed candidate: lossless historical needs and original-input
   choices, producer-basis compatibility, real BEX validation/operator controls, retained-publication
@@ -74,6 +78,8 @@ Implement the adapter's complete result dispatch, initially exercised with a sim
 - Verified state, history, successful/handled cursors, receipts, obligations and outbox in the
   corresponding transaction; no semantic execution or provider wait inside an SQL transaction.
 - Cold receipt restoration, uncertain-commit reconciliation and idempotent publication.
+- Do not ordinary-release work owned by a retained plan. The host rejects it until full-plan
+  reconciliation; keep all joined work members discoverable together.
 - Exercise both publication-read and sink-payload capacity holds through a real release: retry the
   retained stream head after supported capacity increases, without new semantic work or gas. Wire
   non-spinning blocked-head handling and keep unrelated streams progressing. Admission and the
@@ -84,6 +90,8 @@ Implement the adapter's complete result dispatch, initially exercised with a sim
   not a wrapper transaction containing all groups.
 - Use bounded fair service per Timeline in both evidence-maintenance queues. Ordinary work-claim
   fairness is not proof of maintenance progress under a sustained earlier-key backlog.
+- Preserve item-local discovery Holds/backoff across pump turns and cold restart. One oversized
+  source proof must not monopolize fanout/backfill service for independently serviceable items.
 
 **Exit:** an actual create → append → process → publish → stop → restart → append sequence passes
 through the runnable profile. The host contains no second interpreter and no authoritative runtime
@@ -112,8 +120,9 @@ Preserve these boundaries explicitly:
   named needs; a physically newer head cannot substitute for them.
 - Semantic failed source/consumer operations retain verified failure capabilities and actual
   consumer/source-specific successful pins. Operational failures consume nothing.
-- Verify producer success/failure against the independently expected canonical source basis before
-  metadata or execution progress. Producer and observer budgets may legitimately differ; copying
+- Verify producer success/failure, used initialization/borrowed-init evidence and frontier views
+  against independently expected canonical source bases before metadata or execution progress.
+  Producer and observer budgets may legitimately differ; copying
   the observer's policy into producer verification is not the compatibility rule.
 - Genuine feedback and conditional joins use the library's complete ownership/rollback result.
   The host does not infer an atomic group from graph reachability or changed bytes.

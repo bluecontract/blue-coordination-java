@@ -1,0 +1,13 @@
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+nested retry=0 SETTLED RUNTIME_FATAL disposition=CONSUMED events=0 counter=0
+nested retry=1 SETTLED RUNTIME_FATAL disposition=CONSUMED events=0 counter=0
+type retry=0 SETTLED RUNTIME_FATAL disposition=CONSUMED events=0 counter=0
+type retry=1 SETTLED RUNTIME_FATAL disposition=CONSUMED events=0 counter=0
+schema retry=0 ESCAPED blue.language.processor.UnclassifiedProcessingException: Unclassified processing failure; no semantic result is available beforeCounter=0
+  cause=blue.language.processor.UnclassifiedProcessingException: Unclassified processing failure; no semantic result is available
+  cause=java.lang.IllegalArgumentException: No content found for required blueId DVEPzFWaZRXG7n1FrYcZiQknshBA3Lmc7JgbrciVMbpi#0 at path /.
+schema retry=1 ESCAPED blue.language.processor.UnclassifiedProcessingException: Unclassified processing failure; no semantic result is available beforeCounter=0
+  cause=blue.language.processor.UnclassifiedProcessingException: Unclassified processing failure; no semantic result is available
+  cause=java.lang.IllegalArgumentException: No content found for required blueId DVEPzFWaZRXG7n1FrYcZiQknshBA3Lmc7JgbrciVMbpi#0 at path /.

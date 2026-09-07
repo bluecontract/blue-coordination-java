@@ -218,7 +218,7 @@ class CanonicalSourceHistoryTest {
                     f.core.evaluate(new CoordinationCore.WorkIntent(id, CoordinationCore.OperationKind.INITIALIZATION), evidence));
             assertEquals(List.of("canonical-initialization:" + child.documentId().value()), missing.keys());
             evidence = evidence.withSourceInitializations(List.of(OperationReceiptCodec.restoreSourceInitialization(
-                    childBirth.receiptIdentity(), f.blobs::get, LIMITS)));
+                    childBirth.receiptIdentity(), f.blobs::get, LIMITS))).withExpectedSourceBases(f.expectedBases(child.documentId()));
             var childAdmission = OriginalSourceInputTestSupport.admit(f.core, childBirth.after(),
                     new CanonicalSourceHistory.Request(child.documentId(), cut),
                     f.evidence(child, List.of(input("later source input", 15, "account")), 21), SameOriginAttachmentPolicy.empty(), f.blobs);
@@ -230,7 +230,7 @@ class CanonicalSourceHistoryTest {
                     List.of(child.documentId(), parent.documentId()), snapshot.readPins());
             var aheadEvidence = new CoordinationCore.EvaluationEvidence(aheadSnapshot, Set.of(), List.of(), Optional.empty(),
                     List.of(new CoordinationCore.ReadFence("physical-child", "later-host-head")), Map.of())
-                    .withSourceInitializations(evidence.sourceInitializations());
+                    .withSourceInitializations(evidence.sourceInitializations()).withExpectedSourceBases(evidence.expectedSourceBases());
             var needLogicalView = assertInstanceOf(CoordinationCore.NeedEvidence.class,
                     f.core.evaluate(new CoordinationCore.WorkIntent(id, CoordinationCore.OperationKind.INITIALIZATION), aheadEvidence));
             assertEquals(List.of("canonical-initialization-view:" + child.documentId().value() + ":" + child.blueId()), needLogicalView.keys());
@@ -278,7 +278,7 @@ class CanonicalSourceHistoryTest {
                     List.of(ClosureEvidenceFactory.acyclicComponent(z), ClosureEvidenceFactory.acyclicComponent(yAuthored)),
                     List.of(yAuthored.documentId(), z.documentId()), List.of(zPin));
             var yEvidence = new CoordinationCore.EvaluationEvidence(ySnapshot, Set.of(), List.of(), Optional.empty(), List.of(), Map.of())
-                    .withSourceInitializations(List.of(zCapability));
+                    .withSourceInitializations(List.of(zCapability)).withExpectedSourceBases(f.expectedBases(z.documentId()));
             var yBirth = assertInstanceOf(CanonicalSourceHistory.Step.class, history.prepareNext(
                     new CanonicalSourceHistory.Request(yAuthored.documentId(), cut), history.start(yAuthored.documentId()),
                     yEvidence, f.blobs::put, LIMITS));
@@ -306,7 +306,8 @@ class CanonicalSourceHistoryTest {
                             ClosureEvidenceFactory.acyclicComponent(xAuthored)),
                     List.of(xAuthored.documentId(), y.documentId(), z.documentId()), List.of(zPin,
                             ManagedReadPin.fromExactEvidence(yAuthored.documentId(), yAuthored.blueId(), yAuthored.document(), null)));
-            var xEvidence = new CoordinationCore.EvaluationEvidence(xSnapshot, Set.of(), List.of(), Optional.empty(), List.of(), Map.of());
+            var xEvidence = new CoordinationCore.EvaluationEvidence(xSnapshot, Set.of(), List.of(), Optional.empty(), List.of(), Map.of())
+                    .withExpectedSourceBases(f.expectedBases(y.documentId(), z.documentId()));
             var intent = new CoordinationCore.WorkIntent(xAuthored.documentId(), CoordinationCore.OperationKind.INITIALIZATION);
             var hot = assertInstanceOf(CoordinationCore.PreparedOperation.class, f.core.evaluate(intent,
                     xEvidence.withSourceInitializations(List.of(SourceInitialization.fromProgram(hotY)))));
@@ -368,6 +369,8 @@ class CanonicalSourceHistoryTest {
             assertEquals(1, groups.operations().size()); assertEquals(Set.of(setup.child.documentId()), groups.operations().get(0).ownedLineages());
             assertEquals(ProcessorStatus.RUNTIME_FATAL, groups.operations().get(0).result().status());
             assertEquals(setup.parent.documentId(), groups.targetProgress().orElseThrow().lineage());
+            assertEquals(List.of(new CoordinationCore.ReadFence("parent", "p0")), groups.targetProgress().orElseThrow().fences());
+            assertEquals(List.of(groups.operations().get(0).operationId()), groups.targetProgress().orElseThrow().consumedSourceOperations());
             assertEquals(CanonicalSourceHistory.RecordKind.METADATA_PROGRESS, step.after().recordKind().orElseThrow());
             assertEquals(setup.birth.after().successfulView(), step.after().successfulView());
             assertEquals(setup.birth.after().semanticPredecessor(), step.after().semanticPredecessor());
@@ -425,7 +428,8 @@ class CanonicalSourceHistoryTest {
                 List.of(child.documentId(), parentAuthored.documentId()), List.of(ManagedReadPin.fromExactEvidence(child.documentId(), childAuthored.blueId(), childAuthored.document(), null)));
         var birthEvidence = new CoordinationCore.EvaluationEvidence(snapshot, Set.of(), List.of(), Optional.empty(), List.of(),
                 Map.of(child.documentId(), childBirth.after().semanticPredecessor().orElseThrow())).withSourceInitializations(List.of(
-                OperationReceiptCodec.restoreSourceInitialization(childBirth.receiptIdentity(), f.blobs::get, LIMITS)));
+                OperationReceiptCodec.restoreSourceInitialization(childBirth.receiptIdentity(), f.blobs::get, LIMITS)))
+                .withExpectedSourceBases(f.expectedBases(child.documentId()));
         var request = new CanonicalSourceHistory.Request(parentAuthored.documentId(), cut);
         var birth = assertInstanceOf(CanonicalSourceHistory.Step.class, history.prepareNext(request, history.start(parentAuthored.documentId()), birthEvidence, f.blobs::put, LIMITS));
         var parent = f.restore(birth.after().successfulView().orElseThrow());
@@ -439,7 +443,11 @@ class CanonicalSourceHistoryTest {
                 Map.of(child.documentId(), childBirth.after().semanticPredecessor().orElseThrow(), parent.documentId(), birth.after().semanticPredecessor().orElseThrow()))
                 .withOperationFences(Map.of(child.documentId(), List.of(childFence), parent.documentId(), List.of(parentFence)));
         var admitted = OriginalSourceInputTestSupport.admit(f.core, birth.after(), request, external, SameOriginAttachmentPolicy.empty(), f.blobs);
-        return new FreshChild(history, admitted.request(), birth, child, parent, admitted.evidence());
+        var originalChild = FreshProducerAdmissionTest.admission(f.core, child.documentId(), external.prefixes().get(0).inputs().get(0),
+                Map.of(child.documentId(), childBirth.after().semanticPredecessor().orElseThrow()), SameOriginAttachmentPolicy.empty(), f.blobs);
+        return new FreshChild(history, admitted.request(), birth, child, parent, admitted.evidence()
+                .withSourceInputAdmissions(List.of(admitted.admission(), originalChild))
+                .withOriginalSourceInputRoots(Map.of(child.documentId(), originalChild.identity())));
     }
 
     private static String retainPrefix(com.fasterxml.jackson.databind.node.ObjectNode value, Map<String, byte[]> blobs) {
@@ -477,6 +485,12 @@ class CanonicalSourceHistoryTest {
             var environment = ClosureEvidenceFactory.environment(processor, "sha256:" + "a".repeat(64), "sha256:" + "b".repeat(64),
                     "content-lineage", "exact-binding", "test-exact-provider", "micros-entry-text", "local-portable-limits", GasSchedule.contracts10().portableLimits());
             core = new CoordinationCore(processor, environment, ClosureEvidenceFactory.executionPolicy(100_000, Map.of(), "fixed-source-policy"));
+        }
+        Map<DocumentId, String> expectedBases(DocumentId... sources) {
+            Map<DocumentId, String> bases = new TreeMap<>();
+            // This fixture produces these sources under its fixed original Core, never under an offered receipt's policy.
+            for (DocumentId source : sources) bases.put(source, SourceExecutionBasis.identity(source, core.environment(), core.executionPolicy()));
+            return bases;
         }
         ManagedDocumentSnapshot authored(String yaml, Map<String, String> references) {
             Node body = runtime.yamlToNode(yaml);
@@ -618,8 +632,13 @@ class CanonicalSourceHistoryTest {
                     List.of(source.documentId(), observer.before.documentId()));
             Map<DocumentId, String> originalBases = new TreeMap<>();
             // These fixtures produce their source operations under this fixed original Core configuration.
-            for (var program : programs) for (DocumentId member : program.ownedDocumentIds())
-                originalBases.put(member, SourceExecutionBasis.identity(member, core.environment(), core.executionPolicy()));
+            Set<String> checked = new HashSet<>(); ArrayDeque<SourceObservationProgram> pending = new ArrayDeque<>(programs);
+            while (!pending.isEmpty()) {
+                var program = pending.removeFirst(); if (!checked.add(program.invocationIdentity())) continue;
+                for (DocumentId member : program.ownedDocumentIds())
+                    originalBases.put(member, SourceExecutionBasis.identity(member, core.environment(), core.executionPolicy()));
+                pending.addAll(program.borrowedPrograms());
+            }
             return new CoordinationCore.EvaluationEvidence(snapshot, Set.of("timeline"),
                     List.of(new CoordinationCore.TimelinePrefix("timeline", 31, inputs)), handled, List.of(), Map.of(), programs)
                     .withExpectedSourceBases(originalBases);

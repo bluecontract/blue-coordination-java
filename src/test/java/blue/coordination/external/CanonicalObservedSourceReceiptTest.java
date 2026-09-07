@@ -58,6 +58,10 @@ class CanonicalObservedSourceReceiptTest {
             Map<DocumentId, String> predecessors = Map.of(source.documentId(), initial.after().semanticPredecessor().orElseThrow());
             var fresh = new CoordinationCore.EvaluationEvidence(base.snapshot(), base.relevantTimelines(), base.prefixes(),
                     base.handledThrough(), List.of(), predecessors);
+            var originalSource = FreshProducerAdmissionTest.admission(f.core, source.documentId(), entry, predecessors,
+                    SameOriginAttachmentPolicy.empty(), f.blobs);
+            fresh = fresh.withSourceInputAdmissions(List.of(originalSource))
+                    .withOriginalSourceInputRoots(Map.of(source.documentId(), originalSource.identity()));
             var work = new CoordinationCore.WorkIntent(observer.before().documentId(), CoordinationCore.OperationKind.EXTERNAL_INPUT);
             var actualFresh = assertInstanceOf(CoordinationCore.PreparedOperations.class, f.core.evaluate(work, fresh));
             assertEquals(2, actualFresh.operations().size());

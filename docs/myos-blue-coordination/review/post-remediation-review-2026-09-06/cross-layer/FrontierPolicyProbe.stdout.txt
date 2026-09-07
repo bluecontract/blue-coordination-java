@@ -1,0 +1,13 @@
+independentPolicy=false, authenticatedSourceLimit=100000
+parent=SUCCESS, gas=607
+independentPolicy=true, authenticatedSourceLimit=5000
+parent=IllegalArgumentException: Selected frontier belongs to another execution environment or fixed policy
+  at blue.language.processor.closure.SourceFrontierView.requireEnvironment(SourceFrontierView.java:106)
+  at blue.language.processor.closure.SourceFrontierView.verifyInvocation(SourceFrontierView.java:90)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:727)
+  at blue.coordination.external.CoordinationCore.evaluate(CoordinationCore.java:461)
+  at blue.coordination.external.FrontierPolicyProbe.run(FrontierPolicyProbe.java:65)
+  at blue.coordination.external.FrontierPolicyProbe.main(FrontierPolicyProbe.java:10)
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.

@@ -113,6 +113,8 @@ final class SameOriginReceiptSupport {
         }).orElse(null);
         return encoder.blob(bytes(map("format", FORMAT, "operation", group.operationIdentity(), "seeds", identities(evidence.originalSeedByMember()),
                 "admissions", admissions, "consumed", identities(evidence.consumedSourceOperations()),
+                "interpretedSourceEvidence", evidence.interpretedSourceEvidence().stream()
+                        .map(source -> map("kind", source.kind().name(), "identity", source.identity())).toList(),
                 "failureSite", group.failure().map(SameOriginOperationResult.Failure::canonicalSite).orElse(null), "rejectedCharge", charge, "rejectedAdmission", union)));
     }
 
@@ -122,7 +124,8 @@ final class SameOriginReceiptSupport {
         List<SameOriginGroupEvidence.Admission> admissions = new ArrayList<>();
         for (JsonNode row : array(root, "admissions")) admissions.add(new SameOriginGroupEvidence.Admission(text(row, "site"), documents(row, "members")));
         SameOriginGroupEvidence group;
-        try { group = SameOriginGroupEvidence.fromExactEvidence(receipt.operationId(), identities(root.get("seeds")), admissions, identities(root.get("consumed"))); }
+        try { group = SameOriginGroupEvidence.fromExactEvidence(receipt.operationId(), identities(root.get("seeds")), admissions,
+                identities(root.get("consumed")), interpretedSources(root)); }
         catch (IllegalArgumentException failure) { throw invalid("Invalid same-origin settlement constructor: " + failure.getMessage()); }
         Set<DocumentId> owners = new TreeSet<>(); receipt.states().forEach(state -> owners.add(state.lineage()));
         if (!owners.equals(group.originalSeedByMember().keySet()) || !new TreeSet<>(receipt.consumedSourceOperations()).equals(new TreeSet<>(group.consumedSourceOperations().values())))
@@ -154,6 +157,21 @@ final class SameOriginReceiptSupport {
         if (receipt.status() != ProcessorStatus.SUCCESS) for (OwnedState state : receipt.states())
             if (!state.beforeBlueId().equals(state.afterBlueId()) || state.beforeEpoch() != state.afterEpoch()) throw invalid("Failed group changes successful state");
         return new SameOriginSettlement(group, Optional.ofNullable(site), Optional.ofNullable(charge), Optional.ofNullable(union));
+    }
+
+    private static List<SameOriginGroupEvidence.SourceEvidence> interpretedSources(JsonNode root) {
+        List<SameOriginGroupEvidence.SourceEvidence> sources = new ArrayList<>();
+        String previous = null;
+        for (JsonNode row : array(root, "interpretedSourceEvidence")) {
+            Set<String> fields = new HashSet<>(); row.fieldNames().forEachRemaining(fields::add);
+            if (!fields.equals(Set.of("kind", "identity"))) throw invalid("Invalid interpreted-source field set");
+            var source = new SameOriginGroupEvidence.SourceEvidence(
+                    SameOriginGroupEvidence.SourceEvidence.Kind.valueOf(text(row, "kind")), text(row, "identity"));
+            String key = source.kind().name() + ":" + source.identity();
+            if (previous != null && previous.compareTo(key) >= 0) throw invalid("Noncanonical interpreted-source evidence");
+            previous = key; sources.add(source);
+        }
+        return List.copyOf(sources);
     }
 
     private static RejectedAdmission union(JsonNode root, Set<DocumentId> owners) {

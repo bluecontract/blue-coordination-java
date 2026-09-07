@@ -105,6 +105,16 @@ class SourceInputAdmissionCoOwnedTest {
                 assertEquals(members, group.ownedLineages());
                 assertEquals(ProcessorStatus.SUCCESS, group.result().status());
                 assertEquals(2, group.projections().size());
+                var oneRootEvidence = external.withSourceInputAdmissions(List.of(restored))
+                        .withOriginalSourceInputRoots(Map.of(member, originalRoot));
+                var plan = new SourceInputAdmissionPlan(Set.of(), initializedCut, oneRootEvidence, entry,
+                        runtime.core.environment(), runtime.core.executionPolicy(), SameOriginAttachmentPolicy.empty(), null);
+                var originalChoices = group.sourceProgram().orElseThrow().originalAttachmentSelections();
+                assertEquals(List.of(), plan.verifyRetained(members, group.operationId(), originalChoices));
+                Map<DocumentId, List<String>> wrongOtherChoices = new HashMap<>(originalChoices.orElseThrow());
+                wrongOtherChoices.put(otherMember, List.of("sha256:" + "0".repeat(64)));
+                assertThrows(InvalidExecutionEvidenceException.class, () -> plan.verifyRetained(members, group.operationId(),
+                        Optional.of(wrongOtherChoices)), "A root selected through one SCC member binds the other member's original choices too");
                 for (var projection : group.projections()) {
                     assertEquals(predecessors.get(projection.lineage()), projection.precedingOperation());
                     assertEquals(BigInteger.ONE, projection.result().document().get("/counter"));

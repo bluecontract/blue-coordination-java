@@ -126,9 +126,14 @@ class CoordinationCoreTest {
                     pairEvidence(observerInitial, sourceBefore, binding, List.of(), List.of())));
             assertEquals(ProcessorStatus.SUCCESS, observerBirth.result().status(), () -> observerBirth.result().diagnostic().toString());
             var observerBefore = restored(observerBirth.projections().get(0));
+            var freshEvidence = pairEvidence(observerBefore, sourceBefore, binding, entries, List.of());
+            var originalSource = FreshProducerAdmissionTest.admission(core(processor), sourceId, entries.get(0).inputs().get(0),
+                    Map.of(),
+                    blue.language.processor.closure.SameOriginAttachmentPolicy.empty(), new java.util.HashMap<>());
             var fresh = assertInstanceOf(CoordinationCore.PreparedOperations.class, core(processor).evaluate(
                     new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
-                    pairEvidence(observerBefore, sourceBefore, binding, entries, List.of())));
+                    freshEvidence.withSourceInputAdmissions(List.of(originalSource))
+                            .withOriginalSourceInputRoots(Map.of(sourceId, originalSource.identity()))));
             assertEquals(2, fresh.operations().size());
             assertEquals(sourceResult.operationId(), fresh.operations().get(0).operationId(), "Producer identity excludes observer inventory");
             var imported = singleGroup(core(processor).evaluate(
@@ -219,6 +224,19 @@ class CoordinationCoreTest {
             assertEquals(input.blueId(), progress.input().entry().blueId());
             assertEquals(java.math.BigInteger.ZERO, observerBefore.document().getProperties().get("seen").getValue(),
                     "A failed source alone creates no observer invocation, gas settlement, business epoch, or output");
+            var attributedFailureCut = new CoordinationCore.EvaluationEvidence(unchangedCut.snapshot(), unchangedCut.relevantTimelines(),
+                    unchangedCut.prefixes(), unchangedCut.handledThrough(), List.of(), unchangedCut.precedingOperations(),
+                    List.of(), Map.of(), List.of(sourceFailure))
+                    .withExpectedSourceBases(originalSourceBasis).withOperationFences(unchangedCut.operationFences());
+            var attributedProgress = assertInstanceOf(CoordinationCore.MetadataProgress.class, core(processor).evaluate(
+                    new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT), attributedFailureCut));
+            assertEquals(unchangedCut.operationFences().get(observerId), attributedProgress.fences(),
+                    "Failed-source metadata carries observer authority, not the independent source head's fence");
+            assertEquals(progress, attributedProgress);
+            var missingTargetFence = assertInstanceOf(CoordinationCore.NeedEvidence.class, core(processor).evaluate(
+                    new CoordinationCore.WorkIntent(observerId, CoordinationCore.OperationKind.EXTERNAL_INPUT),
+                    attributedFailureCut.withOperationFences(Map.of(sourceId, unchangedCut.operationFences().get(sourceId)))));
+            assertEquals(List.of("group-read-fences:" + observerId.value()), missingTargetFence.keys());
             var wrongPin = new ManagedDocumentSnapshot(sourceBefore.documentId(), sourceBefore.blueId(), sourceBefore.document(),
                     true, false, true, sourceBefore.epoch() + 1L, 0L);
             var wrongCut = pairEvidence(observerBefore, wrongPin, binding, entries, List.of());

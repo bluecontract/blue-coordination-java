@@ -1,6 +1,14 @@
 # Committed Phase1/2 source sets
 
-> Recorded 2026-09-06. Working branches, not releases or an API freeze.
+> Updated 2026-09-07. Working branches, not releases or an API freeze.
+
+## Latest local repair candidate
+
+The [R1–R5 repairs](final-review-remediation.md) and subsequent [N1–N5 repairs](post-remediation-fixes.md)
+are local changes on the same branches, awaiting final verification and the authorized commit/push.
+Their exact base commits, source patches/new files and tested artifact
+hashes are retained in the linked verification archive. The tables below identify historical
+committed source sets, not these new fixes. R6 remains deferred and Phase3 has not started.
 
 ## Reviewed remediation source set
 

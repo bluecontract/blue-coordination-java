@@ -14,7 +14,8 @@ Phase1 libraries are implemented in `worktrees/coordination-external-state`; Pha
 and durable witnesses are in `../myos-simple` on `feat/coordination-with-external-state`. Their
 baseline local verification is recorded in the linked handoff. The subsequent
 [review repairs and changed-candidate verification](implementation/pre-phase-3-review-remediation.md)
-have passed the agreed gate for the Phase3 integration described in [25](25-phase-3-integration-plan.md).
+passed their scoped gate. The later [R1–R5 repair record](implementation/final-review-remediation.md)
+tracks the additional source-admission, schema and host fixes before the dependent Phase3 paths.
 This is not a release, production readiness, API freeze or a formal pass of every acceptance-catalog
 scenario. The concrete surface below is the implemented API. Later host
 protocol sections preserve design requirements; their capitalized conceptual names are not claims
@@ -73,9 +74,11 @@ After receiving a prepared result the host does not call Contracts again to inte
 
 `EvaluationEvidence` contains the snapshot, exact relevant Timeline set and prefixes, optional
 `handledThrough`, predecessor operation IDs, retained source programs/failures/gaps, offered
-initializations/frontier selections, host fences, expected producer bases and original source-input
-admissions. Its additive helpers are `withOperationFences`, `withSourceInitializations`,
-`withSourceFrontiers`, `withExpectedSourceBases` and `withSourceInputAdmissions`. Each helper preserves
+initializations/frontier selections, host fences, expected producer bases, original source-input
+admissions and independently authenticated `originalSourceInputRoots` for the selected input.
+Its additive helpers are `withOperationFences`, `withSourceInitializations`,
+`withSourceFrontiers`, `withExpectedSourceBases`, `withSourceInputAdmissions` and
+`withOriginalSourceInputRoots`. Each helper preserves
 the other evidence; the internal history-cut copy changes only prefixes, handled position and
 predecessors. The new review-repair paths remain subject to their focused verification record.
 
@@ -83,6 +86,46 @@ Expected source bases come from authenticated source admission/prefix authority,
 the offered producer result and trusting that same hash. The source's execution policy is checked
 against its expected source basis; it need not equal the independent consumer's gas budget. Missing
 required authority is a need before metadata-only progress as well as before execution.
+The rule also covers used initialization capabilities and their borrowed initialization dependencies,
+plus selected or retained frontier views. Initialization demand policy describes the creator's retry
+context; it is not authority to reconstruct the source under the creator's budget.
+Here, used includes initialization offers selected by explicit `FULL_HISTORY` choices: Core checks
+their authority before execution even if that execution does not activate the creation site.
+Unrelated initialization inventory is not selected merely because the host supplied it.
+The explicit-map Contracts `admitExternalScope` overload requires each imported initialization's
+owner, including borrowed owners, to have its exact initialization operation in the invocation's
+semantic predecessor map. Core supplies these bindings. A direct caller must bind the input before
+execution, rather than allow distinct preparation histories to share one admission identity.
+The old fixed-policy overload remains a compatibility entry point, not implicit cross-policy authority.
+
+Fresh independent producers need their own original input authority, not only retained producers.
+The root map is keyed by producer lineage for the selected Entry; the separately supplied record
+binds that Entry/order, predecessor, producer basis and original attachment choices. An offered
+record alone is not authority. Common-context fresh producers can still execute together, including
+lawful dynamic joins, with each seed binding only its own creators' choices. A producer needing a
+different authorized policy requires its canonical source result; it cannot use the observer's meter.
+
+The strict Contracts overload accepts immutable admitted fresh-owner IDs and reports
+`SameOriginProcessAttempt.requiredSourceAdmissions()` when an actual seed or ownership promotion
+lacks authority. These are lineage IDs, not exact node acquisition keys. Core translates them into
+named root/record/source-operation needs and returns no partial proposal. Passive read dependencies
+do not require a new source operation merely because they occur in the supplied graph. The existing
+complete-input Contracts overloads remain available; explicitly supplied producer bases are still
+verified for fresh execution as well as retained substitution.
+
+Same-origin source success and failure capabilities also retain their original per-owner selection
+identities through `originalAttachmentSelections()`. The complete map distinguishes an explicitly
+empty selection from unknown binding and includes unused original choices, because those choices
+already participate in seed identity. `SameOriginAttachmentPolicy.Selection.identity()` supplies
+the stable identity of a choice. The capability's binding is derived from its actual producer
+admission, not an observer-supplied sidecar, and survives codec restoration.
+
+During selected external-input evaluation (including canonical history), if an original input root
+is explicitly supplied alongside a cached source result, their choices must agree. A contradictory
+cache is rejected. Managed-import evaluation uses its separate lane authority. A supported scoped producer API that
+does not retain same-origin choice binding yields a named `source-input-selection-binding` need
+when that binding is required; this is not a second specification version. Authenticated cached
+imports without an independently supplied original-choice root retain their existing contract.
 
 `TimelineInput.timelineId()` is the exact **string locator** stored at
 `/timeline/timelineId` of a typed `MyOS/Timeline` inside the typed `Coordination/Timeline Entry`.
@@ -100,6 +143,11 @@ requirement that its mutable head still equal an old snapshot. Thus B can commit
 making A stale merely through B's new head. Conflicting revisions for the same exact fence key are
 rejected. Legacy undifferentiated fences are not silently divided by guessing keys; missing group
 attribution returns a named `group-read-fences` need.
+Metadata-only progress uses the target's attributed entry, including an explicitly empty list.
+If any attribution is supplied but the target entry is absent, it requests that target's authority.
+Only a wholly empty owner map preserves legacy metadata-fence fallback; completely fence-free pure
+evaluation remains supported. Early metadata exits and target progress alongside independent source
+publications use this same rule.
 
 ### Source preparation, attachment and import
 
@@ -203,6 +251,11 @@ must not freeze a predecessor/seed before the target work becomes canonically el
 For dynamic same-origin work, stable execution seeds are fixed before evaluation. Each emitted
 occurrence binds its seed, lineage and local emission site; a later accepted join cannot rename it.
 Final operation/settlement authority binds the selected seeds/predecessors and accepted admissions.
+It also binds independent external outcomes and separately the initialization/frontier authority
+actually interpreted by the original attempts. An unused offered capability does not enter this
+settlement set. Work performed before terminal failure or a later embedding retirement still does;
+that binding alone never authorizes publication of an orphan initialization. The closed
+`SameOriginGroupEvidence` and retained success/failure records preserve this distinction on restore.
 It is a completed wrapper, not an earlier business-code input or a circular admission dependency.
 Discard provisional publication wrappers on replan, not canonical seed-local event identities.
 Availability-only retries preserve IDs. Scope derivation excludes arbitrary speculative footprints;

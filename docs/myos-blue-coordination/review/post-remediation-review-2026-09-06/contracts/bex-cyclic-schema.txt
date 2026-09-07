@@ -1,0 +1,3 @@
+nested REJECTED blue.bex.BexException: Blue output conversion failed: Transient BEX output cannot counterfeit an exact cyclic-set member reference: DVEPzFWaZRXG7n1FrYcZiQknshBA3Lmc7JgbrciVMbpi#0 at function $root /expr/$nodeBlueId $nodeBlueId
+type REJECTED blue.bex.BexException: Blue output conversion failed: Transient BEX output cannot counterfeit an exact cyclic-set member reference: DVEPzFWaZRXG7n1FrYcZiQknshBA3Lmc7JgbrciVMbpi#0 at function $root /expr/$nodeBlueId $nodeBlueId
+schema ACCEPTED identity=9xxJPTzEubysTgwyqurdc1zPBuLt1CswvHuReEWiJfNP events=1 patches=1 inventedMember=DVEPzFWaZRXG7n1FrYcZiQknshBA3Lmc7JgbrciVMbpi#0

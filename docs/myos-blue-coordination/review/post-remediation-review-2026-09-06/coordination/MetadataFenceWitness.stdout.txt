@@ -1,0 +1,5 @@
+input=[15, A8AzLtGGNsM4kfEJrTrgcKU67o5XtKN11WK4PtQJG9LT]
+attributedOwnerFenceCount=1
+legacyMetadataFenceCount=1
+attributedOnlyMetadataFenceCount=0
+sameInput=true

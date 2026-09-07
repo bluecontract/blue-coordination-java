@@ -17,8 +17,14 @@ class FrontierCreatorIntegrationTest {
     @Test void frontierEqualToCreationHasAnEmptyHistoricalLane() { run(true, false, false); }
     @Test void failedTerminalAtFInstallsThePriorSuccessfulViewAndStartsAfterTheFailure() { run(false, true, false); }
     @Test void fullHistoryCreatorInstallsActualInit0AndItsRetainedInstallationMintsTheLaterLane() { run(false, false, true); }
+    @Test void failedFullHistoryCreatorRetainsInterpretedAuthorityWithoutPublishingAnInstallation() { run(false, false, true, true); }
+    @Test void failedFrontierCreatorRetainsInterpretedAuthorityWithoutPublishingAnInstallation() { run(false, false, false, true); }
 
     private void run(boolean atCreation, boolean failedTerminal, boolean fullHistory) {
+        run(atCreation, failedTerminal, fullHistory, false);
+    }
+
+    private void run(boolean atCreation, boolean failedTerminal, boolean fullHistory, boolean failAfterCreation) {
         try (var f = new CanonicalSourceHistoryTest.Fixture()) {
             var source = f.authored("""
                     name: source with distinguishable frontier and head
@@ -109,7 +115,16 @@ class FrontierCreatorIntegrationTest {
                               - $appendChange: {op: replace, path: /seen, val: {$document: /child/counter}}
                               - $appendChange: {op: replace, path: /imported, val: {$add: [{$document: /imported}, 1]}}
                               - $return: true
-                    """, Map.of("child", fullHistory ? source.blueId() : head.blueId()));
+                    """ + (failAfterCreation ? """
+                      failAfterCreation:
+                        type: Coordination/Sequential Workflow
+                        channel: ingress
+                        order: 2
+                        steps:
+                          - type: Coordination/Compute
+                            do:
+                              - $return: {$divide: [1, 0]}
+                    """ : ""), Map.of("child", fullHistory ? source.blueId() : head.blueId()));
             var birth = assertInstanceOf(CoordinationCore.PreparedOperation.class, f.core.evaluate(
                     new CoordinationCore.WorkIntent(authored.documentId(), CoordinationCore.OperationKind.INITIALIZATION),
                     evidence(List.of(authored), List.of(), List.of(), Map.of())));
@@ -140,9 +155,32 @@ class FrontierCreatorIntegrationTest {
             var need = assertInstanceOf(CoordinationCore.NeedEvidence.class, f.core.evaluate(work, input, policy));
             if (fullHistory) assertFalse(need.resourceDemands().isEmpty());
             else assertTrue(need.keys().stream().anyMatch(key -> key.startsWith("source-frontier:")));
-            var completeEvidence = fullHistory ? input.withSourceInitializations(List.of(initialization)) : input.withSourceFrontiers(List.of(frontier));
+            var completeEvidence = (fullHistory ? input.withSourceInitializations(List.of(initialization)) : input.withSourceFrontiers(List.of(frontier)))
+                    .withExpectedSourceBases(f.expectedBases(source.documentId()));
             var operations = assertInstanceOf(CoordinationCore.PreparedOperations.class, f.core.evaluate(work, completeEvidence, policy));
             assertEquals(1, operations.operations().size()); var created = operations.operations().get(0);
+            if (failAfterCreation) {
+                assertEquals(ProcessorStatus.RUNTIME_FATAL, created.result().status());
+                assertEquals(creator.blueId(), created.projections().get(0).result().afterBlueId());
+                assertEquals(creator.epoch(), created.projections().get(0).afterEpoch());
+                assertTrue(created.result().sourceProgram().isEmpty());
+                assertTrue(created.result().events().isEmpty());
+                assertTrue(created.consumedSourceOperations().isEmpty(), "Preparation is not external source consumption");
+                var interpreted = created.result().interpretedSourceEvidence();
+                assertEquals(List.of(new SameOriginGroupEvidence.SourceEvidence(fullHistory
+                                ? SameOriginGroupEvidence.SourceEvidence.Kind.INITIALIZATION : SameOriginGroupEvidence.SourceEvidence.Kind.FRONTIER,
+                        fullHistory ? initialization.program().invocationIdentity() : frontier.selectedView().identity())), interpreted);
+                var failedReceipt = OperationReceiptCodec.encode(created, f.blobs::put, LIMITS);
+                assertEquals(interpreted, OperationReceiptCodec.restoreSameOrigin(failedReceipt.receiptIdentity(), f.blobs::get, LIMITS)
+                        .group().interpretedSourceEvidence());
+                assertEquals(interpreted, OperationReceiptCodec.restoreSourceFailure(failedReceipt.receiptIdentity(), f.blobs::get, LIMITS)
+                        .interpretedSourceEvidence());
+                assertTrue(OperationReceiptCodec.restoreReadPins(failedReceipt.receiptIdentity(), f.blobs::get, LIMITS).isEmpty());
+                var retry = assertInstanceOf(CoordinationCore.PreparedOperations.class, f.core.evaluate(work, completeEvidence, policy)).operations().get(0);
+                assertEquals(failedReceipt.receiptIdentity(), OperationReceiptCodec.encode(retry, f.blobs::put, LIMITS).receiptIdentity());
+                assertRejectedPreparationAuthorityRemoval(failedReceipt.receiptIdentity(), f.blobs);
+                return;
+            }
             // The creator is now reconstructed as a historical source. Its OWN original choices
             // are admitted independently; an importing observer's policy never enters this call.
             var creatorHistory = new CanonicalSourceHistory(f.core);
@@ -191,6 +229,14 @@ class FrontierCreatorIntegrationTest {
             assertEquals(BigInteger.ZERO, created.projections().get(0).result().document().get("/imported"));
             var receipt = OperationReceiptCodec.encode(created, f.blobs::put, LIMITS);
             var coldProgram = OperationReceiptCodec.restoreSourceProgram(receipt.receiptIdentity(), f.blobs::get, LIMITS);
+            var interpreted = created.result().interpretedSourceEvidence();
+            assertEquals(List.of(new SameOriginGroupEvidence.SourceEvidence(fullHistory
+                            ? SameOriginGroupEvidence.SourceEvidence.Kind.INITIALIZATION : SameOriginGroupEvidence.SourceEvidence.Kind.FRONTIER,
+                    fullHistory ? initialization.program().invocationIdentity() : frontier.selectedView().identity())), interpreted);
+            assertEquals(interpreted, coldProgram.interpretedSourceEvidence());
+            assertEquals(interpreted, OperationReceiptCodec.restoreSameOrigin(receipt.receiptIdentity(), f.blobs::get, LIMITS)
+                    .group().interpretedSourceEvidence());
+            assertRejectedPreparationAuthorityRemoval(receipt.receiptIdentity(), f.blobs);
             ManagedImportLane.Descriptor lane;
             if (fullHistory) {
                 var installation = coldProgram.acceptedInitializations().stream().filter(value -> value.selection().occurrenceIdentity().equals(row.occurrenceIdentity())).findFirst().orElseThrow();
@@ -251,6 +297,26 @@ class FrontierCreatorIntegrationTest {
             assertTrue(acquiredExactValues > 0, "Cold checkpoint values must be acquired from authenticated receipts");
             assertTrue(cursor.complete());
         }
+    }
+
+    private static void assertRejectedPreparationAuthorityRemoval(String receipt, Map<String, byte[]> blobs) {
+        var original = (com.fasterxml.jackson.databind.node.ObjectNode) OperationReceiptCodec.json(blobs.get(receipt));
+        var evidence = (com.fasterxml.jackson.databind.node.ObjectNode) OperationReceiptCodec.json(blobs.get(original.get("sameOrigin").textValue()));
+        assertFalse(evidence.get("interpretedSourceEvidence").isEmpty());
+        // Rehash both changed wrappers: this is constructor validation, not merely a bad blob hash.
+        evidence.putArray("interpretedSourceEvidence");
+        byte[] changedEvidence = OperationReceiptCodec.bytes(evidence);
+        String evidenceKey = FrozenNodeEvidenceCodec.digest(changedEvidence); blobs.put(evidenceKey, changedEvidence);
+        original.put("sameOrigin", evidenceKey);
+        byte[] changedReceipt = OperationReceiptCodec.bytes(original);
+        String receiptKey = FrozenNodeEvidenceCodec.digest(changedReceipt); blobs.put(receiptKey, changedReceipt);
+        assertThrows(blue.language.processor.InvalidExecutionEvidenceException.class,
+                () -> OperationReceiptCodec.restoreSameOrigin(receiptKey, blobs::get, LIMITS));
+        assertThrows(blue.language.processor.InvalidExecutionEvidenceException.class,
+                () -> OperationReceiptCodec.restoreSourceProgram(receiptKey, blobs::get, LIMITS));
+        if (!original.get("status").textValue().equals(ProcessorStatus.SUCCESS.name()))
+            assertThrows(blue.language.processor.InvalidExecutionEvidenceException.class,
+                    () -> OperationReceiptCodec.restoreSourceFailure(receiptKey, blobs::get, LIMITS));
     }
 
     /** Resolve only the demanded exact value from bounded, authenticated operation evidence. */

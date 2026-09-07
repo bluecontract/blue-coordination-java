@@ -1,11 +1,19 @@
 # Review package
 
-> **Design baseline:** 15.12 · active documentation synchronized with Phase1/2 handoff, 2026-09-06
+> **Design baseline:** 15.12 · implementation review updated 2026-09-07
 
-Latest: [final implementation review](final-implementation-review-2026-09-06.md) of all four pushed
-repositories. It records five open P1 findings, one separate graph-depth concern, and executable
-[diagnostic evidence](final-implementation-review-2026-09-06/README.md). Previous passing gates
-remain historical evidence for their scoped cases, not a clean sign-off on this reviewed candidate.
+Latest: [post-remediation review](post-remediation-review-2026-09-07.md) of the current local repaired
+candidate. It records five confirmed follow-up findings, executable contrasts, additional regression
+results and explicit scope limits. No fixes or Phase3 implementation are part of that review.
+The subsequent authorized [N1–N5 repair round](../implementation/post-remediation-fixes.md) is
+tracked separately, including new regression witnesses and the actual tested source/artifact set.
+
+Earlier review: [final implementation review](final-implementation-review-2026-09-06.md) of all four
+then-pushed repositories. Its five P1 findings and separate graph-depth concern have executable
+[diagnostic evidence](final-implementation-review-2026-09-06/README.md). The subsequent
+[R1–R5 repair record](../implementation/final-review-remediation.md) documents the implemented,
+locally verified repairs; R6 is deferred by user decision. The original report remains unchanged.
+Previous passing gates remain historical evidence for their scoped cases, not all-catalog sign-off.
 
 Use the current directory for the synchronized proposal. The r15.12 ZIP is an immutable
 preimplementation snapshot, not a copy of these updated files. Start with the

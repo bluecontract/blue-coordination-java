@@ -445,6 +445,9 @@ public final class OperationReceiptCodec {
         }
         if (!receipt.operationId().equals(program.invocationIdentity()) || !receipt.causeIdentity().equals(program.causeIdentity())
                 || !owners.equals(program.ownedDocumentIds())) throw invalid("Source program is not owned by this operation");
+        if (receipt.sameOriginIdentity().isPresent() && !SameOriginReceiptSupport.decode(receipt, decoder).group()
+                .interpretedSourceEvidence().equals(program.interpretedSourceEvidence()))
+            throw invalid("Source program differs from its settlement's interpreted-source authority");
         verifyManagedReaction(receipt, program.managedReaction(), decoder);
         return program;
     }
@@ -493,6 +496,8 @@ public final class OperationReceiptCodec {
             throw invalid("Source failure does not match its committed receipt");
         if (receipt.sameOriginIdentity().isPresent()) {
             SameOriginSettlement group = SameOriginReceiptSupport.decode(receipt, decoder);
+            if (!group.group().interpretedSourceEvidence().equals(failure.interpretedSourceEvidence()))
+                throw invalid("Source failure differs from its settlement's interpreted-source authority");
             if (!Objects.equals(failure.rejectedChargeIdentity(), group.rejectedCharge().map(SameOriginRejectedChargeEvidence::identity).orElse(null)))
                 throw invalid("Group failure rejected charge differs from its receipt");
         }
