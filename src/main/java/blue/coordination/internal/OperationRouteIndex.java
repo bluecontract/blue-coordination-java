@@ -1002,11 +1002,11 @@ final class OperationRouteIndex {
             if (stateBlueId == null) {
                 return true;
             }
-            if (exact) {
-                return stateBlueId.equals(selectedHeadResolver.apply(documentId));
-            }
+            boolean selectedExactHead = stateBlueId.equals(selectedHeadResolver.apply(documentId));
+            if (exact) return selectedExactHead;
+            if (selectedExactHead) return true;
             DocumentSession session = resolver.apply(documentId);
-            return session != null && session.epochForState(stateBlueId).isPresent();
+            return session != null && session.recognizesOperationTarget(stateBlueId);
         }
     }
 

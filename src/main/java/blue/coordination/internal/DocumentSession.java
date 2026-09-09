@@ -298,6 +298,13 @@ final class DocumentSession {
         return stateEpochs.first(exactBlueId);
     }
 
+    /** Authenticated operation lineage includes representation steps without inventing numbered epochs. */
+    synchronized boolean recognizesOperationTarget(String exactBlueId) {
+        return stateEpochs.first(exactBlueId).isPresent()
+                || componentRepresentationTransitions.stream().anyMatch(row -> row.beforeBlueId().equals(exactBlueId)
+                        || row.afterBlueId().equals(exactBlueId));
+    }
+
     synchronized long resolveAdmissionEpoch(
             String stateBlueId,
             Long exactEpoch) {

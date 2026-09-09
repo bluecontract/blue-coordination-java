@@ -46,6 +46,10 @@ final class RootedSdkFixture implements AutoCloseable {
     }
 
     EntryHandle append(DocumentHandle target, String timeline, String operation, long timestamp, String request, boolean exactVersion) {
+        return appendReference(target.snapshot().blueId(), timeline, operation, timestamp, request, exactVersion);
+    }
+
+    EntryHandle appendReference(String targetReference, String timeline, String operation, long timestamp, String request, boolean exactVersion) {
         String yaml = """
                 type: Coordination/Timeline Entry
                 timeline:
@@ -64,7 +68,7 @@ final class RootedSdkFixture implements AutoCloseable {
                   channel: owner
                   request:
                 %s
-                """.formatted(timeline, timestamp, target.snapshot().blueId(), exactVersion, operation, request.indent(4));
+                """.formatted(timeline, timestamp, targetReference, exactVersion, operation, request.indent(4));
         String previous = previousEntries.get(timeline);
         if (previous != null) yaml += "\nprevEntry:\n  blueId: " + previous + "\n";
         EntryHandle entry = blue.events().from(timelines.get(timeline)).exact(blue.values().yaml(yaml)).submit();

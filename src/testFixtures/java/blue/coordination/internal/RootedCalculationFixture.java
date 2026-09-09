@@ -50,6 +50,16 @@ public final class RootedCalculationFixture {
         return engine.documents().require(root).rootedView().snapshot();
     }
 
+    /** Tests exact retained-view reuse without installing the proposed capture. */
+    public boolean matchesRetainedCapture(DocumentId root, long graphGeneration,
+            java.util.List<blue.language.processor.closure.ManagedDocumentSnapshot> documents,
+            java.util.List<blue.language.processor.closure.ManagedOccurrenceBinding> rows,
+            java.util.List<blue.language.processor.closure.ComponentSnapshot> components,
+            java.util.List<blue.language.processor.closure.DocumentId> publicRoots) {
+        return engine.documents().require(root).rootedView()
+                .matchesCapture(graphGeneration, documents, rows, components, publicRoots);
+    }
+
     /** Exercises the publication boundary verifier with real retained state and a proposed logical order. */
     public void verifyRetainedLogicalBoundary(DocumentId root, String terminalKey,
             blue.language.processor.ExternalOrderKey proposed) {

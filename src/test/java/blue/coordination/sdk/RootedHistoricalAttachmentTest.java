@@ -47,6 +47,15 @@ final class RootedHistoricalAttachmentTest {
                 assertEquals(epoch, work.sourceEpoch());
                 assertEquals(10L, blue.advanced().auditDocument(a.id()).epoch());
                 assertEquals(originalReceipts, fixture.history(a).subList(0, originalReceipts.size()));
+                assertEquals(epoch == 10, application.quiescent());
+                if (epoch < 10) assertEquals(a10, a.snapshot().blueId());
+                if (epoch == 7) {
+                    var beforeRestart = control.selectedView(b.id());
+                    var receiptPrefixes = List.of(fixture.history(a), fixture.history(b));
+                    CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+                    assertEquals(beforeRestart.closureIdentity(), control.selectedView(b.id()).closureIdentity());
+                    assertEquals(receiptPrefixes, List.of(fixture.history(a), fixture.history(b)));
+                }
             }
             assertEquals(10L, a.snapshot().longAt("/counter"));
             assertEquals(10L, b.snapshot().longAt("/seen"));
@@ -60,6 +69,40 @@ final class RootedHistoricalAttachmentTest {
             CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
             assertEquals(heads, List.of(a.snapshot().blueId(), b.snapshot().blueId()));
             assertEquals(histories, List.of(fixture.history(a), fixture.history(b)));
+            assertTrue(blue.processing().processNext(b).quiescent());
+            assertEquals(histories, List.of(fixture.history(a), fixture.history(b)));
+            var live = fixture.append(a, "rcp2/a", "tick", 300, "{}");
+            var liveResult = blue.processing().process(a, live).entry(live);
+            assertEquals(EntryDisposition.APPLIED, liveResult.disposition(), liveResult.diagnostic().toString());
+            assertEquals(11L, a.snapshot().longAt("/counter"));
+            assertEquals(11L, b.snapshot().longAt("/seen"));
+            assertEquals(11L, b.snapshot().longAt("/log/5"));
+            assertEquals(originalEvents + 1, blue.advanced().auditManagedEpochs(a.id()).stream()
+                    .mapToLong(x -> x.emittedEvents().size()).sum());
+            assertEquals(originalReceipts, fixture.history(a).subList(0, originalReceipts.size()));
+            var finalHeads = List.of(a.snapshot().blueId(), b.snapshot().blueId());
+            var finalHistories = List.of(fixture.history(a), fixture.history(b));
+            CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(finalHeads, List.of(a.snapshot().blueId(), b.snapshot().blueId()));
+            assertEquals(finalHistories, List.of(fixture.history(a), fixture.history(b)));
+            assertTrue(blue.processing().processNext(a).quiescent());
+            var staleExact = fixture.appendReference(heads.get(0), "rcp2/a", "tick", 400, "{}", true);
+            assertEquals(EntryDisposition.NO_MATCH, blue.processing().process(a, staleExact).entry(staleExact).disposition());
+            var foreign = fixture.appendReference(heads.get(1), "rcp2/a", "tick", 410, "{}", false);
+            assertEquals(EntryDisposition.NO_MATCH, blue.processing().process(a, foreign).entry(foreign).disposition());
+            var unknown = fixture.appendReference(blue.values().yaml("name: unowned routing target").blueId(),
+                    "rcp2/a", "tick", 420, "{}", false);
+            assertEquals(EntryDisposition.NO_MATCH, blue.processing().process(a, unknown).entry(unknown).disposition());
+            assertEquals(finalHeads, List.of(a.snapshot().blueId(), b.snapshot().blueId()));
+            assertEquals(finalHistories, List.of(fixture.history(a), fixture.history(b)));
+            var retainedRepresentation = fixture.appendReference(heads.get(0), "rcp2/a", "tick", 430, "{}", false);
+            assertEquals(EntryDisposition.APPLIED, blue.processing().process(a, retainedRepresentation)
+                    .entry(retainedRepresentation).disposition());
+            assertEquals(12L, a.snapshot().longAt("/counter"));
+            assertEquals(12L, b.snapshot().longAt("/seen"));
+            assertEquals(originalEvents + 2, blue.advanced().auditManagedEpochs(a.id()).stream()
+                    .mapToLong(x -> x.emittedEvents().size()).sum());
+            assertEquals(originalReceipts, fixture.history(a).subList(0, originalReceipts.size()));
             System.out.println("RCP-RUN-007 savedA5=" + a5 + " sourceA10=" + a10 + " finalHeads=" + heads);
         }
     }

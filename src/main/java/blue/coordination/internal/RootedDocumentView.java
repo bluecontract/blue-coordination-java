@@ -48,8 +48,13 @@ final class RootedDocumentView {
             throw new IllegalArgumentException("A rooted view cannot retain unrelated route surfaces");
         }
         this.routes = Map.copyOf(selected);
-        this.snapshot = ClosureEvidenceFactory.affectedClosure(result.graphGeneration(), documents,
-                result.occurrenceBindings(), result.resultingComponents(), publicRoots);
+        // Retain the processor-verified roles as well as the exact values. Rebuilding a
+        // rooted result as a flat set of current heads erases immutable historical
+        // witness provenance (including an authenticated return reference to an older owner).
+        this.snapshot = result.rootedProjection() == null
+                ? ClosureEvidenceFactory.affectedClosure(result.graphGeneration(), documents,
+                    result.occurrenceBindings(), result.resultingComponents(), publicRoots)
+                : result.rootedProjection().resultingSnapshot();
         if (!snapshot.closureIdentity().equals(result.outputClosureIdentity())) {
             throw new IllegalArgumentException("Rooted view differs from the complete computed result");
         }
@@ -65,6 +70,28 @@ final class RootedDocumentView {
     blue.language.processor.ExternalOrderKey logicalBoundary() { return logicalBoundary; }
     ClosureProcessResult result() { return result; }
     AffectedClosureSnapshot snapshot() { return snapshot; }
+
+    /** Retains processor provenance only when capture selected this complete, unchanged exact view. */
+    boolean matchesCapture(long graphGeneration, List<ManagedDocumentSnapshot> documents,
+            List<blue.language.processor.closure.ManagedOccurrenceBinding> occurrences,
+            List<blue.language.processor.closure.ComponentSnapshot> components,
+            List<blue.language.processor.closure.DocumentId> publicRoots) {
+        if (snapshot.graphGeneration() != graphGeneration || documents.size() != snapshot.managedDocuments().size()
+                || !ManagedOccurrenceInventory.sameRows(snapshot.occurrences(), occurrences) || !snapshot.components().equals(components)
+                || !snapshot.publicRootDocumentIds().equals(publicRoots)) return false;
+        var seen = new java.util.HashSet<blue.language.processor.closure.DocumentId>();
+        for (var document : documents) {
+            var original = snapshot.managedDocument(document.documentId());
+            if (!seen.add(document.documentId()) || original == null
+                    || !original.blueId().equals(document.blueId()) || original.epoch() != document.epoch()
+                    || !blue.language.model.NodeWireForm.get(original.document())
+                            .equals(blue.language.model.NodeWireForm.get(document.document()))
+                    || original.initialized() != document.initialized() || original.terminated() != document.terminated()
+                    || original.publicRoot() != document.publicRoot()
+                    || original.componentGeneration() != document.componentGeneration()) return false;
+        }
+        return true;
+    }
     ClosureSubscriptionInventory subscriptions() { return subscriptions; }
     List<SubscriptionDelta.Entry> routes(DocumentId documentId) {
         return Objects.requireNonNull(routes.get(documentId), "No selected route view for " + documentId);

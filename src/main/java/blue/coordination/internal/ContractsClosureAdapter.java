@@ -1458,8 +1458,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
         List<ComponentSnapshot> components = view.snapshot().components().stream()
                 .filter(component -> component.orderedMemberDocumentIds().stream()
                         .allMatch(member -> selected.contains(coordinationId(member)))).toList();
-        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory.affectedClosure(
-                maximumCapturedGraphGeneration(captured.values()), inputs, forward.occurrences(), components, publicRoots);
+        long graphGeneration = maximumCapturedGraphGeneration(captured.values());
+        AffectedClosureSnapshot snapshot = view.matchesCapture(graphGeneration, inputs, forward.occurrences(), components, publicRoots)
+                ? view.snapshot()
+                : ClosureEvidenceFactory.affectedClosure(graphGeneration, inputs, forward.occurrences(), components, publicRoots);
         return new RootedCapturedState(snapshot, Map.copyOf(captured), localRoutes, view, anchor);
     }
 
@@ -1977,6 +1979,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         : current.automaticExpansion();
         AutomaticManagedOccurrenceExpansion accumulated = prior.merge(
                 selected, prospectiveIdentities);
+
+        // Resolving a missing exact occurrence witness does not create a new
+        // calculation input. Keep the verified roles when every captured member
+        // and row is unchanged; the store/index/owner fences above still apply.
+        if (current.rootedEvidence() != null && drafts.isEmpty()
+                && captured.equals(current.documents())
+                && graphGeneration == current.input().snapshot().graphGeneration()
+                && ManagedOccurrenceInventory.sameRows(current.input().snapshot().occurrences(),
+                        rows.values().stream().sorted().toList())) {
+            ClosureProcessRetryInput retry = retryResolutions.isEmpty() ? null
+                    : ClosureProcessRetryInput.derived(current.input(), new ArrayList<>(retryResolutions.values()));
+            return new CohortInvocation(current.members(), current.directDeliveries(), current.input(), retry,
+                    captured, current.managedDraftPlan(), accumulated, current.publicationIdentityMembers(),
+                    current.publicationIdentityPublicRoots(), current.rootedAnchor(), current.rootedEvidence());
+        }
 
         LinkedHashMap<blue.language.processor.closure.DocumentId, Node>
                 bodies = new LinkedHashMap<>();
