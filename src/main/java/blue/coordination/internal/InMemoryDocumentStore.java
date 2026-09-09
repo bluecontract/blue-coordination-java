@@ -323,6 +323,24 @@ final class InMemoryDocumentStore {
                         publicationIdentity, "publicationIdentity")));
     }
 
+    /** Checks retained local-provider promises before accepting another exact entry. */
+    synchronized void requireAfterRootedProviderFrontier(blue.coordination.api.TimelineEntry entry) {
+        // The in-memory provider closes each required source through the
+        // selected input when retaining its terminal admission evidence. The
+        // promise survives response loss/restart with that atomic receipt;
+        // unrelated sources never inherit a global environment watermark.
+        for (ContractsClosurePublicationReceipt receipt : state.closurePublicationReceipts().values()) {
+            RootedTerminalEvidence evidence = receipt.rootedTerminalEvidence();
+            if (evidence == null || !evidence.requiredTimelineIds().contains(entry.timeline().timelineId())
+                    || !(evidence.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause)) continue;
+            long closedThrough = new java.math.BigInteger(cause.sourceOrder().components().get(0).toString()).longValueExact();
+            if (entry.timestampMicros() <= closedThrough) {
+                throw new IllegalArgumentException("Timeline Entry order " + entry.sourceOrderKey()
+                        + " is not after its required Timeline completeness frontier " + cause.sourceOrder());
+            }
+        }
+    }
+
     /** Looks up one typed admission receipt without opening document heads. */
     synchronized Optional<ContractsClosureAdmissionReceipt> admissionReceipt(
             String publicationIdentity) {

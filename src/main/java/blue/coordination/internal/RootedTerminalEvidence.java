@@ -16,6 +16,7 @@ final class RootedTerminalEvidence {
     private final RootedInvocationEvidence rooted;
     private final String executedInvocationIdentity;
     private final String historicalWorkIdentity;
+    private final java.util.Set<String> requiredTimelineIds;
 
     private RootedTerminalEvidence(ContractsClosureAdapter.CohortInvocation invocation,
             blue.coordination.api.ManagedEpochApplicationWork work) {
@@ -23,6 +24,7 @@ final class RootedTerminalEvidence {
         this.rooted = Objects.requireNonNull(invocation.rootedEvidence(), "rooted evidence");
         this.executedInvocationIdentity = invocation.executionInvocationIdentity();
         this.historicalWorkIdentity = work == null ? null : work.workIdentity();
+        this.requiredTimelineIds = requiredTimelines(invocation);
         if (work != null) requireHistoricalCause(work);
     }
 
@@ -90,6 +92,26 @@ final class RootedTerminalEvidence {
     }
 
     ClosureInvocationInput input() { return input; }
+
+    java.util.Set<String> requiredTimelineIds() { return requiredTimelineIds; }
+
+    /** Frozen provider surface, not the ambient registry or a checkpoint-derived claim. */
+    private static java.util.Set<String> requiredTimelines(ContractsClosureAdapter.CohortInvocation invocation) {
+        java.util.Set<String> timelines = new java.util.LinkedHashSet<>();
+        java.util.Set<blue.language.processor.closure.DocumentId> visited = new java.util.LinkedHashSet<>();
+        var pending = new java.util.ArrayDeque<>(invocation.rootedEvidence().context().entryOwners());
+        while (!pending.isEmpty()) {
+            var id = pending.removeFirst();
+            if (!visited.add(id)) continue;
+            var document = Objects.requireNonNull(invocation.documents().get(ContractsClosureAdapter.coordinationId(id)),
+                    "Required provider document is absent from frozen capture");
+            timelines.addAll(document.layout().routingSurface().externalTimelineIds());
+            invocation.input().snapshot().occurrences().stream()
+                    .filter(row -> row.active() && row.sourceDocumentId().equals(id))
+                    .forEach(row -> pending.addLast(row.targetDocumentId()));
+        }
+        return java.util.Set.copyOf(timelines);
+    }
 
     Map<DocumentId, ResultingDocument> publicationDocuments(ClosureProcessResult result) {
         List<DocumentId> owners = result.commits() ? RootedResultScope.members(result) : entryOwners();

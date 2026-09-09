@@ -2642,6 +2642,10 @@ public final class DefaultCoordinationEngine
     }
 
     private void requireAfterProcessedFrontier(TimelineEntry entry) {
+        if (contractsClosureProfile != null && contractsClosureProfile.rootedCheckpoint()) {
+            documents.requireAfterRootedProviderFrontier(entry);
+            return;
+        }
         ExternalOrderKey processed = contractsJournalCoordinator == null
                 ? drainCoordinator.processedThrough()
                 : contractsJournalCoordinator.processedThrough();

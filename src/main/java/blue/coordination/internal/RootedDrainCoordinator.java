@@ -62,7 +62,7 @@ final class RootedDrainCoordinator {
         }
         // This cursor describes transport completion only. Root selection always
         // uses local exact progress, including entries behind this cursor.
-        for (TimelineEntry entry : transport.completeRootedPrefix(cutoff, remaining)) {
+        for (TimelineEntry entry : transport.completeRootedTransport(cutoff, remaining)) {
             completed.putIfAbsent(entry.blueId(), entry);
         }
         boolean budgetExhausted = selected >= budget.maxSelectedEntries()
