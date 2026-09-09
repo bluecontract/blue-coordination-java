@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.internal.CoordinationTestControl;
+import blue.coordination.internal.RootedCalculationFixture;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,13 @@ final class RootedCycleEntrypointTest {
             assertTrue(blue.advanced().auditManagedOccurrence(a.id(), "/peer").orElseThrow().active());
             assertTrue(blue.advanced().auditManagedOccurrence(b.id(), "/peer").orElseThrow().active());
             var subject = append(fixture, a, "startFinite", 100, "{}");
+            var control = new RootedCalculationFixture(blue.advanced().rawEngine());
+            var referenceInput = control.capture((throughB ? b : a).id(), subject.blueId(), null);
+            var beforeReference = List.of(a.snapshot().blueId(), b.snapshot().blueId());
+            var reference = RootedCalculationFixture.materializedReference(referenceInput);
+            assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
+            assertNull(reference.rootedProjection());
+            assertEquals(beforeReference, List.of(a.snapshot().blueId(), b.snapshot().blueId()));
             var result = blue.processing().processNext(throughB ? b : a).entry(subject);
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
             assertEquals("done", a.snapshot().textAt("/phase"));
@@ -53,6 +61,9 @@ final class RootedCycleEntrypointTest {
                     .flatMap(c -> c.changes().stream()).map(DocumentChange::documentId).sorted().toList());
             String terminal = result.closures().get(0).closureId();
             var retained = blue.advanced().closureExecution(terminal).orElseThrow();
+            assertEquals(reference.totalGas(), retained.totalGas());
+            assertEquals(reference.gasTraceIdentity(), retained.gasTraceIdentity());
+            assertEquals(reference.outputClosureIdentity(), retained.outputClosureIdentity());
             var input = blue.advanced().closureInvocation(terminal).orElseThrow();
             var rooted = retained.rootedProjection();
             assertNotNull(rooted);

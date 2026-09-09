@@ -98,7 +98,7 @@ public final class RootedCalculationFixture {
     }
 
     /**
-     * Executes the complete immutable acyclic input in a fresh materialized runtime.
+     * Executes the complete immutable input in a fresh materialized runtime.
      * There is no host publication, rooted projection, cached result, history lookup or
      * optimized dependency selection on this reference path. The original tariff,
      * direct deliveries, public-root flags, exact bodies, environment and budget remain.
@@ -106,7 +106,14 @@ public final class RootedCalculationFixture {
     public static ClosureProcessResult materializedReference(ClosureInvocationInput input) {
         WholeObjectStore objects = new WholeObjectStore(new EngineMetrics());
         for (var document : input.snapshot().managedDocuments()) {
-            objects.put(ExactValue.verified(document.blueId(), document.document()), "rooted reference input");
+            var component = input.snapshot().components().stream()
+                    .filter(value -> value.orderedMemberDocumentIds().contains(document.documentId()))
+                    .findFirst().orElseThrow();
+            var proof = component.completeCyclicProof();
+            var value = proof == null
+                    ? ExactValue.verified(document.blueId(), document.document())
+                    : ExactValue.fromVerifiedProviderEvidence(document.blueId(), document.document(), proof);
+            objects.putVerifiedProviderEvidence(value, document.document(), proof, "rooted reference input");
         }
         var base = ClosureInvocationInput.processClosure(input.invocationIdentity(), input.snapshot(), input.cause(),
                 input.directDeliveries(), input.directDeliverySnapshotIdentity(), input.executionPolicy(), input.environment());
