@@ -33,6 +33,102 @@ final class RootedCreatedChildTest {
         birthWithBudget(fullGas - 1);
     }
 
+    @Test void preBirthEntriesStayExcludedAcrossBothLocalCreationSchedules() throws IOException {
+        assertEquals(runLocalCreationWithPreBirthEntries(false), runLocalCreationWithPreBirthEntries(true));
+    }
+
+    private static Outcome runLocalCreationWithPreBirthEntries(boolean sourceFirst) throws IOException {
+        try (var fixture = new RootedSdkFixture()) {
+            var blue = fixture.blue;
+            var source = fixture.startYaml(RootedSdkFixture.resource("parent.yaml")
+                    .replace("RCP2 Parent", "RCP2 Creator").replace("rcp2/parent", "rcp2/creator"), "rcp2/creator");
+            var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", fixture.retain(source)));
+            fixture.timelines.put("rcp2/source", blue.timelines().register("rcp2/source", "alice"));
+            var initial = blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
+            var draft = blue.documents().draft(DocumentId.of(initial.blueId()), initial);
+            // Actual retained inputs advance the SDK's clock; no private clock setter is used.
+            long base = 1_800_000_000_000_000L;
+            var old15 = fixture.appendReference(initial.blueId(), "rcp2/source", "tick", base + 15L, "{}", false);
+            var old19 = fixture.appendReference(initial.blueId(), "rcp2/source", "tick", base + 19L, "{}", false);
+            assertThrows(blue.coordination.api.CoordinationException.class, () -> blue.documents().require(draft.id()));
+            var creation = blue.operations().on(source).from(fixture.timelines.get("rcp2/creator"))
+                    .call("attach").through("owner").request(request -> request.managed("child", draft))
+                    .expectOccurrence("/child", draft).activation(ActivationPolicy.fromNow()).submit();
+            var exactBirth = blue.advanced().auditTimelineEntry(creation.blueId()).orElseThrow();
+            assertEquals(base + 20L, exactBirth.timestampMicros());
+            assertEquals(base + 15L, blue.advanced().auditTimelineEntry(old15.blueId()).orElseThrow().timestampMicros());
+            assertEquals(base + 19L, blue.advanced().auditTimelineEntry(old19.blueId()).orElseThrow().timestampMicros());
+            EntryResult sourceBirth = null;
+            if (sourceFirst) {
+                sourceBirth = blue.processing().processNext(source).entry(creation);
+                assertEquals(EntryDisposition.APPLIED, sourceBirth.disposition());
+            }
+            var priorSourceHead = source.snapshot().blueId();
+            var priorSourceHistory = fixture.history(source);
+            var local = blue.processing().processNext(parent).entry(creation);
+            assertEquals(EntryDisposition.APPLIED, local.disposition(), local.diagnostic().toString());
+            assertEquals(priorSourceHead, source.snapshot().blueId());
+            assertEquals(priorSourceHistory, fixture.history(source));
+            assertEquals(List.of(parent.id()), local.closures().stream()
+                    .flatMap(closure -> closure.changes().stream()).map(DocumentChange::documentId).toList());
+            var selected = fixture.control.selectedView(parent.id()).managedDocument(
+                    new blue.language.processor.closure.DocumentId(draft.id().value()));
+            assertNotNull(selected);
+            assertTrue(selected.initialized());
+            assertEquals(0L, ((Number) selected.document().getProperties().get("counter").getValue()).longValue());
+            if (!sourceFirst) {
+                assertThrows(blue.coordination.api.CoordinationException.class, () -> blue.documents().require(draft.id()));
+                CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+                assertThrows(blue.coordination.api.CoordinationException.class, () -> blue.documents().require(draft.id()));
+                sourceBirth = blue.processing().processNext(source).entry(creation);
+                assertEquals(EntryDisposition.APPLIED, sourceBirth.disposition());
+            }
+            var child = blue.documents().require(draft.id());
+            assertEquals(initial.blueId(), child.id().value());
+            assertEquals(initial.blueId(), blue.advanced().auditDocument(child.id()).authoredInitialBlueId());
+            assertEquals(selected.blueId(), child.snapshot().blueId());
+            assertEquals(0L, child.snapshot().longAt("/counter"));
+            var birth = blue.advanced().auditManagedEpoch(child.id(), 0L).orElseThrow();
+            assertEquals(DocumentRevision.Kind.INITIALIZATION, birth.kind());
+            assertTrue(birth.beforeBlueId().isEmpty());
+            assertEquals(1, fixture.history(child).size());
+            var result = blue.advanced().closureExecution(java.util.Objects.requireNonNull(sourceBirth)
+                    .closures().get(0).closureId()).orElseThrow();
+            assertEquals(result.platformCommitCompanion().companionIdentity(), birth.commitCompanionIdentity());
+            var input = blue.advanced().closureInvocation(sourceBirth.closures().get(0).closureId()).orElseThrow();
+            assertEquals(input.cause().causeIdentity(), birth.originalCauseIdentity());
+            var basis = fixture.control.historyBasis(child.id());
+            var admission = (Map<?, ?>) basis.get("admission");
+            assertEquals("CREATED_IN_OPERATION", admission.get("mode"));
+            assertEquals(result.rootedProjection().invocationIdentity(), admission.get("creatorOperationIdentity"));
+            var order = ((blue.language.processor.closure.ExternalEventCause) input.cause()).sourceOrder().components();
+            assertEquals(order, birth.sourceOrder().orElseThrow().components());
+            assertEquals(Map.of("timestampUs", Long.toString(base + 20L), "timelineBlueId", order.get(1),
+                    "entryBlueId", creation.blueId()), admission.get("lowerExclusiveOrder"));
+            assertTrue(result.occurrenceBindings().stream().anyMatch(row -> row.active()
+                    && row.occurrenceIdentity().equals(admission.get("birthOccurrenceIdentity"))
+                    && row.sourceDocumentId().value().equals(source.id().value())
+                    && row.targetDocumentId().value().equals(child.id().value()) && row.sourcePath().equals("/child")));
+            var heads = List.of(parent.snapshot().blueId(), source.snapshot().blueId(), child.snapshot().blueId());
+            var histories = List.of(fixture.history(parent), fixture.history(source), fixture.history(child));
+            var journal = blue.advanced().auditTimelineEntries().stream().map(TimelineEntrySnapshot::blueId).toList();
+            assertTrue(journal.containsAll(List.of(old15.blueId(), old19.blueId(), creation.blueId())));
+            for (var root : List.of(child, source, parent)) assertTrue(blue.processing().processNext(root).quiescent());
+            assertEquals(heads, List.of(parent.snapshot().blueId(), source.snapshot().blueId(), child.snapshot().blueId()));
+            assertEquals(histories, List.of(fixture.history(parent), fixture.history(source), fixture.history(child)));
+            CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(basis, fixture.control.historyBasis(child.id()));
+            assertEquals(journal, blue.advanced().auditTimelineEntries().stream().map(TimelineEntrySnapshot::blueId).toList());
+            for (var root : List.of(child, source, parent)) assertTrue(blue.processing().processNext(root).quiescent());
+            assertEquals(heads, List.of(parent.snapshot().blueId(), source.snapshot().blueId(), child.snapshot().blueId()));
+            assertEquals(histories, List.of(fixture.history(parent), fixture.history(source), fixture.history(child)));
+            System.out.println("PRE_BIRTH_EXCLUSION_PROVED sourceFirst=" + sourceFirst + " authored=" + initial.blueId()
+                    + " born=" + child.snapshot().blueId() + " old15=" + old15.blueId() + " old19=" + old19.blueId()
+                    + " birth=" + creation.blueId() + " birthOrder=" + order);
+            return new Outcome(heads, histories);
+        }
+    }
+
     private static long birthWithBudget(Long budget) throws IOException {
         try (var fixture = new RootedSdkFixture()) {
             var blue = fixture.blue;

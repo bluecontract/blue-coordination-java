@@ -237,7 +237,8 @@ public final class DefaultCoordinationEngine
                     documents,
                     routeIndex,
                     profile,
-                    contractsActiveSourceTimelines);
+                    contractsActiveSourceTimelines,
+                    journal::entries);
             contractsClosureAdmissionAdapter =
                     new ContractsClosureAdmissionAdapter(
                             runtime,

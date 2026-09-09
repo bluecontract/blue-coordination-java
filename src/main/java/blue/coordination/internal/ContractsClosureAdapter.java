@@ -125,6 +125,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private final OperationRouteIndex routes;
     private final ContractsClosureProfile profile;
     private final ContractsActiveSourceTimelineIndex activeSourceTimelines;
+    private final java.util.function.Supplier<List<TimelineEntry>> timelineHistory;
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
@@ -168,6 +169,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             OperationRouteIndex routes,
             ContractsClosureProfile profile,
             ContractsActiveSourceTimelineIndex activeSourceTimelines) {
+        this(runtime, objects, layoutBuilder, documents, routes, profile, activeSourceTimelines, List::of);
+    }
+
+    ContractsClosureAdapter(BlueRuntime runtime, WholeObjectStore objects, EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents, OperationRouteIndex routes, ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines,
+            java.util.function.Supplier<List<TimelineEntry>> timelineHistory) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -177,6 +185,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         this.profile = Objects.requireNonNull(profile, "profile");
         this.activeSourceTimelines = Objects.requireNonNull(
                 activeSourceTimelines, "activeSourceTimelines");
+        this.timelineHistory = Objects.requireNonNull(timelineHistory, "timelineHistory");
         this.environment = profile.environment(runtime.documentProcessor());
         this.executionObserver =
                 new ContractsClosureExecutionMetricsObserver(
@@ -232,8 +241,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             @Override
                             public ManagedOccurrenceResolver.Resolution requirePrerequisites(
                                     CohortInvocation current, ManagedOccurrenceResolver.Resolution resolution) {
-                                return current.rootedEvidence() == null ? resolution
-                                        : RootedManagedBirths.requireSourceHistories(current.managedDraftPlan(), resolution);
+                                if (current.rootedEvidence() == null) return resolution;
+                                var histories = RootedManagedBirths.requireSourceHistories(current.managedDraftPlan(), resolution);
+                                if (!histories.complete()) return histories;
+                                histories = RootedManagedBirths.bindDeclarations(current, histories, documents);
+                                return RootedJoinPrerequisites.requireEarlierSourceWork(current, histories, documents,
+                                        ContractsClosureAdapter.this, timelineHistory.get());
                             }
 
                             @Override

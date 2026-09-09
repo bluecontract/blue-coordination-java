@@ -67,6 +67,33 @@ public final class RootedCalculationFixture {
         engine.contractsClosureAdapter().onStoreFailurePoint(ignored -> { });
     }
 
+    /** Reads actual independently owned registered work; never constructs a successful source receipt. */
+    public blue.coordination.api.ManagedEpochApplicationWork registeredOwnedHistory(DocumentId root) {
+        return Objects.requireNonNull(new RootedCheckpointDriver(engine.documents(), engine.contractsClosureAdapter())
+                .select(root, engine.auditTimelineEntries()).historical(), "No actual registered owned history");
+    }
+
+    /** Simulates unavailable evidence through the real same-cursor plan/barrier failure path only. */
+    public void deferRegisteredOwnedHistory(blue.coordination.api.ManagedEpochApplicationWork work) {
+        var selected = registeredOwnedHistory(work.consumerDocumentId());
+        if (!selected.workIdentity().equals(work.workIdentity()))
+            throw new IllegalArgumentException("Availability control does not name the actual due work");
+        engine.documents().recordManagedEpochEvidenceFailure(ManagedEpochEvidenceException.waiting(selected,
+                ManagedEpochEvidenceException.SOURCE_EPOCH_MISSING, "Rooted join fixture: exact history temporarily unavailable"));
+        var after = new RootedCheckpointDriver(engine.documents(), engine.contractsClosureAdapter())
+                .select(work.consumerDocumentId(), engine.auditTimelineEntries());
+        if (!after.blocked() || after.live() != null || after.historical() != null || after.localHistorical() != null)
+            throw new IllegalStateException("Availability control did not retain a blocked source with no selected work");
+    }
+
+    /** Reads the actual barrier that created the registered work, independently of its source receipt order. */
+    public blue.language.processor.ExternalOrderKey registeredHistoryBarrierOrder(
+            blue.coordination.api.ManagedEpochApplicationWork work) {
+        var plan = engine.documents().catchUpPlan(work.planIdentity()).orElseThrow();
+        if (!plan.barrierIdentity().equals(work.barrierIdentity())) throw new IllegalStateException("Work/plan barrier mismatch");
+        return engine.documents().catchUpBarrier(plan.barrierIdentity()).orElseThrow().causeOrder();
+    }
+
     /** Captures actual input/result evidence and returns a read-only current-owner fence check. */
     public Runnable capturedPublicationFence(DocumentId root) {
         var adapter = engine.contractsClosureAdapter();

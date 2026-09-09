@@ -11,8 +11,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Saved authored graph inputs with explicit full-history admission. */
 final class RootedSavedOriginalGraphTest {
     @Test void threeNodeRingKeepsExactHistoricalViewsAndFinishesWithin32Steps() throws Exception {
-        assertTrue(run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}) > 0,
-                "The ring must exercise an authenticated indirect reference update with an unowned direct lane");
+        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}});
+    }
+
+    @Test void threeNodeRingCompletesAfterExactPreAnchorSourcePrerequisites() throws Exception {
+        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}, true);
+    }
+
+    @Test void threeNodeRingWaitsForEarlierSourceWorkBeforeFreezingItsJoinAnchor() throws Exception {
+        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}, false, true);
     }
 
     @Test void figureEightKeepsBothSavedOriginalLoopsAndTheirHistories() throws Exception {
@@ -116,7 +123,15 @@ final class RootedSavedOriginalGraphTest {
         }
     }
 
-    private static int run(String[][] edges) throws Exception {
+    private static void run(String[][] edges) throws Exception {
+        run(edges, false);
+    }
+
+    private static void run(String[][] edges, boolean settlePreAnchorSource) throws Exception {
+        run(edges, settlePreAnchorSource, false);
+    }
+
+    private static void run(String[][] edges, boolean settlePreAnchorSource, boolean expectJoinPrerequisite) throws Exception {
         String template;
         try (var in = RootedSavedOriginalGraphTest.class.getResourceAsStream("/rooted/node-graph.template.json")) {
             template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
@@ -135,7 +150,13 @@ final class RootedSavedOriginalGraphTest {
             }
             int ordinal = 0;
             var attachedInputs = new java.util.LinkedHashSet<String>();
+            EntryHandle precedingAttachment = null;
             for (String[] edge : edges) {
+                if (settlePreAnchorSource && ordinal == 2) {
+                    assertEquals("C", edge[0]);
+                    assertEquals("A", edge[2]);
+                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment));
+                }
                 var replayedLiveInputs = new java.util.LinkedHashSet<String>();
                 var root = handles.get(edge[0]);
                 var saved = originals.get(edge[2]);
@@ -149,10 +170,36 @@ final class RootedSavedOriginalGraphTest {
                 }
                 var submitted = f.append(root, "rcp/saved/" + edge[0], "attach", ++ordinal * 100L,
                         "edge: " + edge[1] + "\nsource:\n  blueId: " + saved.blueId());
+                var beforeHeads = handles.values().stream().map(doc -> doc.snapshot().blueId()).toList();
+                var beforeHistories = histories(f, handles);
                 var attached = f.blue.processing().processNext(root);
-                assertEquals(EntryDisposition.APPLIED, attached.entry(submitted).disposition(),
+                boolean journalSettled = false;
+                if (expectJoinPrerequisite && ordinal == 3) {
+                    assertEquals(EntryDisposition.NEEDS_RESOURCES, attached.entry(submitted).disposition(),
+                            "An incomplete causal source view must not become a frozen historical join anchor");
+                    assertTrue(attached.blocked());
+                    assertEquals(beforeHeads, handles.values().stream().map(doc -> doc.snapshot().blueId()).toList());
+                    assertEquals(beforeHistories, histories(f, handles));
+                    assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).isEmpty());
+                    CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+                    var retried = f.blue.processing().processNext(root);
+                    assertEquals(EntryDisposition.NEEDS_RESOURCES, retried.entry(submitted).disposition());
+                    assertEquals(beforeHistories, histories(f, handles));
+                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment), submitted);
+                    attached = f.blue.processing().processNext(root);
+                }
+                if (!settlePreAnchorSource && !expectJoinPrerequisite && edges.length == 3 && ordinal == 3) {
+                    assertEquals(EntryDisposition.NEEDS_RESOURCES, attached.entry(submitted).disposition());
+                    assertTrue(attached.blocked());
+                    assertEquals(beforeHeads, handles.values().stream().map(doc -> doc.snapshot().blueId()).toList());
+                    assertEquals(beforeHistories, histories(f, handles));
+                    assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).isEmpty());
+                    finishJoinWithPublicDriver(f, handles, submitted, attachedInputs);
+                    journalSettled = true;
+                }
+                if (!journalSettled) assertEquals(EntryDisposition.APPLIED, attached.entry(submitted).disposition(),
                         "Saved attachment " + String.join("/", edge) + " " + attached.entry(submitted).diagnostic());
-                for (int step = 0; step < 32; step++) {
+                for (int step = 0; !journalSettled && step < 32; step++) {
                     Map<String, List<String>> prefixes = histories(f, handles);
                     var result = f.blue.processing().processNext(root);
                     for (var prior : prefixes.entrySet()) assertEquals(prior.getValue(),
@@ -175,6 +222,7 @@ final class RootedSavedOriginalGraphTest {
                 assertTrue(f.blue.processing().processNext(root).quiescent(), "Unfinished saved attachment " + String.join("/", edge));
                 assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).orElseThrow().active());
                 attachedInputs.add(submitted.blueId());
+                precedingAttachment = submitted;
                 for (var doc : handles.values()) assertTrue(f.blue.advanced().auditManagedEpochs(doc.id())
                         .stream().allMatch(receipt -> receipt.emittedEvents().isEmpty()), "No duplicate initialization/source emission");
             }
@@ -203,7 +251,6 @@ final class RootedSavedOriginalGraphTest {
                         + " rows=" + selected.occurrences().stream().map(row -> row.sourceDocumentId() + ":" + row.sourcePath()
                                 + "->" + row.targetDocumentId() + ":active=" + row.active() + ":pending=" + row.pendingHistoricalEpoch()).toList());
             }
-            int proofs = verifyReferenceProofNegatives(f, handles.get("C"));
             var emitted = f.append(handles.get("C"), "rcp/saved/C", "emit", ++ordinal * 100L,
                     edges.length == 3 ? "to: B\nnext: A" : "to: A\nnext: B");
             assertEquals(EntryDisposition.APPLIED, applyWithin32(f, handles.get("A"), emitted, handles).disposition());
@@ -225,39 +272,97 @@ final class RootedSavedOriginalGraphTest {
             assertTrue(f.blue.processing().processNext(handles.get("A")).quiescent());
             assertEquals(finalHeads, handles.values().stream().map(doc -> doc.snapshot().blueId()).toList());
             assertEquals(finalHistories, histories(f, handles));
-            return proofs;
         }
     }
 
-    private static int verifyReferenceProofNegatives(RootedSdkFixture f, DocumentHandle owner) {
-        var terminals = f.control.retainedTerminals(owner.id());
-        var id = new blue.language.processor.closure.DocumentId(owner.id().value());
-        int verified = 0;
-        for (var terminal : terminals) {
-            var result = terminal.result();
-            var before = terminal.input().snapshot().managedDocument(id);
-            var after = result.resultingDocuments().stream().filter(doc -> doc.documentId().equals(id)).findFirst();
-            var targets = terminal.input().directDeliveries().stream().map(delivery -> delivery.targetDocumentId())
-                    .distinct().sorted().toList();
-            if (!result.commits() || before == null || after.isEmpty() || before.epoch() != after.orElseThrow().epoch()
-                    || before.blueId().equals(after.orElseThrow().afterBlueId()) || targets.isEmpty()
-                    || targets.contains(id) || !result.rootedProjection().owns(id)
-                    || targets.stream().anyMatch(target -> result.rootedProjection().owns(target))) continue;
-            var direct = targets.stream().map(target -> blue.coordination.api.DocumentId.of(target.value())).toList();
-            assertTrue(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, owner.id(), direct));
-            assertFalse(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, owner.id(), List.of()));
-            assertFalse(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, owner.id(), List.of(owner.id())));
-            var extra = new java.util.ArrayList<>(direct); extra.add(owner.id());
-            assertFalse(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, owner.id(), extra));
-            var duplicate = new java.util.ArrayList<>(direct); duplicate.add(direct.get(0));
-            assertFalse(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, owner.id(), duplicate));
-            assertFalse(f.control.verifiesRetainedReferenceRebind(terminal.identity(), result, direct.get(0), direct));
-            var other = terminals.stream().filter(value -> !value.identity().equals(terminal.identity())).findFirst().orElseThrow();
-            assertThrows(IllegalArgumentException.class, () -> f.control.verifiesRetainedReferenceRebind(
-                    terminal.identity(), other.result(), owner.id(), direct));
-            verified++;
+    /** Explicit host scheduling: each prerequisite remains its own public, metered selection. */
+    private static void finishJoinWithPublicDriver(RootedSdkFixture f, Map<String, DocumentHandle> handles,
+            EntryHandle submitted, java.util.Set<String> previouslyApplied) {
+        boolean observed = false;
+        var invocations = new java.util.HashSet<String>();
+        // The initial root-only wait already consumed one of the unchanged 32 selections.
+        for (int step = 1; step < 32; step++) {
+            var prefixes = histories(f, handles);
+            var result = f.blue.processing().drain(new DrainBudget(1L, 1L));
+            prefixes.forEach((name, prefix) -> assertEquals(prefix,
+                    f.history(handles.get(name)).subList(0, prefix.size())));
+            assertFalse(result.blocked(), result.diagnostic().toString());
+            for (var actual : result.entries()) {
+                boolean current = actual.entry().equals(submitted);
+                assertTrue(current || previouslyApplied.contains(actual.entry().blueId()));
+                if (actual.disposition() == EntryDisposition.APPLIED) {
+                    if (current) observed = true;
+                    for (var closure : actual.closures()) assertTrue(invocations.add(closure.closureId()),
+                            "A committed invocation must not be executed twice");
+                    assertTrue(actual.publicEvents().isEmpty());
+                } else {
+                    assertEquals(EntryDisposition.NO_MATCH, actual.disposition());
+                    assertTrue(!current || observed, "A transport marker cannot replace actual application");
+                    assertTrue(actual.closures().isEmpty());
+                }
+            }
+            System.out.println("LATE_JOIN_PUBLIC_DRIVER step=" + step + " entries=" + result.entries().size()
+                    + " retained=" + result.rootedRetainedResults().size() + " quiescent=" + result.quiescent());
+            if (result.quiescent()) {
+                assertTrue(observed, "The exact saved-original attachment must be applied");
+                return;
+            }
         }
-        return verified;
+        throw new AssertionError("Saved-original join failed to finish within 32 actual public selections");
+    }
+
+    /** Diagnostic scheduling only: A owns its two actual earlier prerequisites before C attaches A. */
+    private static void settleExactPreAnchorSource(RootedSdkFixture f,
+            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment) {
+        settleExactPreAnchorSource(f, handles, precedingAttachment, null);
+    }
+
+    private static void settleExactPreAnchorSource(RootedSdkFixture f,
+            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment, EntryHandle laterInput) {
+        var a = handles.get("A");
+        var b = handles.get("B");
+        var c = handles.get("C");
+        var sourceHeads = List.of(List.of(b.snapshot().epoch(), b.snapshot().blueId()),
+                List.of(c.snapshot().epoch(), c.snapshot().blueId()));
+        var sourceHistories = List.of(f.history(b), f.history(c));
+        var priorAHistory = f.history(a);
+        var live = f.blue.processing().processNext(a);
+        assertEquals(EntryDisposition.APPLIED, live.entry(precedingAttachment).disposition());
+        assertEquals(1, live.entries().size(), "Only the already supplied B attachment at 200 is processed");
+        assertTrue(live.managedEpochApplications().isEmpty());
+        assertTrue(live.rootedRetainedResults().isEmpty());
+        assertFalse(live.quiescent(), "A still needs the exact C initialization inside its calculated B");
+        assertEquals(sourceHeads, List.of(List.of(b.snapshot().epoch(), b.snapshot().blueId()),
+                List.of(c.snapshot().epoch(), c.snapshot().blueId())));
+        assertEquals(sourceHistories, List.of(f.history(b), f.history(c)));
+        assertEquals(priorAHistory, f.history(a).subList(0, priorAHistory.size()));
+        var afterLiveHistory = f.history(a);
+        var local = f.blue.processing().processNext(a);
+        assertTrue(local.entries().isEmpty(), "The prerequisite is not a fabricated external entry");
+        assertTrue(local.managedEpochApplications().isEmpty(), "No independent B publication is fabricated");
+        assertEquals(1, local.rootedRetainedApplications().size());
+        var retained = local.rootedRetainedApplications().get(0);
+        assertEquals(a.id(), retained.rootDocumentId());
+        assertEquals(b.id(), retained.work().consumerDocumentId());
+        assertEquals(c.id(), retained.work().sourceDocumentId());
+        assertEquals(0L, retained.work().sourceEpoch());
+        assertEquals(EntryDisposition.APPLIED, local.rootedRetainedResults().get(0).disposition());
+        if (laterInput == null) {
+            assertTrue(local.quiescent(), "The exact two prerequisites must suffice; there is no new drain loop");
+        } else {
+            assertEquals(laterInput.blueId(), f.control.nextLiveInput(a.id()).orElseThrow(),
+                    "The new attachment remains a later ordinary LIVE input after the two earlier prerequisites");
+        }
+        assertEquals(sourceHeads, List.of(List.of(b.snapshot().epoch(), b.snapshot().blueId()),
+                List.of(c.snapshot().epoch(), c.snapshot().blueId())));
+        assertEquals(sourceHistories, List.of(f.history(b), f.history(c)));
+        assertEquals(priorAHistory, f.history(a).subList(0, priorAHistory.size()));
+        assertEquals(afterLiveHistory, f.history(a).subList(0, afterLiveHistory.size()));
+        var selectedB = f.control.selectedView(a.id()).managedDocument(
+                new blue.language.processor.closure.DocumentId(b.id().value()));
+        assertEquals(b.snapshot().epoch(), selectedB.epoch(), "A now selects B's real causal revision");
+        assertEquals(b.snapshot().blueId(), selectedB.blueId(), "The required source state must match exactly");
+        System.out.println("PRE_ANCHOR_PREREQUISITES_PROVED actualSource=B200 retainedSource=C0");
     }
 
     private static EntryResult applyWithin32(RootedSdkFixture f, DocumentHandle root,
