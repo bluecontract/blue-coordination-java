@@ -16,6 +16,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused regression coverage for additive SDK engine seams. */
@@ -62,6 +63,18 @@ final class SdkCoreSeamsTest {
         assertEquals(
                 blue.language.processor.ClosureRuntimeDescriptor.CYCLIC_PROOF_VERIFIER_IDENTITY,
                 manifest.cyclicProofVerifier());
+        ContractsClosureProfile profile = ContractsClosureProfile.release10(
+                manifest.blueLanguageSpecification(),
+                manifest.contractsSpecification(), Set.of(A));
+        assertTrue(profile.rootedCheckpoint());
+        assertEquals(manifest.contractsRelease(),
+                profile.rootedRuntimeSemanticsIdentity());
+        ContractsClosureProfile wrongProfile = ContractsClosureProfile.release10(
+                manifest.blueLanguageSpecification(),
+                "sha256:" + "0".repeat(64), Set.of(A));
+        assertFalse(wrongProfile.rootedCheckpoint());
+        assertThrows(IllegalStateException.class,
+                wrongProfile::rootedRuntimeSemanticsIdentity);
     }
 
     private static String owningJarResourceIdentity(Class<?> owner, String resource) throws Exception {
