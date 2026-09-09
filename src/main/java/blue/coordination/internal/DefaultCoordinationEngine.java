@@ -697,6 +697,30 @@ public final class DefaultCoordinationEngine
                 sourceYaml, objects, "external-exact-value");
     }
 
+    /** Reads an already retained exact body without resolving to a current document head. */
+    public synchronized Optional<ExactValue> retainedExactValue(String blueId) {
+        ensureOpen();
+        Objects.requireNonNull(blueId, "blueId");
+        return objects.contains(blueId) ? Optional.of(objects.require(blueId)) : Optional.empty();
+    }
+
+    /** Reads the exact terminal processor result retained at the atomic publication boundary. */
+    public synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
+            String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity, "publicationIdentity"))
+                .map(receipt -> receipt.attempt().processResult());
+    }
+
+    /** Reads the original immutable input retained with a terminal closure decision. */
+    public synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
+            String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity, "publicationIdentity"))
+                .map(receipt -> receipt.rootedTerminalEvidence() == null
+                        ? receipt.managedSurfaceEvidence().originalInvocation() : receipt.rootedTerminalEvidence().input());
+    }
+
     /**
      * Parses provider content, preprocesses runtime aliases, and retains its
      * direct identity without resolving the value's type as an instance.
@@ -1035,6 +1059,104 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /**
+     * Executes one already supplied exact input relative to a selected root.
+     * The caller's ordered driver owns input completeness; this method does
+     * not select an input by wall clock or advance the global journal cursor.
+     */
+    public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input) {
+        return processRootInput(root, input, null);
+    }
+
+    /** Executes the supplied root input using one frozen invocation budget. */
+    public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        try {
+            ensureOpen();
+            TimelineEntry entry = journal.requireCanonical(Objects.requireNonNull(input, "input"));
+            long started = System.nanoTime();
+            ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
+                    Objects.requireNonNull(root, "root"), entry, policy);
+            return executeRootBatch(batch, started);
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    private ProcessingDrainReceipt executeRootBatch(ContractsClosureAdapter.FrozenBatch batch, long started) {
+        TimelineEntry entry = batch.entry();
+            List<ContractsClosureDispatchAttempt> attempts = new ArrayList<>();
+            List<DocumentDispatchOutcome> outcomes = new ArrayList<>();
+            boolean complete = true;
+            long committed = 0L;
+            for (ContractsClosureAdapter.CohortInvocation invocation : batch.invocations()) {
+                ContractsClosureAdapter.CohortOutcome exact = contractsClosureAdapter.executeAndPublish(batch, invocation);
+                complete &= exact.attempt().isComplete();
+                attempts.add(new ContractsClosureDispatchAttempt(entry.blueId(), exact.publicationMembers(),
+                        exact.attempt(), exact.published(), exact.publicationIdentity(), exact.replayed(),
+                        exact.automaticRetryCount(), managedOccurrenceResolutions(exact.managedSurfaceEvidence()),
+                        exact.managedSurfaceEvidence().inputComponents(),
+                        exact.managedSurfaceEvidence().operationRouteChanges().stream()
+                                .map(DefaultCoordinationEngine::operationRouteChange).toList(),
+                        exact.unresolvedDemands().stream().map(unresolved ->
+                                new ContractsClosureDispatchAttempt.ManagedOccurrenceResolutionIssue(
+                                        unresolved.demand().demandIdentity(),
+                                        ContractsClosureDispatchAttempt.ResolutionStatus.valueOf(unresolved.status().name()),
+                                        unresolved.diagnostic())).toList()));
+                if (exact.published() && !exact.replayed()) {
+                    committed++;
+                    for (DocumentId member : exact.publicationMembers()) {
+                        documents.require(member).revisionForEntry(entry.blueId()).ifPresent(revision ->
+                                outcomes.add(new DocumentDispatchOutcome(member, revision, 0L)));
+                    }
+                }
+            }
+            return new ProcessingDrainReceipt(complete ? List.of(entry) : List.of(),
+                    Map.of(entry.blueId(), outcomes), Map.of(entry.blueId(), attempts),
+                    complete ? entry.sourceOrderKey() : null, complete, false, committed,
+                    System.nanoTime() - started);
+    }
+
+    /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
+    public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root) {
+        try {
+            ensureOpen();
+            long started = System.nanoTime();
+            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+                    .select(Objects.requireNonNull(root, "root"), journal.entries());
+            if (next.live() != null) {
+                ProcessingDrainReceipt completed = executeRootBatch(next.live(), started);
+                return rootedReadiness(root, completed, started);
+            }
+            if (next.historical() != null) {
+                var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
+                var attempt = managedApplicationAttempt(outcome);
+                ProcessingDrainReceipt completed = new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                        outcome.published(), false, outcome.published() && !outcome.replayed() ? 1L : 0L,
+                        System.nanoTime() - started, outcome.receipt().stream().toList(), List.of(attempt), List.of());
+                return rootedReadiness(root, completed, started);
+            }
+            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, !next.blocked(), false,
+                    0L, System.nanoTime() - started);
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    /** Recomputes pending work after the selected step; the one-step budget is not a resource wait. */
+    private ProcessingDrainReceipt rootedReadiness(DocumentId root, ProcessingDrainReceipt completed, long started) {
+        if (!completed.quiescent()) return completed;
+        RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+                .select(root, journal.entries());
+        boolean pending = remaining.live() != null || remaining.historical() != null;
+        boolean quiescent = !pending && !remaining.blocked();
+        return new ProcessingDrainReceipt(completed.processedEntries(), completed.outcomesByEntry(),
+                completed.contractsAttemptsByEntry(), completed.processedThrough().orElse(null),
+                quiescent, pending && !remaining.blocked(), completed.committedProcessTransitions(),
+                System.nanoTime() - started, completed.managedEpochApplications(),
+                completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures());
+    }
+
     @Override
     public synchronized ProcessingDrainReceipt drainJournal(
             CoordinationEngine.DrainBudget budget) {
@@ -1360,6 +1482,8 @@ public final class DefaultCoordinationEngine
 
     synchronized WholeObjectStore objects() { return objects; }
 
+    synchronized BlueRuntime runtime() { return runtime; }
+
     synchronized void inject(FailurePoint point) {
         failureInjector.accept(Objects.requireNonNull(point, "point"));
     }
@@ -1537,7 +1661,7 @@ public final class DefaultCoordinationEngine
             return ManagedSurfacePublicationEvidence.empty();
         }
         ContractsClosurePublicationReceipt retained = documents
-                .closurePublicationReceipt(outcome.work().workIdentity())
+                .closureReceiptForApplication(outcome.receipt().orElseThrow())
                 .orElseThrow(() -> new IllegalStateException(
                         "Committed managed application is missing publication evidence"));
         var application = outcome.receipt().orElseThrow();
@@ -2032,43 +2156,7 @@ public final class DefaultCoordinationEngine
                     contractsRecoveryState.managedEpochTurn = false;
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
-                    ManagedSurfacePublicationEvidence managedSurface =
-                            committedManagedApplicationSurface(outcome);
-                    managedAttempts.add(new ManagedEpochApplicationAttempt(
-                            outcome.work(),
-                            outcome.attempt(),
-                            outcome.published(),
-                            outcome.replayed(),
-                            outcome.receipt(),
-                            outcome.automaticRetryCount(),
-                            outcome.automaticResolutionStopReason()
-                                    .map(reason -> ManagedEpochApplicationAttempt
-                                            .AutomaticResolutionStopReason
-                                            .valueOf(reason.name())),
-                            outcome.unresolvedDemands().stream()
-                                    .map(unresolved -> new
-                                            ManagedEpochApplicationAttempt
-                                                    .ManagedOccurrenceResolutionIssue(
-                                                    unresolved.demand()
-                                                            .demandIdentity(),
-                                                    ManagedEpochApplicationAttempt
-                                                            .ResolutionStatus
-                                                            .valueOf(
-                                                                    unresolved
-                                                                            .status()
-                                                                            .name()),
-                                                    unresolved.diagnostic()))
-                                    .toList(),
-                            outcome.publicationFailure().map(failure ->
-                                    new ManagedEpochApplicationAttempt
-                                            .PublicationFailure(
-                                            failure.code(),
-                                            failure.message(),
-                                            failure.details())),
-                            managedOccurrenceResolutions(managedSurface),
-                            managedSurface.inputComponents(),
-                            managedSurface.operationRouteChanges().stream()
-                                    .map(DefaultCoordinationEngine::operationRouteChange).toList()));
+                    managedAttempts.add(managedApplicationAttempt(outcome));
                     contractsRecoveryState.deferManagedEpochConsumer(
                             outcome.work().consumerDocumentId());
                     if (!outcome.published()) {
@@ -2201,6 +2289,46 @@ public final class DefaultCoordinationEngine
                 managedApplications,
                 managedAttempts,
                 managedEvidenceFailures);
+    }
+
+    private ManagedEpochApplicationAttempt managedApplicationAttempt(
+            ContractsClosureAdapter.ManagedApplicationOutcome outcome) {
+        ManagedSurfacePublicationEvidence managedSurface = committedManagedApplicationSurface(outcome);
+        return new ManagedEpochApplicationAttempt(
+                            outcome.work(),
+                            outcome.attempt(),
+                            outcome.published(),
+                            outcome.replayed(),
+                            outcome.receipt(),
+                            outcome.automaticRetryCount(),
+                            outcome.automaticResolutionStopReason()
+                                    .map(reason -> ManagedEpochApplicationAttempt
+                                            .AutomaticResolutionStopReason
+                                            .valueOf(reason.name())),
+                            outcome.unresolvedDemands().stream()
+                                    .map(unresolved -> new
+                                            ManagedEpochApplicationAttempt
+                                                    .ManagedOccurrenceResolutionIssue(
+                                                    unresolved.demand()
+                                                            .demandIdentity(),
+                                                    ManagedEpochApplicationAttempt
+                                                            .ResolutionStatus
+                                                            .valueOf(
+                                                                    unresolved
+                                                                            .status()
+                                                                            .name()),
+                                                    unresolved.diagnostic()))
+                                    .toList(),
+                            outcome.publicationFailure().map(failure ->
+                                    new ManagedEpochApplicationAttempt
+                                            .PublicationFailure(
+                                            failure.code(),
+                                            failure.message(),
+                                            failure.details())),
+                            managedOccurrenceResolutions(managedSurface),
+                            managedSurface.inputComponents(),
+                            managedSurface.operationRouteChanges().stream()
+                                    .map(DefaultCoordinationEngine::operationRouteChange).toList());
     }
 
     private Optional<ContractsClosureAdapter.ManagedApplicationOutcome>

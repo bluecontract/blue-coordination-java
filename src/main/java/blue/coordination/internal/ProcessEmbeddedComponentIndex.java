@@ -344,6 +344,26 @@ final class ProcessEmbeddedComponentIndex {
         ProcessEmbeddedComponentIndex local = fromDirectedBindings(
                 affected, active);
 
+        return replaceRegion(affected, local);
+    }
+
+    /** Uses the real rooted finalizer's partition; one-way targets keep their independent components. */
+    ProcessEmbeddedComponentIndex replaceOwnedResult(blue.language.processor.closure.ClosureProcessResult result) {
+        if (!result.commits() || result.rootedProjection() == null) {
+            throw new IllegalArgumentException("Owned component replacement requires processor-derived authority");
+        }
+        var calculated = result.rootedProjection().resultingSnapshot();
+        List<DocumentId> selected = calculated.managedDocuments().stream()
+                .map(document -> DocumentId.of(document.documentId().value())).toList();
+        List<DirectedBinding> active = calculated.occurrences().stream().filter(row -> row.active())
+                .map(row -> new DirectedBinding(row.occurrenceIdentity(), DocumentId.of(row.sourceDocumentId().value()),
+                        DocumentId.of(row.targetDocumentId().value()))).toList();
+        ProcessEmbeddedComponentIndex local = fromDirectedBindings(selected, active);
+        return replaceRegion(RootedResultScope.members(result), local);
+    }
+
+    private ProcessEmbeddedComponentIndex replaceRegion(Collection<DocumentId> affected,
+            ProcessEmbeddedComponentIndex local) {
         PersistentOrderedMap<DocumentId, Component> components =
                 componentByDocument;
         for (DocumentId document : affected) {

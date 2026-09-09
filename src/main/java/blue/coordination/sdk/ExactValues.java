@@ -17,6 +17,16 @@ public final class ExactValues {
     }
 
     /**
+     * Reads a retained exact body, including a committed root-local child view.
+     * This lookup never substitutes the current head of the body's managed lineage.
+     * @param blueId exact content identity
+     * @return retained immutable body, or empty when its exact content is unavailable
+     */
+    public java.util.Optional<ExactBlueValue> retained(String blueId) {
+        return runtime.retainedExactValue(Objects.requireNonNull(blueId, "blueId"));
+    }
+
+    /**
      * Parses one whole YAML value for direct exact-provider storage.
      *
      * <p>The runtime preprocesses its pinned aliases and calculates the direct

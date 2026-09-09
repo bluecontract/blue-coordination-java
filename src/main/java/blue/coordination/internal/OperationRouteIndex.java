@@ -37,6 +37,7 @@ final class OperationRouteIndex {
             PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     private final EngineMetrics metrics;
     private final Function<DocumentId, DocumentSession> sessionResolver;
+    private final Function<DocumentId, String> selectedHeadResolver;
     private long generation;
 
     public OperationRouteIndex(EngineMetrics metrics) {
@@ -46,9 +47,21 @@ final class OperationRouteIndex {
     public OperationRouteIndex(
             EngineMetrics metrics,
             Function<DocumentId, DocumentSession> sessionResolver) {
+        this(metrics, sessionResolver, documentId -> {
+            DocumentSession session = sessionResolver.apply(documentId);
+            return session == null ? null : session.currentRepresentation().blueId();
+        });
+    }
+
+    /** Uses the exact head selected in the verified calculation view for version targeting. */
+    OperationRouteIndex(
+            EngineMetrics metrics,
+            Function<DocumentId, DocumentSession> sessionResolver,
+            Function<DocumentId, String> selectedHeadResolver) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.sessionResolver = Objects.requireNonNull(
                 sessionResolver, "sessionResolver");
+        this.selectedHeadResolver = Objects.requireNonNull(selectedHeadResolver, "selectedHeadResolver");
     }
 
     /** Replaces only one document's rows from its exact active intervals. */
@@ -427,7 +440,7 @@ final class OperationRouteIndex {
                 metrics.increment("routing.rowsInspected");
                 if (row.accepts(entry)
                         && target.accepts(
-                        row.documentId(), sessionResolver)) {
+                        row.documentId(), sessionResolver, selectedHeadResolver)) {
                     selected.add(row.documentId());
                 }
             }
@@ -475,7 +488,7 @@ final class OperationRouteIndex {
                 metrics.increment("routing.rowsInspected");
                 if (row.accepts(entry)
                         && target.accepts(
-                        row.documentId(), sessionResolver)) {
+                        row.documentId(), sessionResolver, selectedHeadResolver)) {
                     DirectDeliveryKey key = new DirectDeliveryKey(
                             row.documentId(),
                             row.scopePath(),
@@ -981,18 +994,19 @@ final class OperationRouteIndex {
 
         private boolean accepts(
                 DocumentId documentId,
-                Function<DocumentId, DocumentSession> resolver) {
+                Function<DocumentId, DocumentSession> resolver,
+                Function<DocumentId, String> selectedHeadResolver) {
             if (!supported) {
                 return false;
             }
             if (stateBlueId == null) {
                 return true;
             }
+            if (exact) {
+                return stateBlueId.equals(selectedHeadResolver.apply(documentId));
+            }
             DocumentSession session = resolver.apply(documentId);
-            return session != null && (exact
-                    ? session.currentRepresentation().blueId()
-                    .equals(stateBlueId)
-                    : session.epochForState(stateBlueId).isPresent());
+            return session != null && session.epochForState(stateBlueId).isPresent();
         }
     }
 

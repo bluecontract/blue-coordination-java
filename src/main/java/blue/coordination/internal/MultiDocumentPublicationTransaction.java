@@ -94,6 +94,13 @@ final class MultiDocumentPublicationTransaction {
     private ClosureInvocationInput stagedManagedExpansionInput;
     private ContractsClosureAdmissionReceipt stagedAdmissionReceipt;
     private ContractsClosurePublicationReceipt stagedClosurePublicationReceipt;
+    private RootedDocumentView stagedRootedView;
+
+    MultiDocumentPublicationTransaction stageRootedView(RootedDocumentView view) {
+        if (stagedRootedView != null) throw new IllegalStateException("Rooted view is already staged");
+        stagedRootedView = Objects.requireNonNull(view, "view");
+        return this;
+    }
     private final List<ManagedReceiptStage> stagedManagedEpochReceipts =
             new ArrayList<>();
     private CatchUpPlanStore expectedCatchUpPlans;
@@ -922,6 +929,33 @@ final class MultiDocumentPublicationTransaction {
                         sessionIndexNodesCopied, mutation.copiedNodes());
             }
         }
+        if (stagedRootedView != null) {
+            ClosureProcessResult viewResult = stagedRootedView.result();
+            Set<DocumentId> viewOwners;
+            if (stagedAdmissionResult && stagedAdmissionReceipt != null) {
+                requireSameClosureResult(stagedGraphGeneration, viewResult);
+                viewOwners = expectedAbsent;
+            } else {
+                if (viewResult.rootedProjection() == null || stagedClosurePublicationReceipt == null
+                        || !stagedClosurePublicationReceipt.commits()) {
+                    throw new IllegalStateException("Selected views require their exact rooted publication");
+                }
+                requireSameClosureResult(stagedClosurePublicationReceipt.attempt().processResult(), viewResult);
+                viewOwners = new LinkedHashSet<>(RootedResultScope.members(viewResult));
+                if (!affectedDocuments().equals(viewOwners)) {
+                    throw new IllegalStateException("Selected views must be staged for exactly the derived owners");
+                }
+            }
+            for (DocumentId owner : viewOwners) {
+                DocumentSession replacement = Objects.requireNonNull(resultingSessionIndex.get(owner),
+                        "Missing rooted view owner").copyForAtomicPublication();
+                replacement.retainRootedView(stagedRootedView);
+                var mutation = resultingSessionIndex.put(owner, replacement);
+                resultingSessionIndex = mutation.map();
+                sessionIndexComparisons = Math.addExact(sessionIndexComparisons, mutation.comparisons());
+                sessionIndexNodesCopied = Math.addExact(sessionIndexNodesCopied, mutation.copiedNodes());
+            }
+        }
         metrics.add("store.sessionIndexComparisons", sessionIndexComparisons);
         metrics.add("store.sessionIndexNodesCopied", sessionIndexNodesCopied);
         Map<DocumentId, DocumentSession> resultingSessions =
@@ -932,8 +966,9 @@ final class MultiDocumentPublicationTransaction {
         ProcessEmbeddedComponentIndex resultingIndex =
                 stagedOccurrenceInventory == null
                         ? before.componentIndex()
-                        : before.componentIndex().replaceForwardClosure(
-                                affectedDocuments, resultingInventory);
+                        : stagedGraphGeneration != null && stagedGraphGeneration.rootedProjection() != null
+                        ? before.componentIndex().replaceOwnedResult(stagedGraphGeneration)
+                        : before.componentIndex().replaceForwardClosure(affectedDocuments, resultingInventory);
         long resultingIndexGeneration =
                 stagedOccurrenceInventory == null
                         ? before.componentIndexGeneration()
@@ -967,15 +1002,25 @@ final class MultiDocumentPublicationTransaction {
                                 stagedGraphGeneration,
                                 expectedGraphGenerations,
                                 expectedAbsent)
+                        : stagedGraphGeneration.rootedProjection() != null
+                        ? before.graphGenerations().applyOwned(stagedGraphGeneration, expectedGraphGenerations)
                         : before.graphGenerations().apply(
                                 stagedGraphGeneration,
                                 expectedGraphGenerations);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
                 applyClosureSubscriptions(before);
-        requireContiguousPublicEventOrdinals(stagedOutbox);
+        if (stagedGraphGeneration == null || stagedGraphGeneration.rootedProjection() == null) {
+            requireContiguousPublicEventOrdinals(stagedOutbox);
+        } else if (!stagedOutbox.equals(RootedResultScope.events(stagedGraphGeneration))) {
+            throw new IllegalStateException("Rooted outbox must preserve the exact owned occurrence sequence");
+        }
         PersistentAppendLog<PublicEventOccurrence> resultingOutbox =
                 before.outboxLog().appendAll(stagedOutbox);
-        requireContiguousCheckpointOrdinals(stagedCheckpointEvidence);
+        if (stagedGraphGeneration == null || stagedGraphGeneration.rootedProjection() == null) {
+            requireContiguousCheckpointOrdinals(stagedCheckpointEvidence);
+        } else if (!stagedCheckpointEvidence.equals(RootedResultScope.checkpoints(stagedGraphGeneration))) {
+            throw new IllegalStateException("Rooted checkpoints must preserve the exact owned occurrence sequence");
+        }
         PersistentAppendLog<CheckpointWrite> resultingCheckpoints =
                 before.checkpointEvidenceLog().appendAll(
                         stagedCheckpointEvidence);
@@ -1094,6 +1139,8 @@ final class MultiDocumentPublicationTransaction {
         ClosureSubscriptionInventory resulting =
                 stagedClosureSubscriptions == null
                         ? before.closureSubscriptions()
+                        : stagedClosureSubscriptions.rootedProjection() != null
+                        ? before.closureSubscriptions().applyOwned(stagedClosureSubscriptions, expectedGraphGenerations)
                         : before.closureSubscriptions().apply(
                                 stagedClosureSubscriptions,
                                 expectedGraphGenerations);
@@ -1447,7 +1494,7 @@ final class MultiDocumentPublicationTransaction {
             requireReceiptOnlyStaging();
             return;
         }
-        var resultDocuments = ContractsClosureAdapter.resultingDocuments(result, members);
+        var resultDocuments = receipt.publicationDocuments();
         for (Map.Entry<DocumentId,
                 blue.language.processor.closure.ResultingDocument> entry
                 : resultDocuments.entrySet()) {
@@ -1539,14 +1586,18 @@ final class MultiDocumentPublicationTransaction {
             }
             requireSameClosureResult(stagedGraphGeneration, result);
             requireSameClosureResult(stagedClosureSubscriptions, result);
-            if (!stagedOutbox.equals(result.publicEvents())
+            if (!stagedOutbox.equals(RootedResultScope.events(result))
                     || !stagedCheckpointEvidence.equals(
-                            result.checkpointWrites())
+                            RootedResultScope.checkpoints(result))
                     || !stagedComponentStates.equals(
-                            result.resultingComponents())) {
+                            RootedResultScope.components(result))) {
                 throw new IllegalStateException(
                         "A committing process receipt requires the exact "
                                 + "component, outbox, and checkpoint result");
+            }
+            if (result.rootedProjection() != null && (stagedRootedView == null
+                    || stagedRootedView.result() != result)) {
+                throw new IllegalStateException("A rooted commit must retain its full calculated local views atomically");
             }
             return;
         }
@@ -1605,6 +1656,14 @@ final class MultiDocumentPublicationTransaction {
                                         stage.transitionReceipt()));
     }
 
+    private boolean publicationIdentifiesManagedWork(ManagedEpochApplicationWork work) {
+        if (stagedClosurePublicationReceipt == null || stagedClosurePublicationReceipt.rootedTerminalEvidence() == null) {
+            return publicationIdentity.equals(work.workIdentity());
+        }
+        return publicationIdentity.equals(stagedClosurePublicationReceipt.publicationIdentity())
+                && stagedClosurePublicationReceipt.rootedTerminalEvidence().identifiesHistoricalWork(work);
+    }
+
     /**
      * Recognizes the sole Contracts exception which may change a durable head
      * identity without advancing the document's own source epoch. The source
@@ -1620,7 +1679,7 @@ final class MultiDocumentPublicationTransaction {
                 componentRepresentationUpdates.get(documentId);
         boolean managedApplication = update != null
                 && update.work() != null
-                && publicationIdentity.equals(update.work().workIdentity())
+                && publicationIdentifiesManagedWork(update.work())
                 && documentId.equals(update.work().sourceDocumentId())
                 && !update.work().sourceDocumentId().equals(
                         update.work().consumerDocumentId())
@@ -1777,7 +1836,7 @@ final class MultiDocumentPublicationTransaction {
             ManagedEpochApplicationWork work) {
         if (work == null
                 || result == null
-                || !publicationIdentity.equals(work.workIdentity())
+                || !publicationIdentifiesManagedWork(work)
                 || !documentId.equals(work.consumerDocumentId())
                 || work.expectedConsumerCommittedEpoch() != before.epoch()
                 || !work.expectedConsumerCommittedBlueId().equals(
@@ -1890,6 +1949,7 @@ final class MultiDocumentPublicationTransaction {
         }
 
         List<OccurrenceRow> expectedRows = result.occurrenceBindings().stream()
+                .filter(row -> result.rootedProjection() == null || result.rootedProjection().owns(row.sourceDocumentId()))
                 .map(OccurrenceRow::from)
                 .toList();
         List<OccurrenceRow> durableRows = members.stream()
@@ -1915,7 +1975,7 @@ final class MultiDocumentPublicationTransaction {
                     label + " occurrence state is not the exact result");
         }
 
-        List<String> expectedComponents = result.resultingComponents().stream()
+        List<String> expectedComponents = RootedResultScope.components(result).stream()
                 .map(ComponentSnapshot::componentStateIdentity)
                 .toList();
         List<String> actualComponents = resultingComponents

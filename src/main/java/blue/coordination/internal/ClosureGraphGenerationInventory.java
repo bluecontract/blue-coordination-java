@@ -203,6 +203,36 @@ final class ClosureGraphGenerationInventory {
         return new ClosureGraphGenerationInventory(replacement, work);
     }
 
+    /** Installs only the processor-derived owned projection; dependency generations remain local. */
+    ClosureGraphGenerationInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGenerations) {
+        if (!result.commits() || result.rootedProjection() == null
+                || !expectedGenerations.keySet().equals(new LinkedHashSet<>(RootedResultScope.members(result)))) {
+            throw new IllegalArgumentException("Rooted graph publication requires exactly the derived owner fences");
+        }
+        var input = result.rootedProjection().inputSnapshot();
+        if (!input.closureIdentity().equals(result.commitCompanion().inputClosureIdentity())
+                || input.graphGeneration() != result.commitCompanion().expectedInputGraphGeneration()) {
+            throw new IllegalArgumentException("Rooted graph evidence differs from the exact companion input");
+        }
+        Work work = new Work();
+        PersistentOrderedMap<DocumentId, Long> replacement = generations;
+        for (Map.Entry<DocumentId, Long> fence : canonicalExpectedGenerations(expectedGenerations).entrySet()) {
+            long actual = require(fence.getKey(), work);
+            if (actual != fence.getValue()) {
+                throw new MultiDocumentPublicationTransaction.AtomicPublicationCasException(
+                        "Stale rooted graph generation for " + fence.getKey());
+            }
+            if (result.graphGeneration() < actual) {
+                throw new IllegalArgumentException("A rooted publication cannot rewind an owned graph generation");
+            }
+            var mutation = replacement.put(fence.getKey(), safeGeneration(result.graphGeneration()));
+            work.mutation(mutation);
+            replacement = mutation.map();
+        }
+        return new ClosureGraphGenerationInventory(replacement, work);
+    }
+
     /**
      * Installs graph generations for one verified all-new closure admission.
      * Existing lineages are rejected rather than silently treated as updates.

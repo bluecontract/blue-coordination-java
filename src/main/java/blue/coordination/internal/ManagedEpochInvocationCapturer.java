@@ -143,11 +143,14 @@ final class ManagedEpochInvocationCapturer {
                             + work.workIdentity());
         }
 
-        ContractsClosureAdapter.ConnectedSelection connected =
-                ContractsClosureAdapter.initialConnectedSelection(
-                        topology.occurrenceInventory(),
-                        topology.closureSubscriptions(),
-                        work.consumerDocumentId());
+        ContractsClosureAdapter.RootedCapturedState rootedState = profile.rootedCheckpoint()
+                ? host.captureRootedState(work.consumerDocumentId()) : null;
+        ContractsClosureAdapter.ConnectedSelection connected = rootedState == null
+                ? ContractsClosureAdapter.initialConnectedSelection(topology.occurrenceInventory(),
+                        topology.closureSubscriptions(), work.consumerDocumentId())
+                : new ContractsClosureAdapter.ConnectedSelection(
+                        canonical(rootedState.documents().keySet()), rootedState.snapshot().occurrences(),
+                        rootedState.snapshot().occurrences().size());
         runtime.metrics().add(
                 ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED,
                 connected.rowsExamined());
@@ -173,10 +176,9 @@ final class ManagedEpochInvocationCapturer {
         TreeMap<DocumentId, ContractsClosureAdapter.CapturedDocument>
                 captured = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         for (DocumentId documentId : members) {
-            captured.put(documentId, host.captureDocument(
-                    documentId,
-                    publication.requireHead(documentId),
-                    members));
+            captured.put(documentId, rootedState == null ? host.captureDocument(documentId,
+                    publication.requireHead(documentId), members) : java.util.Objects.requireNonNull(
+                    rootedState.documents().get(documentId), "Historical root view omits a selected document"));
             runtime.metrics().increment(
                     ManagedEpochApplicationExecutor
                             .AFFECTED_DOCUMENTS_OPENED);
@@ -212,7 +214,8 @@ final class ManagedEpochInvocationCapturer {
                 : captured.values()) {
             blue.language.processor.closure.DocumentId closureDocumentId =
                     ContractsClosureAdapter.closureId(document.documentId());
-            boolean publicRoot = profile.isPublicRoot(document.documentId());
+            boolean publicRoot = rootedState == null ? profile.isPublicRoot(document.documentId())
+                    : rootedState.snapshot().publicRootDocumentIds().contains(closureDocumentId);
             managedDocuments.add(new ManagedDocumentSnapshot(
                     closureDocumentId,
                     document.head().blueId(),
@@ -238,7 +241,7 @@ final class ManagedEpochInvocationCapturer {
             occurrences.addAll(rows);
         }
         occurrences.sort(java.util.Comparator.naturalOrder());
-        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
+        AffectedClosureSnapshot snapshot = rootedState != null ? rootedState.snapshot() : ClosureEvidenceFactory
                 .affectedClosure(
                         graphGeneration,
                         managedDocuments,
@@ -292,6 +295,14 @@ final class ManagedEpochInvocationCapturer {
                         profile.isPublicRoot(work.consumerDocumentId())
                                 ? List.of(work.consumerDocumentId())
                                 : List.of());
+        if (rootedState != null) {
+            String position = target.pendingRepresentationCursor() == null
+                    ? fromEpoch < 0 ? documents.require(work.sourceDocumentId()).requireRootedHistory().identity()
+                            : documents.managedEpochEvidence(work.sourceDocumentId(), fromEpoch).receipt().receiptIdentity()
+                    : target.pendingRepresentationCursor().positionIdentity();
+            invocation = invocation.withRootedAnchor(rootedState.anchor()).withRootedEvidence(
+                    RootedInvocationEvidence.retained(rootedState.anchor(), input, documents, target, position));
+        }
         return new Capture(
                 work, sourceReceipt, sourceTransition, invocation);
     }

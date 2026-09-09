@@ -27,6 +27,26 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Reads the full retained processor evidence for a terminal closure identity.
+     * Calculated dependency records are local views; only the rooted projection's
+     * owners have authoritative publication rights. Failures carry no such rights.
+     * @param publicationIdentity terminal closure identity returned by processing
+     * @return exact retained result and gas trace, or empty if no terminal record exists
+     */
+    public Optional<blue.language.processor.closure.ClosureProcessResult> closureExecution(String publicationIdentity) {
+        return runtime.auditClosureExecution(requireIdentity(publicationIdentity, "publicationIdentity"));
+    }
+
+    /**
+     * Reads the original exact input of a retained closure decision, including rollback.
+     * @param publicationIdentity terminal closure identity returned by processing
+     * @return immutable original invocation, or empty when no such evidence was retained
+     */
+    public Optional<blue.language.processor.closure.ClosureInvocationInput> closureInvocation(String publicationIdentity) {
+        return runtime.auditClosureInvocation(requireIdentity(publicationIdentity, "publicationIdentity"));
+    }
+
+    /**
      * Exports bounded signed pages of already committed source history.
      * The receiving host must pin this producer's public key independently.
      * This evidence transport does not install receipts in another engine.

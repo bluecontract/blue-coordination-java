@@ -27,6 +27,8 @@ final class DocumentSession {
     private final Set<String> transitionReceipts = new LinkedHashSet<>();
     private final List<ComponentRepresentationTransition>
             componentRepresentationTransitions = new ArrayList<>();
+    private RootedDocumentHistory rootedHistory;
+    private RootedDocumentView rootedView;
     private final StateEpochs stateEpochs = new StateEpochs();
     private EmbeddedOnlyLayout layout;
     private EmbeddedOnlyLayout readyLayout;
@@ -79,6 +81,7 @@ final class DocumentSession {
     private DocumentSession(DocumentSession source) {
         this.documentId = source.documentId;
         this.authoredInitialBlueId = source.authoredInitialBlueId;
+        this.rootedHistory = source.rootedHistory;
         this.activeSubscriptions = source.activeSubscriptions;
         this.revisions.addAll(source.revisions);
         this.terminalEntryBlueIds.addAll(source.terminalEntryBlueIds);
@@ -103,7 +106,16 @@ final class DocumentSession {
      * immutable and therefore remain structurally shared.
      */
     synchronized DocumentSession copyForAtomicPublication() {
-        return new DocumentSession(this);
+        DocumentSession copy = new DocumentSession(this);
+        copy.rootedView = rootedView;
+        return copy;
+    }
+
+    synchronized RootedDocumentView rootedView() { return rootedView; }
+
+    synchronized void retainRootedView(RootedDocumentView view) {
+        Objects.requireNonNull(view, "view").requireOwnerHead(documentId, currentRepresentation().blueId());
+        rootedView = view;
     }
 
     public DocumentId documentId() {
@@ -112,6 +124,23 @@ final class DocumentSession {
 
     public String authoredInitialBlueId() {
         return authoredInitialBlueId;
+    }
+
+    synchronized void establishRootedHistory(RootedDocumentHistory history) {
+        RootedDocumentHistory selected = Objects.requireNonNull(history, "history");
+        if (rootedHistory != null || epoch != 0L
+                || !authoredInitialBlueId.equals(selected.descriptor().get("initialDocumentBlueId"))
+                || !documentId.value().equals(selected.descriptor().get("documentId"))) {
+            throw new IllegalStateException("Rooted history must be established once at exact admission");
+        }
+        rootedHistory = selected;
+    }
+
+    synchronized RootedDocumentHistory requireRootedHistory() {
+        if (rootedHistory == null) {
+            throw new IllegalStateException("Document has no authenticated rooted history basis: " + documentId);
+        }
+        return rootedHistory;
     }
 
     public synchronized long epoch() {

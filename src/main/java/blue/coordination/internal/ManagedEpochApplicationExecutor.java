@@ -129,7 +129,7 @@ final class ManagedEpochApplicationExecutor {
         return execute(work, Set.of());
     }
 
-    private ContractsClosureAdapter.ManagedApplicationOutcome execute(
+    ContractsClosureAdapter.ManagedApplicationOutcome execute(
             ManagedEpochApplicationWork work,
             Set<DocumentId> excludedConsumers) {
         ManagedEpochApplicationWork selected = Objects.requireNonNull(
@@ -139,7 +139,7 @@ final class ManagedEpochApplicationExecutor {
                         selected.workIdentity());
         if (prior.isPresent()) {
             ContractsClosurePublicationReceipt retained = documents
-                    .closurePublicationReceipt(selected.workIdentity())
+                    .closureReceiptForApplication(prior.orElseThrow())
                     .orElseThrow(() -> new IllegalStateException(
                             "Managed application has no retained Contracts "
                                     + "publication receipt "
@@ -208,14 +208,11 @@ final class ManagedEpochApplicationExecutor {
                             initialCapture.sourceTransitionReceipt(),
                             automatic.invocation());
             ClosureProcessResult result = attempt.processResult();
-            ContractsClosurePublicationReceipt receipt =
-                    new ContractsClosurePublicationReceipt(
-                            selected.workIdentity(),
-                            capture.invocation().members(),
-                            attempt,
-                            automatic.expansionCount(),
-                            ManagedSurfacePublicationEvidence.committed(
-                                    capture.invocation(), result));
+            RootedTerminalEvidence terminal = RootedTerminalEvidence.captureHistorical(capture.invocation(), result, selected);
+            ContractsClosurePublicationReceipt receipt = new ContractsClosurePublicationReceipt(
+                    terminal == null ? selected.workIdentity() : capture.invocation().rootedEvidence().terminalKey(),
+                    RootedResultScope.members(result), attempt, automatic.expansionCount(),
+                    ManagedSurfacePublicationEvidence.committed(capture.invocation(), result), null, terminal);
             ManagedEpochApplicationReceipt application;
             try {
                 application = publish(capture, receipt, excludedConsumers);
@@ -290,21 +287,24 @@ final class ManagedEpochApplicationExecutor {
         ManagedEpochApplicationWork work = capture.work();
         ClosureProcessResult result = Objects.requireNonNull(
                 receipt, "receipt").attempt().processResult();
-        if (!receipt.publicationIdentity().equals(work.workIdentity())) {
+        if (receipt.rootedTerminalEvidence() == null ? !receipt.publicationIdentity().equals(work.workIdentity())
+                : !receipt.rootedTerminalEvidence().identifiesHistoricalWork(work)) {
             throw new IllegalArgumentException(
                     "Managed application receipt does not identify its work");
         }
         ContractsClosureAdapter.requirePublishableResult(invocation, result);
-        InMemoryDocumentStore.ClosureSnapshot current =
-                documents.closureSnapshot(invocation.existingMemberSet());
-        host.requireCohortStillCurrent(invocation, current);
+        Set<DocumentId> ownedMembers = new java.util.LinkedHashSet<>(RootedResultScope.members(result));
+        Set<DocumentId> existingOwners = new java.util.LinkedHashSet<>(ownedMembers);
+        existingOwners.retainAll(invocation.existingMemberSet());
+        InMemoryDocumentStore.ClosureSnapshot current = documents.closureSnapshot(existingOwners);
+        if (result.rootedProjection() == null) host.requireCohortStillCurrent(invocation, current);
+        else host.requireRootedOwnersStillCurrent(invocation, result, current, existingOwners);
         String sourceCausalEntryBlueId = requireSourceCausalEntryBlueId(
                 work, capture.sourceReceipt());
         ManagedOccurrenceInventory.DeltaResult inventoryDelta =
-                host.mergeInventory(
-                        current.occurrenceInventory(),
-                        invocation.memberSet(),
-                        result.occurrenceBindings());
+                result.rootedProjection() == null ? host.mergeInventory(current.occurrenceInventory(),
+                        invocation.memberSet(), result.occurrenceBindings())
+                        : host.mergeOwnedInventory(current.occurrenceInventory(), result);
         ManagedOccurrenceInventory resultingInventory =
                 inventoryDelta.inventory();
         long resultingInventoryGeneration =
@@ -316,7 +316,7 @@ final class ManagedEpochApplicationExecutor {
                 !ContractsClosureAdapter.sameActiveTopologyForSources(
                         current.occurrenceInventory(),
                         resultingInventory,
-                        invocation.memberSet());
+                        ownedMembers);
         long resultingComponentIndexGeneration =
                 ContractsClosureAdapter.transitionGeneration(
                         current.componentIndexGeneration(),
@@ -324,12 +324,13 @@ final class ManagedEpochApplicationExecutor {
                         "component index generation");
         MultiDocumentPublicationTransaction transaction = documents
                 .beginAtomicPublication(
-                        work.workIdentity(),
+                        receipt.publicationIdentity(),
                         current.occurrenceInventoryGeneration(),
                         current.componentIndexGeneration());
         host.configureManagedApplicationTransaction(transaction);
         for (ContractsClosureAdapter.CapturedDocument document
                 : invocation.documents().values()) {
+            if (!existingOwners.contains(document.documentId())) continue;
             transaction.expectHead(
                     document.documentId(),
                     document.head().epoch(),
@@ -337,11 +338,10 @@ final class ManagedEpochApplicationExecutor {
             transaction.expectGraphGeneration(
                     document.documentId(), document.graphGeneration());
         }
-        invocation.newMemberSet().forEach(transaction::expectAbsent);
+        invocation.newMemberSet().stream().filter(ownedMembers::contains).forEach(transaction::expectAbsent);
         invocation.input().snapshot().components().stream()
                 .filter(component -> component.orderedMemberDocumentIds()
-                        .stream().allMatch(member -> invocation
-                                .existingMemberSet().contains(
+                        .stream().allMatch(member -> existingOwners.contains(
                                         DocumentId.of(member.value()))))
                 .forEach(transaction::expectComponentState);
         if (invocation.managedExpansion() || inventoryDelta.changed()) {
@@ -350,15 +350,15 @@ final class ManagedEpochApplicationExecutor {
                     resultingInventoryGeneration,
                     resultingComponentIndexGeneration);
         }
-        transaction.stageComponentStates(result.resultingComponents());
+        transaction.stageComponentStates(RootedResultScope.components(result));
         if (invocation.managedExpansion()) {
             transaction.stageManagedExpansionResult(invocation.input(), result);
         } else {
             transaction.stageClosureGraphGeneration(result);
             transaction.stageClosureSubscriptionDeltas(result);
         }
-        transaction.stageOutbox(result.publicEvents());
-        transaction.stageCheckpointEvidence(result.checkpointWrites());
+        transaction.stageOutbox(RootedResultScope.events(result));
+        transaction.stageCheckpointEvidence(RootedResultScope.checkpoints(result));
 
         Map<DocumentId, ResultingDocument> resultingDocuments =
                 ContractsClosureAdapter.resultingDocuments(
@@ -368,7 +368,7 @@ final class ManagedEpochApplicationExecutor {
                         ContractsClosureAdapter.transitionReceipts(
                                 result, resultingDocuments.keySet());
         ClosureSubscriptionInventory resultingClosureSubscriptions =
-                current.closureSubscriptions().apply(
+                ContractsClosureAdapter.capturedSubscriptions(invocation, current.closureSubscriptions()).apply(
                         result,
                         ContractsClosureAdapter.capturedGraphGenerations(
                                 invocation.documents().values()));
@@ -388,6 +388,7 @@ final class ManagedEpochApplicationExecutor {
         try {
             List<OperationRouteIndex.Replacement> routeReplacements =
                     new ArrayList<>();
+            Map<DocumentId, List<SubscriptionDelta.Entry>> viewRoutes = new java.util.LinkedHashMap<>();
             for (Map.Entry<DocumentId, ResultingDocument> entry
                     : resultingDocuments.entrySet()) {
                 ContractsClosureAdapter.CapturedDocument before =
@@ -407,6 +408,20 @@ final class ManagedEpochApplicationExecutor {
                 ResultingDocument after = entry.getValue();
                 ManagedDocumentTransitionReceipt transition =
                         transitionReceipts.get(entry.getKey());
+                if (!ownedMembers.contains(entry.getKey())) {
+                    ManagedRootSubscriptionSurface projected = contracts.projectRootSubscriptionSurface(after.document());
+                    EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(result, entry.getKey(), before.layout(), projected);
+                    ContractsClosureAdapter.requireExactRootSubscriptionSurface(entry.getKey(), projected,
+                            host.subscriptionStatesFor(resultingClosureSubscriptions, entry.getKey()));
+                    SubscriptionDelta delta = ContractsClosureAdapter.routeDelta(before.activeSubscriptions(),
+                            projected.externalSubscriptions(), after.epoch(), causalOrder);
+                    List<SubscriptionDelta.Entry> localRoutes = DocumentTransitionProcessor.applyManagedRootSubscriptionDelta(
+                            before.activeSubscriptions(), delta, after.epoch(), causalOrder, runtime.metrics());
+                    CheckpointDomainEvidence.retainAll(localRoutes, objects);
+                    objects.put(layout.semanticRoot(), "rooted-retained-local-view");
+                    viewRoutes.put(entry.getKey(), localRoutes);
+                    continue;
+                }
                 boolean componentRepresentationRebind =
                         isIndirectComponentRepresentationRebind(
                                 invocation,
@@ -488,6 +503,7 @@ final class ManagedEpochApplicationExecutor {
                 }
                 CheckpointDomainEvidence.retainAll(
                         activeSubscriptionsAfter, objects);
+                viewRoutes.put(entry.getKey(), activeSubscriptionsAfter);
                 routeReplacements.add(
                         new OperationRouteIndex.Replacement(
                                 entry.getKey(),
@@ -688,7 +704,7 @@ final class ManagedEpochApplicationExecutor {
                             advancedCatchUpPlans,
                             current.occurrenceInventory(),
                             resultingInventory,
-                            invocation.memberSet(),
+                            ownedMembers,
                             committedEpochReceipts.values(),
                             owningBarrier.causedByIdentity(),
                             owningBarrier.causeOrder(),
@@ -705,7 +721,7 @@ final class ManagedEpochApplicationExecutor {
                                                 documentId, epoch)
                                         .orElse(null);
                             },
-                            documentId -> invocation.memberSet().contains(
+                            documentId -> ownedMembers.contains(
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
@@ -719,6 +735,8 @@ final class ManagedEpochApplicationExecutor {
                     .withOperationRouteChanges(
                             preparedRoutes.operationRouteChanges());
             transaction.stageClosurePublicationReceipt(retainedReceipt);
+            if (result.rootedProjection() != null) transaction.stageRootedView(
+                    new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes));
             transaction.commit();
             storeCommitted = true;
             runtime.metrics().increment(OCCURRENCES_ADVANCED);
@@ -728,7 +746,7 @@ final class ManagedEpochApplicationExecutor {
                     "embedding.parentEpochApplications");
             host.injectManagedApplicationPublicationFailure();
             preparedRoutes.publish();
-            activeSourceTimelines.refresh(invocation.members(), documents);
+            activeSourceTimelines.refresh(ownedMembers, documents);
             objects.commit(objectMark);
             clearPendingReconciliation(work);
             return application;

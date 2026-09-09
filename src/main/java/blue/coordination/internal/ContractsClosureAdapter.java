@@ -269,7 +269,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return runtime.metrics().timed(PLAN_CONSTRUCTION_PHASE, () -> {
             InMemoryDocumentStore.ClosureTopologySnapshot topology =
                     documents.closureTopologySnapshot();
-            List<CohortSelection> selectedCohorts = partitionSelection(
+            List<CohortSelection> selectedCohorts = profile.rootedCheckpoint()
+                    ? partitionRootedSelection(
+                            topology.componentIndex(),
+                            topology.occurrenceInventory(),
+                            selection,
+                            runtime.metrics())
+                    : partitionSelection(
                     topology.componentIndex(),
                     topology.occurrenceInventory(),
                     selection,
@@ -297,6 +303,38 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     selection.routeGeneration(),
                     invocations);
         });
+    }
+
+    /** Captures one supplied input relative to an explicitly selected root. */
+    synchronized FrozenBatch captureRoot(DocumentId requestedRoot, TimelineEntry entry) {
+        return captureRoot(requestedRoot, entry, null);
+    }
+
+    synchronized FrozenBatch captureRoot(DocumentId requestedRoot, TimelineEntry entry,
+            blue.coordination.api.ContractsExecutionPolicy selectedPolicy) {
+        ensureOpen();
+        if (!profile.rootedCheckpoint()) {
+            throw new IllegalStateException("Selected-root processing requires the rooted checkpoint profile");
+        }
+        CohortInvocation invocation = captureRootedView(entry, requestedRoot, selectedPolicy == null
+                ? profile.executionPolicy() : ClosureEvidenceFactory.executionPolicy(selectedPolicy.sharedGasLimit(),
+                        Map.of(), selectedPolicy.label()));
+        return new FrozenBatch(entry, routes.generation(), invocation == null || invocation.directDeliveries().isEmpty()
+                ? List.of() : applyManagedDraftPlan(entry, List.of(invocation)));
+    }
+
+    /** Selects the first still-new exact LIVE input in this root's committed view. */
+    synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries) {
+        ensureOpen();
+        if (!profile.rootedCheckpoint()) throw new IllegalStateException("Rooted selection requires its exact profile");
+        for (TimelineEntry entry : entries.stream().sorted(Comparator.comparing(TimelineEntry::sourceOrderKey)).toList()) {
+            CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true);
+            if (invocation == null) continue;
+            FrozenBatch batch = new FrozenBatch(entry, routes.generation(), List.of(invocation));
+            if (publicationReceipt(batch, invocation).isEmpty()) return Optional.of(new FrozenBatch(entry,
+                    routes.generation(), applyManagedDraftPlan(entry, List.of(invocation))));
+        }
+        return Optional.empty();
     }
 
     /** Registers exact SDK host evidence before the entry can be drained. */
@@ -492,6 +530,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return managedEpochApplicationExecutor.execute(work);
     }
 
+    /** Applies the canonical retained step within the caller's frozen root scope. */
+    synchronized ManagedApplicationOutcome executeManagedEpochApplication(
+            ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers) {
+        ensureOpen();
+        return managedEpochApplicationExecutor.execute(work, excludedConsumers);
+    }
+
     /** Runs retained managed work through the ordinary typed-demand loop. */
     AutomaticOccurrenceResolutionCoordinator.RunResult<
             CohortInvocation, ContractsClosurePublicationReceipt>
@@ -582,15 +627,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     && executed.managedDraftPlan().missingExpectedOccurrence(attempt.processResult())
                     ? executed.managedDraftPlan() : null;
             if (rejected != null) requireCommitFences(executed, attempt.processResult());
+            RootedTerminalEvidence terminal = RootedTerminalEvidence.capture(executed, attempt.processResult());
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
-                    executed.members(),
+                    terminal == null ? RootedResultScope.members(attempt.processResult())
+                            : new ArrayList<>(terminal.publicationDocuments(attempt.processResult()).keySet()),
                     attempt,
                     automatic.expansionCount(),
                     attempt.processResult().commits() && rejected == null
                             ? ManagedSurfacePublicationEvidence.committed(
                                     executed, attempt.processResult())
-                            : ManagedSurfacePublicationEvidence.empty(), rejected);
+                            : ManagedSurfacePublicationEvidence.empty(), rejected, terminal);
         } finally {
             runtime.metrics().addNanos(
                     RESULT_VALIDATION_PHASE,
@@ -629,7 +676,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             boolean replayed,
             List<DocumentId> laneMembers) {
         return new CohortOutcome(
-                laneMembers,
+                receipt.rootedTerminalEvidence() == null ? laneMembers : receipt.rootedTerminalEvidence().entryOwners(),
                 receipt.documentIds(),
                 receipt.attempt(),
                 receipt.commits(),
@@ -666,6 +713,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 + identity);
             }
             return Optional.empty();
+        }
+        if (receipt.rootedTerminalEvidence() != null) {
+            receipt.rootedTerminalEvidence().requireSameObligation(selected.rootedEvidence());
+            return Optional.of(receipt);
         }
         if (!new LinkedHashSet<>(receipt.documentIds()).containsAll(
                 selected.publicationIdentityMembers())
@@ -737,9 +788,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
             throw new IllegalArgumentException(
                     "Receipt-only publication requires a non-commit decision");
         }
-        InMemoryDocumentStore.ClosureSnapshot current =
-                documents.closureSnapshot(invocation.existingMemberSet());
-        requireCohortStillCurrent(invocation, current);
+        Set<DocumentId> terminalOwners = new LinkedHashSet<>(receipt.documentIds());
+        Set<DocumentId> existingOwners = new LinkedHashSet<>(terminalOwners);
+        existingOwners.retainAll(invocation.existingMemberSet());
+        InMemoryDocumentStore.ClosureSnapshot current = documents.closureSnapshot(existingOwners);
+        if (receipt.rootedTerminalEvidence() == null) requireCohortStillCurrent(invocation, current);
+        else {
+            receipt.rootedTerminalEvidence().requireResult(result, receipt.publicationIdentity());
+            requireRootedOwnersStillCurrent(invocation, result, current, existingOwners);
+        }
         MultiDocumentPublicationTransaction transaction = documents
                 .beginAtomicPublication(
                         receipt.publicationIdentity(),
@@ -747,6 +804,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         current.componentIndexGeneration());
         transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document : invocation.documents().values()) {
+            if (!terminalOwners.contains(document.documentId())) continue;
             transaction.expectHead(
                     document.documentId(),
                     document.head().epoch(),
@@ -764,7 +822,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             .stream().allMatch(member -> invocation
                                     .existingMemberSet().contains(
                                             coordinationId(member)));
-                    if (existing) {
+                    if (existing && component.orderedMemberDocumentIds().stream()
+                            .allMatch(member -> terminalOwners.contains(coordinationId(member)))) {
                         transaction.expectComponentState(component);
                     }
                 });
@@ -852,6 +911,64 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 occurrenceInventory,
                 selection,
                 null);
+    }
+
+    /**
+     * Captures separate rooted operations, grouping only entry owners in the
+     * same live SCC. Overlapping read views never merge independent owners.
+     * Publication must subsequently project the independently derived owners.
+     */
+    static List<CohortSelection> partitionRootedSelection(
+            ProcessEmbeddedComponentIndex index,
+            ManagedOccurrenceInventory inventory,
+            OperationRouteIndex.FrozenDirectDeliverySelection selection,
+            EngineMetrics metrics) {
+        TreeMap<DocumentId, ProcessEmbeddedComponentIndex.Component> owners =
+                new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        for (DocumentId target : selection.documentIds()) {
+            ProcessEmbeddedComponentIndex.Component owner = index.component(target);
+            owners.putIfAbsent(owner.members().get(0), owner);
+        }
+        List<CohortSelection> result = new ArrayList<>();
+        for (ProcessEmbeddedComponentIndex.Component owner : owners.values()) {
+            ConnectedSelection forward = forwardSelection(
+                    inventory, owner.members().get(0));
+            Set<DocumentId> members = new LinkedHashSet<>(forward.members());
+            List<OperationRouteIndex.FrozenDirectDelivery> deliveries =
+                    selection.deliveries().stream()
+                            .filter(delivery -> members.contains(delivery.documentId()))
+                            .toList();
+            result.add(new CohortSelection(
+                    forward.members(), forwardComponents(index, members),
+                    forward.occurrences(), deliveries, owner.members().get(0)));
+            if (metrics != null) {
+                metrics.add(OCCURRENCE_ROWS_EXAMINED, forward.rowsExamined());
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** Opens outgoing selected occurrences; incoming observers are absent. */
+    private static ConnectedSelection forwardSelection(
+            ManagedOccurrenceInventory inventory, DocumentId root) {
+        TreeMap<DocumentId, Boolean> members = new TreeMap<>(
+                EmbeddingBinding.DOCUMENT_ORDER);
+        Deque<DocumentId> pending = new ArrayDeque<>();
+        List<ManagedOccurrenceBinding> occurrences = new ArrayList<>();
+        members.put(root, Boolean.TRUE);
+        pending.addLast(root);
+        while (!pending.isEmpty()) {
+            for (ManagedOccurrenceBinding row : inventory.rowsFrom(pending.removeFirst())) {
+                occurrences.add(row);
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (members.putIfAbsent(target, Boolean.TRUE) == null) {
+                    pending.addLast(target);
+                }
+            }
+        }
+        occurrences.sort(Comparator.naturalOrder());
+        return new ConnectedSelection(
+                List.copyOf(members.keySet()), occurrences, occurrences.size());
     }
 
     static List<CohortSelection> partitionSelection(
@@ -1124,6 +1241,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             TimelineEntry entry,
             InMemoryDocumentStore.ClosureSnapshot publication,
             CohortSelection selection) {
+        if (selection.rootedAnchor() != null) return captureRootedView(entry, selection.rootedAnchor());
         TreeMap<DocumentId, CapturedDocument> captured = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Set<DocumentId> allowedMembers = new LinkedHashSet<>(
@@ -1149,7 +1267,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         List<blue.language.processor.closure.DocumentId> publicRoots =
                 new ArrayList<>();
         for (CapturedDocument document : captured.values()) {
-            boolean publicRoot = profile.isPublicRoot(document.documentId());
+            boolean publicRoot = selection.rootedAnchor() == null
+                    ? profile.isPublicRoot(document.documentId())
+                    : selection.components().stream()
+                            .filter(component -> component.members().contains(selection.rootedAnchor()))
+                            .anyMatch(component -> component.members().contains(document.documentId()));
             blue.language.processor.closure.DocumentId closureDocumentId =
                     closureId(document.documentId());
             managedDocuments.add(new ManagedDocumentSnapshot(
@@ -1234,8 +1356,115 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 input,
                 captured,
                 null,
-                dormantReservations);
+                dormantReservations).withRootedAnchor(selection.rootedAnchor())
+                .withRootedEvidence(selection.rootedAnchor() == null ? null
+                        : RootedInvocationEvidence.live(selection.rootedAnchor(), input,
+                                documents, publication.closureSubscriptions()));
     }
+
+    /** Captures immutable selected views; independent source heads cannot replace these inputs. */
+    private CohortInvocation captureRootedView(TimelineEntry entry, DocumentId requestedRoot) {
+        return captureRootedView(entry, requestedRoot, profile.executionPolicy());
+    }
+
+    private CohortInvocation captureRootedView(TimelineEntry entry, DocumentId requestedRoot,
+            blue.language.processor.closure.ExecutionPolicy executionPolicy) {
+        return captureRootedView(entry, requestedRoot, executionPolicy, false);
+    }
+
+    private CohortInvocation captureRootedView(TimelineEntry entry, DocumentId requestedRoot,
+            blue.language.processor.closure.ExecutionPolicy executionPolicy, boolean eligibleOnly) {
+        RootedCapturedState state = captureRootedState(requestedRoot);
+        RootedDocumentView view = state.view();
+        AffectedClosureSnapshot snapshot = state.snapshot();
+        Map<DocumentId, CapturedDocument> captured = state.documents();
+        OperationRouteIndex localRoutes = state.routes();
+        DocumentId anchor = state.anchor();
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(view.snapshot().occurrences());
+        List<DocumentId> members = snapshot.managedDocuments().stream().map(d -> coordinationId(d.documentId())).toList();
+        ExternalEventCause cause = ClosureEvidenceFactory.externalCause(entry.exactEvent().copyNode(),
+                entry.blueId(), entry.sourceOrderKey(), environment.externalOrderPolicyIdentity());
+        Set<DocumentId> live = new LinkedHashSet<>();
+        Deque<DocumentId> pendingLive = new ArrayDeque<>();
+        live.add(requestedRoot); pendingLive.add(requestedRoot);
+        while (!pendingLive.isEmpty()) {
+            for (ManagedOccurrenceBinding row : inventory.rowsFrom(pendingLive.removeFirst())) {
+                DocumentId target = coordinationId(row.targetDocumentId());
+                if (row.active() && live.add(target)) pendingLive.addLast(target);
+            }
+        }
+        List<DirectLogicalDelivery> deliveries = localRoutes.selectDirectDeliveries(entry).deliveries().stream()
+                .map(OperationRouteIndex.FrozenDirectDelivery::toContractsEvidence)
+                .filter(delivery -> live.contains(coordinationId(delivery.targetDocumentId()))).toList();
+        if (eligibleOnly) deliveries = runtime.eligibleRootDeliveries(snapshot, deliveries, entry);
+        if (deliveries.isEmpty()) return null;
+        ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(snapshot, cause, deliveries,
+                executionPolicy, environment);
+        return new CohortInvocation(members, deliveries, input, captured, null)
+                .withRootedAnchor(anchor).withRootedEvidence(RootedInvocationEvidence.live(anchor, input,
+                        documents, view.subscriptions()));
+    }
+
+    /** Captures the committed selected view and current fences only for its entry owners. */
+    synchronized RootedCapturedState captureRootedState(DocumentId requestedRoot) {
+        DocumentSession root = documents.require(requestedRoot);
+        RootedDocumentView view = Objects.requireNonNull(root.rootedView(), "Root has no retained rooted view");
+        view.requireOwnerHead(requestedRoot, root.currentRepresentation().blueId());
+        ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(view.snapshot().occurrences());
+        List<DocumentId> all = view.snapshot().managedDocuments().stream()
+                .map(document -> coordinationId(document.documentId())).toList();
+        ProcessEmbeddedComponentIndex index = ProcessEmbeddedComponentIndex.fromDocumentsAndOccurrenceInventory(all, inventory);
+        ConnectedSelection forward = forwardSelection(inventory, requestedRoot);
+        Set<DocumentId> selected = new LinkedHashSet<>(forward.members());
+        Set<DocumentId> owners = new LinkedHashSet<>(index.component(requestedRoot).members());
+        DocumentId anchor = index.component(requestedRoot).members().get(0);
+        TreeMap<DocumentId, CapturedDocument> captured = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+        List<ManagedDocumentSnapshot> inputs = new ArrayList<>();
+        List<blue.language.processor.closure.DocumentId> publicRoots = new ArrayList<>();
+        OperationRouteIndex localRoutes = new OperationRouteIndex(runtime.metrics(), documents::require,
+                documentId -> {
+                    CapturedDocument document = captured.get(documentId);
+                    return document == null ? null : document.head().blueId();
+                });
+        for (DocumentId documentId : forward.members()) {
+            ManagedDocumentSnapshot exact = view.snapshot().managedDocument(closureId(documentId));
+            CapturedDocument capturedView;
+            if (owners.contains(documentId)) {
+                DocumentSession session = documents.require(documentId);
+                if (!session.currentRepresentation().blueId().equals(exact.blueId())) {
+                    throw stale("Selected rooted owner no longer has its captured causal state " + documentId);
+                }
+                capturedView = captureDocument(documentId,
+                        new InMemoryDocumentStore.DocumentHead(session.epoch(), exact.blueId()), selected);
+            } else {
+                ExactValue body = objects.put(ExactValue.fromVerifiedClosureResult(view.result(), documentId),
+                        "committed-rooted-selected-view");
+                ManagedRootSubscriptionSurface surface = contracts.projectRootSubscriptionSurface(exact.document());
+                EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(view.result(), documentId, surface);
+                capturedView = new CapturedDocument(documentId,
+                        new InMemoryDocumentStore.DocumentHead(exact.epoch(), exact.blueId()),
+                        view.snapshot().graphGeneration(), body, layout, view.routes(documentId),
+                        Math.addExact(exact.epoch(), 1L), exact.initialized(), exact.terminated(),
+                        view.subscriptions().statesFor(documentId));
+            }
+            captured.put(documentId, capturedView);
+            boolean publicRoot = owners.contains(documentId);
+            inputs.add(new ManagedDocumentSnapshot(exact.documentId(), exact.blueId(),
+                    invocationDocument(capturedView.current()), exact.initialized(), exact.terminated(), publicRoot,
+                    capturedView.head().epoch(), exact.componentGeneration()));
+            if (publicRoot) publicRoots.add(exact.documentId());
+            localRoutes.replace(documentId, capturedView.layout().routingSurface(), capturedView.activeSubscriptions());
+        }
+        List<ComponentSnapshot> components = view.snapshot().components().stream()
+                .filter(component -> component.orderedMemberDocumentIds().stream()
+                        .allMatch(member -> selected.contains(coordinationId(member)))).toList();
+        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory.affectedClosure(
+                maximumCapturedGraphGeneration(captured.values()), inputs, forward.occurrences(), components, publicRoots);
+        return new RootedCapturedState(snapshot, Map.copyOf(captured), localRoutes, view, anchor);
+    }
+
+    record RootedCapturedState(AffectedClosureSnapshot snapshot, Map<DocumentId, CapturedDocument> documents,
+                               OperationRouteIndex routes, RootedDocumentView view, DocumentId anchor) { }
 
     /** Returns the proof-verified provider shell required for cyclic calls. */
     private Node invocationDocument(ExactValue current) {
@@ -1292,7 +1521,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     plan,
                     null,
                     base.publicationIdentityMembers(),
-                    base.publicationIdentityPublicRoots());
+                    base.publicationIdentityPublicRoots(), base.rootedAnchor(), base.rootedEvidence());
             String identity = publicationIdentity(
                     new FrozenBatch(entry, 0L, List.of(replay)), replay);
             ContractsClosurePublicationReceipt receipt = documents
@@ -1502,6 +1731,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         original.directDeliveries(),
                         original.executionPolicy(),
                         original.environment());
+        if (base.rootedEvidence() != null) expanded = expanded.withRootedReadExpansionOf(original);
         return new CohortInvocation(
                 coordinationIds(graph.documentIds()),
                 base.directDeliveries(),
@@ -1511,7 +1741,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 plan,
                 null,
                 base.publicationIdentityMembers(),
-                base.publicationIdentityPublicRoots());
+                base.publicationIdentityPublicRoots(), base.rootedAnchor(), base.rootedEvidence());
     }
 
     private long requireAutomaticExpansionLimit() {
@@ -1574,7 +1804,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             InMemoryDocumentStore.DocumentHead head =
                     durable.requireHead(documentId);
             if (prior != null) {
-                if (!prior.head().equals(head)) {
+                if (!prior.head().equals(head) && (current.rootedEvidence() == null
+                        || current.rootedEvidence().context().entryOwners().contains(closureId(documentId)))) {
                     throw stale("Document head changed during automatic "
                             + "occurrence expansion " + documentId);
                 }
@@ -1622,7 +1853,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         for (DocumentId source : existingMembers) {
             List<ManagedOccurrenceBinding> sourceRows =
-                    indexed.occurrenceInventory().rowsFrom(source);
+                    current.rootedEvidence() != null && current.input().snapshot().contains(closureId(source))
+                            ? current.input().snapshot().occurrences().stream()
+                                    .filter(row -> row.sourceDocumentId().equals(closureId(source))).toList()
+                            : indexed.occurrenceInventory().rowsFrom(source);
             runtime.metrics().add(
                     OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
             for (ManagedOccurrenceBinding row : sourceRows) {
@@ -1749,7 +1983,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         for (CapturedDocument document : captured.values()) {
             blue.language.processor.closure.DocumentId documentId =
                     closureId(document.documentId());
-            boolean publicRoot = profile.isPublicRoot(document.documentId());
+            boolean publicRoot = current.rootedEvidence() == null ? profile.isPublicRoot(document.documentId())
+                    : current.input().snapshot().publicRootDocumentIds().contains(documentId);
             ManagedDocumentSnapshot priorInvocationDocument = current
                     .input()
                     .snapshot()
@@ -1866,6 +2101,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         original.directDeliveries(),
                         original.executionPolicy(),
                         original.environment());
+        if (current.rootedEvidence() != null) expanded = expanded.withRootedReadExpansionOf(original);
         ClosureProcessRetryInput retryInput = retryResolutions.isEmpty()
                 ? null
                 : ClosureProcessRetryInput.derived(
@@ -1880,7 +2116,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 current.managedDraftPlan(),
                 accumulated,
                 current.publicationIdentityMembers(),
-                current.publicationIdentityPublicRoots());
+                current.publicationIdentityPublicRoots(), current.rootedAnchor(), current.rootedEvidence());
     }
 
     private long requireManagedDocumentLimit() {
@@ -2180,7 +2416,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     session.activeSubscriptions(),
                     session.nextApplicationOrder(),
                     initialized,
-                    terminated);
+                    terminated,
+                    documents.closureTopologySnapshot().closureSubscriptions().statesFor(documentId));
         }
     }
 
@@ -2241,14 +2478,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Process receipt identity does not identify this cohort");
         }
         requirePublishableResult(invocation, result);
-        InMemoryDocumentStore.ClosureSnapshot current =
-                documents.closureSnapshot(invocation.existingMemberSet());
-        requireCohortStillCurrent(invocation, current);
+        Set<DocumentId> ownedMembers = new LinkedHashSet<>(RootedResultScope.members(result));
+        Set<DocumentId> existingOwners = new LinkedHashSet<>(ownedMembers);
+        existingOwners.retainAll(invocation.existingMemberSet());
+        InMemoryDocumentStore.ClosureSnapshot current = documents.closureSnapshot(existingOwners);
+        if (result.rootedProjection() == null) requireCohortStillCurrent(invocation, current);
+        else requireRootedOwnersStillCurrent(invocation, result, current, existingOwners);
         ManagedOccurrenceInventory.DeltaResult inventoryDelta =
-                mergeInventory(
-                current.occurrenceInventory(),
-                invocation.memberSet(),
-                result.occurrenceBindings());
+                result.rootedProjection() == null
+                ? mergeInventory(current.occurrenceInventory(), invocation.memberSet(), result.occurrenceBindings())
+                : mergeOwnedInventory(current.occurrenceInventory(), result);
         ManagedOccurrenceInventory resultingInventory =
                 inventoryDelta.inventory();
         long resultingInventoryGeneration = transitionGeneration(
@@ -2258,7 +2497,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         boolean topologyChanged = !sameActiveTopologyForSources(
                 current.occurrenceInventory(),
                 resultingInventory,
-                invocation.memberSet());
+                ownedMembers);
         long resultingComponentIndexGeneration = transitionGeneration(
                 current.componentIndexGeneration(),
                 topologyChanged,
@@ -2272,6 +2511,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document
                 : invocation.documents().values()) {
+            if (!ownedMembers.contains(document.documentId())) continue;
             transaction.expectHead(
                     document.documentId(),
                     document.head().epoch(),
@@ -2280,7 +2520,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     document.documentId(), document.graphGeneration());
         }
         if (invocation.managedExpansion()) {
-            invocation.newMemberSet().forEach(transaction::expectAbsent);
+            invocation.newMemberSet().stream().filter(ownedMembers::contains).forEach(transaction::expectAbsent);
         }
         invocation.input().snapshot().components().forEach(
                 component -> {
@@ -2288,7 +2528,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             .stream().allMatch(member -> invocation
                                     .existingMemberSet().contains(
                                             coordinationId(member)));
-                    if (existing) {
+                    if (existing && component.orderedMemberDocumentIds().stream()
+                            .allMatch(member -> ownedMembers.contains(coordinationId(member)))) {
                         transaction.expectComponentState(component);
                     }
                 });
@@ -2298,7 +2539,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     resultingInventoryGeneration,
                     resultingComponentIndexGeneration);
         }
-        transaction.stageComponentStates(result.resultingComponents());
+        transaction.stageComponentStates(RootedResultScope.components(result));
         if (invocation.managedExpansion()) {
             transaction.stageManagedExpansionResult(
                     invocation.input(), result);
@@ -2306,8 +2547,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             transaction.stageClosureGraphGeneration(result);
             transaction.stageClosureSubscriptionDeltas(result);
         }
-        transaction.stageOutbox(result.publicEvents());
-        transaction.stageCheckpointEvidence(result.checkpointWrites());
+        transaction.stageOutbox(RootedResultScope.events(result));
+        transaction.stageCheckpointEvidence(RootedResultScope.checkpoints(result));
 
         Map<DocumentId, ResultingDocument> resultingDocuments =
                 resultingDocuments(result, invocation.memberSet());
@@ -2319,20 +2560,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Map<DocumentId, ManagedEpochReceipt> committedEpochReceipts =
                 new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         ClosureSubscriptionInventory resultingClosureSubscriptions =
-                current.closureSubscriptions().apply(
+                capturedSubscriptions(invocation, current.closureSubscriptions()).apply(
                         result,
                         capturedGraphGenerations(
                                 invocation.documents().values()));
         WholeObjectStore.Mark objectMark = objects.mark();
         boolean storeCommitted = false;
         try {
-            List<OperationRouteIndex.Replacement> routeReplacements =
-                    new ArrayList<>();
+            List<OperationRouteIndex.Replacement> routeReplacements = new ArrayList<>();
+            Map<DocumentId, List<SubscriptionDelta.Entry>> viewRoutes = new LinkedHashMap<>();
             for (Map.Entry<DocumentId, ResultingDocument> entry
                     : resultingDocuments.entrySet()) {
                 CapturedDocument before = invocation.documents().get(
                         entry.getKey());
                 ResultingDocument after = entry.getValue();
+                boolean owned = ownedMembers.contains(entry.getKey());
                 if (before == null) {
                     ContractsManagedDraftPlan.ManagedDraft draft = invocation
                             .managedDraft(entry.getKey());
@@ -2457,10 +2699,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         after.afterBlueId());
                 ManagedRootSubscriptionSurface projected = contracts
                         .projectRootSubscriptionSurface(after.document());
-                transaction.stageEmbeddedDemands(
-                        entry.getKey(),
-                        ClosureSubscriptionInventory.embeddedDemands(
-                                projected));
+                if (owned) transaction.stageEmbeddedDemands(entry.getKey(),
+                        ClosureSubscriptionInventory.embeddedDemands(projected));
                 EmbeddedOnlyLayout layout = stateChanged
                         ? layoutBuilder.retainVerifiedClosureRoot(
                                 result,
@@ -2500,10 +2740,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
                 CheckpointDomainEvidence.retainAll(
                         activeSubscriptionsAfter, objects);
+                viewRoutes.put(entry.getKey(), activeSubscriptionsAfter);
+                if (!owned) {
+                    objects.put(layout.semanticRoot(), "rooted-local-dependency-result");
+                    continue;
+                }
                 routeReplacements.add(new OperationRouteIndex.Replacement(
-                        entry.getKey(),
-                        layout.routingSurface(),
-                        activeSubscriptionsAfter));
+                        entry.getKey(), layout.routingSurface(), activeSubscriptionsAfter));
                 if (!changed) {
                     resultingHeads.put(
                             entry.getKey(),
@@ -2588,6 +2831,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 committedEpochReceipts.put(
                         entry.getKey(), epochReceipt);
             }
+            if (result.rootedProjection() != null) {
+                transaction.stageRootedView(new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes));
+            }
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
@@ -2596,7 +2842,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             beforeCatchUpPlans,
                             current.occurrenceInventory(),
                             resultingInventory,
-                            invocation.memberSet(),
+                            ownedMembers,
                             committedEpochReceipts.values(),
                             invocation.input().cause().causeIdentity(),
                             batch.entry().sourceOrderKey(),
@@ -2613,7 +2859,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                                 documentId, epoch)
                                         .orElse(null);
                             },
-                            documentId -> invocation.memberSet().contains(
+                            documentId -> ownedMembers.contains(
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
@@ -2634,7 +2880,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     PublicationFailurePoint
                             .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
             preparedRoutes.publish();
-            activeSourceTimelines.refresh(invocation.members(), documents);
+            activeSourceTimelines.refresh(ownedMembers, documents);
             objects.commit(objectMark);
             return retainedReceipt;
         } catch (RuntimeException failure) {
@@ -2674,6 +2920,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             CohortInvocation invocation,
             ClosureProcessResult result) {
         requireCommitFences(invocation, result);
+        if (invocation.rootedEvidence() != null) RootedResultScope.require(result, invocation.rootedEvidence());
         if (invocation.managedExpansion()) requireManagedExpansionResult(invocation, result);
         if (invocation.automaticExpansion() != null) requireAutomaticOccurrenceResults(invocation, result);
     }
@@ -3134,6 +3381,54 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
     }
 
+    void requireRootedOwnersStillCurrent(CohortInvocation invocation, ClosureProcessResult result,
+            InMemoryDocumentStore.ClosureSnapshot current, Set<DocumentId> existingOwners) {
+        if (invocation.rootedEvidence() == null) throw new IllegalArgumentException("Missing rooted owner context");
+        if (result.commits()) RootedResultScope.require(result, invocation.rootedEvidence());
+        for (DocumentId owner : existingOwners) {
+            CapturedDocument captured = invocation.documents().get(owner);
+            if (captured == null || !captured.head().equals(current.requireHead(owner))
+                    || captured.graphGeneration() != current.graphGenerations().require(owner)) {
+                throw stale("Owned state changed before rooted publication " + owner);
+            }
+            Map<String, OccurrenceProjection> expected = new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+            invocation.input().snapshot().occurrences().stream()
+                    .filter(row -> coordinationId(row.sourceDocumentId()).equals(owner))
+                    .filter(row -> !invocation.prospectiveOccurrenceIdentities().contains(row.occurrenceIdentity()))
+                    .forEach(row -> expected.put(row.sourcePath(), OccurrenceProjection.from(row)));
+            Map<String, OccurrenceProjection> actual = new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
+            current.occurrenceInventory().rowsFrom(owner).stream()
+                    .filter(row -> !invocation.prospectiveOccurrenceIdentities().contains(row.occurrenceIdentity()))
+                    .forEach(row -> actual.put(row.sourcePath(), OccurrenceProjection.from(row)));
+            if (!expected.equals(actual)) throw stale("Owned occurrence state changed before publication " + owner);
+        }
+        if (!componentStateIndex(invocation.input().snapshot().components(), existingOwners)
+                .equals(componentStateIndex(current.componentStates(), existingOwners))) {
+            throw stale("Owned cyclic/component state changed before rooted publication");
+        }
+    }
+
+    ManagedOccurrenceInventory.DeltaResult mergeOwnedInventory(ManagedOccurrenceInventory before,
+            ClosureProcessResult result) {
+        var scope = Objects.requireNonNull(result.rootedProjection(), "rooted projection");
+        Set<DocumentId> owners = new LinkedHashSet<>(RootedResultScope.members(result));
+        List<ManagedOccurrenceBinding> rows = new ArrayList<>();
+        Set<String> keys = new LinkedHashSet<>();
+        for (ManagedOccurrenceBinding row : result.occurrenceBindings()) {
+            if (scope.owns(row.sourceDocumentId())) {
+                rows.add(row);
+                keys.add(occurrenceKey(row.sourceDocumentId().value(), row.sourcePath()));
+            }
+        }
+        for (DocumentId owner : owners) {
+            for (ManagedOccurrenceBinding row : before.rowsFrom(owner)) {
+                if (!row.active() && row.pendingHistoricalEpoch() == null
+                        && keys.add(occurrenceKey(row.sourceDocumentId().value(), row.sourcePath()))) rows.add(row);
+            }
+        }
+        return before.replaceSources(owners, rows);
+    }
+
     private static Map<List<DocumentId>, String> componentStateIndex(
             Collection<ComponentSnapshot> components,
             Set<DocumentId> members) {
@@ -3430,6 +3725,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return true;
     }
 
+    /** Frozen per-member input catalogs include newly discovered read dependencies. */
+    static ClosureSubscriptionInventory capturedSubscriptions(CohortInvocation invocation,
+            ClosureSubscriptionInventory legacy) {
+        if (invocation.rootedAnchor() == null) return legacy;
+        return ClosureSubscriptionInventory.of(invocation.documents().values().stream()
+                .flatMap(document -> document.closureSubscriptions().stream()).toList());
+    }
+
     List<SubscriptionState> subscriptionStatesFor(
             ClosureSubscriptionInventory subscriptions,
             DocumentId documentId) {
@@ -3490,6 +3793,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (selected.members().isEmpty()) {
             throw new IllegalArgumentException(
                     "A closure cohort must not be empty");
+        }
+        if (selected.rootedEvidence() != null) {
+            return selected.rootedEvidence().terminalKey();
         }
         MessageDigest digest;
         try {
@@ -3642,7 +3948,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
             List<DocumentId> members,
             List<ProcessEmbeddedComponentIndex.Component> components,
             List<ManagedOccurrenceBinding> occurrences,
-            List<OperationRouteIndex.FrozenDirectDelivery> deliveries) {
+            List<OperationRouteIndex.FrozenDirectDelivery> deliveries,
+            DocumentId rootedAnchor) {
+        CohortSelection(List<DocumentId> members,
+                List<ProcessEmbeddedComponentIndex.Component> components,
+                List<ManagedOccurrenceBinding> occurrences,
+                List<OperationRouteIndex.FrozenDirectDelivery> deliveries) {
+            this(members, components, occurrences, deliveries, null);
+        }
+
         CohortSelection {
             members = List.copyOf(Objects.requireNonNull(
                     members, "members"));
@@ -3691,7 +4005,49 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ContractsManagedDraftPlan managedDraftPlan,
             AutomaticManagedOccurrenceExpansion automaticExpansion,
             List<DocumentId> publicationIdentityMembers,
-            List<DocumentId> publicationIdentityPublicRoots) {
+            List<DocumentId> publicationIdentityPublicRoots,
+            DocumentId rootedAnchor,
+            RootedInvocationEvidence rootedEvidence) {
+        CohortInvocation(List<DocumentId> members,
+                List<DirectLogicalDelivery> directDeliveries,
+                ClosureInvocationInput input, ClosureProcessRetryInput retryInput,
+                Map<DocumentId, CapturedDocument> documents,
+                ContractsManagedDraftPlan managedDraftPlan,
+                AutomaticManagedOccurrenceExpansion automaticExpansion,
+                List<DocumentId> publicationIdentityMembers,
+                List<DocumentId> publicationIdentityPublicRoots, DocumentId rootedAnchor) {
+            this(members, directDeliveries, input, retryInput, documents, managedDraftPlan,
+                    automaticExpansion, publicationIdentityMembers, publicationIdentityPublicRoots,
+                    rootedAnchor, null);
+        }
+
+        CohortInvocation withRootedEvidence(RootedInvocationEvidence evidence) {
+            return new CohortInvocation(members, directDeliveries, evidence == null ? input
+                    : input.withRootedContext(evidence.context(), evidence.deliveryBasisIdentity()), retryInput, documents,
+                    managedDraftPlan, automaticExpansion, publicationIdentityMembers,
+                    publicationIdentityPublicRoots, rootedAnchor, evidence);
+        }
+
+        CohortInvocation(List<DocumentId> members,
+                List<DirectLogicalDelivery> directDeliveries,
+                ClosureInvocationInput input,
+                ClosureProcessRetryInput retryInput,
+                Map<DocumentId, CapturedDocument> documents,
+                ContractsManagedDraftPlan managedDraftPlan,
+                AutomaticManagedOccurrenceExpansion automaticExpansion,
+                List<DocumentId> publicationIdentityMembers,
+                List<DocumentId> publicationIdentityPublicRoots) {
+            this(members, directDeliveries, input, retryInput, documents,
+                    managedDraftPlan, automaticExpansion,
+                    publicationIdentityMembers, publicationIdentityPublicRoots, null);
+        }
+
+        CohortInvocation withRootedAnchor(DocumentId anchor) {
+            return new CohortInvocation(members, directDeliveries, input, retryInput,
+                    documents, managedDraftPlan, automaticExpansion,
+                    publicationIdentityMembers, publicationIdentityPublicRoots, anchor);
+        }
+
         CohortInvocation(
                 List<DocumentId> members,
                 List<DirectLogicalDelivery> directDeliveries,
@@ -3993,7 +4349,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     members, "members"));
             publicationMembers = List.copyOf(Objects.requireNonNull(
                     publicationMembers, "publicationMembers"));
-            if (!publicationMembers.containsAll(members)) {
+            boolean rooted = attempt != null && attempt.isComplete()
+                    && attempt.processResult().rootedProjection() != null;
+            if (rooted ? !publicationMembers.equals(RootedResultScope.members(attempt.processResult()))
+                    : !publicationMembers.containsAll(members)) {
                 throw new IllegalArgumentException(
                         "Publication members must contain the frozen lane");
             }
@@ -4041,7 +4400,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             List<SubscriptionDelta.Entry> activeSubscriptions,
             long nextApplicationOrder,
             boolean initialized,
-            boolean terminated) {
+            boolean terminated,
+            List<SubscriptionState> closureSubscriptions) {
         CapturedDocument {
             documentId = Objects.requireNonNull(documentId, "documentId");
             head = Objects.requireNonNull(head, "head");
@@ -4051,6 +4411,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             layout = Objects.requireNonNull(layout, "layout");
             activeSubscriptions = List.copyOf(Objects.requireNonNull(
                     activeSubscriptions, "activeSubscriptions"));
+            closureSubscriptions = List.copyOf(Objects.requireNonNull(closureSubscriptions, "closureSubscriptions"));
+            for (SubscriptionState state : closureSubscriptions) {
+                if (!state.channelOccurrence().managedDocumentId().value().equals(documentId.value())
+                        || !state.documentBlueId().equals(head.blueId())) {
+                    throw new IllegalArgumentException("Captured subscriptions must identify their exact selected document");
+                }
+            }
             if (nextApplicationOrder < 0L) {
                 throw new IllegalArgumentException(
                         "nextApplicationOrder must be non-negative");

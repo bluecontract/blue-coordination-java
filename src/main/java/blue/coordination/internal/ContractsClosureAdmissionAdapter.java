@@ -1223,6 +1223,10 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         activeSubscriptions,
                         frontier,
                         revision);
+                if (profile.rootedCheckpoint()) {
+                    session.establishRootedHistory(RootedDocumentHistory.admitted(documentId,
+                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity()));
+                }
                 session.restoreCoordinationState(
                         resulting.terminated()
                                 ? SessionStatus.TERMINATED
@@ -1242,6 +1246,13 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         documentId,
                         layout.routingSurface(),
                         activeSubscriptions));
+            }
+            if (profile.rootedCheckpoint()) {
+                Map<DocumentId, List<SubscriptionDelta.Entry>> selectedRoutes = new LinkedHashMap<>();
+                for (OperationRouteIndex.Replacement replacement : routeReplacements) {
+                    selectedRoutes.put(replacement.documentId(), replacement.activeSubscriptions());
+                }
+                transaction.stageRootedView(new RootedDocumentView(result, subscriptions, selectedRoutes));
             }
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =

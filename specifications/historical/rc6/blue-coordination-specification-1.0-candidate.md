@@ -1,6 +1,4 @@
-# Blue Coordination Specification 1.0 — rooted checkpoint candidate
-
-> **Current revision:** `blue-rooted-checkpoint/1.0-draft.2`. The [RCP-1 companion](rooted-checkpoint-processing-1.0-draft.md) is normative for this draft. Feeder selection remains separate from the one-input Contracts processor. This revision narrows root scope, clarifies checkpoint-driven historical advancement and records root-bound compatibility requirements; it is not a released or implemented replacement RC.
+# Blue Coordination Specification 1.0
 
 **Status:** Proposed normative candidate aligned with the Blue Language empty-object revision, the BEX null-boundary correction, and the Contracts embedded-collection revision; exact specification/type identities pending regeneration
 **Intended audience:** authors of Coordination types, Timeline Providers, feeder implementers, Blue Contracts processors, managed-document hosts, Mandate resolvers, conformance tools, and application platforms
@@ -186,15 +184,11 @@ Provider-specific behavior is selected by the exact concrete Timeline and eviden
 
 ### 4.3 Feeder
 
-The feeder closes the outside world for the selected root's next processing decision. It follows declared forward managed dependencies, preserves each exact selected view and its existing channel/application progress, obtains complete ordered evidence, and derives the earliest eligible unconsumed input. Unrelated incoming observers are notification targets, not part of this root's source surface.
-
-For external inputs, it validates attribution and direct/delegated eligibility, then supplies one original eligible Timeline Entry and its frozen receiving set to the processor. For retained history it supplies the existing exact contiguous application cause. These are different admitted input forms to the same deterministic processing machinery.
+The feeder closes the outside world for one processing decision. It discovers active external sources, obtains complete history, orders entries, derives source Channels, validates direct or delegated authority, and supplies one original eligible entry to the processor.
 
 The feeder answers:
 
-> Which exact input is next for this selected root and its embedded views, after their individual progress?
-
-The processor does not repeat this selection or wait for provider completeness. RCP-1 §§1–4 provides the reference head-merge rule. A scan and an equivalent optimized selector are both conforming.
+> Which exact external entry is next, complete, and eligible for this document or affected document closure?
 
 ### 4.4 Blue Contracts processor
 
@@ -1114,12 +1108,12 @@ The target feeder validates the authority on the new entry again. A source docum
 
 ## 15. Feeder source discovery and safe-window planning
 
-### 15.1 Freeze the selected rooted views
+### 15.1 Freeze exact current state
 
 At the beginning of a planning turn, the feeder freezes:
 
 ```text
-selected root and exact forward document/occurrence views;
+current exact target document or managed closure state;
 active source Channel occurrences;
 source activation intervals;
 current processor checkpoints;
@@ -1128,7 +1122,7 @@ registered type implementations;
 current provider access and evidence requirements.
 ```
 
-The frozen snapshot is revision-bound to this root and its actual mutable dependencies. Unrelated reverse observer registration does not invalidate its semantic identity. Required historical read positions remain exact even if their source later advances. Replan on a change to a relevant writable/activation assumption, not because an unrelated global graph counter changed.
+The frozen snapshot is revision-bound. If authoritative state changes before commit, the feeder replans.
 
 ### 15.2 Runtime selection
 
@@ -1160,7 +1154,7 @@ or
 the beginning of the Timeline when full-history admission is required.
 ```
 
-The feeder may fetch from the earliest required lower bound for one Timeline and filter per Channel afterward. For selection it compares each context’s first admissible pending input and chooses the minimum under §9. A root checkpoint at E20 cannot suppress E10 for a newly embedded view checkpointed at E5. Existing terminal/application progress handles inputs that do not produce a new direct checkpoint.
+The feeder may fetch from the earliest required lower bound for one Timeline and filter per Channel afterward.
 
 An operational global watermark MUST NOT suppress historical entries required by a newly activated imported Channel.
 
@@ -1191,7 +1185,7 @@ such topology change. The host may pre-supply prospective occurrence evidence
 for that exact future member, but the row remains inactive until the completed
 Contracts result contains the object-compatible collection and verified member.
 
-A precomputed remainder of an old window MUST NOT be processed blindly under stale topology. New historical bindings may introduce earlier inputs; recompute the candidate heads rather than rejecting them through a global root watermark. Do not redeliver the creating entry to new bindings through the already frozen batch.
+A precomputed remainder of an old window MUST NOT be processed blindly under stale topology.
 
 ### 15.7 Notifications and polling
 
@@ -1434,7 +1428,7 @@ The original exact Timeline Entry is the processor cause.
 Invoke the exact supported Contracts processing boundary with:
 
 ```text
-selected-root exact document/view graph and required RCP-1 context;
+current exact document or affected closure;
 original exact Timeline Entry;
 frozen accepted source occurrences/logical deliveries;
 exact required resources;
@@ -1445,7 +1439,7 @@ registered runtimes.
 
 ### 17.11 Step 10 — publish
 
-On a committing result, atomically publish the complete required **selected-root** unit under RCP-1 §8:
+On a committing result, atomically publish the complete required unit:
 
 ```text
 new document or closure state;
@@ -1457,7 +1451,7 @@ input progress;
 commit companion/receipt.
 ```
 
-On noncommitting result, publish no tentative processor state. Already committed independent source receipts remain intact. A reverse index may schedule another root’s required work; that root does not retroactively join this publication.
+On noncommitting result, publish no processor state.
 
 ### 17.12 Recompute before next entry
 
@@ -1503,13 +1497,13 @@ Internal embedded or Mandate events may cause ancestor reactions without automat
 
 ## 19. Activation, initialization, and historical catch-up
 
-### 19.1 Explicit birth versus source materialization
+### 19.1 Newly born source
 
-A process or Channel **explicitly and semantically born** by entry E has no history before E; its ordinary live interval starts strictly after that exact order, as in §10.6. Processor-managed initialization is not a provider Timeline fact.
+A process or Channel genuinely created by entry `E` has no history before `E`.
 
-Discovering or loading an authored/retained source is not, by itself, such a birth. RCP-1 §7 requires its declared checkpoints and explicit history basis to determine eligible inputs, regardless of whether the host already stored the lineage. With no explicit newborn-from-cause admission, the embedding operation's time MUST NOT silently discard otherwise required earlier source inputs.
+It does not process `E` through the new occurrence. Its live interval begins strictly after `E`.
 
-Keep explicit full-history, retained-position and specified activation policies distinct. A verified birth/admission context is established at that boundary, not chosen by a later worker or cache lookup. Physical deletion or eviction is not semantic reset. Temporary NeedsResources suspension must not make another root establish a different history for identical semantic inputs.
+Processor-managed deterministic initialization may occur as required by Blue Contracts and the host admission policy. Initialization is not a Timeline Provider fact.
 
 ### 19.2 Imported existing process
 
@@ -1548,27 +1542,23 @@ the exact source surface matches the authoritative state;
 no required catch-up barrier through T remains.
 ```
 
-The feeder MUST NOT deliver a later dependent entry while readiness through an earlier required frontier is incomplete. This is forward-dependency readiness. An unrelated incoming observer’s pending application does not block its source. Step completion is distinct from having drained every pending input; both are distinct from global idleness.
+The feeder MUST NOT deliver a later dependent entry while readiness through an earlier required frontier is incomplete.
 
 ### 19.6 Source-surface changes during catch-up
 
 A historical entry may add or remove Timeline Channels or embedded managed documents. The feeder recomputes the source surface after every historical commit and continues under the same outer cutoff.
 
-### 19.6a LIVE versus retained-application classification (RCP-1)
-
-RCP-1 CAUSE-01..03 bind the historical join interval at the attachment's logical boundary. They apply before inspecting storage warmth or independently available receipts. An already-live receiving view's original pending external input remains LIVE even if another worker has committed the child result. A new historical occurrence consumes its exact frozen interval, then joins through the existing terminal representation/activation rules; later physical source progress does not silently lengthen that interval or select a cheaper operation kind. OWN-01..06 and ID-01..05 define the resulting write roles and exact idempotency context. No host may choose these by a database-row existence branch.
-
 ### 19.7 Catch-up order
-
-Historical advancement uses the same outer next-input loop, not a separate business-processing algorithm. Each selected occurrence retains its own progress and exact position. A6/B8 are lineage-local positions, not globally ordered timestamps. Source-transition and representation predecessor constraints remain required in addition to their original cause order.
 
 When several imported sources are catching up together, the feeder selects the next exact required entry using the same canonical `ExternalOrderKey` used for live processing, then applies dependency ordering required by Blue Contracts.
 
 It MUST NOT arbitrarily finish one child's complete history while an earlier eligible entry from another required source waits.
 
-### 19.8 Historical representation positions (adopted dependency of the RCP-1 draft)
+### 19.8 Historical representation positions (proposed extension)
 
-This subsection is mandatory for the RCP-1 draft.2 candidate under its new exact specification/profile binding. It is not retroactively applicable to an unamended historical runtime. It applies with the adopted candidate Contracts §§2.3a and 7.5a. Existing `ManagedRevisionCause` retains its
+This subsection is an isolated proposal requiring a new specification identity
+and explicit compatibility binding before adoption. It applies only with the
+proposed Contracts §§2.3a and 7.5a. Existing `ManagedRevisionCause` retains its
 one-epoch rule, and existing managed-epoch receipts remain immutable.
 
 A same-epoch exact-identity change permitted by Contracts §5.7.1 MUST be
@@ -2310,59 +2300,93 @@ No other Contracts processing rule is changed by this statement. Workflow execut
 
 ## Appendix A. Normative feeder pseudocode
 
-The provider/authority machinery below is outside `PROCESS`. `state` contains exact selected views and existing progress; it is not a map that silently replaces every historic child with its current head.
-
 ```text
-FEED(selectedRoot):
+FEED(target):
+
   loop:
-    state = LOAD_ROOTED_STATE_AND_PROGRESS(selectedRoot)
-    bindings = DISCOVER_FORWARD_BINDINGS(state)
-    REQUIRE_EXACT_SUPPORTED_RUNTIMES(bindings)
+    state = LOAD_AUTHORITATIVE_STATE(target)
+    surface = DISCOVER_ACTIVE_EXTERNAL_SOURCES(state)
 
-    # Reuse physical Timeline reads, not semantic checkpoint state.
-    evidence = OBTAIN_REQUIRED_COMPLETE_EVIDENCE(bindings)
-    if evidence is unavailable:
-      RETAIN_TYPED_WAIT_WITHOUT_PROCESSOR_MUTATION()
-      return WAITING_FOR_EVIDENCE
-    if evidence is invalid:
-      return BLOCKED_INVALID_EVIDENCE
+    for each external source type in surface:
+      REQUIRE_INSTALLED_EXACT_RUNTIME(typeBlueId)
 
-    heads = NEXT_ADMISSIBLE_HEAD_PER_BINDING(bindings, evidence)
-    # Include existing retained applications with their predecessor order;
-    # do not finish one child's entire history before inspecting others.
-    next = CANONICAL_MINIMUM_READY_HEAD(heads)
+    groups = GROUP_BY_EXACT_TIMELINE(surface)
+
+    guarantees = []
+    for each timeline group:
+      result = OBTAIN_COMPLETE_BEFORE(group.timeline, requestedFrontier)
+      switch result:
+        COMPLETE:
+          guarantees.add(result)
+        COMPLETE_EMPTY:
+          guarantees.add(result)
+        DEFERRED_UNAVAILABLE:
+          return WAITING_FOR_EVIDENCE
+        NOT_FOUND:
+          return WAITING_FOR_EVIDENCE
+        INVALID_EVIDENCE:
+          return BLOCKED_INVALID_EVIDENCE
+        INCOMPATIBLE_FRONTIER:
+          return BLOCKED_INCOMPATIBLE_FRONTIER
+
+    safeBefore = MIN(guarantees.completeBefore)
+
+    physicalEntries = FETCH_EXACT_ENTRIES(
+        groups,
+        EARLIEST_REQUIRED_LOWER_BOUNDS(surface),
+        timestamp < safeBefore)
+
+    VALIDATE_TIMELINE_AND_PREDECESSOR_EVIDENCE(physicalEntries)
+    entries = DEDUPLICATE_BY_ENTRY_BLUE_ID(physicalEntries)
+    SORT(entries, ExternalOrderKey)
+
+    next = FIRST_ENTRY_WITH_NONTERMINAL_TARGET_WORK(entries, state)
+
     if next is absent:
-      VERIFY_AND_REPORT_READY_THROUGH_ESTABLISHED_BOUNDARY(state, evidence)
-      return IDLE_AT_THAT_BOUNDARY
+      ADVANCE_OPERATIONAL_COMPLETE_FRONTIER(target, safeBefore)
+      return IDLE
 
-    decision = FREEZE_ELIGIBILITY_RECIPIENTS_AND_ROOT_CONTEXT(state, next)
-    if decision is feeder-terminal:
-      COMMIT_TERMINAL_FEEDER_PROGRESS_WITHOUT_FAKE_CHECKPOINT(decision)
-      continue
-    if decision requires evidence:
-      RETAIN_TYPED_WAIT(next, decision)
-      return WAITING_FOR_EVIDENCE
-    if decision is invalid or unsupported:
-      return THE_EXACT_DEFINED_FAILURE(decision)
+    targetClosures = DERIVE_CANDIDATE_TARGETS_FROM_INDEX_AND_STATE(next)
 
-    result = PROCESS_ONE_ADMITTED_INPUT(state, next, decision)
-    if result commits:
-      ATOMICALLY_INSTALL_ROOTED_RESULT_AND_PROGRESS(result)
-      RETAIN_DERIVABLE_NOTIFICATIONS_FOR_OTHER_ROOTS(result)
-    else:
-      RETAIN_DEFINED_FAILURE_OR_WAIT(result)
-      # A required retained application remains pending. A terminal live
-      # input follows its existing poison/disposition policy, not an
-      # endless automatic retry and not a fabricated successful checkpoint.
-      APPLY_EXISTING_RESULT_PROGRESS_RULES(result)
+    for each independent targetClosure in canonical order:
+      decision = CLASSIFY_FEEDER_ELIGIBILITY(
+          targetClosure,
+          next,
+          state,
+          surface)
 
-    # Immediate processor work is finished. Recompute affected topology,
-    # selected positions and candidate heads before another input.
+      switch decision:
+        NO_MATCH, STALE, REJECTED, WITHHELD:
+          COMMIT_TERMINAL_FEEDER_PROGRESS(decision)
+
+        DEFERRED_UNAVAILABLE:
+          PERSIST_WAIT(next, targetClosure)
+
+        INVALID_EVIDENCE, UNSUPPORTED:
+          BLOCK_OR_QUARANTINE(next, targetClosure)
+
+        ELIGIBLE_DIRECT, ELIGIBLE_MANDATE:
+          result = CONTRACTS_PROCESS(
+              targetClosure,
+              originalEntry = next,
+              frozenDeliveries = decision.deliveries,
+              requiredResources = decision.resources)
+
+          if result commits:
+            ATOMICALLY_PUBLISH(
+                result.state,
+                result.publicEvents,
+                result.checkpoints,
+                result.sourceSurfaceChanges,
+                terminalInputProgress,
+                commitCompanion)
+          else:
+            RECORD_NONCOMMITTING_RESULT(result)
+
+    # State or topology may have changed. Replan from authoritative state.
 ```
 
-`CANONICAL_MINIMUM_READY_HEAD` is the prescribed minimum across complete external projections and exact retained predecessor obligations. It does not use worker readiness to bypass an earlier required unavailable input. A changed topology invalidates affected cached head selections.
-
-The simple scan and any optimized heap/index implementation MUST agree on selected causes, frozen recipients, exact reads, results, gas/failure and publication. RCP-1 and its fixtures define root isolation; a global reverse-cohort index is never substituted for `DISCOVER_FORWARD_BINDINGS`.
+---
 
 ## Appendix B. Normative checkpoint pseudocode
 
@@ -2472,9 +2496,3 @@ composition-safe semantics.
 ```
 
 That is the complete Coordination boundary between independent external histories and deterministic Blue document processing.
-
-## Appendix E. Rooted checkpoint processing revision
-
-RCP-1 supplies the common normative model for this candidate. In particular, provider completeness and authority remain feeder responsibilities; one already-admitted input is settled by Contracts; older embedded states introduce their own pending successors rather than resetting the root; and unrelated reverse observers do not alter a root's input or wait condition.
-
-The new fixture suite is `../conformance/rooted-processing/`. Its source fixtures and abstract model are not a substitute for the complete registered-runtime, exact-evidence, gas, durable-restart and MyOS product gates. Previous exact histories remain associated with their original profiles.

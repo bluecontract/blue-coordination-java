@@ -1,0 +1,59 @@
+package blue.coordination.internal;
+
+import blue.coordination.api.CoordinationEngine;
+import blue.coordination.api.DocumentId;
+import blue.coordination.api.ExactValue;
+import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.closure.ClosureInvocationInput;
+import blue.language.processor.closure.ClosureProcessResult;
+import blue.language.processor.closure.RootedProcessingContext;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/** Admission-owned history facts retained with a document, independently of its head. */
+record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
+        String admissionInvocationIdentity, String admissionCompanionIdentity) {
+    RootedDocumentHistory {
+        descriptor = Map.copyOf(Objects.requireNonNull(descriptor, "descriptor"));
+        if (!RootedProcessingContext.historyBasisIdentity(descriptor).equals(identity)) {
+            throw new IllegalArgumentException("Rooted history identity differs from its exact descriptor");
+        }
+        Objects.requireNonNull(admissionInvocationIdentity, "admissionInvocationIdentity");
+        Objects.requireNonNull(admissionCompanionIdentity, "admissionCompanionIdentity");
+    }
+
+    /** Called only while staging a fully verified successful admission. */
+    static RootedDocumentHistory admitted(DocumentId document, ExactValue authored,
+            CoordinationEngine.AdmissionPolicy policy, ExternalOrderKey frontier,
+            ClosureInvocationInput input, ClosureProcessResult result,
+            String runtimeSemanticsIdentity) {
+        if (input.operation() != ClosureInvocationInput.Operation.ADMIT_CLOSURE
+                || !result.commits() || result.platformCommitCompanion() == null
+                || !result.invocationIdentity().equals(input.invocationIdentity())
+                || !result.inputClosureIdentity().equals(input.snapshot().closureIdentity())
+                || input.snapshot().managedDocument(ContractsClosureAdapter.closureId(document)) == null) {
+            throw new IllegalArgumentException("History basis requires its complete successful admission evidence");
+        }
+        Map<String, Object> admission;
+        if (policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY) {
+            admission = Map.of("mode", "FULL_HISTORY");
+        } else {
+            List<Object> order = frontier.components();
+            if (order.size() != 3) {
+                throw new IllegalArgumentException("Rooted bounded admission requires an exact logical activation entry");
+            }
+            admission = Map.of("mode", policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
+                            ? "FROM_NOW" : "FROM_FRONTIER",
+                    "lowerExclusiveOrder", Map.of("timestampUs", order.get(0).toString(),
+                            "timelineBlueId", order.get(1), "entryBlueId", order.get(2)));
+        }
+        Map<String, Object> descriptor = Map.of("documentId", document.value(),
+                "initialDocumentBlueId", authored.blueId(),
+                "runtimeSemanticsIdentity", runtimeSemanticsIdentity, "admission", admission);
+        return new RootedDocumentHistory(descriptor,
+                RootedProcessingContext.historyBasisIdentity(descriptor), input.invocationIdentity(),
+                result.platformCommitCompanion().companionIdentity());
+    }
+}

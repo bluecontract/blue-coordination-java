@@ -112,6 +112,20 @@ final class ClosureSubscriptionInventory {
     ClosureSubscriptionInventory apply(
             ClosureProcessResult result,
             Map<DocumentId, Long> expectedGraphGenerations) {
+        return applySelected(result, expectedGraphGenerations, false);
+    }
+
+    ClosureSubscriptionInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations) {
+        if (result.rootedProjection() == null
+                || !expectedGraphGenerations.keySet().equals(new java.util.LinkedHashSet<>(RootedResultScope.members(result)))) {
+            throw new IllegalArgumentException("Owned subscription publication requires exactly the derived owner fences");
+        }
+        return applySelected(result, expectedGraphGenerations, true);
+    }
+
+    private ClosureSubscriptionInventory applySelected(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations, boolean ownedOnly) {
         ClosureProcessResult verified = Objects.requireNonNull(result, "result");
         if (!verified.commits()) {
             throw new IllegalArgumentException(
@@ -129,11 +143,12 @@ final class ClosureSubscriptionInventory {
                     "Graph-generation fences escape the closure result");
         }
         Map<String, ResultingDocument> resultingDocuments =
-                resultingDocuments(verified.resultingDocuments());
+                resultingDocuments(ownedOnly ? verified.rootedProjection().ownedDocuments() : verified.resultingDocuments());
         Indexes next = new Indexes(
                 bySlot, slotByIdentity, byDocument);
         Work work = new Work();
-        for (SubscriptionDelta delta : verified.subscriptionDeltas()) {
+        for (SubscriptionDelta delta : ownedOnly ? verified.rootedProjection().ownedSubscriptionDeltas()
+                : verified.subscriptionDeltas()) {
             SubscriptionState before = delta.beforeSubscription();
             SubscriptionState after = delta.afterSubscription();
             SubscriptionState representative = after != null ? after : before;

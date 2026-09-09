@@ -261,6 +261,23 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 Objects.requireNonNull(sourceYaml, "sourceYaml")));
     }
 
+    synchronized Optional<ExactBlueValue> retainedExactValue(String blueId) {
+        ensureOpen();
+        return engine.retainedExactValue(blueId).map(ExactBlueValue::wrap);
+    }
+
+    synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditClosureExecution(publicationIdentity);
+    }
+
+    synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditClosureInvocation(publicationIdentity);
+    }
+
     synchronized ExactBlueValue exactProviderValue(String sourceYaml) {
         ensureOpen();
         return ExactBlueValue.wrap(engine.exactProviderValue(
@@ -607,6 +624,29 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         TimelineEntry entry = requireCoreEntry(handle);
         return terminalResult(handle, engine.drainThrough(
                 entry.sourceOrderKey()));
+    }
+
+    synchronized DrainResult processRootInput(DocumentHandle root, EntryHandle input) {
+        return processRootInput(root, input, null);
+    }
+
+    synchronized DrainResult processRootInput(DocumentHandle root, EntryHandle input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        ensureOpen();
+        if (input.owner() != owner) {
+            throw new IllegalArgumentException("Entry belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return mapper.map(engine.processRootInput(root.id(), requireCoreEntry(input), policy));
+    }
+
+    synchronized DrainResult processNextRoot(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return retain(mapper.map(engine.processNextRoot(root.id())));
     }
 
     synchronized DrainResult drain() {

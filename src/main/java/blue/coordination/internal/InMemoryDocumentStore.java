@@ -460,6 +460,20 @@ final class InMemoryDocumentStore {
         return Optional.ofNullable(read.barrier());
     }
 
+    /** Resolves a retained rooted terminal through the already authenticated application result. */
+    synchronized Optional<ContractsClosurePublicationReceipt> closureReceiptForApplication(
+            ManagedEpochApplicationReceipt application) {
+        ContractsClosurePublicationReceipt legacy = state.closurePublicationReceipts().get(application.workIdentity());
+        if (legacy != null) return Optional.of(legacy);
+        List<ContractsClosurePublicationReceipt> matches = state.closurePublicationReceipts().values().stream()
+                .filter(receipt -> receipt.attempt().processResult().commits())
+                .filter(receipt -> receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity()))
+                .filter(receipt -> receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
+                .toList();
+        if (matches.size() > 1) throw new IllegalStateException("Ambiguous retained rooted application result");
+        return matches.stream().findFirst();
+    }
+
     synchronized Optional<ManagedEpochApplicationWork> catchUpWork(
             String workIdentity) {
         return Optional.ofNullable(state.catchUpPlans()
@@ -1007,7 +1021,7 @@ final class InMemoryDocumentStore {
                                 exact.documentIds(),
                                 exact.attempt().processResult(),
                                 this.sessions,
-                                "Process receipt");
+                                "Process receipt", exact.publicationDocuments().values());
                     });
             this.closurePublicationReceiptIndex =
                     closurePublicationReceiptIndex(processReceipts);
@@ -1412,10 +1426,17 @@ final class InMemoryDocumentStore {
                 blue.language.processor.closure.ClosureProcessResult result,
                 Map<DocumentId, DocumentSession> sessions,
                 String label) {
+            requireRetainedResult(receiptDocuments, result, sessions, label, RootedResultScope.documents(result));
+        }
+
+        private static void requireRetainedResult(
+                List<DocumentId> receiptDocuments,
+                blue.language.processor.closure.ClosureProcessResult result,
+                Map<DocumentId, DocumentSession> sessions, String label,
+                Collection<ResultingDocument> authoritativeRecords) {
             TreeMap<DocumentId, ResultingDocument> resulting =
                     new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
-            for (ResultingDocument document : Objects.requireNonNull(
-                    result, "receipt result").resultingDocuments()) {
+            for (ResultingDocument document : authoritativeRecords) {
                 DocumentId documentId = DocumentId.of(
                         document.documentId().value());
                 if (resulting.putIfAbsent(documentId, document) != null) {
