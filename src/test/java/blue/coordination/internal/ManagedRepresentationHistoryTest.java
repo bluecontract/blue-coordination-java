@@ -16,11 +16,24 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * The retained pre-rooted fixture runs under its exact original protocol pair.
+ * RootedHistoricalReferenceChainTest and RootedExactInlinePublicSequenceTest
+ * independently exercise the current bundled profile with its owned-publication rules.
+ */
 class ManagedRepresentationHistoryTest {
+    private static BlueCoordination legacyFixtureRuntime() {
+        // Exact source: 22f31f4, contracts-1.0-release.properties; never the mutable bundled default.
+        return BlueCoordination.builder().release(
+                "sha256:77b48506ff7b5ddbab26b98ce9e060e943cb3babf1e6f5511085bbb3c31c4144",
+                "sha256:0d7496790fb87d4589628c81fa8ca5e72b7d955458e20bc393f7837115ecb3b7")
+                .contentDerivedDocumentIds().build();
+    }
+
     @Test
     void authenticatesTheActualIntermediateGapAndRejectsRecomputedWrongAnchors() throws Exception {
         // given
-        try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+        try (BlueCoordination blue = legacyFixtureRuntime()) {
             com.fasterxml.jackson.databind.JsonNode scenario;
             try (var stream = getClass().getResourceAsStream("/historical-representation/scenario.json")) {
                 scenario = new com.fasterxml.jackson.databind.ObjectMapper().readTree(java.util.Objects.requireNonNull(stream));
@@ -138,7 +151,7 @@ class ManagedRepresentationHistoryTest {
     @Test
     void reconnectProcessorProofAgreesWithPublishedSdkTraversal() throws Exception {
         // given
-        try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+        try (BlueCoordination blue = legacyFixtureRuntime()) {
             String template;
             try (var stream = getClass().getResourceAsStream("/historical-representation/reconnect.template.json")) {
                 template = new String(java.util.Objects.requireNonNull(stream).readAllBytes(), StandardCharsets.UTF_8);
