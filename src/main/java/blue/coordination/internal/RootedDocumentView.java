@@ -21,11 +21,14 @@ final class RootedDocumentView {
     private final AffectedClosureSnapshot snapshot;
     private final ClosureSubscriptionInventory subscriptions;
     private final Map<DocumentId, List<SubscriptionDelta.Entry>> routes;
+    private final Map<DocumentId, InMemoryDocumentStore.DocumentHead> publishedHeads;
+    private final AffectedClosureSnapshot retainedSnapshot;
 
     RootedDocumentView(ClosureProcessResult result, ClosureSubscriptionInventory subscriptions,
             Map<DocumentId, List<SubscriptionDelta.Entry>> routes,
             blue.language.processor.ExternalOrderKey logicalBoundary) {
         this.result = Objects.requireNonNull(result, "result");
+        this.publishedHeads = Map.of();
         this.logicalBoundary = logicalBoundary;
         if (!result.commits() || result.commitCompanion() == null
                 || !RootedProcessingContext.CONTRACTS_SPECIFICATION_IDENTITY.equals(
@@ -58,6 +61,41 @@ final class RootedDocumentView {
         if (!snapshot.closureIdentity().equals(result.outputClosureIdentity())) {
             throw new IllegalArgumentException("Rooted view differs from the complete computed result");
         }
+        this.retainedSnapshot = snapshot;
+    }
+
+    private RootedDocumentView(RootedDocumentView calculated,
+            Map<DocumentId, InMemoryDocumentStore.DocumentHead> publishedHeads) {
+        this.result = calculated.result;
+        this.logicalBoundary = calculated.logicalBoundary;
+        this.snapshot = calculated.snapshot;
+        this.subscriptions = calculated.subscriptions;
+        this.routes = calculated.routes;
+        this.publishedHeads = Map.copyOf(publishedHeads);
+        this.publishedHeads.forEach((owner, head) -> requireOwnerHead(owner, head.blueId()));
+        Map<blue.language.processor.closure.DocumentId, Long> epochs = new LinkedHashMap<>();
+        this.publishedHeads.forEach((id, head) -> epochs.put(ContractsClosureAdapter.closureId(id), head.epoch()));
+        this.retainedSnapshot = result.rootedProjection() == null ? snapshot
+                : ClosureEvidenceFactory.rootedRetainedSnapshot(result, epochs);
+    }
+
+    /** Bound only to the fully validated replacement sessions, inside atomic publication. */
+    RootedDocumentView withPublishedHeads(Map<DocumentId, InMemoryDocumentStore.DocumentHead> heads) {
+        return new RootedDocumentView(this, heads);
+    }
+
+    /** Host receipt position may advance for an event-only step without changing the processor epoch. */
+    long retainedEpoch(DocumentId documentId) {
+        var published = publishedHeads.get(documentId);
+        return published == null ? snapshot.managedDocument(ContractsClosureAdapter.closureId(documentId)).epoch()
+                : published.epoch();
+    }
+
+    void requirePublishedHead(DocumentId owner, long epoch, String blueId) {
+        requireOwnerHead(owner, blueId);
+        if (!new InMemoryDocumentStore.DocumentHead(epoch, blueId).equals(publishedHeads.get(owner))) {
+            throw new IllegalArgumentException("Rooted view does not bind its exact retained publication position");
+        }
     }
 
     void requireProcessingBoundary(blue.language.processor.closure.ClosureInvocationInput input,
@@ -76,12 +114,14 @@ final class RootedDocumentView {
     blue.language.processor.ExternalOrderKey logicalBoundary() { return logicalBoundary; }
     ClosureProcessResult result() { return result; }
     AffectedClosureSnapshot snapshot() { return snapshot; }
+    AffectedClosureSnapshot retainedSnapshot() { return retainedSnapshot; }
 
     /** Retains processor provenance only when capture selected this complete, unchanged exact view. */
     boolean matchesCapture(long graphGeneration, List<ManagedDocumentSnapshot> documents,
             List<blue.language.processor.closure.ManagedOccurrenceBinding> occurrences,
             List<blue.language.processor.closure.ComponentSnapshot> components,
             List<blue.language.processor.closure.DocumentId> publicRoots) {
+        AffectedClosureSnapshot snapshot = retainedSnapshot;
         if (snapshot.graphGeneration() != graphGeneration || documents.size() != snapshot.managedDocuments().size()
                 || !ManagedOccurrenceInventory.sameRows(snapshot.occurrences(), occurrences) || !snapshot.components().equals(components)
                 || !snapshot.publicRootDocumentIds().equals(publicRoots)) return false;

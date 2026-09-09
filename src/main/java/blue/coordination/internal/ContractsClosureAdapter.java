@@ -1434,7 +1434,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     synchronized RootedCapturedState captureRootedState(DocumentId requestedRoot) {
         DocumentSession root = documents.require(requestedRoot);
         RootedDocumentView view = Objects.requireNonNull(root.rootedView(), "Root has no retained rooted view");
-        view.requireOwnerHead(requestedRoot, root.currentRepresentation().blueId());
+        view.requirePublishedHead(requestedRoot, root.epoch(), root.currentRepresentation().blueId());
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(view.snapshot().occurrences());
         List<DocumentId> all = view.snapshot().managedDocuments().stream()
                 .map(document -> coordinationId(document.documentId())).toList();
@@ -1467,9 +1467,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 ManagedRootSubscriptionSurface surface = contracts.projectRootSubscriptionSurface(exact.document());
                 EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(view.result(), documentId, surface);
                 capturedView = new CapturedDocument(documentId,
-                        new InMemoryDocumentStore.DocumentHead(exact.epoch(), exact.blueId()),
+                        new InMemoryDocumentStore.DocumentHead(view.retainedEpoch(documentId), exact.blueId()),
                         view.snapshot().graphGeneration(), body, layout, view.routes(documentId),
-                        Math.addExact(exact.epoch(), 1L), exact.initialized(), exact.terminated(),
+                        Math.addExact(view.retainedEpoch(documentId), 1L), exact.initialized(), exact.terminated(),
                         view.subscriptions().statesFor(documentId));
             }
             captured.put(documentId, capturedView);
@@ -1485,7 +1485,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         .allMatch(member -> selected.contains(coordinationId(member)))).toList();
         long graphGeneration = maximumCapturedGraphGeneration(captured.values());
         AffectedClosureSnapshot snapshot = view.matchesCapture(graphGeneration, inputs, forward.occurrences(), components, publicRoots)
-                ? view.snapshot()
+                ? view.retainedSnapshot()
                 : ClosureEvidenceFactory.affectedClosure(graphGeneration, inputs, forward.occurrences(), components, publicRoots);
         return new RootedCapturedState(snapshot, Map.copyOf(captured), localRoutes, view, anchor);
     }
@@ -2120,7 +2120,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             // never substitute that old view for the frozen primary document.
             ClosureInvocationInput expanded = ClosureEvidenceFactory.rootedReadExpansion(current.input(),
                     graphGeneration, new ArrayList<>(existing.values()), new ArrayList<>(rows.values()),
-                    attachmentViews.values().stream().map(RootedDocumentView::snapshot).distinct().toList());
+                    attachmentViews.values().stream().map(RootedDocumentView::retainedSnapshot).distinct().toList());
             ClosureProcessRetryInput retry = retryResolutions.isEmpty() ? null
                     : ClosureProcessRetryInput.derived(expanded, new ArrayList<>(retryResolutions.values()));
             return new CohortInvocation(coordinationIds(members), current.directDeliveries(), expanded, retry,
@@ -2493,8 +2493,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         ExactValue body = objects.put(ExactValue.fromVerifiedClosureResult(view.result(), id), "rooted-attachment-source-view");
         ManagedRootSubscriptionSurface surface = contracts.projectRootSubscriptionSurface(exact.document());
         EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(view.result(), id, surface);
-        return new CapturedDocument(id, new InMemoryDocumentStore.DocumentHead(exact.epoch(), exact.blueId()),
-                view.snapshot().graphGeneration(), body, layout, view.routes(id), Math.addExact(exact.epoch(), 1L),
+        return new CapturedDocument(id, new InMemoryDocumentStore.DocumentHead(view.retainedEpoch(id), exact.blueId()),
+                view.snapshot().graphGeneration(), body, layout, view.routes(id), Math.addExact(view.retainedEpoch(id), 1L),
                 exact.initialized(), exact.terminated(), view.subscriptions().statesFor(id));
     }
 

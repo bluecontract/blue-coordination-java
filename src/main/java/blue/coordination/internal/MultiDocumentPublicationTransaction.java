@@ -949,6 +949,13 @@ final class MultiDocumentPublicationTransaction {
                     throw new IllegalStateException("Selected views must be staged for exactly the derived owners");
                 }
             }
+            Map<DocumentId, InMemoryDocumentStore.DocumentHead> publishedHeads = new LinkedHashMap<>();
+            for (DocumentId owner : viewOwners) {
+                DocumentSession published = Objects.requireNonNull(resultingSessionIndex.get(owner), "Missing published owner");
+                publishedHeads.put(owner, new InMemoryDocumentStore.DocumentHead(
+                        published.epoch(), published.currentRepresentation().blueId()));
+            }
+            RootedDocumentView publishedView = stagedRootedView.withPublishedHeads(publishedHeads);
             for (DocumentId owner : viewOwners) {
                 DocumentSession replacement = Objects.requireNonNull(resultingSessionIndex.get(owner),
                         "Missing rooted view owner").copyForAtomicPublication();
@@ -959,7 +966,7 @@ final class MultiDocumentPublicationTransaction {
                         throw new IllegalStateException("Rooted admission view changed its authenticated history boundary");
                     }
                 }
-                replacement.retainRootedView(stagedRootedView);
+                replacement.retainRootedView(publishedView);
                 if (rootedLocalHistoryPending(owner)
                         && replacement.status() == blue.coordination.api.SessionStatus.READY) replacement.markCatchingUp();
                 var mutation = resultingSessionIndex.put(owner, replacement);

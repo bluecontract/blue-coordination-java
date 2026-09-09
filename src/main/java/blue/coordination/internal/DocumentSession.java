@@ -118,7 +118,7 @@ final class DocumentSession {
     synchronized RootedDocumentView rootedView() { return rootedView; }
 
     synchronized void retainRootedView(RootedDocumentView view) {
-        Objects.requireNonNull(view, "view").requireOwnerHead(documentId, currentRepresentation().blueId());
+        Objects.requireNonNull(view, "view").requirePublishedHead(documentId, epoch, currentRepresentation().blueId());
         ExternalOrderKey boundary = view.logicalBoundary();
         if (!rootedViewPositions.isEmpty()) {
             ExternalOrderKey prior = rootedViewPositions.get(rootedViewPositions.size() - 1).boundary();

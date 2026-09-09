@@ -141,6 +141,20 @@ public final class RootedCalculationFixture {
         return engine.documents().require(root).requireRootedHistory().descriptor();
     }
 
+    /** Validates a proposed retained coordinate on a detached session; never installs it in the store. */
+    public void verifyRetainedPublicationHead(DocumentId root, long epoch, String blueId) {
+        var session = engine.documents().require(root);
+        var view = session.rootedView();
+        var heads = new java.util.LinkedHashMap<DocumentId, InMemoryDocumentStore.DocumentHead>();
+        for (var id : view.result().rootedProjection().ownedDocumentIds()) {
+            DocumentId owner = ContractsClosureAdapter.coordinationId(id);
+            heads.put(owner, new InMemoryDocumentStore.DocumentHead(view.retainedEpoch(owner),
+                    view.snapshot().managedDocument(id).blueId()));
+        }
+        heads.put(root, new InMemoryDocumentStore.DocumentHead(epoch, blueId));
+        session.copyForAtomicPublication().retainRootedView(view.withPublishedHeads(heads));
+    }
+
     /** Tests exact retained-view reuse without installing the proposed capture. */
     public boolean matchesRetainedCapture(DocumentId root, long graphGeneration,
             java.util.List<blue.language.processor.closure.ManagedDocumentSnapshot> documents,
