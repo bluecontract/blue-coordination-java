@@ -429,7 +429,9 @@ final class ProcessEmbeddedComponentIndex {
         Map<Component, NavigableSet<Component>> targets =
                 componentAdjacency(selected, true);
         Map<Component, NavigableSet<Component>> sources =
-                componentAdjacency(selected, false);
+                componentAdjacency(selected);
+        targets.forEach((source, selectedTargets) -> selectedTargets.forEach(
+                target -> sources.get(target).add(source)));
         return targetBeforeSource(selected, targets, sources);
     }
 

@@ -233,7 +233,7 @@ public final class DefaultCoordinationEngine
             contractsClosureProfile = profile;
             contractsActiveSourceTimelines =
                     new ContractsActiveSourceTimelineIndex(
-                            profile.publicRoots());
+                            profile.publicRoots(), metrics);
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,

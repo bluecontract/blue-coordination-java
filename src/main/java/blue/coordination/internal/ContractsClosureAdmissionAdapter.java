@@ -1319,7 +1319,19 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     PublicationFailurePoint
                             .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
             preparedRoutes.publish();
-            activeSourceTimelines.refresh(members, documents);
+            Set<DocumentId> changedSourceSurfaces = new LinkedHashSet<>(
+                    invocation.newDocuments().keySet());
+            for (DocumentId existing : invocation.existingMembers()) {
+                if (!sameActiveTopologyForSources(
+                        before.occurrenceInventory(),
+                        resultingInventory,
+                        List.of(existing))) {
+                    changedSourceSurfaces.add(existing);
+                }
+            }
+            // Existing admission members retain their exact heads and route surfaces.
+            // A new incoming observer does not change the source's forward surface.
+            activeSourceTimelines.refresh(changedSourceSurfaces, documents);
             objects.commit(objectMark);
         } catch (RuntimeException failure) {
             if (storeCommitted) {
