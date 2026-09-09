@@ -44,3 +44,25 @@ gate was relaxed.
 This is a development integration checkpoint. Bare authored-source discovery,
 the complete production adapter, all 34 production obligations, packaged MyOS
 birth/restart verification and the final RC gates remain required.
+
+## Bare-source prerequisites and original operation targets
+
+A newly resolved authored value without an explicit causal-birth declaration
+now remains `UNPROVEN_MANAGED_HISTORY` / `NEEDS_RESOURCES` until its established
+history is available. It cannot reach publication as an unowned document with
+no source lineage. Wrong content under the requested BlueId still fails exact
+identity verification; content availability alone does not create receipts.
+
+`RootedSourceDiscoveryTest.missingHistoryRemainsAWaitUntilCommittedEvidenceIsSupplied`
+proves missing-body wait, strict wrong-body rejection, body-only history wait,
+restart while pending, independent FULL_HISTORY source admission and processing,
+then the original attachment's separate -1→0 and 0→1 applications. It checks
+counter 5, unchanged source receipts and exact retained restart state.
+This is a resource-continuation proof, not completion of automatic discovery;
+the two cold-source/suspension acquisition regressions remain failing obligations.
+
+That test also exposed non-exact routing dropping an entry addressed to the
+source's original authored ID. The routing inventory now includes the session's
+exact retained authored identity. The exact-version branch still accepts only
+the selected current head. `RootedExactVersionRoutingTest` checks the original-ID
+positive, exact-original rejection and unrelated-ID rejection.

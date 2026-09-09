@@ -113,6 +113,7 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                             attempt.resourceDemands(),
                             storeState,
                             selectionPlan));
+            resolution = expansions.requirePrerequisites(current, resolution);
             resolvedSelectorPaths.addAll(
                     resolution.resolvedSelectorPaths());
             if (!resolution.complete()) {
@@ -191,6 +192,11 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
 
     interface ExpansionBuilder<I> {
         InMemoryDocumentStore.OccurrenceResolutionSnapshot captureStoreState();
+
+        default ManagedOccurrenceResolver.Resolution requirePrerequisites(I current,
+                ManagedOccurrenceResolver.Resolution resolution) {
+            return resolution;
+        }
 
         I expand(
                 I current,

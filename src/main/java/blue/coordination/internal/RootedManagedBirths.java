@@ -13,6 +13,25 @@ import java.util.Map;
 final class RootedManagedBirths {
     private RootedManagedBirths() { }
 
+    static ManagedOccurrenceResolver.Resolution requireSourceHistories(ContractsManagedDraftPlan plan,
+            ManagedOccurrenceResolver.Resolution resolution) {
+        var resolved = new ArrayList<ManagedOccurrenceResolver.ResolvedOccurrence>();
+        var missing = new ArrayList<>(resolution.unresolvedDemands());
+        for (var occurrence : resolution.resolvedOccurrences()) {
+            boolean declared = plan != null && occurrence.demand().sourceDocumentId().value()
+                    .equals(plan.targetDocumentId().value()) && plan.expectedOccurrences().stream()
+                    .anyMatch(row -> row.path().equals(occurrence.demand().sourcePath()));
+            if (occurrence.targetKind() == ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED && !declared) {
+                missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
+                        ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
+                        "Bare authored source requires its established FULL_HISTORY basis and committed history: "
+                                + occurrence.targetDocumentId()));
+            } else resolved.add(occurrence);
+        }
+        return new ManagedOccurrenceResolver.Resolution(resolution.demands(), resolved,
+                resolution.resolvedExactNodes(), missing, resolution.resolvedSelectorPaths());
+    }
+
     static ManagedOccurrenceResolver.Resolution bindDeclarations(ContractsClosureAdapter.CohortInvocation current,
             ManagedOccurrenceResolver.Resolution resolution, InMemoryDocumentStore documents) {
         var plan = current.managedDraftPlan();

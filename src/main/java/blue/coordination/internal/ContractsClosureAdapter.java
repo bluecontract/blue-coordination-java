@@ -230,6 +230,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             }
 
                             @Override
+                            public ManagedOccurrenceResolver.Resolution requirePrerequisites(
+                                    CohortInvocation current, ManagedOccurrenceResolver.Resolution resolution) {
+                                return current.rootedEvidence() == null ? resolution
+                                        : RootedManagedBirths.requireSourceHistories(current.managedDraftPlan(), resolution);
+                            }
+
+                            @Override
                             public CohortInvocation expand(
                                     CohortInvocation current,
                                     ManagedOccurrenceResolver.Resolution

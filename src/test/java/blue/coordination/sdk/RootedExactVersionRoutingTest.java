@@ -6,6 +6,29 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedExactVersionRoutingTest {
+    @Test void savedAuthoredTargetRoutesOnlyWithANonExactPrecondition() throws IOException {
+        try (var fixture = new RootedSdkFixture()) {
+            var blue = fixture.blue;
+            var source = fixture.start("source.yaml", "rcp2/source", Map.of());
+            String original = blue.advanced().auditDocument(source.id()).authoredInitialBlueId();
+            assertNotEquals(original, source.snapshot().blueId());
+            var exactOriginal = fixture.appendReference(original, "rcp2/source", "tick", 10, "{}", true);
+            assertTrue(blue.processing().process(source, exactOriginal).entries().stream()
+                    .allMatch(entry -> entry.closures().isEmpty() && entry.publicEvents().isEmpty()));
+            assertEquals(0L, source.snapshot().longAt("/counter"));
+            var accepted = fixture.appendReference(original, "rcp2/source", "tick", 20, "{}", false);
+            assertEquals(EntryDisposition.APPLIED, blue.processing().processNext(source).entry(accepted).disposition());
+            assertEquals(1L, source.snapshot().longAt("/counter"));
+            var history = fixture.history(source);
+            String unknown = blue.values().yaml("name: unrelated identity").blueId();
+            var foreign = fixture.appendReference(unknown, "rcp2/source", "tick", 30, "{}", false);
+            assertTrue(blue.processing().process(source, foreign).entries().stream()
+                    .allMatch(entry -> entry.closures().isEmpty() && entry.publicEvents().isEmpty()));
+            assertEquals(history, fixture.history(source));
+            assertEquals(1L, source.snapshot().longAt("/counter"));
+        }
+    }
+
     @Test void exactTargetUsesTheSelectedViewAfterIndependentSourcePublication() throws IOException {
         try (var fixture = new RootedSdkFixture()) {
             var blue = fixture.blue;

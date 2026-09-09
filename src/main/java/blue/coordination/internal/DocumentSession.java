@@ -300,7 +300,7 @@ final class DocumentSession {
 
     /** Authenticated operation lineage includes representation steps without inventing numbered epochs. */
     synchronized boolean recognizesOperationTarget(String exactBlueId) {
-        return stateEpochs.first(exactBlueId).isPresent()
+        return authoredInitialBlueId.equals(exactBlueId) || stateEpochs.first(exactBlueId).isPresent()
                 || componentRepresentationTransitions.stream().anyMatch(row -> row.beforeBlueId().equals(exactBlueId)
                         || row.afterBlueId().equals(exactBlueId));
     }
