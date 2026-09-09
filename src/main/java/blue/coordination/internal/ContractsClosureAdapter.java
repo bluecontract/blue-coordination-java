@@ -50,6 +50,7 @@ import blue.language.processor.closure.ManagedScopeKey;
 import blue.language.processor.closure.PublicEventOccurrence;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.ScopeAddress;
+import blue.language.processor.closure.SccPartitioner;
 import blue.language.processor.closure.SubscriptionState;
 import blue.language.processor.util.PointerUtils;
 
@@ -1466,6 +1467,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 .filter(delivery -> live.contains(coordinationId(delivery.targetDocumentId()))).toList();
         if (eligibleOnly) deliveries = runtime.eligibleRootDeliveries(snapshot, deliveries, entry);
         if (deliveries.isEmpty()) return null;
+        state = captureDormantDependencies(state, requestedRoot, entry.sourceOrderKey());
+        snapshot = state.snapshot(); captured = state.documents();
+        members = snapshot.managedDocuments().stream().map(d -> coordinationId(d.documentId())).toList();
         ExternalEventCause cause = ClosureEvidenceFactory.externalCause(entry.exactEvent().copyNode(),
                 entry.blueId(), entry.sourceOrderKey(), environment.externalOrderPolicyIdentity());
         ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(snapshot, cause, deliveries,
@@ -1473,6 +1477,66 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return new CohortInvocation(members, deliveries, input, captured, null)
                 .withRootedAnchor(anchor).withRootedEvidence(RootedInvocationEvidence.live(anchor, input,
                         documents, view.subscriptions()));
+    }
+
+    /** Retired slots reserve generations, not the next attachment's source frontier. */
+    private RootedCapturedState captureDormantDependencies(RootedCapturedState state, DocumentId root,
+            ExternalOrderKey boundary) {
+        var prior = state.snapshot();
+        Set<blue.language.processor.closure.DocumentId> selected = new LinkedHashSet<>();
+        Deque<blue.language.processor.closure.DocumentId> pending = new ArrayDeque<>();
+        pending.add(closureId(root));
+        while (!pending.isEmpty()) {
+            var source = pending.removeFirst();
+            if (!selected.add(source)) continue;
+            prior.occurrences().stream().filter(row -> row.sourceDocumentId().equals(source)
+                    && (row.active() || row.pendingHistoricalEpoch() != null))
+                    .forEach(row -> pending.addLast(row.targetDocumentId()));
+        }
+        var inputs = new LinkedHashMap<blue.language.processor.closure.DocumentId, ManagedDocumentSnapshot>();
+        prior.managedDocuments().forEach(document -> inputs.put(document.documentId(), document));
+        var captured = new LinkedHashMap<>(state.documents());
+        var components = new ArrayList<>(prior.components());
+        var rows = new ArrayList<>(prior.occurrences());
+        boolean changed = false;
+        for (var old : prior.managedDocuments()) {
+            if (selected.contains(old.documentId())) continue;
+            var source = documents.require(coordinationId(old.documentId())).rootedViewBefore(boundary);
+            pending.add(old.documentId());
+            while (!pending.isEmpty()) {
+                var id = pending.removeFirst();
+                if (!selected.add(id)) continue;
+                var exact = Objects.requireNonNull(source.retainedSnapshot().managedDocument(id),
+                        "Retained dormant source omits a forward document");
+                var previous = inputs.get(id);
+                var sourceRows = source.snapshot().occurrences().stream()
+                        .filter(row -> row.sourceDocumentId().equals(id)).toList();
+                sourceRows.forEach(row -> pending.addLast(row.targetDocumentId()));
+                var component = source.snapshot().components().stream()
+                        .filter(value -> value.orderedMemberDocumentIds().contains(id)).findFirst().orElseThrow();
+                components.removeIf(value -> !java.util.Collections.disjoint(value.orderedMemberDocumentIds(),
+                        component.orderedMemberDocumentIds()));
+                components.add(component);
+                changed |= !ManagedOccurrenceInventory.sameRows(sourceRows, rows.stream()
+                        .filter(row -> row.sourceDocumentId().equals(id)).toList());
+                rows.removeIf(row -> row.sourceDocumentId().equals(id));
+                rows.addAll(sourceRows);
+                inputs.put(id, new ManagedDocumentSnapshot(id, exact.blueId(), exact.document(),
+                        exact.initialized(), exact.terminated(), previous != null && previous.publicRoot(),
+                        exact.epoch(), exact.componentGeneration()));
+                captured.put(coordinationId(id), captureSelectedDocument(coordinationId(id), source));
+                changed |= previous == null || !previous.blueId().equals(exact.blueId())
+                        || previous.epoch() != exact.epoch()
+                        || previous.componentGeneration() != exact.componentGeneration();
+            }
+        }
+        if (!changed) return state;
+        var graph = ManagedDocumentGraph.fromBindings(inputs.keySet(), rows);
+        var ordered = new SccPartitioner().partition(graph).stream().map(members -> components.stream()
+                .filter(component -> component.orderedMemberDocumentIds().equals(members)).findFirst().orElseThrow()).toList();
+        var snapshot = ClosureEvidenceFactory.affectedClosure(maximumCapturedGraphGeneration(captured.values()),
+                new ArrayList<>(inputs.values()), rows, ordered, prior.publicRootDocumentIds());
+        return new RootedCapturedState(snapshot, Map.copyOf(captured), state.routes(), state.view(), state.anchor());
     }
 
     /** Captures the committed selected view and current fences only for its entry owners. */

@@ -159,9 +159,9 @@ final class ManagedEpochInvocationCapturer {
         // Catch-up owns a verified pending occurrence, which ordinary active
         // selection deliberately excludes. Include its source and complete
         // forward inventory without discovering unrelated reverse consumers.
-        Set<DocumentId> members = ContractsClosureAdapter.forwardExistingMembers(
+        Set<DocumentId> members = rootedState == null ? ContractsClosureAdapter.forwardExistingMembers(
                 connected.members(), List.of(work.sourceDocumentId()),
-                topology.occurrenceInventory(), runtime.metrics());
+                topology.occurrenceInventory(), runtime.metrics()) : new LinkedHashSet<>(connected.members());
         InMemoryDocumentStore.ClosureSnapshot publication = documents
                 .closureSnapshot(members, topology);
         InMemoryDocumentStore.DocumentHead consumerHead = publication

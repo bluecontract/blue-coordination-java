@@ -9,6 +9,44 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** A retired collection key reuses its reserved generation but starts at the saved exact source. */
 final class RootedRecreatedCollectionOccurrenceTest {
+    @Test void retiredGenerationDoesNotFreezeTheNewAttachmentBeforeAnEarlierSourceEntry() throws Exception {
+        try (var f = new RootedSdkFixture()) {
+            var source = f.start("historical-a.yaml", "rcp2/a", Map.of());
+            String original = source.id().value();
+            var parent = f.startYaml(consumer(), "rcp2/b");
+            apply(f, parent, f.append(parent, "rcp2/b", "attach", 100, reference(source.snapshot().blueId())));
+            var first = f.append(source, "rcp2/a", "tick", 200, "{}");
+            apply(f, source, first); apply(f, parent, first);
+            apply(f, parent, f.append(parent, "rcp2/b", "remove", 300, "{}"));
+            apply(f, source, f.append(source, "rcp2/a", "tick", 350, "{}"));
+            var sourceHistory = f.history(source);
+            String sourceHead = source.snapshot().blueId();
+            var readd = f.append(parent, "rcp2/b", "attach", 400, reference(original));
+            var future = f.append(source, "rcp2/a", "tick", 500, "{}");
+            apply(f, parent, readd);
+            boolean ready = false;
+            for (int step = 0; step < 32; step++) {
+                if (f.blue.advanced().auditManagedDocumentReadiness(parent.id()).orElseThrow().ready()) {
+                    ready = true; break;
+                }
+                var result = f.blue.processing().processNext(parent);
+                assertFalse(result.blocked(), result.diagnostic().toString());
+                assertTrue(result.entries().isEmpty(), "Historical work cannot overtake the frozen 400 frontier");
+            }
+            assertTrue(ready);
+            assertEquals(3, parent.snapshot().valueAt("/log").copyNode().getItems().size());
+            assertEquals(1L, parent.snapshot().longAt("/log/1"));
+            assertEquals(2L, parent.snapshot().longAt("/log/2"));
+            assertEquals(sourceHead, source.snapshot().blueId());
+            assertEquals(sourceHistory, f.history(source));
+            CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(2L, parent.snapshot().longAt("/seen"));
+            apply(f, parent, future);
+            assertEquals(3L, parent.snapshot().longAt("/log/3"));
+            assertEquals(sourceHistory, f.history(source));
+        }
+    }
+
     @Test void readdingSavedInitializedSourceTraversesHistoryForTheNewGeneration() throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             var blue = fixture.blue;
