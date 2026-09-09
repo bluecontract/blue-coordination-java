@@ -86,6 +86,12 @@ public final class RootedCalculationFixture {
         engine.runtime().clearSnapshotCaches();
     }
 
+    /** Uses the actual read-only selector and returns only its chosen exact entry. */
+    public java.util.Optional<String> nextLiveInput(DocumentId root) {
+        return engine.contractsClosureAdapter().nextRootLiveInput(root, engine.auditTimelineEntries())
+                .map(batch -> batch.entry().blueId());
+    }
+
     /**
      * Executes the complete immutable acyclic input in a fresh materialized runtime.
      * There is no host publication, rooted projection, cached result, history lookup or

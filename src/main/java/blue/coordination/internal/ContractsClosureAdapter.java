@@ -327,8 +327,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
     synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries) {
         ensureOpen();
         if (!profile.rootedCheckpoint()) throw new IllegalStateException("Rooted selection requires its exact profile");
+        // This synchronized decision cannot publish between candidate entries.
+        // Capture its exact view once; the next decision captures fresh fences.
+        RootedCapturedState state = null;
         for (TimelineEntry entry : entries.stream().sorted(Comparator.comparing(TimelineEntry::sourceOrderKey)).toList()) {
-            CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true);
+            if (state == null) state = captureRootedState(root);
+            CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true, state);
             if (invocation == null) continue;
             FrozenBatch batch = new FrozenBatch(entry, routes.generation(), List.of(invocation));
             if (publicationReceipt(batch, invocation).isEmpty()) return Optional.of(new FrozenBatch(entry,
@@ -1374,7 +1378,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     private CohortInvocation captureRootedView(TimelineEntry entry, DocumentId requestedRoot,
             blue.language.processor.closure.ExecutionPolicy executionPolicy, boolean eligibleOnly) {
-        RootedCapturedState state = captureRootedState(requestedRoot);
+        return captureRootedView(entry, requestedRoot, executionPolicy, eligibleOnly, captureRootedState(requestedRoot));
+    }
+
+    private CohortInvocation captureRootedView(TimelineEntry entry, DocumentId requestedRoot,
+            blue.language.processor.closure.ExecutionPolicy executionPolicy, boolean eligibleOnly,
+            RootedCapturedState state) {
         RootedDocumentView view = state.view();
         AffectedClosureSnapshot snapshot = state.snapshot();
         Map<DocumentId, CapturedDocument> captured = state.documents();
@@ -1382,8 +1391,6 @@ final class ContractsClosureAdapter implements AutoCloseable {
         DocumentId anchor = state.anchor();
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(view.snapshot().occurrences());
         List<DocumentId> members = snapshot.managedDocuments().stream().map(d -> coordinationId(d.documentId())).toList();
-        ExternalEventCause cause = ClosureEvidenceFactory.externalCause(entry.exactEvent().copyNode(),
-                entry.blueId(), entry.sourceOrderKey(), environment.externalOrderPolicyIdentity());
         Set<DocumentId> live = new LinkedHashSet<>();
         Deque<DocumentId> pendingLive = new ArrayDeque<>();
         live.add(requestedRoot); pendingLive.add(requestedRoot);
@@ -1398,6 +1405,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 .filter(delivery -> live.contains(coordinationId(delivery.targetDocumentId()))).toList();
         if (eligibleOnly) deliveries = runtime.eligibleRootDeliveries(snapshot, deliveries, entry);
         if (deliveries.isEmpty()) return null;
+        ExternalEventCause cause = ClosureEvidenceFactory.externalCause(entry.exactEvent().copyNode(),
+                entry.blueId(), entry.sourceOrderKey(), environment.externalOrderPolicyIdentity());
         ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(snapshot, cause, deliveries,
                 executionPolicy, environment);
         return new CohortInvocation(members, deliveries, input, captured, null)
