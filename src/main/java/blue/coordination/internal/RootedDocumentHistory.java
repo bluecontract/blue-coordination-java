@@ -28,7 +28,7 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
     static RootedDocumentHistory admitted(DocumentId document, ExactValue authored,
             CoordinationEngine.AdmissionPolicy policy, ExternalOrderKey frontier,
             ClosureInvocationInput input, ClosureProcessResult result,
-            String runtimeSemanticsIdentity) {
+            String runtimeSemanticsIdentity, RootedBeginningAdmission beginning) {
         if (input.operation() != ClosureInvocationInput.Operation.ADMIT_CLOSURE
                 || !result.commits() || result.platformCommitCompanion() == null
                 || !result.invocationIdentity().equals(input.invocationIdentity())
@@ -37,7 +37,14 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
             throw new IllegalArgumentException("History basis requires its complete successful admission evidence");
         }
         Map<String, Object> admission;
-        if (policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY) {
+        if (beginning != null) {
+            if (policy != CoordinationEngine.AdmissionPolicy.FROM_NOW
+                    || !RootedBeginningAdmission.BOUND.equals(frontier)) {
+                throw new IllegalArgumentException("BEGINNING proof cannot change another admission mode or bound");
+            }
+            beginning.requireFor(input, result);
+            admission = Map.of("mode", "FROM_NOW", "lowerExclusiveOrder", Map.of("kind", "BEGINNING"));
+        } else if (policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY) {
             admission = Map.of("mode", "FULL_HISTORY");
         } else {
             List<Object> order = frontier.components();

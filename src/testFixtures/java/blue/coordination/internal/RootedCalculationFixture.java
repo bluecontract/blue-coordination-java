@@ -140,6 +140,28 @@ public final class RootedCalculationFixture {
                 .verifiesReadOnlyReferenceRebind(result, document, directTargets);
     }
 
+    /**
+     * Runs the original retained terminal's checkpoint-only authority check without publication.
+     * @param key exact retained publication key
+     * @param result proposed complete result
+     * @param document proposed owned representation source
+     * @param proof proposed processor proof identity
+     */
+    public void verifyRetainedCheckpointPosition(String key, ClosureProcessResult result,
+            DocumentId document, String proof) {
+        engine.documents().closurePublicationReceipt(key).orElseThrow().rootedTerminalEvidence()
+                .requireCheckpointReferencePosition(result, document, proof);
+    }
+
+    /**
+     * Matches a proposed position against the actual immutable retained publication chain.
+     * @param position proposed authenticated representation position
+     */
+    public void verifySuppliedRepresentationPosition(
+            blue.language.processor.closure.ManagedRepresentationTransition position) {
+        new ManagedRepresentationHistory(engine.documents()).verifySupplied(position);
+    }
+
     /** The exact processor input/result retained at a real terminal publication. */
     public record RetainedTerminal(String identity, ClosureInvocationInput input, ClosureProcessResult result) { }
 

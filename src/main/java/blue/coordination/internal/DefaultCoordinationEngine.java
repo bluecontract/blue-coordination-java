@@ -251,7 +251,9 @@ public final class DefaultCoordinationEngine
                             documents,
                             routeIndex,
                             profile,
-                            contractsActiveSourceTimelines);
+                            contractsActiveSourceTimelines,
+                            (input, result, project) -> RootedBeginningAdmission.verify(
+                                    input, result, journal, timelines, this::timelineActorKind, project));
             rootedSourceDiscoveries = profile.rootedCheckpoint() ? new RootedSourceDiscoveryCoordinator(this, documents,
                     contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider) : null;
             if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
@@ -2720,6 +2722,7 @@ public final class DefaultCoordinationEngine
         if (latest != null) {
             return latest;
         }
+        if (contractsClosureProfile.rootedCheckpoint()) return RootedBeginningAdmission.BOUND;
         return ExternalOrderKey.of(List.of(
                 BigInteger.ZERO,
                 "contracts-admission",

@@ -126,6 +126,21 @@ final class RootedTerminalEvidence {
                 priorTargets, nextTargets);
     }
 
+    /** Authenticates the original rooted checkpoint class against its retained terminal authority. */
+    void requireCheckpointReferencePosition(ClosureProcessResult result, DocumentId document, String expectedProof) {
+        requireResult(result, rooted.terminalKey());
+        var id = ContractsClosureAdapter.closureId(document);
+        var directTargets = input.directDeliveries().stream()
+                .map(delivery -> ContractsClosureAdapter.coordinationId(delivery.targetDocumentId()))
+                .distinct().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList();
+        if (!entryOwners().contains(document) || directTargets.stream().anyMatch(target ->
+                    result.rootedProjection().owns(ContractsClosureAdapter.closureId(target)))
+                || !result.rootedProjection().checkpointReferenceProofIdentity(id).filter(expectedProof::equals).isPresent()
+                || !verifiesReadOnlyReferenceRebind(result, document, directTargets)) {
+            throw new IllegalArgumentException("Historical checkpoint position lacks its exact original rooted authority");
+        }
+    }
+
     /** Proves the existing pending-target exception against the current immutable history and complete result. */
     boolean verifiesLocalHistoricalRebind(ClosureProcessResult result, DocumentId document,
             blue.coordination.api.ManagedEpochApplicationWork work, InMemoryDocumentStore documents) {

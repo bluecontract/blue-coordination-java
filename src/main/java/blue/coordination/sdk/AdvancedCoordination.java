@@ -61,6 +61,15 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Reads the SDK view retained by one completed source execution, without executing another obligation.
+     * @param expected complete exact descriptor used for that source execution
+     * @return actual mapped drain, or empty for an admission, unknown, or mismatched descriptor
+     */
+    public Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.sourceHistoryProcessingResult(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
      * Applies only the selected root's exact retained prerequisite, failing before processing on mismatch.
      * @param root authoritative root owning the calculation
      * @param workIdentity exact work identity from the read-only processing selection

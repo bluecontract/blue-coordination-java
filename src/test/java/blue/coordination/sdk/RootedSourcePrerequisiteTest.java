@@ -65,7 +65,12 @@ final class RootedSourcePrerequisiteTest {
             var live = one(blue, b, SourceHistoryPrerequisite.Kind.LIVE);
             assertEquals(e15.blueId(), live.entryBlueId());
             assertNotEquals(e50.blueId(), live.entryBlueId());
+            assertTrue(blue.advanced().sourceHistoryProcessingResult(live).isEmpty());
             var sourceResult = blue.advanced().processSourceHistoryPrerequisite(live);
+            var publicResult = blue.advanced().sourceHistoryProcessingResult(live).orElseThrow();
+            assertEquals(List.of(e15.blueId()), publicResult.entries().stream().map(row -> row.entry().blueId()).toList());
+            assertEquals(sourceResult.processing().orElseThrow().committedProcessTransitions(), publicResult.stats().committedTransitions());
+            assertTrue(blue.advanced().sourceHistoryProcessingResult(selectedAdmission).isEmpty());
             assertTrue(sourceResult.admission().isEmpty());
             assertEquals(List.of(e15.blueId()), sourceResult.processing().orElseThrow().processedEntries().stream()
                     .map(entry -> entry.blueId()).toList());

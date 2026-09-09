@@ -86,6 +86,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
+    private final RootedBeginningAdmission.Verifier beginningVerifier;
     private Consumer<MultiDocumentPublicationTransaction.FailurePoint>
             failureInjector = ignored -> { };
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
@@ -118,6 +119,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             OperationRouteIndex routes,
             ContractsClosureProfile profile,
             ContractsActiveSourceTimelineIndex activeSourceTimelines) {
+        this(runtime, objects, layoutBuilder, documents, routes, profile, activeSourceTimelines, null);
+    }
+
+    ContractsClosureAdmissionAdapter(
+            BlueRuntime runtime, WholeObjectStore objects, EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents, OperationRouteIndex routes, ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines,
+            RootedBeginningAdmission.Verifier beginningVerifier) {
+        this.beginningVerifier = beginningVerifier;
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -1023,6 +1033,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             List<DocumentId> members,
             InMemoryDocumentStore.ClosureSnapshot before) {
         ClosureInvocationInput input = invocation.input();
+        RootedBeginningAdmission beginning = null;
+        if (profile.rootedCheckpoint() && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
+                && RootedBeginningAdmission.BOUND.equals(frontier)) {
+            if (beginningVerifier == null) throw new blue.coordination.api.CoordinationException(
+                    blue.coordination.api.CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE,
+                    "BEGINNING admission lacks its owning provider verifier");
+            beginning = beginningVerifier.verify(input, result, contracts::projectRootSubscriptionSurface);
+            beginning.requireFor(input, result);
+        }
         Set<DocumentId> memberSet = new LinkedHashSet<>(members);
         ManagedOccurrenceInventory.DeltaResult inventoryDelta =
                 mergeAdmissionInventory(
@@ -1183,7 +1202,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         result,
                         documentId,
                         policy,
-                        frontier);
+                        frontier, beginning);
                 List<Node> emitted = result.publicEvents().stream()
                         .filter(event -> event.publicRootDocumentId().value()
                                 .equals(documentId.value()))
@@ -1230,7 +1249,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         revision);
                 if (profile.rootedCheckpoint()) {
                     session.establishRootedHistory(RootedDocumentHistory.admitted(documentId,
-                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity()));
+                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity(), beginning));
                 }
                 session.restoreCoordinationState(
                         resulting.terminated()
@@ -1542,8 +1561,12 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             ClosureProcessResult result,
             DocumentId documentId,
             CoordinationEngine.AdmissionPolicy policy,
-            ExternalOrderKey frontier) {
+            ExternalOrderKey frontier, RootedBeginningAdmission beginning) {
         LinkedHashMap<String, Node> fields = new LinkedHashMap<>();
+        if (beginning != null) {
+            beginning.requireFor(input, result);
+            fields.put("beginningAdmissionEvidence", beginning.evidence());
+        }
         fields.put("causeType", new Node().value(
                 "Coordination/Contracts Closure Admission Cause/v1"));
         fields.put("documentId", new Node().value(documentId.value()));

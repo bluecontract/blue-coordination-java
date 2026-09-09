@@ -281,6 +281,30 @@ final class InMemoryTimelineJournal {
                 : new HistoricalStep.CompleteEmpty(evidence);
     }
 
+    /** Authenticates the provider-owned empty journal at a frozen admission boundary. */
+    synchronized void requireBeginningAdmission(boolean requiresProvider) {
+        if (requiresProvider) {
+            var blocked = historicalAvailability.blockedStep();
+            if (blocked.orElse(null) instanceof HistoricalStep.Unavailable unavailable) {
+                throw new blue.coordination.api.CoordinationException(
+                        blue.coordination.api.CoordinationErrorCode.NEEDS_RESOURCES,
+                        unavailable.diagnostic(), null, Map.of("reason", "DEFERRED_UNAVAILABLE"));
+            }
+            if (blocked.orElse(null) instanceof HistoricalStep.InvalidEvidence invalid) {
+                throw new blue.coordination.api.CoordinationException(
+                        blue.coordination.api.CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE,
+                        invalid.diagnostic(), null, Map.of("reason", "INVALID_EVIDENCE"));
+            }
+            if (blocked.isPresent()) throw new IllegalStateException("Unknown historical provider disposition");
+        }
+        if (!byBlueId.isEmpty() || !externalByOrder.isEmpty()) {
+            throw new blue.coordination.api.CoordinationException(
+                    blue.coordination.api.CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE,
+                    "BEGINNING admission does not match the authoritative journal", null,
+                    Map.of("reason", "NONEMPTY_HISTORY"));
+        }
+    }
+
     public synchronized ExternalOrderKey latestExternalOrder() {
         return externalByOrder.isEmpty() ? null : externalByOrder.lastKey();
     }

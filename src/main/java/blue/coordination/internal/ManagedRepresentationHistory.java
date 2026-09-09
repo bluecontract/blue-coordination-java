@@ -86,6 +86,12 @@ final class ManagedRepresentationHistory {
                     anchor.receiptIdentity(), predecessorPosition,
                     publication.managedSurfaceEvidence().originalInvocation(),
                     publication.attempt().processResult(), row.transitionReceiptIdentity());
+            if (proved.rootedCheckpointReferenceProofIdentity().isPresent()) {
+                RootedTerminalEvidence rooted = publication.rootedTerminalEvidence();
+                if (rooted == null) throw new IllegalArgumentException("Original rooted representation authority is unavailable");
+                rooted.requireCheckpointReferencePosition(publication.attempt().processResult(), documentId,
+                        proved.rootedCheckpointReferenceProofIdentity().orElseThrow());
+            }
             if (!proved.transitionReceipt().beforeBlueId().equals(row.beforeBlueId())
                     || !proved.transitionReceipt().afterBlueId().equals(row.afterBlueId())) {
                 throw new IllegalArgumentException("Representation commit differs from its durable source history");
@@ -152,6 +158,19 @@ final class ManagedRepresentationHistory {
         ManagedRepresentationTransition actual = chain.transitions().stream()
                 .filter(row -> row.positionIdentity().equals(supplied.positionIdentity()))
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("Supplied representation position was not committed"));
+        if (!actual.rootedCheckpointReferenceProofIdentity().equals(supplied.rootedCheckpointReferenceProofIdentity())) {
+            throw new IllegalArgumentException("Supplied checkpoint proof differs from its original rooted publication");
+        }
+        if (actual.rootedCheckpointReferenceProofIdentity().isPresent()) {
+            var original = actual.originalResult().rootedProjection();
+            var proposed = supplied.originalResult().rootedProjection();
+            if (original == null || proposed == null || !original.context().identity().equals(proposed.context().identity())
+                    || !original.deliveryBasisIdentity().equals(proposed.deliveryBasisIdentity())
+                    || !original.invocationIdentity().equals(proposed.invocationIdentity())
+                    || !original.companionIdentity().equals(proposed.companionIdentity())) {
+                throw new IllegalArgumentException("Supplied checkpoint position changes original rooted ownership or companion");
+            }
+        }
         if (!actual.originalInput().invocationIdentity().equals(supplied.originalInput().invocationIdentity())
                 || !actual.originalResult().outputClosureIdentity().equals(supplied.originalResult().outputClosureIdentity())
                 || !actual.originalResult().platformCommitCompanion().companionIdentity().equals(
