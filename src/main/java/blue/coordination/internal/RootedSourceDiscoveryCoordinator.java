@@ -183,8 +183,12 @@ final class RootedSourceDiscoveryCoordinator {
                     window.identity(), null, window.evidence());
         }
         var next = new RootedCheckpointDriver(documents, adapter).select(candidate.source(), journal.entries());
-        if (next.blocked()) return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
-                window.identity(), "Source has unproven earlier history", window.evidence());
+        if (next.blocked()) {
+            String reason = RootedJoinPrerequisites.pendingBefore(candidate.source(),
+                    source.rootedViewBefore(candidate.cutoff()), candidate.cutoff(), documents);
+            return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
+                    window.identity(), reason == null ? "Source has unproven earlier history" : reason, window.evidence());
+        }
         ExternalOrderKey origin;
         SourceHistoryPrerequisite.Kind kind;
         if (next.live() != null) { origin = next.live().entry().sourceOrderKey(); kind = SourceHistoryPrerequisite.Kind.LIVE; }

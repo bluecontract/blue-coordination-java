@@ -55,7 +55,7 @@ final class RootedJoinPrerequisites {
     }
 
     /** Pending work is anchored by its occurrence and activation, not by an old receipt's timestamp. */
-    private static String pendingBefore(DocumentId source, RootedDocumentView view,
+    static String pendingBefore(DocumentId source, RootedDocumentView view,
             ExternalOrderKey boundary, InMemoryDocumentStore documents) {
         var snapshot = view.snapshot();
         var sourceId = ContractsClosureAdapter.closureId(source);
