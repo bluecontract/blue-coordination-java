@@ -1535,8 +1535,44 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return new RootedCapturedState(snapshot, Map.copyOf(captured), localRoutes, view, anchor);
     }
 
-    record RootedCapturedState(AffectedClosureSnapshot snapshot, Map<DocumentId, CapturedDocument> documents,
-                               OperationRouteIndex routes, RootedDocumentView view, DocumentId anchor) { }
+    /** Opaque result of the exact selected-view capture, including its current entry-owner projection. */
+    static final class RootedCapturedState {
+        private final AffectedClosureSnapshot snapshot;
+        private final Map<DocumentId, CapturedDocument> documents;
+        private final OperationRouteIndex routes;
+        private final RootedDocumentView view;
+        private final DocumentId anchor;
+
+        private RootedCapturedState(AffectedClosureSnapshot snapshot, Map<DocumentId, CapturedDocument> documents,
+                OperationRouteIndex routes, RootedDocumentView view, DocumentId anchor) {
+            this.snapshot = snapshot;
+            this.documents = documents;
+            this.routes = routes;
+            this.view = view;
+            this.anchor = anchor;
+        }
+
+        AffectedClosureSnapshot snapshot() { return snapshot; }
+        Map<DocumentId, CapturedDocument> documents() { return documents; }
+        OperationRouteIndex routes() { return routes; }
+        RootedDocumentView view() { return view; }
+        DocumentId anchor() { return anchor; }
+
+        void requireRetainedInput(ClosureInvocationInput input, InMemoryDocumentStore store) {
+            requireCurrentView(store);
+            if (view.logicalBoundary() == null || input.snapshot() != snapshot) {
+                throw new IllegalArgumentException("Local history input is not the exact verified root capture");
+            }
+        }
+
+        void requireCurrentView(InMemoryDocumentStore store) {
+            DocumentSession root = store.require(anchor);
+            if (root.rootedView() != view) {
+                throw new IllegalArgumentException("Local history must retain the exact captured root and its frozen frontier");
+            }
+            view.requirePublishedHead(anchor, root.epoch(), root.currentRepresentation().blueId());
+        }
+    }
 
     /** Returns the proof-verified provider shell required for cyclic calls. */
     private Node invocationDocument(ExactValue current) {

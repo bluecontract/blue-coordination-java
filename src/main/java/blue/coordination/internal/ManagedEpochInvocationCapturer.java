@@ -118,7 +118,9 @@ final class ManagedEpochInvocationCapturer {
                         "Managed application occurrence retired before "
                                 + work.workIdentity()));
         ManagedRepresentationCause representation = work.representationCause().orElse(null);
-        if (representation != null) new ManagedRepresentationHistory(documents).verifyCause(representation, target,
+        ContractsClosureAdapter.RootedCapturedState rootedState = profile.rootedCheckpoint()
+                ? host.captureRootedState(work.consumerDocumentId()) : null;
+        if (representation != null) new ManagedRepresentationHistory(documents).forCapturedRoot(rootedState).verifyCause(representation, target,
                 profile.rootedCheckpoint() ? Objects.requireNonNull(documents.catchUpPlansSnapshot()
                         .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder() : null);
         long fromEpoch = representation == null ? Math.subtractExact(work.sourceEpoch(), 1L) : work.sourceEpoch();
@@ -145,8 +147,6 @@ final class ManagedEpochInvocationCapturer {
                             + work.workIdentity());
         }
 
-        ContractsClosureAdapter.RootedCapturedState rootedState = profile.rootedCheckpoint()
-                ? host.captureRootedState(work.consumerDocumentId()) : null;
         ContractsClosureAdapter.ConnectedSelection connected = rootedState == null
                 ? ContractsClosureAdapter.initialConnectedSelection(topology.occurrenceInventory(),
                         topology.closureSubscriptions(), work.consumerDocumentId())
@@ -281,7 +281,7 @@ final class ManagedEpochInvocationCapturer {
             var boundary = Objects.requireNonNull(documents.catchUpPlansSnapshot()
                     .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder();
             var selectedSource = snapshot.managedDocument(ContractsClosureAdapter.closureId(work.sourceDocumentId()));
-            var history = new ManagedRepresentationHistory(documents);
+            var history = new ManagedRepresentationHistory(documents).forCapturedRoot(rootedState);
             if (work.successorRepresentationCause().isPresent()) {
                 history.verifySuccessor(work, selectedSource, boundary);
                 cause = ((ManagedRevisionCause) cause).withSuccessorRepresentationCause(

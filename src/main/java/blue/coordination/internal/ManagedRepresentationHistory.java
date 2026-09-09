@@ -18,21 +18,66 @@ final class ManagedRepresentationHistory {
     private final ContractsClosurePublicationReceipt stagedPublication;
     private final Map<DocumentId, ManagedCatchUpPlanner.Head> stagedHeads;
     private final Map<DocumentId, ManagedEpochReceipt> stagedReceipts;
+    private final ContractsClosureAdapter.RootedCapturedState capturedRoot;
     ManagedRepresentationHistory(InMemoryDocumentStore documents) {
-        this(documents, null, Map.of(), Map.of());
+        this(documents, null, Map.of(), Map.of(), null);
     }
     private ManagedRepresentationHistory(InMemoryDocumentStore documents,
             ContractsClosurePublicationReceipt publication, Map<DocumentId, ManagedCatchUpPlanner.Head> heads,
-            Map<DocumentId, ManagedEpochReceipt> receipts) {
+            Map<DocumentId, ManagedEpochReceipt> receipts, ContractsClosureAdapter.RootedCapturedState capturedRoot) {
         this.documents = Objects.requireNonNull(documents, "documents");
         this.stagedPublication = publication;
         this.stagedHeads = Map.copyOf(heads);
         this.stagedReceipts = Map.copyOf(receipts);
+        this.capturedRoot = capturedRoot;
+    }
+    ManagedRepresentationHistory forCapturedRoot(ContractsClosureAdapter.RootedCapturedState captured) {
+        if (captured == null) return this;
+        captured.requireCurrentView(documents);
+        return new ManagedRepresentationHistory(documents, stagedPublication, stagedHeads, stagedReceipts, captured);
     }
     /** Used only to prepare work inside the same atomic publication; execution reauthenticates durable membership. */
     ManagedRepresentationHistory afterPublication(ContractsClosurePublicationReceipt publication,
             Map<DocumentId, ManagedCatchUpPlanner.Head> heads, Map<DocumentId, ManagedEpochReceipt> receipts) {
-        return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts);
+        return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts, capturedRoot);
+    }
+    /** A co-owned committed position is already part of this exact causal view, not an independent future head. */
+    private RootedDocumentView sourceView(DocumentId source, blue.language.processor.ExternalOrderKey boundary) {
+        DocumentSession session = documents.require(source);
+        if (capturedRoot != null && boundary.equals(capturedRoot.view().logicalBoundary())
+                && capturedRoot.view().result().rootedProjection() != null
+                && capturedRoot.view().result().rootedProjection().owns(ContractsClosureAdapter.closureId(source))) {
+            capturedRoot.requireCurrentView(documents);
+            var selected = capturedRoot.snapshot().managedDocument(ContractsClosureAdapter.closureId(source));
+            capturedRoot.view().requirePublishedHead(source, selected.epoch(), selected.blueId());
+            // Reject a constructed result/view even when all its endpoints and hashes agree.
+            session.rootedPublicationPrefix(capturedRoot.view());
+            return capturedRoot.view();
+        }
+        if (capturedRoot != null && boundary.equals(capturedRoot.view().logicalBoundary())) {
+            capturedRoot.requireCurrentView(documents);
+            var selected = capturedRoot.snapshot().managedDocument(ContractsClosureAdapter.closureId(source));
+            if (selected != null) {
+                var evidence = documents.managedEpochEvidence(source, selected.epoch());
+                if (evidence.receipt() != null && evidence.transitionReceipt() != null
+                        && evidence.receipt().afterBlueId().equals(selected.blueId())
+                        && evidence.receipt().sourceOrder().filter(boundary::equals).isPresent()) {
+                    var original = session.rootedViewForInvocation(evidence.transitionReceipt().sourceInvocationIdentity());
+                    var projection = original.result().rootedProjection();
+                    if (boundary.equals(original.logicalBoundary()) && projection != null
+                            && projection.owns(ContractsClosureAdapter.closureId(source))
+                            && projection.owns(ContractsClosureAdapter.closureId(capturedRoot.anchor()))
+                            && documents.require(capturedRoot.anchor()).rootedPublicationPrefix(capturedRoot.view())
+                                    .contains(original.result().invocationIdentity())) {
+                        // A split keeps the source position that this root already
+                        // co-published. Later source-only positions are not imported.
+                        original.requirePublishedHead(source, selected.epoch(), selected.blueId());
+                        return original;
+                    }
+                }
+            }
+        }
+        return session.rootedViewBefore(boundary);
     }
     private ManagedEpochReceipt receipt(DocumentId id, long epoch) {
         ManagedEpochReceipt staged = stagedReceipts.get(id);
@@ -122,7 +167,7 @@ final class ManagedRepresentationHistory {
             blue.language.processor.ExternalOrderKey boundary) {
         Chain full = at(documentId, epoch);
         if (full.nextRevisionReceiptIdentity() != null && (cursor == null || cursor.nextRevisionReceiptIdentity() == null)) {
-            var view = documents.require(documentId).rootedViewBefore(boundary);
+            var view = sourceView(documentId, boundary);
             var selected = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(documentId));
             var next = receipt(documentId, Math.addExact(epoch, 1L));
             if (selected != null && selected.epoch() == epoch
@@ -132,7 +177,7 @@ final class ManagedRepresentationHistory {
             }
         }
         if (cursor == null && full.nextRevisionReceiptIdentity() == null) {
-            var view = documents.require(documentId).rootedViewBefore(boundary);
+            var view = sourceView(documentId, boundary);
             var selected = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(documentId));
             if (selected != null && selected.epoch() == epoch) {
                 var prefix = prefixAt(full, view, boundary);
@@ -170,7 +215,7 @@ final class ManagedRepresentationHistory {
     Optional<ManagedRepresentationCause> terminalSuccessor(DocumentId source, long epoch, String occurrence,
             blue.language.processor.ExternalOrderKey boundary,
             java.util.function.Function<String, blue.language.provider.CyclicSetProof> proofs) {
-        var view = documents.require(source).rootedViewBefore(boundary);
+        var view = sourceView(source, boundary);
         var selected = Objects.requireNonNull(view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(source)));
         return terminalSuccessor(source, epoch, occurrence, boundary, selected, proofs);
     }
@@ -189,10 +234,14 @@ final class ManagedRepresentationHistory {
             return Optional.empty();
         }
         DocumentSession session = documents.require(source);
-        RootedDocumentView sourceView = session.rootedViewBefore(boundary);
+        RootedDocumentView sourceView = sourceView(source, boundary);
         var sourceAtView = sourceView.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(source));
         if (sourceAtView == null || sourceAtView.epoch() != epoch || !sourceAtView.blueId().equals(selected.blueId())) {
-            throw new IllegalArgumentException("Numbered terminal source differs from its frozen source publication");
+            throw new IllegalArgumentException("Numbered terminal source differs from its frozen source publication: source="
+                    + source + " epoch=" + epoch + " selected=" + selected.blueId() + " boundary=" + boundary
+                    + " frozenEpoch=" + (sourceAtView == null ? null : sourceAtView.epoch())
+                    + " frozenBlueId=" + (sourceAtView == null ? null : sourceAtView.blueId())
+                    + " sourcePublication=" + sourceView.result().invocationIdentity());
         }
         List<ManagedRepresentationTransition> prefix = prefixAt(complete, sourceView, boundary);
         String lastBlueId = prefix.isEmpty() ? complete.anchor().afterBlueId()
@@ -242,7 +291,7 @@ final class ManagedRepresentationHistory {
         var session = documents.require(chain.documentId());
         // A view's stored position also clamps earlier causal dates to its existing frontier.
         // Comparing with rootedViewBefore proves that it is no later than this exact cutoff.
-        var eligible = session.rootedPublicationPrefix(session.rootedViewBefore(boundary));
+        var eligible = session.rootedPublicationPrefix(sourceView(chain.documentId(), boundary));
         if (!eligible.contains(view.result().invocationIdentity())) {
             throw new IllegalArgumentException("Representation target is after the frozen attachment boundary");
         }

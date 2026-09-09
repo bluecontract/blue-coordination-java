@@ -58,6 +58,7 @@ final class RootedLocalHistory {
                 .findFirst().orElseThrow(() -> new IllegalStateException("Retained local barrier has no exact causal entry"));
         var choices = new ArrayList<Step>();
         for (var target : pending) {
+            if (requiresIndependentReturnSettlement(state, target, boundary, documents)) return new Selection(true, null);
             Step next = capture(root, state, target, anchor, documents, objects, policy, environment);
             if (next == null) return new Selection(true, null);
             choices.add(next);
@@ -66,6 +67,36 @@ final class RootedLocalHistory {
                 .thenComparing(step -> step.target().occurrenceIdentity())
                 .thenComparingLong(step -> step.work().sourceEpoch()));
         return new Selection(true, choices.get(0));
+    }
+
+    /** A pending return to this owner is a real cyclic prerequisite, not one-way observer lag. */
+    private static boolean requiresIndependentReturnSettlement(ContractsClosureAdapter.RootedCapturedState state,
+            ManagedOccurrenceBinding target, ExternalOrderKey boundary, InMemoryDocumentStore documents) {
+        if (!state.snapshot().publicRootDocumentIds().contains(target.targetDocumentId())) return false;
+        var consumer = ContractsClosureAdapter.coordinationId(target.sourceDocumentId());
+        var session = documents.find(consumer).orElse(null);
+        if (session == null || session.rootedView() == null) return false;
+        var current = session.rootedView();
+        current.requirePublishedHead(consumer, session.epoch(), session.currentRepresentation().blueId());
+        var pending = current.snapshot().occurrences().stream().filter(row ->
+                row.occurrenceIdentity().equals(target.occurrenceIdentity())
+                        && row.activationGeneration() == target.activationGeneration()
+                        && row.sourceDocumentId().equals(target.sourceDocumentId())
+                        && row.targetDocumentId().equals(target.targetDocumentId())
+                        && !row.active() && row.pendingHistoricalEpoch() != null).findFirst().orElse(null);
+        if (pending == null) return false;
+        return documents.catchUpPlans(consumer).stream().filter(plan ->
+                plan.targetOccurrenceIdentity().equals(pending.occurrenceIdentity())
+                        && plan.activationGeneration() == pending.activationGeneration()
+                        && plan.sourceDocumentId().value().equals(pending.targetDocumentId().value())
+                        && plan.targetPath().equals(pending.sourcePath())
+                        && plan.nextSourceEpoch() == pending.pendingHistoricalEpoch() + 1L
+                        && plan.status() != ManagedCatchUpStatus.COMPLETE
+                        && plan.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED)
+                .anyMatch(plan -> documents.catchUpBarrier(plan.barrierIdentity()).filter(barrier ->
+                        barrier.consumerDocumentId().equals(consumer)
+                                && barrier.planIdentities().contains(plan.planIdentity())
+                                && barrier.causeOrder().compareTo(boundary) <= 0).isPresent());
     }
 
     private static Step capture(DocumentId root, ContractsClosureAdapter.RootedCapturedState state,
@@ -79,7 +110,7 @@ final class RootedLocalHistory {
         long from = target.pendingHistoricalEpoch();
         ManagedRepresentationCause representation = null;
         if (from >= 0) {
-            var history = new ManagedRepresentationHistory(documents);
+            var history = new ManagedRepresentationHistory(documents).forCapturedRoot(state);
             var chain = history.atRootedCaptured(source, from, target.pendingRepresentationCursor(), anchor.sourceOrderKey());
             var next = chain.next(target.pendingRepresentationCursor(), target.expectedTargetBlueId());
             if (next.isPresent()) {
@@ -127,7 +158,7 @@ final class RootedLocalHistory {
                 target.activationGeneration(), selectedConsumer.epoch(), selectedConsumer.blueId(), state.snapshot().graphGeneration());
         if (representation != null) work = ManagedEpochApplicationWork.identifiedRepresentation(work, representation);
         else if (epoch == selectedSource.epoch()) {
-            var history = new ManagedRepresentationHistory(documents);
+            var history = new ManagedRepresentationHistory(documents).forCapturedRoot(state);
             var successor = history.terminalSuccessor(source, epoch, target.occurrenceIdentity(),
                     anchor.sourceOrderKey(), selectedSource,
                     id -> objects.cyclicSetProofFor(id).proof().orElse(null));
@@ -151,7 +182,7 @@ final class RootedLocalHistory {
         String position = target.pendingRepresentationCursor() != null ? target.pendingRepresentationCursor().positionIdentity()
                 : from < 0 ? documents.require(source).requireRootedHistory().identity()
                         : documents.managedEpochEvidence(source, from).receipt().receiptIdentity();
-        var rooted = RootedInvocationEvidence.retainedLocal(state.anchor(), input, documents, target, position, state.view(), work);
+        var rooted = RootedInvocationEvidence.retainedLocal(state, input, documents, target, position, work);
         var members = state.documents().keySet().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList();
         var owners = state.snapshot().publicRootDocumentIds().stream().map(ContractsClosureAdapter::coordinationId).toList();
         var invocation = new ContractsClosureAdapter.CohortInvocation(members, List.of(), input, null,

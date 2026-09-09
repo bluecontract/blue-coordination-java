@@ -65,17 +65,13 @@ record RootedInvocationEvidence(RootedProcessingContext context, String delivery
                 .capturePublicationFences(input, documents);
     }
 
-    static RootedInvocationEvidence retainedLocal(DocumentId anchor, ClosureInvocationInput input,
+    static RootedInvocationEvidence retainedLocal(ContractsClosureAdapter.RootedCapturedState state, ClosureInvocationInput input,
             InMemoryDocumentStore documents, blue.language.processor.closure.ManagedOccurrenceBinding target,
-            String sourcePositionIdentity, RootedDocumentView origin, blue.coordination.api.ManagedEpochApplicationWork work) {
-        if (documents.require(anchor).rootedView() != origin
-                || !origin.snapshot().closureIdentity().equals(input.snapshot().closureIdentity())
-                || origin.logicalBoundary() == null) {
-            throw new IllegalArgumentException("Local history must retain the exact committed root and its frozen frontier");
-        }
-        var retained = retained(anchor, input, documents, target, sourcePositionIdentity);
+            String sourcePositionIdentity, blue.coordination.api.ManagedEpochApplicationWork work) {
+        state.requireRetainedInput(input, documents);
+        var retained = retained(state.anchor(), input, documents, target, sourcePositionIdentity);
         return new RootedInvocationEvidence(retained.context(), retained.deliveryBasisIdentity(),
-                retained.invocationIdentity(), retained.baseInvocationIdentity(), retained.histories(), origin, Objects.requireNonNull(work), retained.publicationFences());
+                retained.invocationIdentity(), retained.baseInvocationIdentity(), retained.histories(), state.view(), Objects.requireNonNull(work), retained.publicationFences());
     }
 
     /** Operational source fences never replace selected values or enter their semantic identity. */
