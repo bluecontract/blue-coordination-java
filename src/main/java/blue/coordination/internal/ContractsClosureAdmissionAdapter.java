@@ -558,7 +558,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         Set<DocumentId> existingMembers = connectedExistingMembers(
                 current.existingMembers(),
                 selected.existingTargets(),
-                indexed.occurrenceInventory());
+                indexed.occurrenceInventory(),
+                profile.rootedCheckpoint());
         InMemoryDocumentStore.ClosureSnapshot durable =
                 documents.admissionSnapshot(existingMembers);
         requireIndexGenerations(indexed, durable);
@@ -827,7 +828,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private static Set<DocumentId> connectedExistingMembers(
             Collection<DocumentId> original,
             Collection<DocumentId> targets,
-            ManagedOccurrenceInventory inventory) {
+            ManagedOccurrenceInventory inventory,
+            boolean rooted) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -849,6 +851,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     pending.addLast(target);
                 }
             }
+            // Rooted admission follows declared forward views. Incoming
+            // observers are bookkeeping, unless a forward return path reaches them.
+            if (rooted) continue;
             // Active containing occurrences participate in the same exact
             // publication. Inactive reservations retain forward evidence but
             // do not make their containing documents live participants.
