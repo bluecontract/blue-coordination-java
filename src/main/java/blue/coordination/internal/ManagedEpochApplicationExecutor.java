@@ -413,10 +413,17 @@ final class ManagedEpochApplicationExecutor {
                     EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(result, entry.getKey(), before.layout(), projected);
                     ContractsClosureAdapter.requireExactRootSubscriptionSurface(entry.getKey(), projected,
                             host.subscriptionStatesFor(resultingClosureSubscriptions, entry.getKey()));
-                    SubscriptionDelta delta = ContractsClosureAdapter.routeDelta(before.activeSubscriptions(),
-                            projected.externalSubscriptions(), after.epoch(), causalOrder);
-                    List<SubscriptionDelta.Entry> localRoutes = DocumentTransitionProcessor.applyManagedRootSubscriptionDelta(
-                            before.activeSubscriptions(), delta, after.epoch(), causalOrder, runtime.metrics());
+                    List<SubscriptionDelta.Entry> localRoutes;
+                    if (before.head().epoch() == after.epoch() && before.head().blueId().equals(after.afterBlueId())) {
+                        ContractsClosureAdapter.requireUnchangedRouteSurface(entry.getKey(), before.activeSubscriptions(),
+                                projected.externalSubscriptions());
+                        localRoutes = before.activeSubscriptions();
+                    } else {
+                        SubscriptionDelta delta = ContractsClosureAdapter.routeDelta(before.activeSubscriptions(),
+                                projected.externalSubscriptions(), after.epoch(), causalOrder);
+                        localRoutes = DocumentTransitionProcessor.applyManagedRootSubscriptionDelta(
+                                before.activeSubscriptions(), delta, after.epoch(), causalOrder, runtime.metrics());
+                    }
                     CheckpointDomainEvidence.retainAll(localRoutes, objects);
                     objects.put(layout.semanticRoot(), "rooted-retained-local-view");
                     viewRoutes.put(entry.getKey(), localRoutes);
