@@ -640,6 +640,26 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return mapper.map(engine.processRootInput(root.id(), requireCoreEntry(input), policy));
     }
 
+    synchronized List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this)
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        exactNodeProvider.beginLookupScope();
+        try { return engine.sourceHistoryPrerequisites(root.id()); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        exactNodeProvider.beginLookupScope();
+        try {
+            var result = engine.processSourceHistoryPrerequisite(Objects.requireNonNull(expected));
+            result.processing().ifPresent(processing -> retain(mapper.map(processing)));
+            return result;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+
     synchronized DrainResult processNextRoot(DocumentHandle root) {
         return processNextRoot(root, null);
     }

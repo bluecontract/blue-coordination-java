@@ -41,6 +41,26 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Selects exact source-owned work required by a genuinely suspended root input.
+     * Each descriptor represents one source action; provider absence remains an explicit wait.
+     * @param root requesting managed root
+     * @return individual fenced prerequisites; empty when none are pending
+     */
+    public List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentHandle root) {
+        return runtime.sourceHistoryPrerequisites(Objects.requireNonNull(root, "root"));
+    }
+
+    /**
+     * Executes one selected source prerequisite without retrying its waiting parent.
+     * @param expected exact descriptor from sourceHistoryPrerequisites
+     * @return actual source result and its independent publication/meter evidence
+     */
+    public blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.processSourceHistoryPrerequisite(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
      * Applies only the selected root's exact retained prerequisite, failing before processing on mismatch.
      * @param root authoritative root owning the calculation
      * @param workIdentity exact work identity from the read-only processing selection

@@ -240,9 +240,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
                             @Override
                             public ManagedOccurrenceResolver.Resolution requirePrerequisites(
-                                    CohortInvocation current, ManagedOccurrenceResolver.Resolution resolution) {
+                                    CohortInvocation current, ClosureAttemptResult attempt, ManagedOccurrenceResolver.Resolution resolution) {
                                 if (current.rootedEvidence() == null) return resolution;
-                                var histories = RootedManagedBirths.requireSourceHistories(current.managedDraftPlan(), resolution);
+                                var acquired = sourceDiscoveries == null ? resolution
+                                        : sourceDiscoveries.requirePrerequisites(current, attempt, resolution);
+                                var histories = RootedManagedBirths.requireSourceHistories(current.managedDraftPlan(), acquired);
                                 if (!histories.complete()) return histories;
                                 histories = RootedManagedBirths.bindDeclarations(current, histories, documents);
                                 return RootedJoinPrerequisites.requireEarlierSourceWork(current, histories, documents,
@@ -324,6 +326,36 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     invocations);
         });
     }
+
+    private RootedSourceDiscoveryCoordinator sourceDiscoveries;
+
+    synchronized void sourceDiscoveryCoordinator(RootedSourceDiscoveryCoordinator coordinator) {
+        if (sourceDiscoveries != null) throw new IllegalStateException("Source discovery coordinator already installed");
+        sourceDiscoveries = Objects.requireNonNull(coordinator);
+    }
+
+    /** Required providers come from the exact pre-boundary forward source view. */
+    synchronized List<SourceDiscoverySurface> sourceDiscoverySurfaces(RootedDocumentView view, DocumentId root) {
+        var pending = new java.util.ArrayDeque<blue.language.processor.closure.DocumentId>();
+        var visited = new java.util.TreeSet<blue.language.processor.closure.DocumentId>();
+        pending.add(closureId(root));
+        while (!pending.isEmpty()) {
+            var current = pending.removeFirst();
+            if (!visited.add(current)) continue;
+            view.snapshot().occurrences().stream().filter(row -> row.active() && row.sourceDocumentId().equals(current))
+                    .forEach(row -> pending.addLast(row.targetDocumentId()));
+        }
+        var surfaces = new ArrayList<SourceDiscoverySurface>();
+        for (var id : visited) {
+            var exact = Objects.requireNonNull(view.snapshot().managedDocument(id), "Missing frozen source document");
+            var contractsSurface = contracts.projectRootSubscriptionSurface(exact.document());
+            surfaces.add(new SourceDiscoverySurface(coordinationId(id), exact.blueId(),
+                    RoutingSurface.fromManagedRootContracts(contractsSurface.effectiveRootContracts())));
+        }
+        return List.copyOf(surfaces);
+    }
+
+    record SourceDiscoverySurface(DocumentId documentId, String blueId, RoutingSurface routing) { }
 
     /** Captures one supplied input relative to an explicitly selected root. */
     synchronized FrozenBatch captureRoot(DocumentId requestedRoot, TimelineEntry entry) {

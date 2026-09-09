@@ -161,6 +161,8 @@ public final class DefaultCoordinationEngine
     private SequentialDrainCoordinator drainCoordinator;
     private ContractsRootFeederCoordinator contractsFeederCoordinator;
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
+    private final RootedSourceDiscoveryCoordinator rootedSourceDiscoveries;
+    private final blue.coordination.sdk.ExactNodeProvider rootedSourceProvider;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
     private final Map<String, String> timelineActorKinds =
             new LinkedHashMap<>();
@@ -178,6 +180,7 @@ public final class DefaultCoordinationEngine
             ContractsBootstrap contractsBootstrap,
             blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
         metrics = new EngineMetrics();
+        rootedSourceProvider = exactNodeProvider == null ? id -> Optional.empty() : exactNodeProvider;
         objects = new WholeObjectStore(metrics);
         applicationExactNodeProvider = exactNodeProvider == null
                 ? null
@@ -217,6 +220,7 @@ public final class DefaultCoordinationEngine
             contractsRecoveryState = null;
             contractsFeederCoordinator = null;
             contractsJournalCoordinator = null;
+            rootedSourceDiscoveries = null;
         } else {
             ContractsClosureProfile profile = ContractsClosureProfile
                     .release10(
@@ -248,6 +252,9 @@ public final class DefaultCoordinationEngine
                             routeIndex,
                             profile,
                             contractsActiveSourceTimelines);
+            rootedSourceDiscoveries = profile.rootedCheckpoint() ? new RootedSourceDiscoveryCoordinator(this, documents,
+                    contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider) : null;
+            if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
             contractsRecoveryState = new ContractsRecoveryState();
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
@@ -1118,6 +1125,74 @@ public final class DefaultCoordinationEngine
                     Map.of(entry.blueId(), outcomes), Map.of(entry.blueId(), attempts),
                     complete ? entry.sourceOrderKey() : null, complete, false, committed,
                     System.nanoTime() - started);
+    }
+
+    /** Reconciles only actual exact retained source publications after response loss. */
+    boolean sourceHistoryPrerequisiteCommitted(RootedSourceDiscoveryCoordinator.Prepared selected) {
+        if (selected.admission() != null) {
+            var input = selected.admission().invocation();
+            if (selected.admission().activationInputs().policy() != CoordinationEngine.AdmissionPolicy.FULL_HISTORY)
+                throw new IllegalArgumentException("Discovered sources require FULL_HISTORY");
+            var frontier = ExternalOrderKey.of(List.of(PORTABLE_FULL_HISTORY_ORDER,
+                    "contracts-full-history-admission", input.invocationIdentity()));
+            String identity = ContractsClosureAdmissionAdapter.publicationIdentity(input,
+                    CoordinationEngine.AdmissionPolicy.FULL_HISTORY, frontier);
+            return documents.admissionReceipt(identity).map(ContractsClosureAdmissionReceipt::published).orElse(false);
+        }
+        var step = Objects.requireNonNull(selected.step());
+        if (step.historical() != null) {
+            var application = documents.catchUpApplicationByWork(step.historical().workIdentity());
+            return application.isPresent() && documents.closureReceiptForApplication(application.orElseThrow())
+                    .map(ContractsClosurePublicationReceipt::commits).orElse(false);
+        }
+        var batch = step.live() != null ? step.live()
+                : contractsClosureAdapter.localHistoryBatch(Objects.requireNonNull(step.localHistorical()));
+        if (batch.invocations().size() != 1) throw new IllegalStateException("Source prerequisite requires exactly one rooted invocation");
+        return contractsClosureAdapter.publicationReceipt(batch, batch.invocations().get(0))
+                .map(ContractsClosurePublicationReceipt::commits).orElse(false);
+    }
+
+    /**
+     * Selects separately owned source prerequisites from actual suspended rooted attempts.
+     * Provider reads may retain immutable exact evidence; no source or parent is processed.
+     * @param root requesting root whose exact input remains pending
+     * @return bounded individual source actions and explicit resource waits
+     */
+    public synchronized List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentId root) {
+        ensureOpen();
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        return rootedSourceDiscoveries.selections(Objects.requireNonNull(root, "root"));
+    }
+
+    /**
+     * Revalidates and executes exactly one separately reported source prerequisite.
+     * The requesting parent is never retried inside this call.
+     * @param expected exact descriptor from sourceHistoryPrerequisites
+     * @return real source admission or one-step processing evidence
+     */
+    public synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        Objects.requireNonNull(expected, "expected");
+        var replay = rootedSourceDiscoveries.completed(expected);
+        if (replay.isPresent()) return replay.orElseThrow();
+        var committed = rootedSourceDiscoveries.committedSelection(expected);
+        var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        blue.coordination.api.SourceHistoryPrerequisiteResult result;
+        if (selected.admission() != null) {
+            var admission = selected.admission();
+            authorizeContractsPublicRoots(Set.of(admission.rootDocumentId()));
+            var activation = admission.activationInputs();
+            var receipt = admitContractsClosure(admission.invocation(), activation.policy(), activation.verifiedFrontier(),
+                    rootedSourceProvider);
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), committed.isPresent());
+        } else {
+            var receipt = executeRootSelection(Objects.requireNonNull(selected.step()), System.nanoTime());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), committed.isPresent());
+        }
+        rootedSourceDiscoveries.retain(result);
+        return result;
     }
 
     /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
