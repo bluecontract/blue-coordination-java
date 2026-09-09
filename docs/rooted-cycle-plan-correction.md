@@ -1,0 +1,9 @@
+# RUN-023 authored-initial setup correction
+
+The handoff literal setup starts B, starts A embedding initialized B, then connects B to A.initialBlueId and immediately asserts a live A/B component. Executing that exact sequence leaves an inactive occurrence: A.initialBlueId is the pre-initialization cursor-1. Contracts§2.3 requires its authenticated-1→0 transition as a separately supplied ManagedRevisionCause. Handoff Contracts lines887–889 explicitly define that sentinel. The fixture is missing this setup invocation; no current-state substitution is valid.
+
+RootedCycleEntrypointTest preserves the saved original input and executes exactly one additional processNext(B), requiring source A epoch0 and one published application before asserting the live component. After that prerequisite the original finite A request is processed through A or B in separate identical realms. Both variants produce the same exact input, heads, receipts, gas trace, operation context, rooted invocation/delivery/companion identities and split evidence. The split keeps both entry owners, creates singleton identities and retains the original subject receipts; fresh store restart preserves everything.
+
+The public audit correctly retains an inactive generation-plus-one successor after removal (Contracts C-CLO-35). Initial new-test assertions incorrectly expected that audit to disappear or retain the old generation; preserved failures document those test extraction corrections. The final test asserts absence of the actual /peer field, inactive successor, exact target and next generation. No production retirement behavior changed.
+
+Result: one maintained SDK test, both variants, passed. This does not yet claim an executed production adapter fixture. The maintained literal plan must record the additional explicit setup step before adapter qualification; its immutable handoff remains untouched.
