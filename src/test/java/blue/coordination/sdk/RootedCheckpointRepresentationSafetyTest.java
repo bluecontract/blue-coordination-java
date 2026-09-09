@@ -11,6 +11,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Actual SDK/Contracts and retained-publication counterexamples for the checkpoint-only class. */
 final class RootedCheckpointRepresentationSafetyTest {
+    private static String rootScopeIdentity(blue.language.processor.closure.DocumentId document) {
+        try {
+            var envelope = java.util.Map.of("domain", "blue-contracts-managed-scope-key/1.0", "value",
+                    java.util.Map.of("documentId", document.value(), "scopePath", "/", "activationGeneration", 0));
+            byte[] canonical = new org.erdtman.jcs.JsonCanonicalizer(
+                    new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(envelope)).getEncodedUTF8();
+            return "sha256:" + java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(canonical));
+        } catch (Exception failure) { throw new AssertionError(failure); }
+    }
+
     @Test void retainedPositionRejectsForgedProofAndAnUnownedSource() throws Exception {
         try (var scenario = new Scenario()) {
             var committed = scenario.checkpoint(100L);
@@ -91,7 +101,7 @@ final class RootedCheckpointRepresentationSafetyTest {
             assertEquals(1L, scenario.parent.snapshot().longAt("/seen"));
             assertEquals(0L, scenario.source.snapshot().longAt("/counter"), "Source work was root-local only");
             assertTrue(transition.emittedRootEvents().isEmpty(), "The counterexample owner is eventless despite real local work");
-            assertTrue(result.checkpointWrites().stream().anyMatch(w -> w.targetManagedScopeKey().documentId().equals(cid(scenario.source))));
+            assertTrue(result.checkpointWrites().stream().anyMatch(w -> w.targetManagedScopeIdentity().equals(rootScopeIdentity(cid(scenario.source)))));
             assertTrue(result.rootedProjection().checkpointReferenceProofIdentity(parentId).isEmpty());
             var before = scenario.state();
             assertThrows(IllegalArgumentException.class, () -> new ManagedRepresentationTransition(parentId,
@@ -115,7 +125,7 @@ final class RootedCheckpointRepresentationSafetyTest {
             var transition = result.managedTransitionReceipts().stream().filter(r -> r.documentId().equals(sourceId)).findFirst().orElseThrow();
             assertTrue(result.rootedProjection().owns(sourceId));
             assertTrue(input.directDeliveries().stream().anyMatch(d -> d.targetDocumentId().equals(sourceId)));
-            assertTrue(result.checkpointWrites().stream().anyMatch(w -> w.targetManagedScopeKey().documentId().equals(sourceId)));
+            assertTrue(result.checkpointWrites().stream().anyMatch(w -> w.targetManagedScopeIdentity().equals(rootScopeIdentity(sourceId))));
             assertTrue(transition.emittedRootEvents().isEmpty());
             assertEquals(0L, scenario.source.snapshot().longAt("/counter"));
             assertTrue(result.rootedProjection().checkpointReferenceProofIdentity(sourceId).isEmpty());

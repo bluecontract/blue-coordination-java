@@ -56,7 +56,7 @@ final class RootedAdmissionBasisTest {
             var target = fixture.blue.documents().admitStaticProcessEmbedded(
                     RootedSdkFixture.resource("source.yaml").replace("RCP2 Source", "RCP2 Later"),
                     ActivationPolicy.fromNow()).document("root");
-            var actual = fixture.blue.advanced().rawEngine().auditTimelineEntries().get(0).sourceOrderKey().components();
+            var actual = ((blue.coordination.internal.DefaultCoordinationEngine) fixture.blue.advanced().rawEngine()).auditTimelineEntries().get(0).sourceOrderKey().components();
             assertEquals(Map.of("mode", "FROM_NOW", "lowerExclusiveOrder", Map.of(
                     "timestampUs", actual.get(0).toString(), "timelineBlueId", actual.get(1), "entryBlueId", entry.blueId())),
                     fixture.control.historyBasis(target.id()).get("admission"));
@@ -126,10 +126,27 @@ final class RootedAdmissionBasisTest {
         }
     }
 
-    @Test void beginningRejectsUnverifiedRegisteredActorKind() throws Exception {
+    @Test void beginningRejectsExtraFieldsOnTheExactTimelineProviderType() throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             fixture.blue.timelines().register("rcp2/source", "alice");
-            fixture.blue.advanced().rawEngine().registerTimelineActorType("rcp2/source", "MyOS/Agent Actor");
+            assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
+                    .replace("timelineId: rcp2/source", "timelineId: rcp2/source\n      unregisteredEvidence: true"),
+                    "UNSUPPORTED_COORDINATION_TYPE");
+        }
+    }
+
+    @Test void beginningRejectsExtraFieldsOnTheExactRegisteredActorType() throws Exception {
+        try (var fixture = new RootedSdkFixture()) {
+            fixture.blue.timelines().register("rcp2/source", "alice");
+            assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
+                    .replace("accountId: alice", "accountId: alice\n      unregisteredEvidence: true"),
+                    "REGISTERED_ACTOR_MISMATCH");
+        }
+    }
+
+    @Test void beginningRejectsUnverifiedRegisteredActorKind() throws Exception {
+        try (var fixture = new RootedSdkFixture()) {
+            fixture.blue.timelines().register("rcp2/source", "alice", TimelineActorKind.AGENT);
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml"), "UNSUPPORTED_ACTOR_PROVIDER");
         }
     }

@@ -100,11 +100,11 @@ final class RootedBeginningAdmission {
                 }
                 Timeline owner = registered.get(timelineId);
                 if (owner == null) throw invalid("UNKNOWN_PROVIDER", "Timeline has no owning registered provider: " + timelineId);
-                Node expected = new Node().type(new Node().blueId(MyOSTimeline.blueId()))
-                        .properties("timelineId", text(timelineId));
-                String expectedId = DirectBlueIdCalculator.calculateBlueId(expected);
+                // Compare effective headers in the same declaration context: TimelineChannel
+                // contributes required/schema metadata that is absent from a standalone value.
+                var expectedHeaders = registeredHeaders(project, timelineId, owner.actorId());
                 String actualId = DirectBlueIdCalculator.calculateBlueId(timeline.toNode());
-                if (!expectedId.equals(actualId)) {
+                if (!timeline.sameResolvedStructure(expectedHeaders.get("timeline"))) {
                     throw invalid("UNSUPPORTED_COORDINATION_TYPE", "Exact Timeline is not the registered MyOS provider value");
                 }
                 Node row = sourceRow(member.documentId().value(), contract)
@@ -114,11 +114,8 @@ final class RootedBeginningAdmission {
                     if (!PrincipalActor.qualifiedName().equals(registeredActorType.apply(timelineId))) {
                         throw invalid("UNSUPPORTED_ACTOR_PROVIDER", "No beginning verifier for registered actor type");
                     }
-                    Node expectedActor = new Node().type(new Node().blueId(PrincipalActor.blueId()))
-                            .properties("accountId", text(owner.actorId()));
-                    String expectedActorId = DirectBlueIdCalculator.calculateBlueId(expectedActor);
                     String actualActorId = DirectBlueIdCalculator.calculateBlueId(actor.toNode());
-                    if (!expectedActorId.equals(actualActorId)) {
+                    if (!actor.sameResolvedStructure(expectedHeaders.get("actor"))) {
                         throw invalid("REGISTERED_ACTOR_MISMATCH", "Exact Principal Actor does not match the registered provider actor");
                     }
                     row.properties("actorBlueId", text(actualActorId));
@@ -176,6 +173,22 @@ final class RootedBeginningAdmission {
                 || !input.snapshot().closureIdentity().equals(result.inputClosureIdentity())) {
             throw invalid("INVALID_ADMISSION_PROOF", "BEGINNING requires a complete successful exact admission");
         }
+    }
+
+    private static Map<String, blue.language.snapshot.FrozenNode> registeredHeaders(
+            Function<Node, ManagedRootSubscriptionSurface> project, String timelineId, String actorId) {
+        Node channel = new Node().type(new Node().blueId(TimelineChannel.blueId())).properties(
+                "timeline", new Node().type(new Node().blueId(MyOSTimeline.blueId()))
+                        .properties("timelineId", text(timelineId)),
+                "actor", new Node().type(new Node().blueId(PrincipalActor.blueId()))
+                        .properties("accountId", text(actorId)));
+        var contracts = project.apply(new Node().contracts(new Node().properties("registered", channel)))
+                .effectiveRootContracts();
+        if (contracts.size() != 1 || !"registered".equals(contracts.get(0).key())
+                || !TimelineChannel.blueId().equals(contracts.get(0).effectiveTypeBlueId())) {
+            throw invalid("INVALID_SOURCE_SURFACE", "Registered provider reference did not project one exact Timeline Channel");
+        }
+        return contracts.get(0).headerFields();
     }
 
     private static Node sourceRow(String documentId, EffectiveContractSnapshot contract) {
