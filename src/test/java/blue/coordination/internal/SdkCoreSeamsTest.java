@@ -48,10 +48,10 @@ final class SdkCoreSeamsTest {
                         "specifications/blue-contracts-and-processor-specification-1.0.md"),
                 manifest.contractsSpecification());
         assertEquals(
-                "sha256:0de1d6ff58cd8895eddbb8c891ca09ff0a5294458d40b0ec4b79ba2b4fec4056",
+                "sha256:fcde2e3af19a583743fb485d113531d993156a183cb414587fb75d873b905b51",
                 manifest.contractsRelease());
         assertEquals(
-                "sha256:094ad941eb688f4ea7f92c471daf9097411a0378fcfdcd27139901a60c6f739c",
+                "sha256:e61d6b75b5f6d84065cdbd2e439fa99a6b4710fde163ace2faaa39fdbaa8229f",
                 manifest.fixturePackage());
         assertEquals(
                 blue.language.processor.GasSchedule.contracts10().packageIdentity(),
