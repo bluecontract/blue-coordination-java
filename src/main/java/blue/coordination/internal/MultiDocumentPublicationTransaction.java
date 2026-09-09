@@ -1150,7 +1150,7 @@ final class MultiDocumentPublicationTransaction {
                 stagedClosureSubscriptions == null
                         ? before.closureSubscriptions()
                         : stagedClosureSubscriptions.rootedProjection() != null
-                        ? before.closureSubscriptions().applyOwned(stagedClosureSubscriptions, expectedGraphGenerations)
+                        ? before.closureSubscriptions().applyOwned(stagedClosureSubscriptions, expectedGraphGenerations, expectedAbsent)
                         : before.closureSubscriptions().apply(
                                 stagedClosureSubscriptions,
                                 expectedGraphGenerations);

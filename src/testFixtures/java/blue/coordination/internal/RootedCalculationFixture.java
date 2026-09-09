@@ -50,6 +50,11 @@ public final class RootedCalculationFixture {
         return engine.documents().require(root).rootedView().snapshot();
     }
 
+    /** Reads the actual immutable history descriptor retained with the managed session. */
+    public java.util.Map<String, Object> historyBasis(DocumentId root) {
+        return engine.documents().require(root).requireRootedHistory().descriptor();
+    }
+
     /** Tests exact retained-view reuse without installing the proposed capture. */
     public boolean matchesRetainedCapture(DocumentId root, long graphGeneration,
             java.util.List<blue.language.processor.closure.ManagedDocumentSnapshot> documents,

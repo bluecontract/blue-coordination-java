@@ -43,7 +43,8 @@ public final class ContractsManagedDraftPlan {
         }
         for (ManagedDraft draft : drafts.values()) {
             var target = documents.get(draft.documentId());
-            if (target == null || !target.beforeBlueId().equals(draft.initial().blueId())) {
+            if (target == null) return true;
+            if (!target.beforeBlueId().equals(draft.initial().blueId())) {
                 throw new IllegalArgumentException("Managed draft decision has another exact draft");
             }
         }

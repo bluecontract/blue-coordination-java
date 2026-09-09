@@ -117,8 +117,22 @@ final class ClosureSubscriptionInventory {
 
     ClosureSubscriptionInventory applyOwned(ClosureProcessResult result,
             Map<DocumentId, Long> expectedGraphGenerations) {
+        return applyOwned(result, expectedGraphGenerations, java.util.Set.of());
+    }
+
+    ClosureSubscriptionInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations, java.util.Set<DocumentId> expectedAbsent) {
+        var owners = new java.util.LinkedHashSet<>(expectedGraphGenerations.keySet());
+        for (DocumentId id : expectedAbsent) {
+            var input = result.rootedProjection() == null ? null
+                    : result.rootedProjection().inputSnapshot().managedDocument(ContractsClosureAdapter.closureId(id));
+            if (!owners.add(id) || input == null || input.initialized() || input.epoch() != 0L
+                    || !statesFor(id).isEmpty()) {
+                throw new IllegalArgumentException("Owned birth subscription fence must name an absent uninitialized input");
+            }
+        }
         if (result.rootedProjection() == null
-                || !expectedGraphGenerations.keySet().equals(new java.util.LinkedHashSet<>(RootedResultScope.members(result)))) {
+                || !owners.equals(new java.util.LinkedHashSet<>(RootedResultScope.members(result)))) {
             throw new IllegalArgumentException("Owned subscription publication requires exactly the derived owner fences");
         }
         return applySelected(result, expectedGraphGenerations, true);

@@ -56,4 +56,44 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
                 RootedProcessingContext.historyBasisIdentity(descriptor), input.invocationIdentity(),
                 result.platformCommitCompanion().companionIdentity());
     }
+
+    /** Staged only with the complete authenticated, owned birth transaction. */
+    static RootedDocumentHistory created(DocumentId document, ExactValue authored,
+            ContractsClosureAdapter.CohortInvocation invocation, ClosureProcessResult result,
+            ExternalOrderKey order) {
+        var input = invocation.input();
+        var id = ContractsClosureAdapter.closureId(document);
+        var projection = result.rootedProjection();
+        var plan = invocation.managedDraftPlan();
+        var before = input.snapshot().managedDocument(id);
+        if (projection == null || !result.commits() || !projection.owns(id)
+                || !result.invocationIdentity().equals(input.invocationIdentity())
+                || !result.inputClosureIdentity().equals(input.snapshot().closureIdentity())
+                || plan == null || !plan.drafts().containsKey(document)
+                || before == null || before.initialized() || before.epoch() != 0L
+                || !before.blueId().equals(authored.blueId()) || order.components().size() != 3) {
+            throw new IllegalArgumentException("Created history requires its exact owned causal birth");
+        }
+        var expected = plan.expectedOccurrences().stream()
+                .filter(row -> row.targetDocumentId().equals(document)).findFirst().orElseThrow();
+        var birth = plan.prospectiveOccurrence(input, expected);
+        if (!projection.owns(birth.sourceDocumentId())
+                || result.occurrenceBindings().stream().noneMatch(row -> row.active()
+                        && row.occurrenceIdentity().equals(birth.occurrenceIdentity())
+                        && row.targetDocumentId().equals(id))) {
+            throw new IllegalArgumentException("Created history lacks its committed birth occurrence");
+        }
+        List<Object> key = order.components();
+        Map<String, Object> admission = Map.of("mode", "CREATED_IN_OPERATION",
+                "creatorOperationIdentity", projection.invocationIdentity(),
+                "birthOccurrenceIdentity", birth.occurrenceIdentity(),
+                "lowerExclusiveOrder", Map.of("timestampUs", key.get(0).toString(),
+                        "timelineBlueId", key.get(1), "entryBlueId", key.get(2)));
+        Map<String, Object> descriptor = Map.of("documentId", document.value(),
+                "initialDocumentBlueId", authored.blueId(),
+                "runtimeSemanticsIdentity", BundledContracts10Release.manifest().contractsRelease(),
+                "admission", admission);
+        return new RootedDocumentHistory(descriptor, RootedProcessingContext.historyBasisIdentity(descriptor),
+                input.invocationIdentity(), result.platformCommitCompanion().companionIdentity());
+    }
 }
