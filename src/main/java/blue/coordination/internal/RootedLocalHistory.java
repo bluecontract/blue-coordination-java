@@ -80,7 +80,7 @@ final class RootedLocalHistory {
         ManagedRepresentationCause representation = null;
         if (from >= 0) {
             var history = new ManagedRepresentationHistory(documents);
-            var chain = history.atCaptured(source, from, target.pendingRepresentationCursor());
+            var chain = history.atRootedCaptured(source, from, target.pendingRepresentationCursor(), anchor.sourceOrderKey());
             var next = chain.next(target.pendingRepresentationCursor(), target.expectedTargetBlueId());
             if (next.isPresent()) {
                 var transition = next.orElseThrow();
@@ -91,7 +91,7 @@ final class RootedLocalHistory {
                 representation = new ManagedRepresentationCause(target.occurrenceIdentity(), transition,
                         chain.targetPositionIdentity(), chain.nextRevisionReceiptIdentity(),
                         objects.cyclicSetProofFor(transition.transitionReceipt().afterBlueId()).proof().orElse(null));
-                history.verifyCause(representation, target);
+                history.verifyCause(representation, target, anchor.sourceOrderKey());
             }
         }
         long epoch = representation == null ? Math.addExact(from, 1L) : from;
@@ -126,6 +126,16 @@ final class RootedLocalHistory {
                 receipt.receiptIdentity(), source, epoch, consumer, target.occurrenceIdentity(), target.sourcePath(),
                 target.activationGeneration(), selectedConsumer.epoch(), selectedConsumer.blueId(), state.snapshot().graphGeneration());
         if (representation != null) work = ManagedEpochApplicationWork.identifiedRepresentation(work, representation);
+        else if (epoch == selectedSource.epoch()) {
+            var history = new ManagedRepresentationHistory(documents);
+            var successor = history.terminalSuccessor(source, epoch, target.occurrenceIdentity(),
+                    anchor.sourceOrderKey(), selectedSource,
+                    id -> objects.cyclicSetProofFor(id).proof().orElse(null));
+            if (successor.isPresent()) {
+                work = ManagedEpochApplicationWork.identifiedWithSuccessorRepresentationCause(work, successor.orElseThrow());
+                history.verifySuccessor(work, selectedSource, anchor.sourceOrderKey());
+            }
+        }
         var verified = new ManagedEpochSourceEvidenceVerifier(objects, documents).verify(work, evidence, plan);
         ProcessingCause cause = representation != null ? representation : verified.transitionReceipt() == null
                 ? ClosureEvidenceFactory.managedRevisionCause(target.occurrenceIdentity(), target.targetDocumentId(), from,
@@ -133,6 +143,10 @@ final class RootedLocalHistory {
                         receipt.originalCauseIdentity(), verified.afterCyclicProof())
                 : ClosureEvidenceFactory.managedRevisionCause(target.occurrenceIdentity(), from, epoch,
                         receipt.afterDocument().copyNode(), verified.transitionReceipt(), verified.afterCyclicProof());
+        if (work.successorRepresentationCause().isPresent()) {
+            cause = ((blue.language.processor.closure.ManagedRevisionCause) cause)
+                    .withSuccessorRepresentationCause(work.successorRepresentationCause().orElseThrow());
+        }
         var input = ClosureEvidenceFactory.processClosure(state.snapshot(), cause, List.of(), policy, environment);
         String position = target.pendingRepresentationCursor() != null ? target.pendingRepresentationCursor().positionIdentity()
                 : from < 0 ? documents.require(source).requireRootedHistory().identity()

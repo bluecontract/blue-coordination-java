@@ -73,7 +73,7 @@ final class RootedSourceIsolationTest {
         Map<String, String> exactContent = new LinkedHashMap<>();
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()
                 .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
-                        "sha256:c7c4e4d72ffb2c0da608c7ac2d8e7da920d0a193b84c732e5731c9bf1a2ee15a")
+                        "sha256:e91381c970859a6bafecdd99e46f5115ba033bf0534be84bbd5582531e9e347f")
                 .exactNodeProvider(id -> Optional.ofNullable(exactContent.get(id))).build()) {
             TimelineHandle timeline = blue.timelines().register("rcp2/source", "alice");
             blue.timelines().register("rcp2/parent", "alice");
@@ -168,7 +168,7 @@ final class RootedSourceIsolationTest {
         Map<String, String> exactContent = new LinkedHashMap<>();
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()
                 .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
-                        "sha256:c7c4e4d72ffb2c0da608c7ac2d8e7da920d0a193b84c732e5731c9bf1a2ee15a")
+                        "sha256:e91381c970859a6bafecdd99e46f5115ba033bf0534be84bbd5582531e9e347f")
                 .exactNodeProvider(id -> Optional.ofNullable(exactContent.get(id))).build()) {
             TimelineHandle timeline = blue.timelines().register("rcp2/source", "alice");
             DocumentHandle source = blue.documents().admitStaticProcessEmbedded(

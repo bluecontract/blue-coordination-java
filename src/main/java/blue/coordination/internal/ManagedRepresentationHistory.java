@@ -114,7 +114,42 @@ final class ManagedRepresentationHistory {
 
     /** Captured tails never grow to chase representation changes made by their own reconciliation. */
     Chain atCaptured(DocumentId documentId, long epoch, ManagedRepresentationCursor cursor) {
+        return captured(at(documentId, epoch), cursor);
+    }
+
+    /** Rooted history may exclude a genuine next receipt only by its authenticated frozen source view/order. */
+    Chain atRootedCaptured(DocumentId documentId, long epoch, ManagedRepresentationCursor cursor,
+            blue.language.processor.ExternalOrderKey boundary) {
         Chain full = at(documentId, epoch);
+        if (full.nextRevisionReceiptIdentity() != null && (cursor == null || cursor.nextRevisionReceiptIdentity() == null)) {
+            var view = documents.require(documentId).rootedViewBefore(boundary);
+            var selected = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(documentId));
+            var next = receipt(documentId, Math.addExact(epoch, 1L));
+            if (selected != null && selected.epoch() == epoch
+                    && next.sourceOrder().orElseThrow(() -> new IllegalArgumentException("Next source receipt lacks exact order"))
+                        .compareTo(boundary) >= 0) {
+                full = new Chain(documentId, epoch, full.anchor(), full.transitions(), full.targetPositionIdentity(), null);
+            }
+        }
+        if (cursor == null && full.nextRevisionReceiptIdentity() == null) {
+            var view = documents.require(documentId).rootedViewBefore(boundary);
+            var selected = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(documentId));
+            if (selected != null && selected.epoch() == epoch) {
+                var prefix = prefixAt(full, view, boundary);
+                String target = prefix.isEmpty() ? full.anchor().receiptIdentity()
+                        : prefix.get(prefix.size() - 1).positionIdentity();
+                String lastBlue = prefix.isEmpty() ? full.anchor().afterBlueId()
+                        : prefix.get(prefix.size() - 1).transitionReceipt().afterBlueId();
+                if (!lastBlue.equals(selected.blueId())) {
+                    throw new IllegalArgumentException("Frozen source view omits an authenticated terminal position");
+                }
+                full = new Chain(documentId, epoch, full.anchor(), prefix, target, null);
+            }
+        }
+        return captured(full, cursor);
+    }
+
+    private static Chain captured(Chain full, ManagedRepresentationCursor cursor) {
         if (cursor == null) return full;
         if (!full.anchor().receiptIdentity().equals(cursor.anchorReceiptIdentity())
                 || !Objects.equals(full.nextRevisionReceiptIdentity(), cursor.nextRevisionReceiptIdentity())) {
@@ -128,20 +163,117 @@ final class ManagedRepresentationHistory {
         if (cursor.nextRevisionReceiptIdentity() != null && target != full.transitions().size() - 1) {
             throw new IllegalArgumentException("Intermediate target is not the exact next revision predecessor");
         }
-        return new Chain(documentId, epoch, full.anchor(), List.copyOf(full.transitions().subList(0, target + 1)),
+        return new Chain(full.documentId(), full.epoch(), full.anchor(), List.copyOf(full.transitions().subList(0, target + 1)),
                 cursor.targetPositionIdentity(), cursor.nextRevisionReceiptIdentity());
+    }
+
+    Optional<ManagedRepresentationCause> terminalSuccessor(DocumentId source, long epoch, String occurrence,
+            blue.language.processor.ExternalOrderKey boundary,
+            java.util.function.Function<String, blue.language.provider.CyclicSetProof> proofs) {
+        var view = documents.require(source).rootedViewBefore(boundary);
+        var selected = Objects.requireNonNull(view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(source)));
+        return terminalSuccessor(source, epoch, occurrence, boundary, selected, proofs);
+    }
+
+    /** Captures the terminal tail at an exact source-owned publication before the attachment boundary. */
+    Optional<ManagedRepresentationCause> terminalSuccessor(DocumentId source, long epoch, String occurrence,
+            blue.language.processor.ExternalOrderKey boundary,
+            blue.language.processor.closure.ManagedDocumentSnapshot selected,
+            java.util.function.Function<String, blue.language.provider.CyclicSetProof> proofs) {
+        if (selected.epoch() != epoch) return Optional.empty();
+        Chain complete = atRootedCaptured(source, epoch, null, boundary);
+        if (complete.nextRevisionReceiptIdentity() != null) {
+            if (!complete.transitions().isEmpty()) {
+                throw new IllegalArgumentException("A frozen terminal tail cannot conceal a later numbered source receipt");
+            }
+            return Optional.empty();
+        }
+        DocumentSession session = documents.require(source);
+        RootedDocumentView sourceView = session.rootedViewBefore(boundary);
+        var sourceAtView = sourceView.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(source));
+        if (sourceAtView == null || sourceAtView.epoch() != epoch || !sourceAtView.blueId().equals(selected.blueId())) {
+            throw new IllegalArgumentException("Numbered terminal source differs from its frozen source publication");
+        }
+        List<ManagedRepresentationTransition> prefix = prefixAt(complete, sourceView, boundary);
+        String lastBlueId = prefix.isEmpty() ? complete.anchor().afterBlueId()
+                : prefix.get(prefix.size() - 1).transitionReceipt().afterBlueId();
+        if (!lastBlueId.equals(sourceAtView.blueId())) {
+            throw new IllegalArgumentException("Frozen source publication has an unproved positional tail");
+        }
+        if (prefix.isEmpty()) return Optional.empty();
+        var first = prefix.get(0);
+        return Optional.of(new ManagedRepresentationCause(occurrence, first,
+                prefix.get(prefix.size() - 1).positionIdentity(), null,
+                proofs.apply(first.transitionReceipt().afterBlueId())));
+    }
+
+    /** Revalidates the captured goal as an actual prefix; later same-epoch publications cannot extend it. */
+    void verifySuccessor(blue.coordination.api.ManagedEpochApplicationWork work,
+            blue.language.processor.closure.ManagedDocumentSnapshot selected,
+            blue.language.processor.ExternalOrderKey boundary) {
+        var successor = work.successorRepresentationCause().orElseThrow();
+        var anchor = receipt(work.sourceDocumentId(), work.sourceEpoch());
+        if (anchor == null || !anchor.receiptIdentity().equals(work.sourceReceiptIdentity())
+                || !anchor.afterBlueId().equals(successor.beforeBlueId())
+                || selected.epoch() != work.sourceEpoch() || successor.nextRevisionReceiptIdentity() != null) {
+            throw new IllegalArgumentException("Numbered successor changed its immutable source anchor or epoch");
+        }
+        var cursor = new ManagedRepresentationCursor(anchor.receiptIdentity(), anchor.receiptIdentity(),
+                successor.targetPositionIdentity(), null);
+        Chain captured = atRootedCaptured(work.sourceDocumentId(), work.sourceEpoch(), cursor, boundary);
+        if (captured.transitions().isEmpty()
+                || !captured.transitions().get(0).positionIdentity().equals(successor.transition().positionIdentity())) {
+            throw new IllegalArgumentException("Numbered successor omitted its first exact position");
+        }
+        var last = captured.transitions().get(captured.transitions().size() - 1);
+        RootedDocumentView targetView = documents.require(work.sourceDocumentId())
+                .rootedViewForInvocation(last.originalResult().invocationIdentity());
+        var positioned = prefixAt(at(work.sourceDocumentId(), work.sourceEpoch()), targetView, boundary);
+        if (!positioned.stream().map(ManagedRepresentationTransition::positionIdentity).toList()
+                .equals(captured.transitions().stream().map(ManagedRepresentationTransition::positionIdentity).toList())
+                || !last.transitionReceipt().afterBlueId().equals(selected.blueId())) {
+            throw new IllegalArgumentException("Numbered successor differs from its captured source-view position");
+        }
+        verifySupplied(successor.transition());
+    }
+
+    private List<ManagedRepresentationTransition> prefixAt(Chain chain, RootedDocumentView view,
+            blue.language.processor.ExternalOrderKey boundary) {
+        var session = documents.require(chain.documentId());
+        // A view's stored position also clamps earlier causal dates to its existing frontier.
+        // Comparing with rootedViewBefore proves that it is no later than this exact cutoff.
+        var eligible = session.rootedPublicationPrefix(session.rootedViewBefore(boundary));
+        if (!eligible.contains(view.result().invocationIdentity())) {
+            throw new IllegalArgumentException("Representation target is after the frozen attachment boundary");
+        }
+        var membership = session.rootedPublicationPrefix(view);
+        var prefix = new ArrayList<ManagedRepresentationTransition>();
+        boolean outside = false;
+        for (var transition : chain.transitions()) {
+            boolean included = membership.contains(transition.originalResult().invocationIdentity());
+            if (outside && included) throw new IllegalArgumentException("Source view skips an earlier representation publication");
+            if (included) prefix.add(transition); else outside = true;
+        }
+        return List.copyOf(prefix);
     }
 
     /** Host admission proves both original publication membership and the captured next position. */
     void verifyCause(ManagedRepresentationCause cause, ManagedOccurrenceBinding occurrence) {
+        verifyCause(cause, occurrence, null);
+    }
+
+    void verifyCause(ManagedRepresentationCause cause, ManagedOccurrenceBinding occurrence,
+            blue.language.processor.ExternalOrderKey rootedBoundary) {
         if (occurrence.active() || occurrence.pendingHistoricalEpoch() == null
                 || !occurrence.targetDocumentId().equals(cause.childDocumentId())
                 || occurrence.pendingHistoricalEpoch().longValue() != cause.fromEpoch()
                 || !occurrence.occurrenceIdentity().equals(cause.targetOccurrenceIdentity())) {
             throw new IllegalArgumentException("Representation cause does not own the pending occurrence");
         }
-        Chain chain = atCaptured(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch(),
-                occurrence.pendingRepresentationCursor());
+        Chain chain = rootedBoundary == null
+                ? atCaptured(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch(), occurrence.pendingRepresentationCursor())
+                : atRootedCaptured(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch(),
+                        occurrence.pendingRepresentationCursor(), rootedBoundary);
         var next = chain.next(occurrence.pendingRepresentationCursor(), occurrence.expectedTargetBlueId())
                 .orElseThrow(() -> new IllegalArgumentException("Captured representation chain is already complete"));
         if (!next.positionIdentity().equals(cause.transition().positionIdentity())

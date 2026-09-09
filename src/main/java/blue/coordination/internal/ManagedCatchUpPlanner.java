@@ -147,9 +147,24 @@ final class ManagedCatchUpPlanner {
                 long admitted = row.pendingHistoricalEpoch().longValue();
                 DocumentId source = DocumentId.of(
                         row.targetDocumentId().value());
+                List<ManagedOccurrenceCatchUpPlan> existing = plans
+                        .plansForOccurrence(row.occurrenceIdentity()).plans()
+                        .stream()
+                        .filter(plan -> plan.activationGeneration()
+                                == row.activationGeneration())
+                        .toList();
+                if (existing.size() > 1) {
+                    throw new IllegalStateException(
+                            "Occurrence generation has several catch-up plans "
+                                    + row.occurrenceIdentity());
+                }
                 Head sourceHead = headLookup.require(source);
+                ExternalOrderKey historyBoundary = existing.isEmpty() ? order : Objects.requireNonNull(
+                        plans.barrier(existing.get(0).barrierIdentity()).barrier(), "owning barrier").causeOrder();
                 boolean pendingTail = admitted == sourceHead.epoch() && representationHistory != null
-                        && representationHistory.atCaptured(source, admitted, row.pendingRepresentationCursor())
+                        && (frozenHistoricalIntervals
+                            ? representationHistory.atRootedCaptured(source, admitted, row.pendingRepresentationCursor(), historyBoundary)
+                            : representationHistory.atCaptured(source, admitted, row.pendingRepresentationCursor()))
                             .next(row.pendingRepresentationCursor(), row.expectedTargetBlueId()).isPresent();
                 if (admitted >= sourceHead.epoch() && !pendingTail) {
                     if (admitted == sourceHead.epoch()
@@ -170,17 +185,6 @@ final class ManagedCatchUpPlanner {
                             "Historical occurrence cursor is ahead of source "
                                     + source + " at " + consumer
                                     + row.sourcePath());
-                }
-                List<ManagedOccurrenceCatchUpPlan> existing = plans
-                        .plansForOccurrence(row.occurrenceIdentity()).plans()
-                        .stream()
-                        .filter(plan -> plan.activationGeneration()
-                                == row.activationGeneration())
-                        .toList();
-                if (existing.size() > 1) {
-                    throw new IllegalStateException(
-                            "Occurrence generation has several catch-up plans "
-                                    + row.occurrenceIdentity());
                 }
                 if (existing.size() == 1) {
                     touchedPlanIdentities.add(
@@ -301,8 +305,12 @@ final class ManagedCatchUpPlanner {
             ManagedRepresentationCause representationCause = null;
             if (representationHistory != null && occurrence != null && !occurrence.active()
                     && occurrence.pendingHistoricalEpoch() != null && occurrence.pendingHistoricalEpoch() >= 0L) {
-                var chain = representationHistory.atCaptured(plan.sourceDocumentId(), occurrence.pendingHistoricalEpoch(),
-                        occurrence.pendingRepresentationCursor());
+                var chain = frozenHistoricalIntervals
+                        ? representationHistory.atRootedCaptured(plan.sourceDocumentId(), occurrence.pendingHistoricalEpoch(),
+                            occurrence.pendingRepresentationCursor(), Objects.requireNonNull(
+                                plans.barrier(plan.barrierIdentity()).barrier(), "owning barrier").causeOrder())
+                        : representationHistory.atCaptured(plan.sourceDocumentId(), occurrence.pendingHistoricalEpoch(),
+                            occurrence.pendingRepresentationCursor());
                 var nextPosition = chain.next(occurrence.pendingRepresentationCursor(), occurrence.expectedTargetBlueId());
                 if (nextPosition.isPresent()) {
                     var transition = nextPosition.orElseThrow();
@@ -350,6 +358,13 @@ final class ManagedCatchUpPlanner {
                 throw new IllegalStateException(
                         "Catch-up plan points to a missing barrier "
                                 + plan.barrierIdentity());
+            }
+            if (frozenHistoricalIntervals && representationCause == null && representationHistory != null
+                    && sourceReceipt.epoch() == plan.requiredThroughSourceEpoch()) {
+                var successor = representationHistory.terminalSuccessor(plan.sourceDocumentId(), sourceReceipt.epoch(),
+                        plan.targetOccurrenceIdentity(), barrier.causeOrder(), cyclicProofs);
+                if (successor.isPresent()) work = ManagedEpochApplicationWork.identifiedWithSuccessorRepresentationCause(
+                        work, successor.orElseThrow());
             }
             preparedWork.add(new PreparedWork(
                     work,

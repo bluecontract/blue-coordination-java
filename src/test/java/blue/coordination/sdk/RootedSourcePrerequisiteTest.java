@@ -4,6 +4,8 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.SourceHistoryPrerequisite;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.internal.CoordinationTestControl;
+import blue.language.model.NodePathEditor;
+import blue.language.snapshot.FrozenNode;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +14,85 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real source admission and historical acquisition are individually observable SDK operations. */
 final class RootedSourcePrerequisiteTest {
+    @Test void inlineSourceBodyCanSelectAdmissionBeforeItsMissingEmbeddedResourceArrives() throws IOException {
+        String missingJson;
+        String missingId;
+        String childYaml;
+        String childId;
+        try (var preparation = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+            var missing = preparation.values().yaml("state: unavailable-here\n");
+            missingId = missing.blueId(); missingJson = missing.json();
+            childYaml = "name: inline source with an unavailable peer\npeer: {blueId: " + missingId + "}\n"
+                    + "contracts:\n  embedded:\n    type: Process Embedded\n    paths: [/peer]\n";
+            var authoredChild = preparation.values().yaml(childYaml);
+            childId = authoredChild.blueId();
+        }
+        try (var f = new RootedSdkFixture()) {
+            var blue = f.blue;
+            var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
+            var beforeHead = parent.snapshot().exact().json();
+            var beforeHistory = f.history(parent);
+            var attachment = f.append(parent, "rcp2/parent", "attach", 20L, "child:\n" + childYaml.indent(2));
+            assertFalse(f.exact.containsKey(childId), "The child is authored inline in the original request, not uploaded or prestarted");
+            var exactEntry = blue.values().retained(attachment.blueId()).orElseThrow();
+            var exactRequestChild = NodePathEditor.getOrNull(exactEntry.copyNode(), "/message/request/child");
+            assertEquals(childId, FrozenNode.fromNode(exactRequestChild).blueId(),
+                    "The original retained entry preserves the exact authored inline child");
+            var attachmentResult = blue.processing().processNext(parent).entry(attachment);
+            assertEquals(EntryDisposition.NEEDS_RESOURCES, attachmentResult.disposition(), attachmentResult.diagnostic().toString());
+            var selected = one(blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION);
+            assertEquals(childId, selected.authoredBlueId());
+            assertEquals(childId, selected.sourceDocumentId().value());
+            var stopped = blue.advanced().processSourceHistoryPrerequisite(selected).admission().orElseThrow();
+            assertFalse(stopped.published());
+            assertFalse(stopped.attempt().isComplete(), "The genuine source ADMIT owns the exact-resource suspension");
+            assertTrue(stopped.attempt().resourceDemands().stream().anyMatch(demand -> missingId.equals(demand.suppliedValueBlueId())));
+            assertFalse(stopped.attempt().resourceDemands().stream().anyMatch(demand -> childId.equals(demand.suppliedValueBlueId())),
+                    "The known inline source body is not an unavailable external resource");
+            assertEquals(beforeHead, parent.snapshot().exact().json());
+            assertEquals(beforeHistory, f.history(parent));
+            assertThrows(RuntimeException.class, () -> blue.documents().require(DocumentId.of(childId)));
+
+            CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(EntryDisposition.NEEDS_RESOURCES, blue.processing().processNext(parent).entry(attachment).disposition());
+            var replaySelected = one(blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION);
+            assertTrue(replaySelected.routeGeneration() > selected.routeGeneration(),
+                    "Route reconstruction advances its operational stale-selection fence");
+            assertNotEquals(selected.selectionIdentity(), replaySelected.selectionIdentity(),
+                    "The exact source selection identity includes its current routing generation");
+            var refenced = new SourceHistoryPrerequisite(
+                    replaySelected.selectionIdentity(), selected.requestingRoot(),
+                    selected.requestingInvocationIdentity(), selected.demandIdentity(),
+                    selected.sourceDocumentId(), selected.authoredBlueId(), selected.cutoffExclusive(),
+                    selected.kind(), selected.sourceEpoch(), selected.sourceBlueId(), selected.workIdentity(),
+                    selected.entryBlueId(), selected.journalRevision(), replaySelected.routeGeneration(),
+                    selected.sourceSurfaceIdentity(), selected.diagnostic());
+            assertEquals(refenced, replaySelected,
+                    "Original exact entry replay preserves every source-admission coordinate except its rebuilt route fence");
+            var stale = assertThrows(IllegalArgumentException.class,
+                    () -> blue.advanced().processSourceHistoryPrerequisite(selected));
+            assertEquals("Source prerequisite changed before execution", stale.getMessage());
+            assertEquals(beforeHead, parent.snapshot().exact().json());
+            assertEquals(beforeHistory, f.history(parent));
+            assertThrows(RuntimeException.class, () -> blue.documents().require(DocumentId.of(childId)));
+            f.exact.put(missingId, "state: wrong-unavailable-here\n");
+            assertThrows(RuntimeException.class, () -> blue.advanced().processSourceHistoryPrerequisite(replaySelected));
+            assertEquals(beforeHead, parent.snapshot().exact().json());
+            assertEquals(beforeHistory, f.history(parent));
+            f.exact.put(missingId, missingJson);
+            var admitted = blue.advanced().processSourceHistoryPrerequisite(replaySelected).admission().orElseThrow();
+            assertTrue(admitted.published());
+            assertTrue(admitted.attempt().isComplete());
+            assertTrue(admitted.attempt().processResult().totalGas() > 0L);
+            assertEquals(beforeHead, parent.snapshot().exact().json(), "Source admission does not silently resume the parent");
+            assertEquals(beforeHistory, f.history(parent));
+            assertFalse(f.exact.containsKey(childId));
+            var source = blue.documents().require(DocumentId.of(childId));
+            assertEquals(1, f.history(source).size(), "Exactly one actual source initialization is committed");
+            assertEquals("FULL_HISTORY", ((Map<?, ?>) f.control.historyBasis(source.id()).get("admission")).get("mode"));
+        }
+    }
+
     @Test void unknownAdmissionAndEarlierLiveAreSeparateAndDoNotProcessFuture50() throws IOException {
         assertEquals(runDiscovery(false), runDiscovery(true));
     }

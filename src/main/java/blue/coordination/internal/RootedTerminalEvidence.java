@@ -16,6 +16,7 @@ final class RootedTerminalEvidence {
     private final RootedInvocationEvidence rooted;
     private final String executedInvocationIdentity;
     private final String historicalWorkIdentity;
+    private final blue.coordination.api.ManagedEpochApplicationWork historicalWork;
     private final java.util.Set<String> requiredTimelineIds;
 
     private RootedTerminalEvidence(ContractsClosureAdapter.CohortInvocation invocation,
@@ -25,6 +26,7 @@ final class RootedTerminalEvidence {
         this.executedInvocationIdentity = invocation.executionInvocationIdentity();
         var selectedWork = work == null ? rooted.historicalWork() : work;
         this.historicalWorkIdentity = selectedWork == null ? null : selectedWork.workIdentity();
+        this.historicalWork = selectedWork;
         this.requiredTimelineIds = requiredTimelines(invocation);
         if (selectedWork != null) requireHistoricalCause(selectedWork);
     }
@@ -55,6 +57,11 @@ final class RootedTerminalEvidence {
         long epoch;
         if (input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause revision) {
             occurrence = revision.targetOccurrenceIdentity(); source = revision.childDocumentId().value(); epoch = revision.toEpoch();
+            if (work.isRepresentationApplication()
+                    || !work.successorRepresentationCause().map(value -> value.causeIdentity())
+                        .equals(revision.successorRepresentationCause().map(value -> value.causeIdentity()))) {
+                throw new IllegalArgumentException("Numbered terminal changed its separately captured successor");
+            }
         } else if (input.cause() instanceof blue.language.processor.closure.ManagedRepresentationCause representation) {
             occurrence = representation.targetOccurrenceIdentity(); source = representation.childDocumentId().value(); epoch = representation.fromEpoch();
             if (!work.representationCause().map(cause -> cause.causeIdentity().equals(representation.causeIdentity())).orElse(false)) {
@@ -75,7 +82,21 @@ final class RootedTerminalEvidence {
                 || !input.snapshot().closureIdentity().equals(result.inputClosureIdentity())) {
             throw new IllegalArgumentException("Rooted terminal decision differs from its frozen invocation");
         }
-        if (result.commits()) RootedResultScope.require(result, rooted);
+        if (result.commits()) {
+            RootedResultScope.require(result, rooted);
+            if (historicalWork != null && historicalWork.successorRepresentationCause().isPresent()) {
+                var work = historicalWork;
+                var successor = work.successorRepresentationCause().orElseThrow();
+                var occurrence = result.occurrenceBindings().stream().filter(row ->
+                        row.occurrenceIdentity().equals(work.targetOccurrenceIdentity())).findFirst().orElseThrow();
+                var expected = new blue.language.processor.closure.ManagedRepresentationCursor(
+                        work.sourceReceiptIdentity(), work.sourceReceiptIdentity(), successor.targetPositionIdentity(), null);
+                if (occurrence.active() || !Objects.equals(occurrence.pendingHistoricalEpoch(), work.sourceEpoch())
+                        || !expected.equals(occurrence.pendingRepresentationCursor())) {
+                    throw new IllegalArgumentException("Numbered terminal must publish only its unconsumed anchor cursor");
+                }
+            }
+        }
         else if (!result.rollbackToInput() || result.commitCompanion() != null) {
             throw new IllegalArgumentException("Rooted failure must retain exact rollback evidence without a companion");
         }

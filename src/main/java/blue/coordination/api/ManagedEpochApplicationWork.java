@@ -16,7 +16,10 @@ public final class ManagedEpochApplicationWork {
 
     private static final String REPRESENTATION_DOMAIN =
             "blue-coordination-managed-representation-application-work/1.0";
+    private static final String SUCCESSOR_DOMAIN =
+            "blue-coordination-managed-epoch-with-representation-successor-work/1.0";
     private final ManagedRepresentationCause representationCause;
+    private final ManagedRepresentationCause successorRepresentationCause;
     private final String workIdentity;
     private final String planIdentity;
     private final String barrierIdentity;
@@ -58,7 +61,7 @@ public final class ManagedEpochApplicationWork {
                 activationGeneration,
                 expectedConsumerCommittedEpoch,
                 expectedConsumerCommittedBlueId,
-                expectedGraphGeneration, null);
+                expectedGraphGeneration, null, null);
     }
 
     private ManagedEpochApplicationWork(
@@ -75,8 +78,13 @@ public final class ManagedEpochApplicationWork {
             long expectedConsumerCommittedEpoch,
             String expectedConsumerCommittedBlueId,
             long expectedGraphGeneration,
-            ManagedRepresentationCause representationCause) {
+            ManagedRepresentationCause representationCause,
+            ManagedRepresentationCause successorRepresentationCause) {
         this.representationCause = representationCause;
+        this.successorRepresentationCause = successorRepresentationCause;
+        if (representationCause != null && successorRepresentationCause != null) {
+            throw new IllegalArgumentException("A numbered successor is not an applied representation step");
+        }
         this.planIdentity = ManagedIdentity.requireSha256(
                 planIdentity, "planIdentity");
         this.barrierIdentity = ManagedIdentity.requireSha256(
@@ -109,9 +117,10 @@ public final class ManagedEpochApplicationWork {
                 || !representationCause.transition().anchorReceiptIdentity().equals(sourceReceiptIdentity))) {
             throw new IllegalArgumentException("Representation work must bind its exact source anchor and occurrence");
         }
+        if (successorRepresentationCause != null) requireSuccessor(successorRepresentationCause);
         this.workIdentity = ManagedIdentity.verify(
                 workIdentity,
-                representationCause == null ? IDENTITY_DOMAIN : REPRESENTATION_DOMAIN,
+                representationCause != null ? REPRESENTATION_DOMAIN : successorRepresentationCause != null ? SUCCESSOR_DOMAIN : IDENTITY_DOMAIN,
                 identityValue(),
                 "workIdentity");
     }
@@ -164,7 +173,7 @@ public final class ManagedEpochApplicationWork {
             ManagedEpochApplicationWork coordinates, ManagedRepresentationCause cause) {
         Objects.requireNonNull(coordinates, "coordinates");
         Objects.requireNonNull(cause, "cause");
-        if (coordinates.isRepresentationApplication()) throw new IllegalArgumentException("Coordinates already carry representation work");
+        if (coordinates.isRepresentationApplication() || coordinates.successorRepresentationCause().isPresent()) throw new IllegalArgumentException("Coordinates already carry representation work");
         Map<String, Object> value = new LinkedHashMap<>(coordinates.identityValue());
         value.put("representationCauseIdentity", cause.causeIdentity());
         return new ManagedEpochApplicationWork(ManagedIdentity.identify(REPRESENTATION_DOMAIN, value),
@@ -179,7 +188,42 @@ public final class ManagedEpochApplicationWork {
                 coordinates.activationGeneration(),
                 coordinates.expectedConsumerCommittedEpoch(),
                 coordinates.expectedConsumerCommittedBlueId(),
-                coordinates.expectedGraphGeneration(), cause);
+                coordinates.expectedGraphGeneration(), cause, null);
+    }
+
+    /** Identifies one numbered step that captures, but does not execute, its first terminal successor. */
+    public static ManagedEpochApplicationWork identifiedWithSuccessorRepresentationCause(
+            ManagedEpochApplicationWork coordinates, ManagedRepresentationCause successor) {
+        Objects.requireNonNull(coordinates, "coordinates");
+        Objects.requireNonNull(successor, "successor");
+        if (coordinates.isRepresentationApplication() || coordinates.successorRepresentationCause().isPresent()) {
+            throw new IllegalArgumentException("Coordinates already carry historical representation evidence");
+        }
+        Map<String, Object> value = new LinkedHashMap<>(coordinates.identityValue());
+        value.put("successorRepresentationCauseIdentity", successor.causeIdentity());
+        return new ManagedEpochApplicationWork(ManagedIdentity.identify(SUCCESSOR_DOMAIN, value),
+                coordinates.planIdentity(), coordinates.barrierIdentity(), coordinates.sourceReceiptIdentity(),
+                coordinates.sourceDocumentId(), coordinates.sourceEpoch(), coordinates.consumerDocumentId(),
+                coordinates.targetOccurrenceIdentity(), coordinates.targetPath(), coordinates.activationGeneration(),
+                coordinates.expectedConsumerCommittedEpoch(), coordinates.expectedConsumerCommittedBlueId(),
+                coordinates.expectedGraphGeneration(), null, successor);
+    }
+
+    private void requireSuccessor(ManagedRepresentationCause successor) {
+        if (successor.fromEpoch() != sourceEpoch || successor.toEpoch() != sourceEpoch
+                || !successor.childDocumentId().value().equals(sourceDocumentId.value())
+                || !successor.targetOccurrenceIdentity().equals(targetOccurrenceIdentity)
+                || !successor.transition().anchorReceiptIdentity().equals(sourceReceiptIdentity)
+                || !successor.transition().predecessorPositionIdentity().equals(sourceReceiptIdentity)
+                || successor.targetPositionIdentity().equals(sourceReceiptIdentity)
+                || successor.nextRevisionReceiptIdentity() != null) {
+            throw new IllegalArgumentException("Numbered successor must start at its exact source anchor and occurrence");
+        }
+    }
+
+    /** First future representation step; its presence does not mean that step was executed. */
+    public Optional<ManagedRepresentationCause> successorRepresentationCause() {
+        return Optional.ofNullable(successorRepresentationCause);
     }
 
     public Optional<ManagedRepresentationCause> representationCause() { return Optional.ofNullable(representationCause); }
@@ -234,6 +278,9 @@ public final class ManagedEpochApplicationWork {
                 expectedConsumerCommittedBlueId,
                 expectedGraphGeneration));
         if (representationCause != null) value.put("representationCauseIdentity", representationCause.causeIdentity());
+        if (successorRepresentationCause != null) {
+            value.put("successorRepresentationCauseIdentity", successorRepresentationCause.causeIdentity());
+        }
         return value;
     }
 

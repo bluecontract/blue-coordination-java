@@ -118,7 +118,9 @@ final class ManagedEpochInvocationCapturer {
                         "Managed application occurrence retired before "
                                 + work.workIdentity()));
         ManagedRepresentationCause representation = work.representationCause().orElse(null);
-        if (representation != null) new ManagedRepresentationHistory(documents).verifyCause(representation, target);
+        if (representation != null) new ManagedRepresentationHistory(documents).verifyCause(representation, target,
+                profile.rootedCheckpoint() ? Objects.requireNonNull(documents.catchUpPlansSnapshot()
+                        .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder() : null);
         long fromEpoch = representation == null ? Math.subtractExact(work.sourceEpoch(), 1L) : work.sourceEpoch();
         String sourceBeforeBlueId = representation != null ? representation.beforeBlueId() : sourceTransition == null
                 ? sourceReceipt.beforeBlueId().orElseThrow(() ->
@@ -275,6 +277,23 @@ final class ManagedEpochInvocationCapturer {
                         invocationSourceAfter,
                         sourceTransition,
                         afterCyclicProof);
+        if (rootedState != null && representation == null) {
+            var boundary = Objects.requireNonNull(documents.catchUpPlansSnapshot()
+                    .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder();
+            var selectedSource = snapshot.managedDocument(ContractsClosureAdapter.closureId(work.sourceDocumentId()));
+            var history = new ManagedRepresentationHistory(documents);
+            if (work.successorRepresentationCause().isPresent()) {
+                history.verifySuccessor(work, selectedSource, boundary);
+                cause = ((ManagedRevisionCause) cause).withSuccessorRepresentationCause(
+                        work.successorRepresentationCause().orElseThrow());
+            } else if (history.terminalSuccessor(work.sourceDocumentId(), work.sourceEpoch(),
+                    work.targetOccurrenceIdentity(), boundary, selectedSource,
+                    id -> objects.cyclicSetProofFor(id).proof().orElse(null)).isPresent()) {
+                throw ContractsClosureAdapter.stale("Numbered work omitted its frozen terminal representation successor");
+            }
+        } else if (work.successorRepresentationCause().isPresent()) {
+            throw ContractsClosureAdapter.stale("A numbered successor requires the rooted terminal profile");
+        }
         ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(
                 snapshot,
                 cause,

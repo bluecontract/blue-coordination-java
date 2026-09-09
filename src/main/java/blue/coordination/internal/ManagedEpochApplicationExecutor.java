@@ -693,6 +693,16 @@ final class ManagedEpochApplicationExecutor {
                 application = ManagedEpochApplicationReceipt.identifiedRepresentation(application, work,
                         completedOccurrence.pendingRepresentationCursor());
             }
+            if (work.successorRepresentationCause().isPresent()) {
+                var completedOccurrence = resultingInventory.find(work.consumerDocumentId(), work.targetPath())
+                        .orElseThrow(() -> new IllegalStateException("Numbered application lost its owning occurrence"));
+                if (completedOccurrence.active()
+                        || !java.util.Objects.equals(completedOccurrence.pendingHistoricalEpoch(), work.sourceEpoch())) {
+                    throw new IllegalStateException("Numbered application activated before its captured representation tail");
+                }
+                application = ManagedEpochApplicationReceipt.identifiedWithSuccessorRepresentationCause(application,
+                        work, completedOccurrence.pendingRepresentationCursor());
+            }
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
             ManagedCatchUpBarrier owningBarrier = beforeCatchUpPlans

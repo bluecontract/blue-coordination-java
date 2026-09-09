@@ -317,14 +317,19 @@ final class SdkDrainResultMapper {
                 work.expectedConsumerCommittedEpoch(),
                 work.expectedConsumerCommittedBlueId(),
                 work.expectedGraphGeneration(),
-                work.representationCause().map(cause -> new ManagedEpochApplicationWork.RepresentationStep(
-                        cause.causeIdentity(), cause.beforeBlueId(), cause.afterBlueId(),
-                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
-                                cause.transition().predecessorPositionIdentity(), cause.targetPositionIdentity(),
-                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())),
-                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
-                                cause.transition().positionIdentity(), cause.targetPositionIdentity(),
-                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())), cause.terminalPositionReached())));
+                work.representationCause().map(SdkDrainResultMapper::representationStep),
+                work.successorRepresentationCause().map(SdkDrainResultMapper::representationStep));
+    }
+
+    private static ManagedEpochApplicationWork.RepresentationStep representationStep(
+            blue.language.processor.closure.ManagedRepresentationCause cause) {
+        return new ManagedEpochApplicationWork.RepresentationStep(cause.causeIdentity(), cause.beforeBlueId(), cause.afterBlueId(),
+                new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                        cause.transition().predecessorPositionIdentity(), cause.targetPositionIdentity(),
+                        Optional.ofNullable(cause.nextRevisionReceiptIdentity())),
+                new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                        cause.transition().positionIdentity(), cause.targetPositionIdentity(),
+                        Optional.ofNullable(cause.nextRevisionReceiptIdentity())), cause.terminalPositionReached());
     }
 
     private static ManagedEpochApplicationReceipt
@@ -346,7 +351,7 @@ final class SdkDrainResultMapper {
                 receipt.resultingSourceCursor(), receipt.representationCauseIdentity(),
                 receipt.resultingRepresentationCursor().map(cursor -> new ManagedEpochApplicationWork.Position(
                         cursor.anchorReceiptIdentity(), cursor.positionIdentity(), cursor.targetPositionIdentity(),
-                        Optional.ofNullable(cursor.nextRevisionReceiptIdentity()))));
+                        Optional.ofNullable(cursor.nextRevisionReceiptIdentity()))), receipt.successorRepresentationCauseIdentity());
     }
 
     private EntryResult mapEntry(

@@ -138,6 +138,22 @@ final class DocumentSession {
         throw new ProjectionUnavailableException("No authenticated rooted source view before attachment boundary " + boundary);
     }
 
+    /** Exact publication membership through a retained view, independent of repeated endpoint identities. */
+    synchronized java.util.Set<String> rootedPublicationPrefix(RootedDocumentView selected) {
+        var invocations = new java.util.LinkedHashSet<String>();
+        for (RootedViewPosition position : rootedViewPositions) {
+            invocations.add(position.view().result().invocationIdentity());
+            if (position.view() == selected) return java.util.Set.copyOf(invocations);
+        }
+        throw new ProjectionUnavailableException("Source view is not an actual retained publication position");
+    }
+
+    synchronized RootedDocumentView rootedViewForInvocation(String invocationIdentity) {
+        return rootedViewPositions.stream().map(RootedViewPosition::view)
+                .filter(view -> view.result().invocationIdentity().equals(invocationIdentity)).findFirst()
+                .orElseThrow(() -> new ProjectionUnavailableException("Original source publication view is unavailable"));
+    }
+
     private record RootedViewPosition(RootedDocumentView view, ExternalOrderKey boundary) { }
 
     public DocumentId documentId() {

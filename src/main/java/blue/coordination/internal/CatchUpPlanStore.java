@@ -456,6 +456,7 @@ final class CatchUpPlanStore {
         long cursor = receipt.resultingSourceCursor();
         ManagedCatchUpStatus status = cursor
                 == Math.addExact(plan.requiredThroughSourceEpoch(), 1L)
+                && selectedWork.successorRepresentationCause().isEmpty()
                 && (!selectedWork.isRepresentationApplication() || selectedWork.representationCause().orElseThrow().terminalPositionReached())
                 ? ManagedCatchUpStatus.COMPLETE
                 : ManagedCatchUpStatus.RUNNING;

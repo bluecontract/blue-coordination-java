@@ -73,6 +73,40 @@ public final class RootedCalculationFixture {
                 .select(root, engine.auditTimelineEntries()).historical(), "No actual registered owned history");
     }
 
+    /**
+     * Captures registered owned historical work through the unchanged production capturer.
+     * This fixture supports only the release-profile rooted SDK setup and copies its
+     * actual configured budget/environment; it never changes policy or publishes.
+     * @param root actual public consumer selected by the rooted driver
+     * @return exact immutable input for the registered due work
+     */
+    public ClosureInvocationInput captureRegisteredOwnedHistory(DocumentId root) {
+        var work = registeredOwnedHistory(root);
+        var admission = engine.contractsClosureAdmissionAdapter();
+        var environment = admission.environment();
+        var policy = admission.executionPolicy();
+        var profile = ContractsClosureProfile.release10(environment.blueLanguageSpecificationIdentity(),
+                environment.contractsSpecificationIdentity(),
+                ContractsExecutionPolicy.exactSharedGas(policy.sharedLimit(), policy.label()), java.util.List.of(root));
+        if (!profile.rootedCheckpoint() || !profile.executionPolicy().identity().equals(policy.identity()))
+            throw new IllegalArgumentException("Expected the actual rooted release-profile SDK fixture");
+        return new ManagedEpochInvocationCapturer(engine.contractsClosureAdapter(), engine.runtime(), engine.objects(),
+                engine.documents(), profile, environment).capture(work, java.util.Set.of()).invocation().input();
+    }
+
+    /**
+     * Exercises the actual canonical due-work admission boundary for a proposed work item.
+     * Negative callers must prove that the item differs from the registered identity.
+     * @param proposed exact recomputable but deliberately noncanonical candidate
+     */
+    public void rejectNoncanonicalOwnedHistoryCandidate(blue.coordination.api.ManagedEpochApplicationWork proposed) {
+        var canonical = registeredOwnedHistory(proposed.consumerDocumentId());
+        if (canonical.workIdentity().equals(proposed.workIdentity()))
+            throw new IllegalArgumentException("Negative fixture must not execute the actual canonical work");
+        engine.contractsClosureAdapter().executeManagedEpochApplication(proposed);
+        throw new AssertionError("Noncanonical historical work crossed the production admission boundary");
+    }
+
     /** Simulates unavailable evidence through the real same-cursor plan/barrier failure path only. */
     public void deferRegisteredOwnedHistory(blue.coordination.api.ManagedEpochApplicationWork work) {
         var selected = registeredOwnedHistory(work.consumerDocumentId());
@@ -254,8 +288,32 @@ public final class RootedCalculationFixture {
      */
     public static ClosureProcessResult materializedReference(ClosureInvocationInput input) {
         WholeObjectStore objects = new WholeObjectStore(new EngineMetrics());
-        for (var document : input.snapshot().managedDocuments()) {
-            var component = input.snapshot().components().stream()
+        retainReferenceSnapshot(objects, input.snapshot());
+        if (input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause revision
+                && revision.successorRepresentationCause().isPresent()) {
+            // Exact values already bound by the supplied first-successor proof, not a host-store lookup.
+            retainReferenceSnapshot(objects, revision.successorRepresentationCause().orElseThrow()
+                    .transition().originalInput().snapshot());
+        }
+        var base = ClosureInvocationInput.processClosure(input.invocationIdentity(), input.snapshot(), input.cause(),
+                input.directDeliveries(), input.directDeliverySnapshotIdentity(), input.executionPolicy(), input.environment());
+        try (BlueRuntime runtime = BlueRuntime.create(objects)) {
+            var attempt = new BlueClosureContracts(runtime.documentProcessor()).processClosure(base);
+            if (!attempt.isComplete()) {
+                throw new IllegalStateException("Materialized reference suspended: " + attempt.kind()
+                        + "; demands=" + attempt.resourceDemands().stream().map(demand ->
+                            demand.getClass().getSimpleName() + ":" + demand.demandIdentity()
+                            + ":" + demand.sourceDocumentId().value()).toList()
+                        + "; exactBlueIds=" + attempt.requiredExactBlueIds());
+            }
+            return attempt.processResult();
+        }
+    }
+
+    private static void retainReferenceSnapshot(WholeObjectStore objects,
+            blue.language.processor.closure.AffectedClosureSnapshot snapshot) {
+        for (var document : snapshot.managedDocuments()) {
+            var component = snapshot.components().stream()
                     .filter(value -> value.orderedMemberDocumentIds().contains(document.documentId()))
                     .findFirst().orElseThrow();
             var proof = component.completeCyclicProof();
@@ -263,11 +321,6 @@ public final class RootedCalculationFixture {
                     ? ExactValue.verified(document.blueId(), document.document())
                     : ExactValue.fromVerifiedProviderEvidence(document.blueId(), document.document(), proof);
             objects.putVerifiedProviderEvidence(value, document.document(), proof, "rooted reference input");
-        }
-        var base = ClosureInvocationInput.processClosure(input.invocationIdentity(), input.snapshot(), input.cause(),
-                input.directDeliveries(), input.directDeliverySnapshotIdentity(), input.executionPolicy(), input.environment());
-        try (BlueRuntime runtime = BlueRuntime.create(objects)) {
-            return new BlueClosureContracts(runtime.documentProcessor()).processClosure(base).processResult();
         }
     }
 }

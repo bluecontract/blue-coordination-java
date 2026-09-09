@@ -201,8 +201,16 @@ final class RootedSourceDiscoveryCoordinator {
     private Window window(Pending candidate, DocumentSession source) {
         var required = new LinkedHashMap<String, String>(); var frames = new ArrayList<String>();
         frames.add(candidate.authored().blueId()); frames.add(candidate.invocation().input().environment().runtimeRegistryIdentity());
-        if (source == null) addSurface(frames, required, candidate.source().value(), candidate.authored().blueId(),
-                layouts.build(candidate.authored()).routingSurface());
+        if (source == null) {
+            // The actual stopped demand already authenticated this complete authored Root.
+            // A source-selection read must not reopen its identity via an external provider
+            // or traverse its Process Embedded children before the separate ADMIT attempt.
+            try (var contracts = new blue.language.processor.closure.BlueClosureContracts(engine.runtime().documentProcessor())) {
+                var surface = contracts.projectRootSubscriptionSurface(candidate.authored().copyNode());
+                addSurface(frames, required, candidate.source().value(), candidate.authored().blueId(),
+                        RoutingSurface.fromManagedRootContracts(surface.effectiveRootContracts()));
+            }
+        }
         else {
             var view = source.rootedViewBefore(candidate.cutoff());
             frames.add(view.snapshot().closureIdentity());
