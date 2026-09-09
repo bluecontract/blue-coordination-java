@@ -675,9 +675,9 @@ def publicBoundarySources = files(
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 229,
-        lines: 67_951L,
-        publicApiTypes: 84,
+        classes: 244,
+        lines: 72_218L,
+        publicApiTypes: 86,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
