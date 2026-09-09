@@ -2006,10 +2006,11 @@ final class MultiDocumentPublicationTransaction {
                 .stream()
                 .map(ComponentSnapshot::componentStateIdentity)
                 .toList();
-        if (result.rootedProjection() != null) {
+        if (resultingIndex.hasRootedViews()) {
             // Durable root-local proofs have no shared global topological order.
             // Compare the complete exact inventories; the processor independently
             // verifies the selected semantic graph's component ordering.
+            // Admission has no rooted projection, but uses this same durable index.
             expectedComponents = expectedComponents.stream().sorted().toList();
             actualComponents = actualComponents.stream().sorted().toList();
         }

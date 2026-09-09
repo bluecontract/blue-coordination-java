@@ -23,3 +23,15 @@ The real C1 source event is applied inside calculated B and runs 25 handler reac
 Open: complete root-only cyclic-join/replan behavior, coherent development export and MyOS persistence/public adapter/replay integration, then all remaining production obligations and final gates. Scope/API/Javadoc checks passed the typed-outcome/readiness selection; final release gates still remain. No footprint or semantic gate limit was raised.
 
 The first nested MyOS HTTP run rejected a same-epoch graph update for independent B: SDK managed-surface evidence still included calculated B changes. The SDK now projects published graph, component, subscription, occurrence-resolution, document-transition and route facts through the processor-derived rooted owner set. Complete calculated evidence remains in the advanced retained Contracts result. Seven focused SDK/publication/birth/ring checks plus API/Javadoc pass this correction; MyOS must rerun against its new immutable export.
+
+MyOS1b660436 subsequently passes the nested saved-original case with sole A publication,
+durable exact-work commands and verified ledger replay. Packaged04a14d6916d7 passes this
+case with14 commands, fresh JVM and relocation. Its broader HTTP run found that a later
+static parent admission compared processor topological component order with the durable
+rooted index's canonical proof order. Admission has no rooted projection flag, so the
+existing process-only branch missed it. Inventory comparison now follows the actual
+index format, including admission. It still compares every exact proof identity and
+its multiplicity; no missing, extra or changed proof is accepted. Legacy index ordering
+is unchanged. The new real two-pair SDK reproducer and adjacent admission/publication
+negatives pass, with both API boundary checks and strict Javadoc. A new immutable export
+and packaged rerun are required before accepting the broader preview.
