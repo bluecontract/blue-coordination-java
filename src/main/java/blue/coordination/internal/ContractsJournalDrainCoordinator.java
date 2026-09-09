@@ -147,6 +147,19 @@ final class ContractsJournalDrainCoordinator {
         return durableState.processedThrough;
     }
 
+    /** Advances transport only across entries no selected root still needs. */
+    synchronized List<TimelineEntry> completeRootedPrefix(ExternalOrderKey cutoff,
+            RootedCheckpointDriver.Scan remaining) {
+        if (!remaining.blockedRoots().isEmpty()) return List.of();
+        ExternalOrderKey firstPending = remaining.heads().isEmpty() ? null : remaining.heads().get(0).order();
+        for (TimelineEntry entry : journal.entries()) {
+            if (cutoff != null && entry.sourceOrderKey().compareTo(cutoff) > 0) continue;
+            if (firstPending != null && entry.sourceOrderKey().compareTo(firstPending) >= 0) continue;
+            if (durableState.terminalEntries.add(EntryKey.from(entry))) terminalEntryObserver.accept(entry);
+        }
+        return advanceContiguousFrontier(cutoff);
+    }
+
     /** Whether the ordinary lane has journal work at its retained frontier. */
     synchronized boolean hasPendingJournalTurn() {
         return journal.nextExternal(

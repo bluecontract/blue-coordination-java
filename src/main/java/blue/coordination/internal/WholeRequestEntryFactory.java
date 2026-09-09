@@ -45,6 +45,7 @@ final class WholeRequestEntryFactory {
     private final Map<EventShapeKey, FrozenNode> eventTemplates =
             new LinkedHashMap<>();
     private final Function<String, String> actorType;
+    private final boolean exactTimelineOrder;
 
     public WholeRequestEntryFactory(
             BlueRuntime runtime,
@@ -59,10 +60,16 @@ final class WholeRequestEntryFactory {
             WholeObjectStore objects,
             EngineMetrics metrics,
             Function<String, String> actorType) {
+        this(runtime, objects, metrics, actorType, false);
+    }
+
+    WholeRequestEntryFactory(BlueRuntime runtime, WholeObjectStore objects, EngineMetrics metrics,
+            Function<String, String> actorType, boolean exactTimelineOrder) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.actorType = Objects.requireNonNull(actorType, "actorType");
+        this.exactTimelineOrder = exactTimelineOrder;
     }
 
     public TimelineEntry create(
@@ -92,7 +99,7 @@ final class WholeRequestEntryFactory {
                         "append"));
         ExternalOrderKey journalOrderKey = ExternalOrderKey.of(List.of(
                 BigInteger.valueOf(timestampMicros),
-                timeline.timelineId(),
+                orderTimeline(event, timeline.timelineId()),
                 event.blueId()));
         metrics.increment("append.entriesBuilt");
         return new TimelineEntry(
@@ -137,7 +144,7 @@ final class WholeRequestEntryFactory {
                 supplied, "timeline-entry");
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
                 BigInteger.valueOf(timestamp),
-                timelineId,
+                orderTimeline(retainedEvent, timelineId),
                 retainedEvent.blueId()));
         metrics.increment("append.entriesBuilt");
         return new TimelineEntry(
@@ -151,6 +158,10 @@ final class WholeRequestEntryFactory {
                 timestamp,
                 globalSequence,
                 timelineSequence);
+    }
+
+    private String orderTimeline(ExactValue entry, String legacyTimelineName) {
+        return exactTimelineOrder ? entry.canonicalAt("/timeline").blueId() : legacyTimelineName;
     }
 
     /**

@@ -186,7 +186,9 @@ public final class DefaultCoordinationEngine
         runtime = BlueRuntime.create(
                 objects, metrics, applicationExactNodeProvider);
         entryFactory = new WholeRequestEntryFactory(
-                runtime, objects, metrics, this::timelineActorKind);
+                runtime, objects, metrics, this::timelineActorKind,
+                contractsBootstrap != null && ContractsClosureProfile.ROOTED_CONTRACTS_SPECIFICATION
+                        .equals(contractsBootstrap.contractsSpecificationIdentity()));
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
         documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
@@ -1124,23 +1126,30 @@ public final class DefaultCoordinationEngine
             long started = System.nanoTime();
             RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
                     .select(Objects.requireNonNull(root, "root"), journal.entries());
-            if (next.live() != null) {
-                ProcessingDrainReceipt completed = executeRootBatch(next.live(), started);
-                return rootedReadiness(root, completed, started);
-            }
-            if (next.historical() != null) {
-                var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
-                var attempt = managedApplicationAttempt(outcome);
-                ProcessingDrainReceipt completed = new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
-                        outcome.published(), false, outcome.published() && !outcome.replayed() ? 1L : 0L,
-                        System.nanoTime() - started, outcome.receipt().stream().toList(), List.of(attempt), List.of());
-                return rootedReadiness(root, completed, started);
-            }
-            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, !next.blocked(), false,
-                    0L, System.nanoTime() - started);
+            return rootedReadiness(root, executeRootSelection(next, started), started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
+    }
+
+    private ProcessingDrainReceipt executeRootSelection(RootedCheckpointDriver.Selection next, long started) {
+        if (next.live() != null) return executeRootBatch(next.live(), started);
+        if (next.historical() != null) {
+            try {
+                var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
+                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                        outcome.published(), false, outcome.published() && !outcome.replayed() ? 1L : 0L,
+                        System.nanoTime() - started, outcome.receipt().stream().toList(),
+                        List.of(managedApplicationAttempt(outcome)), List.of());
+            } catch (ManagedEpochEvidenceException failure) {
+                documents.recordManagedEpochEvidenceFailure(failure);
+                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, false, false, 0L,
+                        System.nanoTime() - started, List.of(), List.of(), List.of(new ManagedEpochEvidenceFailure(
+                                failure.work(), failure.planStatus(), failure.code(), failure.message())));
+            }
+        }
+        return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, !next.blocked(), false,
+                0L, System.nanoTime() - started);
     }
 
     /** Recomputes pending work after the selected step; the one-step budget is not a resource wait. */
@@ -1210,6 +1219,18 @@ public final class DefaultCoordinationEngine
                 || !expected.equals(actual)) {
             throw processingSelectionMismatch(
                     "MANAGED_EPOCH_APPLICATION", next, expected);
+        }
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter);
+            var selected = driver.scan(journal.entries(), null).heads().get(0);
+            long started = System.nanoTime();
+            var completed = executeRootSelection(selected.selection(), started);
+            if (!completed.quiescent()) return completed;
+            var remaining = driver.scan(journal.entries(), null);
+            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                    remaining.quiescent(), !remaining.heads().isEmpty(), completed.committedProcessTransitions(),
+                    System.nanoTime() - started, completed.managedEpochApplications(),
+                    completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures());
         }
         try {
             ProcessingDrainReceipt drained = drainContracts(
@@ -1606,6 +1627,14 @@ public final class DefaultCoordinationEngine
                 availability, "availability");
         if (contractsJournalCoordinator == null) {
             return ProcessingSelection.none();
+        }
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            if (supplied.journalAdmissionAvailable()) return ProcessingSelection.journal();
+            if (scan.heads().isEmpty()) return ProcessingSelection.none();
+            var next = scan.heads().get(0).selection();
+            return next.historical() == null ? ProcessingSelection.journal()
+                    : ProcessingSelection.managedEpochApplication(next.historical());
         }
         Optional<ManagedEpochApplicationWork> managed =
                 nextFairManagedEpochApplicationWork();
@@ -2049,6 +2078,12 @@ public final class DefaultCoordinationEngine
             ExternalOrderKey inclusiveCutoff,
             CoordinationEngine.DrainBudget budget,
             boolean managedAllowed) {
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            return new RootedDrainCoordinator(new RootedCheckpointDriver(documents, contractsClosureAdapter),
+                    journal, contractsJournalCoordinator,
+                    head -> executeRootSelection(head.selection(), System.nanoTime()))
+                    .drain(inclusiveCutoff, budget, managedAllowed);
+        }
         long started = System.nanoTime();
         CoordinationEngine.DrainBudget limits = Objects.requireNonNull(
                 budget, "budget");

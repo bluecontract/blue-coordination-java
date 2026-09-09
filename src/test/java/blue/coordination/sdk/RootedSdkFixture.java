@@ -24,7 +24,12 @@ final class RootedSdkFixture implements AutoCloseable {
         timelines.computeIfAbsent(timeline, t -> blue.timelines().register(t, "alice"));
         StringBuilder yaml = new StringBuilder(resource(resource));
         references.forEach((path, id) -> yaml.append("\n").append(path).append(":\n  blueId: ").append(id).append("\n"));
-        DocumentHandle document = blue.documents().admitStaticProcessEmbedded(yaml.toString(),
+        return startYaml(yaml.toString(), timeline);
+    }
+
+    DocumentHandle startYaml(String yaml, String timeline) {
+        timelines.computeIfAbsent(timeline, t -> blue.timelines().register(t, "alice"));
+        DocumentHandle document = blue.documents().admitStaticProcessEmbedded(yaml,
                 ActivationPolicy.importFullHistory()).document("root");
         retain(document);
         return document;
