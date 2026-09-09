@@ -92,6 +92,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
             ignored -> { };
     private boolean closed;
+    private AdmissionInputEvidence lastAdmissionInputs;
 
     ContractsClosureAdmissionAdapter(
             BlueRuntime runtime,
@@ -205,6 +206,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             NodeProvider exactNodes,
             ContractsManagedEpochSelectionPlan selectionPlan) {
         ensureOpen();
+        lastAdmissionInputs = null;
         ClosureInvocationInput admission = Objects.requireNonNull(
                 input, "input");
         CoordinationEngine.AdmissionPolicy temporalPolicy =
@@ -293,12 +295,25 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 publicationIdentity,
                 members,
                 before);
+        lastAdmissionInputs = new AdmissionInputEvidence(
+                publicationIdentity, admission, completedAdmission, selectionPlan);
         return new ContractsClosureAdmissionReceipt(
                 attempt,
                 publicationIdentity,
                 ContractsClosureAdmissionReceipt.PublicationOutcome.PUBLISHED,
                 members);
     }
+
+    /** Observation only: exact inputs of the latest newly published admission. */
+    synchronized Optional<AdmissionInputEvidence> lastAdmissionInputs() {
+        ensureOpen();
+        return Optional.ofNullable(lastAdmissionInputs);
+    }
+
+    /** The actual selected and expanded inputs; neither is reconstructed from a result. */
+    record AdmissionInputEvidence(String publicationIdentity,
+            ClosureInvocationInput originalInput, ClosureInvocationInput completedInput,
+            ContractsManagedEpochSelectionPlan selectionPlan) { }
 
     /** Exact implementation evidence from the latest completed admission. */
     synchronized Optional<ClosureImplementationEvidence>

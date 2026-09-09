@@ -485,6 +485,8 @@ final class ContractsClosureAdmissionAdapterTest {
             assertTrue(afterFailure.documentHeads().isEmpty());
             assertTrue(afterFailure.occurrenceInventory().rows().isEmpty());
             assertTrue(afterFailure.admissionReceipts().isEmpty());
+            assertTrue(engine.contractsClosureAdmissionAdapter().lastAdmissionInputs().isEmpty(),
+                    "A failed publication cannot expose successful admission-input evidence");
 
             engine.contractsClosureAdmissionAdapter().onFailurePoint(
                     ignored -> { });
@@ -500,6 +502,23 @@ final class ContractsClosureAdmissionAdapterTest {
             assertEquals(2, engine.documentCount());
             assertEquals(1, engine.documents().publicationSnapshot()
                     .occurrenceInventory().rows().size());
+            var inputs = engine.contractsClosureAdmissionAdapter().lastAdmissionInputs().orElseThrow();
+            assertEquals(retried.publicationIdentity(), inputs.publicationIdentity());
+            assertSame(compiled.invocation(), inputs.originalInput());
+            assertEquals(1, inputs.originalInput().snapshot().managedDocuments().size());
+            assertEquals(2, inputs.completedInput().snapshot().managedDocuments().size());
+            assertNotEquals(inputs.originalInput().invocationIdentity(), inputs.completedInput().invocationIdentity());
+            assertEquals(retried.attempt().processResult().invocationIdentity(), inputs.completedInput().invocationIdentity());
+            assertEquals(inputs.originalInput().cause().causeIdentity(), inputs.completedInput().cause().causeIdentity());
+            assertSame(inputs.originalInput().executionPolicy(), inputs.completedInput().executionPolicy());
+            assertSame(inputs.originalInput().environment(), inputs.completedInput().environment());
+            assertTrue(inputs.selectionPlan() == null);
+            var replayed = engine.admitContractsClosure(compiled.invocation(),
+                    compiled.activationInputs().policy(), compiled.activationInputs().verifiedFrontier());
+            assertEquals(ContractsClosureAdmissionReceipt.PublicationOutcome.ALREADY_PUBLISHED, replayed.publicationOutcome());
+            assertSame(retried.attempt(), replayed.attempt());
+            assertTrue(engine.contractsClosureAdmissionAdapter().lastAdmissionInputs().isEmpty(),
+                    "Receipt replay must not pretend to be a newly observed processor execution");
         }
     }
 
