@@ -672,6 +672,16 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         selected.maxSelectedEntries()))));
     }
 
+    synchronized DrainResult drainJournalThrough(EntryHandle inclusiveEntry, DrainBudget budget) {
+        ensureOpen();
+        if (Objects.requireNonNull(inclusiveEntry, "inclusiveEntry").owner() != owner) {
+            throw new IllegalArgumentException("Entry belongs to another runtime");
+        }
+        DrainBudget selected = Objects.requireNonNull(budget, "budget");
+        return retain(mapper.map(engine.drainJournalThrough(requireCoreEntry(inclusiveEntry),
+                new CoordinationEngine.DrainBudget(selected.maxCommittedProcessTransitions(), selected.maxSelectedEntries()))));
+    }
+
     synchronized DrainResult drainManagedEpochApplication(
             String expectedWorkIdentity) {
         ensureOpen();

@@ -1169,6 +1169,25 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized ProcessingDrainReceipt drainJournal(
             CoordinationEngine.DrainBudget budget) {
+        return drainJournalThroughOrder(null, budget);
+    }
+
+    /**
+     * Drains one ordinary selection at or before an exact retained input.
+     * Managed application turns remain separately scheduled.
+     * @param inclusiveEntry exact retained entry defining the inclusive cutoff
+     * @param budget deterministic between-invocation limits
+     * @return the complete bounded journal result
+     */
+    public synchronized ProcessingDrainReceipt drainJournalThrough(
+            TimelineEntry inclusiveEntry, CoordinationEngine.DrainBudget budget) {
+        ensureOpen();
+        return drainJournalThroughOrder(journal.requireCanonical(
+                Objects.requireNonNull(inclusiveEntry, "inclusiveEntry")).sourceOrderKey(), budget);
+    }
+
+    private ProcessingDrainReceipt drainJournalThroughOrder(
+            ExternalOrderKey cutoff, CoordinationEngine.DrainBudget budget) {
         ensureOpen();
         CoordinationEngine.DrainBudget selected = Objects.requireNonNull(
                 budget, "budget");
@@ -1179,7 +1198,7 @@ public final class DefaultCoordinationEngine
         }
         try {
             ProcessingDrainReceipt drained = drainContracts(
-                    null,
+                    cutoff,
                     new CoordinationEngine.DrainBudget(
                             selected.maxCommittedProcessTransitions(), 1L),
                     false);

@@ -41,6 +41,19 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Drains one eligible journal selection no later than the supplied exact entry.
+     * Repeated calls can finish separate rooted observers of that entry without
+     * consuming future inputs. Managed application turns remain separately scheduled.
+     * @param inclusiveEntry retained entry defining the full external-order cutoff
+     * @param budget deterministic between-invocation limits
+     * @return complete evidence for this bounded journal selection
+     */
+    public DrainResult drainJournalThrough(EntryHandle inclusiveEntry, DrainBudget budget) {
+        return runtime.drainJournalThrough(Objects.requireNonNull(inclusiveEntry, "inclusiveEntry"),
+                Objects.requireNonNull(budget, "budget"));
+    }
+
+    /**
      * Reads the full retained processor evidence for a terminal closure identity.
      * Calculated dependency records are local views; only the rooted projection's
      * owners have authoritative publication rights. Failures carry no such rights.
