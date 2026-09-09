@@ -65,7 +65,7 @@ final class RootedGasBoundaryTest {
             var policy = ContractsExecutionPolicy.exactSharedGas(budget, "rooted-tight-budget");
             var captured = scenario.control.capture(scenario.parent.id(), scenario.entry.blueId(), policy);
             var reference = RootedCalculationFixture.materializedReference(captured);
-            var result = blue.processing().process(scenario.parent, scenario.entry, policy).entry(scenario.entry);
+            var result = blue.advanced().process(scenario.parent, scenario.entry, policy).entry(scenario.entry);
             assertEquals(succeeds ? EntryDisposition.APPLIED : EntryDisposition.GAS_LIMIT_EXCEEDED,
                     result.disposition(), schedule + " " + budget + " " + result.diagnostic());
             String terminal = result.closures().get(0).closureId();

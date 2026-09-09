@@ -118,7 +118,7 @@ final class RootedSourceIsolationTest {
             String sourceHead = source.snapshot().blueId();
             List<String> sourceHistory = receipts(blue, source.id());
             if (failSibling) {
-                EntryResult failure = blue.processing().process(sibling, input,
+                EntryResult failure = blue.advanced().process(sibling, input,
                         ContractsExecutionPolicy.exactSharedGas(1L, "rcp-one-gas")).entry(input);
                 assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, failure.disposition(), failure.diagnostic().toString());
                 var failedCalculation = blue.advanced().closureExecution(failure.closures().get(0).closureId()).orElseThrow();

@@ -45,7 +45,7 @@ final class RootedCreatedChildTest {
             var head = parent.snapshot().blueId();
             var history = fixture.history(parent);
             var result = budget == null ? blue.processing().processNext(parent).entry(creation)
-                    : blue.processing().process(parent, creation,
+                    : blue.advanced().process(parent, creation,
                         ContractsExecutionPolicy.exactSharedGas(budget, "rooted-birth-boundary")).entry(creation);
             var execution = blue.advanced().closureExecution(result.closures().get(0).closureId()).orElseThrow();
             if (budget != null) {

@@ -27,6 +27,20 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Processes one root input with an explicit low-level execution policy.
+     * Ordinary processing retains the configured release policy.
+     * @param root selected managed root
+     * @param input exact supplied entry
+     * @param policy immutable shared and member gas limits
+     * @return the complete processing outcome
+     */
+    public DrainResult process(DocumentHandle root, EntryHandle input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        return runtime.processRootInput(Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(input, "input"), Objects.requireNonNull(policy, "policy"));
+    }
+
+    /**
      * Reads the full retained processor evidence for a terminal closure identity.
      * Calculated dependency records are local views; only the rooted projection's
      * owners have authoritative publication rights. Failures carry no such rights.

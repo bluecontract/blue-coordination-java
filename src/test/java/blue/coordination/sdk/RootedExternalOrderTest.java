@@ -58,7 +58,7 @@ final class RootedExternalOrderTest {
             var parent = fixture.start("parent.yaml", "rcp2/parent", java.util.Map.of("child", source.snapshot().blueId()));
             var histories = List.of(fixture.history(source), fixture.history(parent));
             var entry = fixture.append(source, "rcp2/source", "tick", 200, "{}");
-            var result = blue.processing().process(parent, entry,
+            var result = blue.advanced().process(parent, entry,
                     ContractsExecutionPolicy.exactSharedGas(1, "provider-frontier-negative"));
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, result.entry(entry).disposition());
             assertEquals(histories, List.of(fixture.history(source), fixture.history(parent)));

@@ -20,13 +20,6 @@ public final class ProcessingGateway {
                 Objects.requireNonNull(input, "input"));
     }
 
-    /** Processes one root input with an explicit, immutable shared gas budget. */
-    public DrainResult process(DocumentHandle root, EntryHandle input,
-            blue.coordination.api.ContractsExecutionPolicy policy) {
-        return runtime.processRootInput(Objects.requireNonNull(root, "root"),
-                Objects.requireNonNull(input, "input"), Objects.requireNonNull(policy, "policy"));
-    }
-
     /** Processes one earliest pending LIVE or retained input in the selected root's exact view. */
     public DrainResult processNext(DocumentHandle root) {
         return runtime.processNextRoot(Objects.requireNonNull(root, "root"));
