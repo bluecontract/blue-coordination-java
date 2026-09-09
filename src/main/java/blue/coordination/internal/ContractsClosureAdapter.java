@@ -1922,7 +1922,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     occurrence.demand().sourcePath());
             ManagedOccurrenceBinding retained = rows.get(key);
             if (retained != null) {
+                // A committed reservation is immutable input. Select its old
+                // source inside the processor retry, never by rewriting the read expansion.
+                boolean reservedHistory = !retained.active() && retained.pendingHistoricalEpoch() == null
+                        && occurrence.pendingHistoricalEpoch() != null
+                        && retained.targetDocumentId().value().equals(occurrence.targetDocumentId().value())
+                        && current.input().snapshot().occurrences().stream().anyMatch(row ->
+                                row.occurrenceIdentity().equals(retained.occurrenceIdentity())
+                                        && row.bindingIdentity().equals(retained.bindingIdentity())
+                                        && !row.active() && row.pendingHistoricalEpoch() == null);
                 if (retained.active()
+                        || reservedHistory
                         || ManagedOccurrenceResolver
                                 .isVerifiedPendingReceiptEventReplacement(
                                         current.input().cause()
