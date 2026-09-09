@@ -504,14 +504,27 @@ final class SdkDrainResultMapper {
         if (!result.commits()) {
             return ManagedSurfaceEvidence.empty();
         }
+        var owned = result.rootedProjection();
+        // This SDK surface describes published records. Full calculated dependency
+        // evidence remains in the retained Contracts result, never a source mutation.
+        var before = owned == null ? inputComponents : inputComponents.stream()
+                .filter(component -> component.orderedMemberDocumentIds().stream().anyMatch(owned::owns)).toList();
+        var after = owned == null ? result.resultingComponents() : owned.ownedComponents();
         return new ManagedSurfaceEvidence(
                 result.graphGeneration(),
-                retainedResolutions.stream().map(SdkDrainResultMapper::occurrenceResolution).toList(),
-                result.graphChanges().stream().map(SdkDrainResultMapper::graphChange).toList(),
-                componentTransitions(inputComponents, result.resultingComponents()),
-                result.subscriptionDeltas().stream().map(SdkDrainResultMapper::subscriptionChange).toList(),
-                result.documentTransitionEvidence().stream().map(SdkDrainResultMapper::documentTransition).toList(),
+                retainedResolutions.stream().filter(resolution -> owned == null
+                        || owned.owns(resolution.occurrence().sourceDocumentId()))
+                        .map(SdkDrainResultMapper::occurrenceResolution).toList(),
+                result.graphChanges().stream().filter(change -> owned == null || owned.owns(change.sourceDocumentId()))
+                        .map(SdkDrainResultMapper::graphChange).toList(),
+                componentTransitions(before, after),
+                (owned == null ? result.subscriptionDeltas() : owned.ownedSubscriptionDeltas()).stream()
+                        .map(SdkDrainResultMapper::subscriptionChange).toList(),
+                result.documentTransitionEvidence().stream().filter(change -> owned == null || owned.owns(change.documentId()))
+                        .map(SdkDrainResultMapper::documentTransition).toList(),
                 java.util.stream.IntStream.range(0, operationRouteChanges.size())
+                        .filter(index -> owned == null || owned.owns(new blue.language.processor.closure.DocumentId(
+                                operationRouteChanges.get(index).documentId().value())))
                         .mapToObj(index -> operationRouteChange(index, operationRouteChanges.get(index)))
                         .toList());
     }

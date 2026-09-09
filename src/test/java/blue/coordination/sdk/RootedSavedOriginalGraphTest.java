@@ -87,6 +87,12 @@ final class RootedSavedOriginalGraphTest {
             assertEquals(handles.get("C").id(), retainedWork.work().sourceDocumentId());
             var local = settled.rootedRetainedResults().get(0);
             assertEquals(EntryDisposition.APPLIED, local.disposition());
+            assertTrue(local.managedSurfaceEvidence().documentTransitions().stream()
+                    .allMatch(change -> change.documentId().equals(handles.get("A").id())));
+            assertTrue(local.managedSurfaceEvidence().graphChanges().stream()
+                    .allMatch(change -> change.sourceDocumentId().equals(handles.get("A").id())));
+            assertTrue(local.managedSurfaceEvidence().componentTransitions().stream().flatMap(change -> change.after().stream())
+                    .flatMap(component -> component.memberDocumentIds().stream()).allMatch(handles.get("A").id()::equals));
             assertEquals(calculated.totalGas(), local.stats().gas());
             assertEquals(calculated.totalGas(), settled.stats().gas());
             assertEquals(List.of(handles.get("A").id()), local.changes().stream().map(DocumentChange::documentId).toList());
