@@ -67,6 +67,12 @@ final class RootedDocumentView {
         }
     }
 
+    void requireProcessingBoundary(RootedTerminalEvidence evidence, CatchUpPlanStore plans) {
+        if (!evidence.logicalBoundary(plans).equals(logicalBoundary)) {
+            throw new IllegalStateException("Rooted view changed the frozen input's logical boundary");
+        }
+    }
+
     blue.language.processor.ExternalOrderKey logicalBoundary() { return logicalBoundary; }
     ClosureProcessResult result() { return result; }
     AffectedClosureSnapshot snapshot() { return snapshot; }

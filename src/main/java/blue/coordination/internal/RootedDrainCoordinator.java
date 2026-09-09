@@ -45,10 +45,11 @@ final class RootedDrainCoordinator {
         List<ManagedEpochApplicationReceipt> applications = new ArrayList<>();
         List<ManagedEpochApplicationAttempt> managedAttempts = new ArrayList<>();
         List<ManagedEpochEvidenceFailure> failures = new ArrayList<>();
+        List<ProcessingDrainReceipt.RootedRetainedAttempt> localAttempts = new ArrayList<>();
         RootedCheckpointDriver.Scan remaining = driver.scan(journal.entries(), cutoff);
         while (selected < budget.maxSelectedEntries() && committed < budget.maxCommittedProcessTransitions()) {
             var next = remaining.heads().stream().filter(head -> !deferred.contains(head.root())).findFirst();
-            if (next.isEmpty() || !managedAllowed && next.get().selection().historical() != null) break;
+            if (next.isEmpty() || !managedAllowed && (next.get().selection().historical() != null || next.get().selection().localHistorical() != null)) break;
             var result = execute.apply(next.get());
             selected = Math.addExact(selected, 1L);
             committed = Math.addExact(committed, result.committedProcessTransitions());
@@ -57,6 +58,7 @@ final class RootedDrainCoordinator {
             applications.addAll(result.managedEpochApplications());
             managedAttempts.addAll(result.managedEpochApplicationAttempts());
             failures.addAll(result.managedEpochEvidenceFailures());
+            localAttempts.addAll(result.rootedRetainedAttempts());
             if (!result.quiescent()) deferred.add(next.get().root());
             remaining = driver.scan(journal.entries(), cutoff);
         }
@@ -71,7 +73,8 @@ final class RootedDrainCoordinator {
         return new ProcessingDrainReceipt(new ArrayList<>(completed.values()), outcomes, attempts,
                 transport.processedThrough(), remaining.quiescent(),
                 !remaining.quiescent() && runnable && (budgetExhausted || !managedAllowed),
-                committed, System.nanoTime() - started, applications, managedAttempts, failures);
+                committed, System.nanoTime() - started, applications, managedAttempts, failures)
+                .withRootedRetainedAttempts(localAttempts);
     }
 
     private static <T> void merge(Map<String, List<T>> target, Map<String, List<T>> source) {

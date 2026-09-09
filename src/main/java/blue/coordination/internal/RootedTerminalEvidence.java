@@ -23,9 +23,10 @@ final class RootedTerminalEvidence {
         this.input = invocation.input();
         this.rooted = Objects.requireNonNull(invocation.rootedEvidence(), "rooted evidence");
         this.executedInvocationIdentity = invocation.executionInvocationIdentity();
-        this.historicalWorkIdentity = work == null ? null : work.workIdentity();
+        var selectedWork = work == null ? rooted.historicalWork() : work;
+        this.historicalWorkIdentity = selectedWork == null ? null : selectedWork.workIdentity();
         this.requiredTimelineIds = requiredTimelines(invocation);
-        if (work != null) requireHistoricalCause(work);
+        if (selectedWork != null) requireHistoricalCause(selectedWork);
     }
 
     static RootedTerminalEvidence capture(ContractsClosureAdapter.CohortInvocation invocation,
@@ -92,6 +93,63 @@ final class RootedTerminalEvidence {
     }
 
     ClosureInvocationInput input() { return input; }
+
+    blue.language.processor.ExternalOrderKey logicalBoundary(CatchUpPlanStore plans) {
+        return rooted.historicalOrigin() == null ? RootedAttachmentCapture.logicalBoundary(input, plans)
+                : rooted.historicalOrigin().logicalBoundary();
+    }
+
+
+    /** Authenticates indirect reference work whose direct lane is a read-only dependency. */
+    boolean verifiesReadOnlyReferenceRebind(ClosureProcessResult result, DocumentId document,
+            List<DocumentId> directTargets) {
+        requireResult(result, rooted.terminalKey());
+        var actualTargets = input.directDeliveries().stream()
+                .map(delivery -> ContractsClosureAdapter.coordinationId(delivery.targetDocumentId()))
+                .distinct().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList();
+        var id = ContractsClosureAdapter.closureId(document);
+        var before = input.snapshot().managedDocument(id);
+        var after = result.resultingDocuments().stream().filter(value -> value.documentId().equals(id)).findFirst().orElse(null);
+        if (!result.commits() || actualTargets.isEmpty() || !actualTargets.equals(directTargets)
+                || actualTargets.contains(document) || !result.rootedProjection().owns(id)
+                || before == null || after == null || before.epoch() != after.epoch()
+                || !before.blueId().equals(after.beforeBlueId()) || before.blueId().equals(after.afterBlueId())
+                || result.managedTransitionReceipts().stream().noneMatch(receipt -> receipt.documentId().equals(id)
+                        && receipt.emittedRootEvents().isEmpty())) return false;
+        Map<String, blue.language.model.Node> priorTargets = new java.util.LinkedHashMap<>();
+        Map<String, blue.language.model.Node> nextTargets = new java.util.LinkedHashMap<>();
+        input.snapshot().managedDocuments().forEach(value -> priorTargets.put(value.documentId().value(), value.document()));
+        result.resultingDocuments().forEach(value -> nextTargets.put(value.documentId().value(), value.document()));
+        return ManagedSourceReferenceRewrite.verifies(before.document(), after.document(),
+                input.snapshot().occurrences().stream().filter(row -> row.sourceDocumentId().equals(id)).toList(),
+                result.occurrenceBindings().stream().filter(row -> row.sourceDocumentId().equals(id)).toList(),
+                priorTargets, nextTargets);
+    }
+
+    /** Proves the existing pending-target exception against the current immutable history and complete result. */
+    boolean verifiesLocalHistoricalRebind(ClosureProcessResult result, DocumentId document,
+            blue.coordination.api.ManagedEpochApplicationWork work, InMemoryDocumentStore documents) {
+        if (rooted.historicalOrigin() == null || rooted.historicalWork() == null || work == null
+                || !identifiesHistoricalWork(work) || !work.sourceDocumentId().equals(document)
+                || work.sourceDocumentId().equals(work.consumerDocumentId())) return false;
+        requireResult(result, rooted.terminalKey());
+        var id = ContractsClosureAdapter.closureId(document);
+        var before = input.snapshot().managedDocument(id);
+        var after = result.resultingDocuments().stream().filter(value -> value.documentId().equals(id)).findFirst().orElse(null);
+        var transition = result.managedTransitionReceipts().stream().filter(value -> value.documentId().equals(id)).findFirst().orElse(null);
+        if (!result.commits() || !result.rootedProjection().owns(id) || before == null || after == null || transition == null
+                || before.epoch() != after.epoch() || before.blueId().equals(after.afterBlueId())) return false;
+        var current = documents.require(document);
+        if (current.epoch() != before.epoch() || !current.currentRepresentation().blueId().equals(before.blueId())) return false;
+        var chain = new ManagedRepresentationHistory(documents).at(document, before.epoch());
+        // The chain was reauthenticated against actual retained publications. This constructor
+        // additionally verifies lifecycle, the selected pending row, complete reference-only
+        // body/binding equality, original invocation, transition receipt and commit companion.
+        new blue.language.processor.closure.ManagedRepresentationTransition(id, before.epoch(),
+                chain.anchor().receiptIdentity(), chain.targetPositionIdentity(), input, result,
+                transition.transitionReceiptIdentity());
+        return true;
+    }
 
     java.util.Set<String> requiredTimelineIds() { return requiredTimelineIds; }
 

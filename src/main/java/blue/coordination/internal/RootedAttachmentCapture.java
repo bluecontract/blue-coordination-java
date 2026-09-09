@@ -37,7 +37,9 @@ final class RootedAttachmentCapture {
     static Map<DocumentId, RootedDocumentView> select(ContractsClosureAdapter.CohortInvocation current,
             Collection<DocumentId> targets, InMemoryDocumentStore documents) {
         if (current.rootedEvidence() == null) return Map.of();
-        ExternalOrderKey boundary = logicalBoundary(current.input(), documents.catchUpPlansSnapshot());
+        ExternalOrderKey boundary = current.rootedEvidence().historicalOrigin() == null
+                ? logicalBoundary(current.input(), documents.catchUpPlansSnapshot())
+                : current.rootedEvidence().historicalOrigin().logicalBoundary();
         Map<DocumentId, RootedDocumentView> selected = new LinkedHashMap<>();
         for (DocumentId target : targets) {
             if (current.input().snapshot().contains(ContractsClosureAdapter.closureId(target))) continue;
@@ -52,9 +54,17 @@ final class RootedAttachmentCapture {
                 if (exact == null) throw new ProjectionUnavailableException("Retained attachment view has incomplete forward evidence");
                 var existing = current.input().snapshot().managedDocument(exact.documentId());
                 RootedDocumentView prior = selected.get(id);
-                if (existing != null && !existing.blueId().equals(exact.blueId()) || prior != null
-                        && !prior.snapshot().managedDocument(exact.documentId()).blueId().equals(exact.blueId())) {
-                    throw new ProjectionUnavailableException("Historical witness needs a separate exact view for " + id);
+                if (existing != null && !existing.blueId().equals(exact.blueId())) {
+                    // Keep the calculating primary. Its older exact role remains
+                    // inside the complete retained source proof; the Contracts
+                    // read-expansion factory independently authenticates that role.
+                    continue;
+                }
+                if (prior != null && !prior.snapshot().managedDocument(exact.documentId()).blueId().equals(exact.blueId())) {
+                    throw new ProjectionUnavailableException("Historical witness needs a separate exact view for " + id
+                            + " at=" + boundary + " target=" + target + " proof=" + exact.blueId()
+                            + " current=" + (existing == null ? "absent" : existing.blueId())
+                            + " prior=" + prior.snapshot().managedDocument(exact.documentId()).blueId());
                 }
                 if (existing == null) selected.putIfAbsent(id, view);
                 view.snapshot().occurrences().stream().filter(row -> row.sourceDocumentId().equals(exact.documentId()))

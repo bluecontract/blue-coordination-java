@@ -45,6 +45,92 @@ public final class RootedCalculationFixture {
                 ManagedSurfacePublicationEvidence.empty(), null, evidence);
     }
 
+    /** Injects one failure at an actual Contracts publication boundary; no legacy processor hook is used. */
+    public void failPublicationAt(String selectedPoint) {
+        var once = new java.util.concurrent.atomic.AtomicBoolean();
+        if ("AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH".equals(selectedPoint)) {
+            engine.contractsClosureAdapter().onPublicationFailurePoint(point -> {
+                if (once.compareAndSet(false, true)) throw new IllegalStateException("Injected rooted publication failure: " + point);
+            });
+        } else {
+            var selected = MultiDocumentPublicationTransaction.FailurePoint.valueOf(selectedPoint);
+            engine.contractsClosureAdapter().onStoreFailurePoint(point -> {
+                if (point == selected && once.compareAndSet(false, true))
+                    throw new IllegalStateException("Injected rooted publication failure: " + point);
+            });
+        }
+    }
+
+    /** Removes only the publication fault callbacks installed by this fixture. */
+    public void clearPublicationFailure() {
+        engine.contractsClosureAdapter().onPublicationFailurePoint(ignored -> { });
+        engine.contractsClosureAdapter().onStoreFailurePoint(ignored -> { });
+    }
+
+    /** Captures actual input/result evidence and returns a read-only current-owner fence check. */
+    public Runnable capturedPublicationFence(DocumentId root) {
+        var adapter = engine.contractsClosureAdapter();
+        var invocation = adapter.nextRootLiveInput(root, engine.auditTimelineEntries()).orElseThrow().invocations().get(0);
+        var result = new BlueClosureContracts(engine.runtime().documentProcessor()).processClosure(invocation.input()).processResult();
+        if (!result.commits()) throw new IllegalStateException("Publication fence fixture requires an actual successful calculation");
+        var owners = new java.util.LinkedHashSet<>(RootedResultScope.members(result));
+        return () -> adapter.requireRootedOwnersStillCurrent(invocation, result, engine.documents().closureSnapshot(owners), owners);
+    }
+
+    /** Reads the actual selected local work without creating an independent catch-up plan. */
+    public blue.coordination.api.ManagedEpochApplicationWork localHistoryWork(DocumentId root) {
+        return Objects.requireNonNull(engine.contractsClosureAdapter().nextRootLocalHistory(root,
+                engine.auditTimelineEntries()).step()).work();
+    }
+
+    /** Captures the actual next local historical input, including the configured execution policy. */
+    public ClosureInvocationInput captureLocalHistory(DocumentId root) {
+        return Objects.requireNonNull(engine.contractsClosureAdapter().nextRootLocalHistory(root,
+                engine.auditTimelineEntries()).step(), "No pending local history").invocation().input();
+    }
+
+    /** Calculates one real pending local initialization successor without publishing any source or root. */
+    public ClosureProcessResult precomputeLocalInitialization(DocumentId root, String causalEntry) {
+        var selected = engine.contractsClosureAdapter().nextRootLocalHistory(root, engine.auditTimelineEntries());
+        var step = Objects.requireNonNull(selected.step(), "Actual local prerequisite was not selected");
+        if (!step.anchor().blueId().equals(causalEntry)) throw new IllegalArgumentException("Different local barrier");
+        return new BlueClosureContracts(engine.runtime().documentProcessor())
+                .processClosure(step.invocation().input()).processResult();
+    }
+
+    /** Enumerates actual retained terminal evidence for publication-proof mutation tests. */
+    public java.util.List<RetainedTerminal> retainedTerminals(DocumentId root) {
+        return engine.documents().closureSnapshot(java.util.Set.of(root)).closurePublicationReceipts().values().stream()
+                .filter(receipt -> receipt.rootedTerminalEvidence() != null)
+                .map(receipt -> new RetainedTerminal(receipt.publicationIdentity(),
+                        receipt.rootedTerminalEvidence().input(), receipt.attempt().processResult())).toList();
+    }
+
+    /** Applies the production reference proof to a proposed result and direct-target inventory without writing state. */
+    public boolean verifiesRetainedReferenceRebind(String key, ClosureProcessResult result,
+            DocumentId document, java.util.List<DocumentId> directTargets) {
+        return engine.documents().closurePublicationReceipt(key).orElseThrow().rootedTerminalEvidence()
+                .verifiesReadOnlyReferenceRebind(result, document, directTargets);
+    }
+
+    /** The exact processor input/result retained at a real terminal publication. */
+    public record RetainedTerminal(String identity, ClosureInvocationInput input, ClosureProcessResult result) { }
+
+    /** Describes actual pending local evidence without changing stores. */
+    public String localHistoryDescription(DocumentId root) {
+        var view = engine.documents().require(root).rootedView();
+        return "boundary=" + view.logicalBoundary() + " pending=" + view.snapshot().occurrences().stream()
+                .filter(row -> !row.active() && row.pendingHistoricalEpoch() != null).map(row -> {
+                    var source = view.snapshot().managedDocument(row.targetDocumentId());
+                    long next = row.pendingHistoricalEpoch() + 1;
+                    var receipt = engine.documents().managedEpochEvidence(
+                            ContractsClosureAdapter.coordinationId(row.targetDocumentId()), next).receipt();
+                    return row.sourceDocumentId() + ":" + row.sourcePath() + " cursor=" + row.pendingHistoricalEpoch()
+                            + " target=" + row.expectedTargetBlueId() + " source=" + source.epoch() + ":" + source.blueId()
+                            + " receipt=" + (receipt == null ? "missing" : receipt.epoch() + ":" + receipt.sourceOrder());
+                }).toList();
+    }
+
     /** Returns the exact retained selected-view evidence without opening current child heads. */
     public blue.language.processor.closure.AffectedClosureSnapshot selectedView(DocumentId root) {
         return engine.documents().require(root).rootedView().snapshot();
@@ -76,7 +162,7 @@ public final class RootedCalculationFixture {
             routes.put(id, original.routes(id));
         });
         var candidate = new RootedDocumentView(original.result(), original.subscriptions(), routes, proposed);
-        candidate.requireProcessingBoundary(retained.rootedTerminalEvidence().input(), engine.documents().catchUpPlansSnapshot());
+        candidate.requireProcessingBoundary(retained.rootedTerminalEvidence(), engine.documents().catchUpPlansSnapshot());
     }
 
     /** Warms the selected exact inputs in the requested physical enumeration only. */

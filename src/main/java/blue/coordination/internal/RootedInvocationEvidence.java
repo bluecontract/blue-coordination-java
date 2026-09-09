@@ -16,10 +16,17 @@ import java.util.Objects;
 /** Frozen draft.2 context derived from durable admission facts and exact input channels. */
 record RootedInvocationEvidence(RootedProcessingContext context, String deliveryBasisIdentity,
         String invocationIdentity, String baseInvocationIdentity,
-        Map<DocumentId, RootedDocumentHistory> histories) {
+        Map<DocumentId, RootedDocumentHistory> histories, RootedDocumentView historicalOrigin,
+        blue.coordination.api.ManagedEpochApplicationWork historicalWork, Map<DocumentId, PublicationFence> publicationFences) {
+    RootedInvocationEvidence(RootedProcessingContext context, String deliveryBasisIdentity,
+            String invocationIdentity, String baseInvocationIdentity, Map<DocumentId, RootedDocumentHistory> histories) {
+        this(context, deliveryBasisIdentity, invocationIdentity, baseInvocationIdentity, histories, null, null, Map.of());
+    }
+
     RootedInvocationEvidence {
         Objects.requireNonNull(context, "context");
         histories = Map.copyOf(histories);
+        publicationFences = Map.copyOf(publicationFences);
         if (!context.invocationIdentity(baseInvocationIdentity, deliveryBasisIdentity).equals(invocationIdentity)) {
             throw new IllegalArgumentException("Rooted invocation envelope does not bind its exact base input");
         }
@@ -44,7 +51,8 @@ record RootedInvocationEvidence(RootedProcessingContext context, String delivery
         }
         String delivery = context.deliveryBasisIdentity(input.cause().causeIdentity(), "LIVE", receiving, null);
         return new RootedInvocationEvidence(context, delivery,
-                context.invocationIdentity(input.invocationIdentity(), delivery), input.invocationIdentity(), histories);
+                context.invocationIdentity(input.invocationIdentity(), delivery), input.invocationIdentity(), histories)
+                .capturePublicationFences(input, documents);
     }
 
     static RootedInvocationEvidence retained(DocumentId anchor, ClosureInvocationInput input,
@@ -53,8 +61,42 @@ record RootedInvocationEvidence(RootedProcessingContext context, String delivery
         ContextEvidence entry = entryContext(anchor, input, documents);
         String delivery = entry.context().retainedDeliveryBasisIdentity(input.cause(), target, sourcePositionIdentity);
         return new RootedInvocationEvidence(entry.context(), delivery,
-                entry.context().invocationIdentity(input.invocationIdentity(), delivery), input.invocationIdentity(), entry.histories());
+                entry.context().invocationIdentity(input.invocationIdentity(), delivery), input.invocationIdentity(), entry.histories())
+                .capturePublicationFences(input, documents);
     }
+
+    static RootedInvocationEvidence retainedLocal(DocumentId anchor, ClosureInvocationInput input,
+            InMemoryDocumentStore documents, blue.language.processor.closure.ManagedOccurrenceBinding target,
+            String sourcePositionIdentity, RootedDocumentView origin, blue.coordination.api.ManagedEpochApplicationWork work) {
+        if (documents.require(anchor).rootedView() != origin
+                || !origin.snapshot().closureIdentity().equals(input.snapshot().closureIdentity())
+                || origin.logicalBoundary() == null) {
+            throw new IllegalArgumentException("Local history must retain the exact committed root and its frozen frontier");
+        }
+        var retained = retained(anchor, input, documents, target, sourcePositionIdentity);
+        return new RootedInvocationEvidence(retained.context(), retained.deliveryBasisIdentity(),
+                retained.invocationIdentity(), retained.baseInvocationIdentity(), retained.histories(), origin, Objects.requireNonNull(work), retained.publicationFences());
+    }
+
+    /** Operational source fences never replace selected values or enter their semantic identity. */
+    RootedInvocationEvidence capturePublicationFences(ClosureInvocationInput input, InMemoryDocumentStore documents) {
+        Map<DocumentId, PublicationFence> fences = new LinkedHashMap<>(publicationFences);
+        for (var selected : input.snapshot().managedDocuments()) {
+            DocumentId id = ContractsClosureAdapter.coordinationId(selected.documentId());
+            if (fences.containsKey(id)) continue;
+            documents.find(id).ifPresent(session -> fences.put(id, new PublicationFence(
+                    new InMemoryDocumentStore.DocumentHead(session.epoch(), session.currentRepresentation().blueId()),
+                    documents.graphGeneration(id))));
+        }
+        return new RootedInvocationEvidence(context, deliveryBasisIdentity, invocationIdentity,
+                baseInvocationIdentity, histories, historicalOrigin, historicalWork, fences);
+    }
+
+    PublicationFence publicationFence(DocumentId id) {
+        return Objects.requireNonNull(publicationFences.get(id), "No captured publication fence for " + id);
+    }
+
+    record PublicationFence(InMemoryDocumentStore.DocumentHead head, long graphGeneration) { }
 
     private static ContextEvidence entryContext(DocumentId anchor, ClosureInvocationInput input,
             InMemoryDocumentStore documents) {

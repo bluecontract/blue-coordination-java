@@ -779,7 +779,7 @@ final class MultiDocumentPublicationTransaction {
                     entry.getValue().copyForAtomicPublication();
             replacement.restoreReadyEmbeddedChildren(
                     activeChildren(resultingInventory, entry.getKey()));
-            if (resultingReadiness.blocked(entry.getKey())) {
+            if (resultingReadiness.blocked(entry.getKey()) || rootedLocalHistoryPending(entry.getKey())) {
                 replacement.markCatchingUp();
             }
             PersistentOrderedMap.Mutation<DocumentId, DocumentSession>
@@ -815,7 +815,7 @@ final class MultiDocumentPublicationTransaction {
                 if (update.terminated()) {
                     replacement.markTerminated(activeChildren(
                             resultingInventory, documentId));
-                } else if (!resultingReadiness.blocked(documentId)) {
+                } else if (!(resultingReadiness.blocked(documentId) || rootedLocalHistoryPending(documentId))) {
                     replacement.markReady(
                             update.committedFrontier(),
                             activeChildren(resultingInventory, documentId));
@@ -856,7 +856,7 @@ final class MultiDocumentPublicationTransaction {
                     update.resultingSubscriptions(),
                     update.transitionReceipt().transitionReceiptIdentity(), publicationIdentity);
             replacement.markGraphPublished();
-            if (!resultingReadiness.blocked(documentId)) {
+            if (!(resultingReadiness.blocked(documentId) || rootedLocalHistoryPending(documentId))) {
                 replacement.markReady(
                         current.readyThrough(),
                         activeChildren(resultingInventory, documentId));
@@ -904,7 +904,7 @@ final class MultiDocumentPublicationTransaction {
                         || current.status() == blue.coordination.api.SessionStatus.PENDING_INITIALIZATION) {
                     continue;
                 }
-                if (!resultingReadiness.blocked(documentId) && current.status()
+                if (!(resultingReadiness.blocked(documentId) || rootedLocalHistoryPending(documentId)) && current.status()
                         != blue.coordination.api.SessionStatus.CATCHING_UP) {
                     throw new IllegalStateException(
                             "A completed catch-up barrier belongs to a "
@@ -912,7 +912,7 @@ final class MultiDocumentPublicationTransaction {
                 }
                 DocumentSession replacement =
                         current.copyForAtomicPublication();
-                if (resultingReadiness.blocked(documentId)) {
+                if (resultingReadiness.blocked(documentId) || rootedLocalHistoryPending(documentId)) {
                     replacement.markCatchingUp();
                 } else {
                     replacement.markReady(
@@ -942,7 +942,7 @@ final class MultiDocumentPublicationTransaction {
                 }
                 requireSameClosureResult(stagedClosurePublicationReceipt.attempt().processResult(), viewResult);
                 stagedRootedView.requireProcessingBoundary(
-                        Objects.requireNonNull(stagedClosurePublicationReceipt.rootedTerminalEvidence(), "rooted terminal").input(),
+                        Objects.requireNonNull(stagedClosurePublicationReceipt.rootedTerminalEvidence(), "rooted terminal"),
                         expectedCatchUpPlans);
                 viewOwners = new LinkedHashSet<>(RootedResultScope.members(viewResult));
                 if (!affectedDocuments().equals(viewOwners)) {
@@ -960,6 +960,8 @@ final class MultiDocumentPublicationTransaction {
                     }
                 }
                 replacement.retainRootedView(stagedRootedView);
+                if (rootedLocalHistoryPending(owner)
+                        && replacement.status() == blue.coordination.api.SessionStatus.READY) replacement.markCatchingUp();
                 var mutation = resultingSessionIndex.put(owner, replacement);
                 resultingSessionIndex = mutation.map();
                 sessionIndexComparisons = Math.addExact(sessionIndexComparisons, mutation.comparisons());
@@ -1565,7 +1567,12 @@ final class MultiDocumentPublicationTransaction {
                     : !unchanged) {
                 throw new IllegalStateException(
                         "Process receipt result epoch/head transition is not "
-                                + "fully staged for " + entry.getKey());
+                                + "fully staged for " + entry.getKey()
+                                + " beforeEpoch=" + before.epoch() + " afterEpoch=" + after.epoch()
+                                + " before=" + before.blueId() + " after=" + after.afterBlueId()
+                                + " staged=" + (documentUpdates.containsKey(entry.getKey())
+                                        ? documentUpdates.get(entry.getKey()).revision().epoch() + ":"
+                                                + documentUpdates.get(entry.getKey()).revision().after().blueId() : "none"));
             }
             if (unchanged && (documentUpdates.containsKey(entry.getKey())
                     || componentRepresentationUpdates.containsKey(
@@ -1693,13 +1700,19 @@ final class MultiDocumentPublicationTransaction {
                 && documentId.equals(update.work().sourceDocumentId())
                 && !update.work().sourceDocumentId().equals(
                         update.work().consumerDocumentId())
-                && update.work().sourceEpoch() == before.epoch()
-                && after.epoch() == update.work().sourceEpoch();
+                && (update.work().sourceEpoch() == before.epoch()
+                        && after.epoch() == update.work().sourceEpoch()
+                        || stagedClosurePublicationReceipt.rootedTerminalEvidence() != null
+                                && stagedClosurePublicationReceipt.rootedTerminalEvidence().verifiesLocalHistoricalRebind(
+                                        result, documentId, update.work(), store));
         boolean indirectClosureMember = update != null
                 && update.work() == null
                 && !update.directTargetDocumentIds().isEmpty()
-                && expectedHeads.keySet().containsAll(
-                        update.directTargetDocumentIds())
+                && (expectedHeads.keySet().containsAll(update.directTargetDocumentIds())
+                        || stagedClosurePublicationReceipt != null
+                                && stagedClosurePublicationReceipt.rootedTerminalEvidence() != null
+                                && stagedClosurePublicationReceipt.rootedTerminalEvidence().verifiesReadOnlyReferenceRebind(
+                                        result, documentId, update.directTargetDocumentIds()))
                 && !update.directTargetDocumentIds().contains(documentId)
                 && after.epoch() == before.epoch();
         if (update == null
@@ -1993,6 +2006,13 @@ final class MultiDocumentPublicationTransaction {
                 .stream()
                 .map(ComponentSnapshot::componentStateIdentity)
                 .toList();
+        if (result.rootedProjection() != null) {
+            // Durable root-local proofs have no shared global topological order.
+            // Compare the complete exact inventories; the processor independently
+            // verifies the selected semantic graph's component ordering.
+            expectedComponents = expectedComponents.stream().sorted().toList();
+            actualComponents = actualComponents.stream().sorted().toList();
+        }
         if (!expectedComponents.equals(actualComponents)) {
             throw new IllegalStateException(
                     label + " component state is not the exact result");
@@ -2465,4 +2485,10 @@ final class MultiDocumentPublicationTransaction {
             super(message);
         }
     }
+    private boolean rootedLocalHistoryPending(DocumentId owner) {
+        return stagedRootedView != null && stagedRootedView.snapshot().publicRootDocumentIds()
+                .contains(ContractsClosureAdapter.closureId(owner))
+                && !RootedLocalHistory.pending(stagedRootedView.snapshot(), owner).isEmpty();
+    }
+
 }

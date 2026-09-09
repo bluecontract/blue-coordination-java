@@ -348,6 +348,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return Optional.empty();
     }
 
+    synchronized FrozenBatch localHistoryBatch(RootedLocalHistory.Step step) {
+        return new FrozenBatch(step.anchor(), routes.generation(), List.of(step.invocation()));
+    }
+
+    synchronized RootedLocalHistory.Selection nextRootLocalHistory(DocumentId root, List<TimelineEntry> entries) {
+        return RootedLocalHistory.select(root, captureRootedState(root), entries, documents, objects,
+                profile.executionPolicy(), environment);
+    }
+
     /** Registers exact SDK host evidence before the entry can be drained. */
     synchronized boolean registerManagedDraftPlan(
             String entryBlueId,
@@ -2105,6 +2114,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
             generations.put(closureDocumentId, 1L);
         });
 
+        if (current.rootedEvidence() != null && drafts.isEmpty()) {
+            // A historical source can reference an older exact view of a
+            // calculating lineage. Supply its full verified snapshot separately;
+            // never substitute that old view for the frozen primary document.
+            ClosureInvocationInput expanded = ClosureEvidenceFactory.rootedReadExpansion(current.input(),
+                    graphGeneration, new ArrayList<>(existing.values()), new ArrayList<>(rows.values()),
+                    attachmentViews.values().stream().map(RootedDocumentView::snapshot).distinct().toList());
+            ClosureProcessRetryInput retry = retryResolutions.isEmpty() ? null
+                    : ClosureProcessRetryInput.derived(expanded, new ArrayList<>(retryResolutions.values()));
+            return new CohortInvocation(coordinationIds(members), current.directDeliveries(), expanded, retry,
+                    captured, current.managedDraftPlan(), accumulated, current.publicationIdentityMembers(),
+                    current.publicationIdentityPublicRoots(), current.rootedAnchor(),
+                    current.rootedEvidence().capturePublicationFences(expanded, documents));
+        }
+
         ManagedDocumentGraph graph = ManagedDocumentGraph.fromBindings(
                 members, rows.values());
         ComponentFinalizationResult finalization =
@@ -2190,7 +2214,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 current.managedDraftPlan(),
                 accumulated,
                 current.publicationIdentityMembers(),
-                current.publicationIdentityPublicRoots(), current.rootedAnchor(), current.rootedEvidence());
+                current.publicationIdentityPublicRoots(), current.rootedAnchor(), current.rootedEvidence() == null ? null
+                        : current.rootedEvidence().capturePublicationFences(expanded, documents));
     }
 
     private long requireManagedDocumentLimit() {
@@ -2567,6 +2592,18 @@ final class ContractsClosureAdapter implements AutoCloseable {
             CohortInvocation invocation,
             ContractsClosurePublicationReceipt receipt) {
         ClosureProcessResult result = receipt.attempt().processResult();
+        var retainedWork = invocation.rootedEvidence() == null ? null : invocation.rootedEvidence().historicalWork();
+        DocumentRevision retainedSource = retainedWork == null ? null
+                : documents.require(retainedWork.sourceDocumentId()).revision(retainedWork.sourceEpoch());
+        if (retainedSource != null && !retainedSource.managedEpochReceipt().orElseThrow().receiptIdentity()
+                .equals(retainedWork.sourceReceiptIdentity())) {
+            throw new IllegalArgumentException("Local retained publication lost its exact original source receipt");
+        }
+        TimelineEntry causalEntry = retainedSource == null ? batch.entry() : retainedSource.sourceEntry().orElse(null);
+        ExternalOrderKey causalOrder = retainedSource == null ? batch.entry().sourceOrderKey()
+                : retainedSource.sourceOrderKey().orElseThrow();
+        String causalEntryBlueId = retainedSource == null ? batch.entry().blueId()
+                : retainedSource.causalEntryBlueId().orElseThrow();
         if (!receipt.publicationIdentity().equals(
                 publicationIdentity(batch, invocation))) {
             throw new IllegalArgumentException(
@@ -2613,7 +2650,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     document.head().epoch(),
                     document.head().blueId());
             transaction.expectGraphGeneration(
-                    document.documentId(), document.graphGeneration());
+                    document.documentId(), invocation.rootedEvidence() == null ? document.graphGeneration()
+                            : invocation.rootedEvidence().publicationFence(document.documentId()).graphGeneration());
         }
         if (invocation.managedExpansion()) {
             invocation.newMemberSet().stream().filter(ownedMembers::contains).forEach(transaction::expectAbsent);
@@ -2790,7 +2828,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 before.head(),
                                 after,
                                 transition);
-                boolean componentRepresentationRebind =
+                boolean localHistoricalRebind = receipt.rootedTerminalEvidence() != null
+                        && receipt.rootedTerminalEvidence().verifiesLocalHistoricalRebind(result, entry.getKey(),
+                                invocation.rootedEvidence().historicalWork(), documents);
+                boolean componentRepresentationRebind = localHistoricalRebind ||
                         !checkpointSettlementChange
                                 && isIndirectComponentRepresentationRebind(
                                         invocation,
@@ -2867,7 +2908,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                     + entry.getKey());
                 }
                 if (componentRepresentationRebind) {
-                    transaction.stageIndirectComponentRepresentationRebind(
+                    if (localHistoricalRebind) transaction.stageComponentRepresentationRebind(
+                            invocation.rootedEvidence().historicalWork(), after, layout, activeSubscriptionsAfter, transition);
+                    else transaction.stageIndirectComponentRepresentationRebind(
                             invocation.publicationIdentityMembers(),
                             after,
                             layout,
@@ -2891,7 +2934,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         .toList();
                 long coordinationEpoch = Math.addExact(
                         before.head().epoch(), 1L);
-                DocumentRevision.Kind revisionKind =
+                DocumentRevision.Kind revisionKind = retainedSource != null
+                        ? DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION :
                         transition.beforeBlueId().equals(
                                 transition.afterBlueId())
                                 ? DocumentRevision.Kind.EVENT_ONLY
@@ -2903,8 +2947,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                 revisionKind,
                                 before.current(),
                                 exact,
-                                batch.entry(),
-                                batch.entry().sourceOrderKey(),
+                                causalEntry,
+                                causalOrder,
                                 transition,
                                 result.platformCommitCompanion());
                 DocumentRevision revision = new DocumentRevision(
@@ -2914,7 +2958,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         revisionKind,
                         before.current(),
                         exact,
-                        batch.entry(),
+                        retainedSource == null ? batch.entry() : null,
+                        causalOrder,
+                        causalEntryBlueId,
                         null,
                         emitted,
                         transition.admittedGas(),
@@ -2922,7 +2968,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 transaction.stageDocument(
                         revision,
                         layout,
-                        batch.entry().sourceOrderKey(),
+                        causalOrder,
                         activeSubscriptionsAfter,
                         after.terminated(),
                         publicationIdentity + "|"
@@ -3495,9 +3541,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (result.commits()) RootedResultScope.require(result, invocation.rootedEvidence());
         for (DocumentId owner : existingOwners) {
             CapturedDocument captured = invocation.documents().get(owner);
-            if (captured == null || !captured.head().equals(current.requireHead(owner))
-                    || captured.graphGeneration() != current.graphGenerations().require(owner)) {
-                throw stale("Owned state changed before rooted publication " + owner);
+            var fence = invocation.rootedEvidence().publicationFence(owner);
+            if (captured == null || !captured.head().equals(fence.head()) || !fence.head().equals(current.requireHead(owner))
+                    || fence.graphGeneration() != current.graphGenerations().require(owner)) {
+                throw stale("Owned state changed before rooted publication " + owner
+                        + " captured=" + (captured == null ? "absent" : captured.head())
+                        + " current=" + current.requireHead(owner)
+                        + " capturedGraph=" + (captured == null ? "absent" : captured.graphGeneration())
+                        + " currentGraph=" + current.graphGenerations().require(owner));
             }
             Map<String, OccurrenceProjection> expected = new TreeMap<>(EmbeddingBinding.TEXT_ORDER);
             invocation.input().snapshot().occurrences().stream()

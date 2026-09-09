@@ -7,6 +7,22 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedPublicationAuthorityTest {
+    @Test void capturedOwnerFenceRejectsARealCommittedHeadChangeWithoutRefreshingIt() throws IOException {
+        try (var fixture = new RootedSdkFixture()) {
+            var source = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var entry = fixture.append(source, "rcp2/source", "tick", 100, "{}");
+            var fence = fixture.control.capturedPublicationFence(source.id());
+            assertDoesNotThrow(fence::run);
+            assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().process(source, entry).entry(entry).disposition());
+            var committed = fixture.history(source);
+            assertThrows(RuntimeException.class, fence::run);
+            assertEquals(committed, fixture.history(source));
+            assertEquals(1L, source.snapshot().longAt("/counter"));
+            fixture.blue.processing().process(source, entry);
+            assertEquals(committed, fixture.history(source));
+        }
+    }
+
     @Test void retainedViewCannotMoveItsLogicalBoundaryToAnEarlierOrLaterEntry() throws IOException {
         try (var fixture = new RootedSdkFixture()) {
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());

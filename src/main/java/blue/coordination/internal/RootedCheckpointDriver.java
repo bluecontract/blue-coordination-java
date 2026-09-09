@@ -36,7 +36,13 @@ final class RootedCheckpointDriver {
                         && p.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED);
         var work = documents.nextCatchUpWorkExcluding(excluded);
         if (historyOutstanding && work.isEmpty()) return new Selection(null, null, excluded, true);
+        var local = adapter.nextRootLocalHistory(root, entries);
+        if (local.pending() && local.step() == null) return new Selection(null, null, excluded, true, null);
         var live = adapter.nextRootLiveInput(root, entries);
+        if (local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
+                && (live.isEmpty() || local.step().sourceOrder().compareTo(live.get().entry().sourceOrderKey()) <= 0)) {
+            return new Selection(null, null, excluded, false, local.step());
+        }
         if (work.isPresent()) {
             var order = order(work.get());
             if (live.isEmpty() || order.compareTo(live.get().entry().sourceOrderKey()) <= 0) {
@@ -63,7 +69,8 @@ final class RootedCheckpointDriver {
             Selection selected = select(anchor, entries);
             if (selected.blocked()) blocked.add(anchor);
             ExternalOrderKey order = selected.live() != null ? selected.live().entry().sourceOrderKey()
-                    : selected.historical() != null ? order(selected.historical()) : null;
+                    : selected.historical() != null ? order(selected.historical())
+                    : selected.localHistorical() != null ? selected.localHistorical().sourceOrder() : null;
             if (order != null && (cutoff == null || order.compareTo(cutoff) <= 0)) {
                 heads.add(new Head(anchor, selected, order));
             }
@@ -95,7 +102,11 @@ final class RootedCheckpointDriver {
     }
 
     record Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
-                     Set<DocumentId> excludedConsumers, boolean blocked) {
+                     Set<DocumentId> excludedConsumers, boolean blocked, RootedLocalHistory.Step localHistorical) {
+        Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
+                Set<DocumentId> excludedConsumers, boolean blocked) {
+            this(live, historical, excludedConsumers, blocked, null);
+        }
         Selection { excludedConsumers = Set.copyOf(excludedConsumers); }
     }
 }

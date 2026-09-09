@@ -641,12 +641,16 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     synchronized DrainResult processNextRoot(DocumentHandle root) {
+        return processNextRoot(root, null);
+    }
+
+    synchronized DrainResult processNextRoot(DocumentHandle root, String expectedLocalWork) {
         ensureOpen();
         if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
             throw new IllegalArgumentException("Document belongs to another runtime");
         }
         requireDocument(root.id());
-        return retain(mapper.map(engine.processNextRoot(root.id())));
+        return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
     }
 
     synchronized DrainResult drain() {

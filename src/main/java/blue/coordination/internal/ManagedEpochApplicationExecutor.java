@@ -336,7 +336,8 @@ final class ManagedEpochApplicationExecutor {
                     document.head().epoch(),
                     document.head().blueId());
             transaction.expectGraphGeneration(
-                    document.documentId(), document.graphGeneration());
+                    document.documentId(), invocation.rootedEvidence() == null ? document.graphGeneration()
+                            : invocation.rootedEvidence().publicationFence(document.documentId()).graphGeneration());
         }
         invocation.newMemberSet().stream().filter(ownedMembers::contains).forEach(transaction::expectAbsent);
         invocation.input().snapshot().components().stream()

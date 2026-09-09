@@ -1079,7 +1079,7 @@ public final class DefaultCoordinationEngine
             long started = System.nanoTime();
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
-            return executeRootBatch(batch, started);
+            return rootedReadiness(root, executeRootBatch(batch, started), started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
@@ -1121,11 +1121,20 @@ public final class DefaultCoordinationEngine
 
     /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
     public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root) {
+        return processNextRoot(root, null);
+    }
+
+    /** Executes only the exact retained local work selected for this root, before any mutation. */
+    public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork) {
         try {
             ensureOpen();
             long started = System.nanoTime();
             RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
                     .select(Objects.requireNonNull(root, "root"), journal.entries());
+            if (expectedLocalWork != null && (next.localHistorical() == null
+                    || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
+                throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
+            }
             return rootedReadiness(root, executeRootSelection(next, started), started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
@@ -1134,6 +1143,16 @@ public final class DefaultCoordinationEngine
 
     private ProcessingDrainReceipt executeRootSelection(RootedCheckpointDriver.Selection next, long started) {
         if (next.live() != null) return executeRootBatch(next.live(), started);
+        if (next.localHistorical() != null) {
+            var step = next.localHistorical();
+            var batch = contractsClosureAdapter.localHistoryBatch(step);
+            var completed = executeRootBatch(batch, started);
+            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                    completed.quiescent(), completed.paused(), completed.committedProcessTransitions(),
+                    completed.elapsedNanos()).withRootedRetainedAttempts(completed.contractsAttemptsFor(step.anchor().blueId())
+                            .stream().map(attempt -> new ProcessingDrainReceipt.RootedRetainedAttempt(
+                                    step.root(), step.work(), attempt)).toList());
+        }
         if (next.historical() != null) {
             try {
                 var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
@@ -1157,13 +1176,14 @@ public final class DefaultCoordinationEngine
         if (!completed.quiescent()) return completed;
         RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
                 .select(root, journal.entries());
-        boolean pending = remaining.live() != null || remaining.historical() != null;
+        boolean pending = remaining.live() != null || remaining.historical() != null || remaining.localHistorical() != null;
         boolean quiescent = !pending && !remaining.blocked();
         return new ProcessingDrainReceipt(completed.processedEntries(), completed.outcomesByEntry(),
                 completed.contractsAttemptsByEntry(), completed.processedThrough().orElse(null),
                 quiescent, pending && !remaining.blocked(), completed.committedProcessTransitions(),
                 System.nanoTime() - started, completed.managedEpochApplications(),
-                completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures());
+                completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures())
+                .withRootedRetainedAttempts(completed.rootedRetainedAttempts());
     }
 
     @Override
@@ -1249,7 +1269,8 @@ public final class DefaultCoordinationEngine
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
                     remaining.quiescent(), !remaining.heads().isEmpty(), completed.committedProcessTransitions(),
                     System.nanoTime() - started, completed.managedEpochApplications(),
-                    completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures());
+                    completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures())
+                .withRootedRetainedAttempts(completed.rootedRetainedAttempts());
         }
         try {
             ProcessingDrainReceipt drained = drainContracts(
@@ -1629,8 +1650,12 @@ public final class DefaultCoordinationEngine
     public synchronized Optional<ManagedEpochApplicationWork>
             auditManagedEpochApplicationWork(String workIdentity) {
         ensureOpen();
-        return documents.catchUpWork(Objects.requireNonNull(
-                workIdentity, "workIdentity"));
+        String selected = Objects.requireNonNull(workIdentity, "workIdentity");
+        var independent = documents.catchUpWork(selected);
+        if (independent.isPresent() || !contractsClosureProfile.rootedCheckpoint()) return independent;
+        return new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null)
+                .heads().stream().map(head -> head.selection().localHistorical()).filter(Objects::nonNull)
+                .map(RootedLocalHistory.Step::work).filter(work -> selected.equals(work.workIdentity())).findFirst();
     }
 
     @Override
@@ -1652,6 +1677,7 @@ public final class DefaultCoordinationEngine
             if (supplied.journalAdmissionAvailable()) return ProcessingSelection.journal();
             if (scan.heads().isEmpty()) return ProcessingSelection.none();
             var next = scan.heads().get(0).selection();
+            if (next.localHistorical() != null) return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
             return next.historical() == null ? ProcessingSelection.journal()
                     : ProcessingSelection.managedEpochApplication(next.historical());
         }

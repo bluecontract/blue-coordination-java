@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.internal.BundledContracts10Release;
+import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.internal.RootedCalculationFixture;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,11 +13,17 @@ import java.util.Optional;
 /** Arranges actual SDK inputs; no expected runtime state is generated here. */
 final class RootedSdkFixture implements AutoCloseable {
     final Map<String, String> exact = new LinkedHashMap<>();
-    final BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()
-            .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
-                    BundledContracts10Release.manifest().contractsSpecification())
-            .exactNodeProvider(id -> Optional.ofNullable(exact.get(id))).build();
-    final RootedCalculationFixture control = new RootedCalculationFixture(blue.advanced().rawEngine());
+    final BlueCoordination blue;
+    final RootedCalculationFixture control;
+    RootedSdkFixture() { this(ContractsExecutionPolicy.releaseDefault()); }
+    RootedSdkFixture(ContractsExecutionPolicy policy) {
+        blue = BlueCoordination.builder().contentDerivedDocumentIds()
+                .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
+                        BundledContracts10Release.manifest().contractsSpecification())
+                .contractsExecutionPolicy(policy)
+                .exactNodeProvider(id -> Optional.ofNullable(exact.get(id))).build();
+        control = new RootedCalculationFixture(blue.advanced().rawEngine());
+    }
     final Map<String, TimelineHandle> timelines = new LinkedHashMap<>();
     final Map<String, String> previousEntries = new LinkedHashMap<>();
 

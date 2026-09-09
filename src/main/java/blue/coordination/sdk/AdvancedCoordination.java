@@ -41,6 +41,17 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Applies only the selected root's exact retained prerequisite, failing before processing on mismatch.
+     * @param root authoritative root owning the calculation
+     * @param workIdentity exact work identity from the read-only processing selection
+     * @return complete local retained-work evidence
+     */
+    public DrainResult processRetained(DocumentHandle root, String workIdentity) {
+        return runtime.processNextRoot(Objects.requireNonNull(root, "root"),
+                SdkPreconditions.requireText(workIdentity, "workIdentity"));
+    }
+
+    /**
      * Drains one eligible journal selection no later than the supplied exact entry.
      * Repeated calls can finish separate rooted observers of that entry without
      * consuming future inputs. Managed application turns remain separately scheduled.

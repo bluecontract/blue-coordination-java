@@ -69,7 +69,11 @@ final class SdkDrainResultMapper {
             throw new IllegalStateException(
                     "SDK drain result contains duplicate entry evidence");
         }
-        ProcessingStats stats = aggregateDrainStats(entries, drained);
+        List<DrainResult.RootedRetainedApplication> local = drained.rootedRetainedAttempts().stream()
+                .map(retained -> new DrainResult.RootedRetainedApplication(retained.rootDocumentId(),
+                        managedEpochApplicationWork(retained.work()), mapLocalRetained(retained.attempt()))).toList();
+        ProcessingStats stats = aggregateDrainStats(entries,
+                local.stream().map(DrainResult.RootedRetainedApplication::result).toList(), drained);
         Diagnostic diagnostic = drained.paused()
                 ? new Diagnostic(
                         "PROCESSING_PAUSED",
@@ -98,7 +102,30 @@ final class SdkDrainResultMapper {
                 drained.managedEpochEvidenceFailures().stream()
                         .map(SdkDrainResultMapper
                                 ::managedEpochEvidenceFailure)
-                        .toList());
+                        .toList(), local);
+    }
+
+    private ClosureResult mapLocalRetained(ContractsClosureDispatchAttempt retained) {
+        TimelineEntry anchor = Objects.requireNonNull(runtime.retainedCoreEntry(retained.entryBlueId()), "retained causal entry");
+        ClosureResult projected = mapClosure(anchor, retained, 0);
+        if (!retained.published() || !retained.attempt().isComplete()) return projected;
+        var result = retained.attempt().processResult();
+        var input = engine.auditClosureInvocation(retained.publicationIdentity()).orElseThrow();
+        if (!(input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause)
+                && !(input.cause() instanceof blue.language.processor.closure.ManagedRepresentationCause))
+            throw new IllegalStateException("Local retained outcome cannot relabel an external input");
+        List<DocumentChange> changes = new ArrayList<>();
+        for (var after : result.rootedProjection().ownedDocuments()) {
+            var before = input.snapshot().managedDocument(after.documentId());
+            if (before.blueId().equals(after.afterBlueId()) && before.epoch() == after.epoch()) continue;
+            var id = DocumentId.of(after.documentId().value());
+            changes.add(new DocumentChange(id, after.epoch(), runtime.retainedExactValue(before.blueId()).orElseThrow(),
+                    ExactBlueValue.wrap(ExactValue.fromVerifiedClosureResult(result, id)), projected.publicEvents().stream()
+                            .filter(event -> event.sourceDocument().filter(id::equals).isPresent()).toList()));
+        }
+        return new ClosureResult(projected.closureId(), projected.disposition(), changes, projected.publicEvents(),
+                stats(result, retained, changes), projected.diagnostic(), projected.resourceDemands(),
+                projected.processorAttemptCount(), projected.managedSurfaceEvidence());
     }
 
     private static ManagedEpochEvidenceFailure managedEpochEvidenceFailure(
@@ -1083,14 +1110,16 @@ final class SdkDrainResultMapper {
     }
 
     private static ProcessingStats aggregateDrainStats(
-            List<EntryResult> entries,
+            List<EntryResult> entries, List<ClosureResult> local,
             ProcessingDrainReceipt receipt) {
         long gas = 0L;
         long opened = 0L;
         ArrayList<DocumentId> order = new ArrayList<>();
         LinkedHashMap<String, Long> counters = new LinkedHashMap<>();
-        for (EntryResult entry : entries) {
-            ProcessingStats stats = entry.stats();
+        List<ProcessingStats> measurements = new ArrayList<>();
+        entries.forEach(entry -> measurements.add(entry.stats()));
+        local.forEach(step -> measurements.add(step.stats()));
+        for (ProcessingStats stats : measurements) {
             gas = Math.addExact(gas, stats.gas());
             opened = Math.addExact(opened, stats.documentsOpened());
             order.addAll(stats.documentStepOrder());
