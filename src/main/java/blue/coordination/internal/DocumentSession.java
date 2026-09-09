@@ -1,5 +1,7 @@
 package blue.coordination.internal;
 
+import blue.coordination.internal.ContractsClosureAdapter.ProjectionUnavailableException;
+
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ExactValue;
@@ -29,6 +31,7 @@ final class DocumentSession {
             componentRepresentationTransitions = new ArrayList<>();
     private RootedDocumentHistory rootedHistory;
     private RootedDocumentView rootedView;
+    private final List<RootedViewPosition> rootedViewPositions = new ArrayList<>();
     private final StateEpochs stateEpochs = new StateEpochs();
     private EmbeddedOnlyLayout layout;
     private EmbeddedOnlyLayout readyLayout;
@@ -108,6 +111,7 @@ final class DocumentSession {
     synchronized DocumentSession copyForAtomicPublication() {
         DocumentSession copy = new DocumentSession(this);
         copy.rootedView = rootedView;
+        copy.rootedViewPositions.addAll(rootedViewPositions);
         return copy;
     }
 
@@ -115,8 +119,26 @@ final class DocumentSession {
 
     synchronized void retainRootedView(RootedDocumentView view) {
         Objects.requireNonNull(view, "view").requireOwnerHead(documentId, currentRepresentation().blueId());
+        ExternalOrderKey boundary = view.logicalBoundary();
+        if (!rootedViewPositions.isEmpty()) {
+            ExternalOrderKey prior = rootedViewPositions.get(rootedViewPositions.size() - 1).boundary();
+            if (prior != null && (boundary == null || prior.compareTo(boundary) > 0)) boundary = prior;
+        }
+        rootedViewPositions.add(new RootedViewPosition(view, boundary));
         rootedView = view;
     }
+
+    /** Exact committed view immediately before the attachment input, never the ambient latest head. */
+    synchronized RootedDocumentView rootedViewBefore(ExternalOrderKey boundary) {
+        Objects.requireNonNull(boundary, "attachment boundary");
+        for (int index = rootedViewPositions.size() - 1; index >= 0; index--) {
+            RootedViewPosition position = rootedViewPositions.get(index);
+            if (position.boundary() == null || position.boundary().compareTo(boundary) < 0) return position.view();
+        }
+        throw new ProjectionUnavailableException("No authenticated rooted source view before attachment boundary " + boundary);
+    }
+
+    private record RootedViewPosition(RootedDocumentView view, ExternalOrderKey boundary) { }
 
     public DocumentId documentId() {
         return documentId;

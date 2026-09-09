@@ -74,6 +74,20 @@ final class ManagedCatchUpPlanner {
             ReceiptLookup receipts,
             GraphGenerationLookup graphGenerations,
             ManagedRepresentationHistory representationHistory, Function<String, CyclicSetProof> cyclicProofs) {
+        return afterPublication(beforePlans, beforeInventory, afterInventory, affectedSources,
+                committedSourceReceipts, causedByIdentity, causeOrder, heads, receipts, graphGenerations,
+                representationHistory, cyclicProofs, false);
+    }
+
+    static PlanningResult afterPublication(
+            CatchUpPlanStore beforePlans,
+            ManagedOccurrenceInventory beforeInventory,
+            ManagedOccurrenceInventory afterInventory,
+            Collection<DocumentId> affectedSources,
+            Collection<ManagedEpochReceipt> committedSourceReceipts,
+            String causedByIdentity, ExternalOrderKey causeOrder, HeadLookup heads, ReceiptLookup receipts,
+            GraphGenerationLookup graphGenerations, ManagedRepresentationHistory representationHistory,
+            Function<String, CyclicSetProof> cyclicProofs, boolean frozenHistoricalIntervals) {
         CatchUpPlanStore plans = Objects.requireNonNull(
                 beforePlans, "beforePlans");
         ManagedOccurrenceInventory prior = Objects.requireNonNull(
@@ -98,7 +112,7 @@ final class ManagedCatchUpPlanner {
                 .comparing(ManagedEpochReceipt::documentId, DOCUMENT_ORDER)
                 .thenComparingLong(ManagedEpochReceipt::epoch));
         for (ManagedEpochReceipt receipt : committed) {
-            plans = plans.withExtendedSourceFrontier(
+            if (!frozenHistoricalIntervals) plans = plans.withExtendedSourceFrontier(
                     receipt.documentId(), receipt.epoch());
         }
 

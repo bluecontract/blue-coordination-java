@@ -17,13 +17,16 @@ import java.util.Objects;
 /** Immutable selected dependency views and local channel progress owned by a committed root. */
 final class RootedDocumentView {
     private final ClosureProcessResult result;
+    private final blue.language.processor.ExternalOrderKey logicalBoundary;
     private final AffectedClosureSnapshot snapshot;
     private final ClosureSubscriptionInventory subscriptions;
     private final Map<DocumentId, List<SubscriptionDelta.Entry>> routes;
 
     RootedDocumentView(ClosureProcessResult result, ClosureSubscriptionInventory subscriptions,
-            Map<DocumentId, List<SubscriptionDelta.Entry>> routes) {
+            Map<DocumentId, List<SubscriptionDelta.Entry>> routes,
+            blue.language.processor.ExternalOrderKey logicalBoundary) {
         this.result = Objects.requireNonNull(result, "result");
+        this.logicalBoundary = logicalBoundary;
         if (!result.commits() || result.commitCompanion() == null
                 || !RootedProcessingContext.CONTRACTS_SPECIFICATION_IDENTITY.equals(
                         result.commitCompanion().contractsSpecificationIdentity())) {
@@ -52,6 +55,14 @@ final class RootedDocumentView {
         }
     }
 
+    void requireProcessingBoundary(blue.language.processor.closure.ClosureInvocationInput input,
+            CatchUpPlanStore plans) {
+        if (!RootedAttachmentCapture.logicalBoundary(input, plans).equals(logicalBoundary)) {
+            throw new IllegalStateException("Rooted view changed the frozen input's logical boundary");
+        }
+    }
+
+    blue.language.processor.ExternalOrderKey logicalBoundary() { return logicalBoundary; }
     ClosureProcessResult result() { return result; }
     AffectedClosureSnapshot snapshot() { return snapshot; }
     ClosureSubscriptionInventory subscriptions() { return subscriptions; }

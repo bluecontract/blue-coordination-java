@@ -708,8 +708,11 @@ final class ManagedEpochApplicationExecutor {
                             committedEpochReceipts.values(),
                             owningBarrier.causedByIdentity(),
                             owningBarrier.causeOrder(),
-                            documentId -> host.resultingManagedHead(
-                                    resultingHeads, documentId),
+                            documentId -> result.rootedProjection() != null && !ownedMembers.contains(documentId)
+                                    && capture.invocation().documents().containsKey(documentId)
+                                    ? new ManagedCatchUpPlanner.Head(capture.invocation().documents().get(documentId).head().epoch(),
+                                            capture.invocation().documents().get(documentId).head().blueId())
+                                    : host.resultingManagedHead(resultingHeads, documentId),
                             (documentId, epoch) -> {
                                 ManagedEpochReceipt staged =
                                         committedEpochReceipts.get(documentId);
@@ -726,7 +729,7 @@ final class ManagedEpochApplicationExecutor {
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
                             new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
-                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -736,7 +739,7 @@ final class ManagedEpochApplicationExecutor {
                             preparedRoutes.operationRouteChanges());
             transaction.stageClosurePublicationReceipt(retainedReceipt);
             if (result.rootedProjection() != null) transaction.stageRootedView(
-                    new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes));
+                    new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder()));
             transaction.commit();
             storeCommitted = true;
             runtime.metrics().increment(OCCURRENCES_ADVANCED);

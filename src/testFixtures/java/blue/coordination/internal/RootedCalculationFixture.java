@@ -50,6 +50,20 @@ public final class RootedCalculationFixture {
         return engine.documents().require(root).rootedView().snapshot();
     }
 
+    /** Exercises the publication boundary verifier with real retained state and a proposed logical order. */
+    public void verifyRetainedLogicalBoundary(DocumentId root, String terminalKey,
+            blue.language.processor.ExternalOrderKey proposed) {
+        var retained = engine.documents().closurePublicationReceipt(terminalKey).orElseThrow();
+        var original = engine.documents().require(root).rootedView();
+        var routes = new java.util.LinkedHashMap<DocumentId, java.util.List<blue.language.processor.SubscriptionDelta.Entry>>();
+        original.snapshot().managedDocuments().forEach(document -> {
+            DocumentId id = ContractsClosureAdapter.coordinationId(document.documentId());
+            routes.put(id, original.routes(id));
+        });
+        var candidate = new RootedDocumentView(original.result(), original.subscriptions(), routes, proposed);
+        candidate.requireProcessingBoundary(retained.rootedTerminalEvidence().input(), engine.documents().catchUpPlansSnapshot());
+    }
+
     /** Warms the selected exact inputs in the requested physical enumeration only. */
     public void warmSelectedView(DocumentId root, boolean reversed) {
         var documents = new java.util.ArrayList<>(engine.documents().require(root).rootedView().snapshot().managedDocuments());

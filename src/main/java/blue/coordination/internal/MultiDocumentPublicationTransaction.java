@@ -941,6 +941,9 @@ final class MultiDocumentPublicationTransaction {
                     throw new IllegalStateException("Selected views require their exact rooted publication");
                 }
                 requireSameClosureResult(stagedClosurePublicationReceipt.attempt().processResult(), viewResult);
+                stagedRootedView.requireProcessingBoundary(
+                        Objects.requireNonNull(stagedClosurePublicationReceipt.rootedTerminalEvidence(), "rooted terminal").input(),
+                        expectedCatchUpPlans);
                 viewOwners = new LinkedHashSet<>(RootedResultScope.members(viewResult));
                 if (!affectedDocuments().equals(viewOwners)) {
                     throw new IllegalStateException("Selected views must be staged for exactly the derived owners");
@@ -949,6 +952,13 @@ final class MultiDocumentPublicationTransaction {
             for (DocumentId owner : viewOwners) {
                 DocumentSession replacement = Objects.requireNonNull(resultingSessionIndex.get(owner),
                         "Missing rooted view owner").copyForAtomicPublication();
+                if (stagedAdmissionResult) {
+                    Object admission = replacement.requireRootedHistory().descriptor().get("admission");
+                    boolean fullHistory = admission instanceof Map<?, ?> values && "FULL_HISTORY".equals(values.get("mode"));
+                    if (!Objects.equals(stagedRootedView.logicalBoundary(), fullHistory ? null : replacement.readyThrough())) {
+                        throw new IllegalStateException("Rooted admission view changed its authenticated history boundary");
+                    }
+                }
                 replacement.retainRootedView(stagedRootedView);
                 var mutation = resultingSessionIndex.put(owner, replacement);
                 resultingSessionIndex = mutation.map();

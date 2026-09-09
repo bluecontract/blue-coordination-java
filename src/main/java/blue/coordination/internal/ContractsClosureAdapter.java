@@ -1782,11 +1782,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
 
-        Set<DocumentId> existingMembers = forwardExistingMembers(
-                current.existingMemberSet(),
-                selected.existingTargets(),
-                indexed.occurrenceInventory(),
-                runtime.metrics());
+        Map<DocumentId, RootedDocumentView> attachmentViews = RootedAttachmentCapture.select(
+                current, selected.existingTargets(), documents);
+        Set<DocumentId> existingMembers;
+        if (current.rootedEvidence() == null) {
+            existingMembers = forwardExistingMembers(current.existingMemberSet(), selected.existingTargets(),
+                    indexed.occurrenceInventory(), runtime.metrics());
+        } else {
+            existingMembers = new LinkedHashSet<>(current.existingMemberSet());
+            existingMembers.addAll(attachmentViews.keySet());
+        }
         InMemoryDocumentStore.ClosureSnapshot durable =
                 documents.closureSnapshot(existingMembers);
         if (durable.occurrenceInventoryGeneration()
@@ -1811,8 +1816,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 }
                 continue;
             }
-            captured.put(documentId, captureDocument(
-                    documentId, head, existingMembers));
+            RootedDocumentView selectedView = attachmentViews.get(documentId);
+            captured.put(documentId, selectedView == null ? captureDocument(documentId, head, existingMembers)
+                    : captureSelectedDocument(documentId, selectedView));
         }
         long graphGeneration = maximumCapturedGraphGeneration(
                 captured.values());
@@ -1856,7 +1862,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     current.rootedEvidence() != null && current.input().snapshot().contains(closureId(source))
                             ? current.input().snapshot().occurrences().stream()
                                     .filter(row -> row.sourceDocumentId().equals(closureId(source))).toList()
-                            : indexed.occurrenceInventory().rowsFrom(source);
+                            : attachmentViews.containsKey(source)
+                                    ? attachmentViews.get(source).snapshot().occurrences().stream()
+                                            .filter(row -> row.sourceDocumentId().equals(closureId(source))).toList()
+                                    : indexed.occurrenceInventory().rowsFrom(source);
             runtime.metrics().add(
                     OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
             for (ManagedOccurrenceBinding row : sourceRows) {
@@ -1972,8 +1981,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         LinkedHashMap<blue.language.processor.closure.DocumentId, Node>
                 bodies = new LinkedHashMap<>();
         LinkedHashMap<blue.language.processor.closure.DocumentId, Long>
-                generations = componentGenerations(
-                        durable, captured, existingMembers);
+                generations = new LinkedHashMap<>();
+        if (current.rootedEvidence() == null) generations.putAll(componentGenerations(durable, captured, existingMembers));
+        else for (DocumentId id : existingMembers) {
+            ManagedDocumentSnapshot exact = current.input().snapshot().managedDocument(closureId(id));
+            if (exact == null) exact = attachmentViews.get(id).snapshot().managedDocument(closureId(id));
+            generations.put(closureId(id), exact.componentGeneration());
+        }
         LinkedHashMap<blue.language.processor.closure.DocumentId,
                 ManagedDocumentSnapshot> existing = new LinkedHashMap<>();
         ArrayList<blue.language.processor.closure.DocumentId> members =
@@ -2298,7 +2312,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
         InMemoryDocumentStore.ClosureSnapshot current =
                 documents.closureSnapshot(expanded.existingMemberSet());
-        requireCohortStillCurrent(expanded, current);
+        if (expanded.rootedEvidence() == null) requireCohortStillCurrent(expanded, current);
+        else for (var owner : expanded.rootedEvidence().context().entryOwners()) {
+            DocumentId id = coordinationId(owner);
+            CapturedDocument captured = expanded.documents().get(id);
+            if (!captured.head().equals(current.requireHead(id))
+                    || captured.graphGeneration() != current.graphGenerations().require(id)) {
+                throw stale("Rooted entry owner changed during exact historical read expansion " + id);
+            }
+        }
     }
 
     private void validateManagedDraftDeclarations(
@@ -2376,6 +2398,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
         List<String> candidate = JsonPointer.split(candidatePath);
         return candidate.size() == collection.size() + 1
                 && candidate.subList(0, collection.size()).equals(collection);
+    }
+
+    private CapturedDocument captureSelectedDocument(DocumentId id, RootedDocumentView view) {
+        ManagedDocumentSnapshot exact = view.snapshot().managedDocument(closureId(id));
+        ExactValue body = objects.put(ExactValue.fromVerifiedClosureResult(view.result(), id), "rooted-attachment-source-view");
+        ManagedRootSubscriptionSurface surface = contracts.projectRootSubscriptionSurface(exact.document());
+        EmbeddedOnlyLayout layout = layoutBuilder.retainVerifiedClosureRoot(view.result(), id, surface);
+        return new CapturedDocument(id, new InMemoryDocumentStore.DocumentHead(exact.epoch(), exact.blueId()),
+                view.snapshot().graphGeneration(), body, layout, view.routes(id), Math.addExact(exact.epoch(), 1L),
+                exact.initialized(), exact.terminated(), view.subscriptions().statesFor(id));
     }
 
     CapturedDocument captureDocument(
@@ -2832,7 +2864,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         entry.getKey(), epochReceipt);
             }
             if (result.rootedProjection() != null) {
-                transaction.stageRootedView(new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes));
+                transaction.stageRootedView(new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, batch.entry().sourceOrderKey()));
             }
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
@@ -2846,8 +2878,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             committedEpochReceipts.values(),
                             invocation.input().cause().causeIdentity(),
                             batch.entry().sourceOrderKey(),
-                            documentId -> resultingManagedHead(
-                                    resultingHeads, documentId),
+                            documentId -> result.rootedProjection() != null && !ownedMembers.contains(documentId)
+                                    && invocation.documents().containsKey(documentId)
+                                    ? new ManagedCatchUpPlanner.Head(invocation.documents().get(documentId).head().epoch(),
+                                            invocation.documents().get(documentId).head().blueId())
+                                    : resultingManagedHead(resultingHeads, documentId),
                             (documentId, epoch) -> {
                                 ManagedEpochReceipt staged =
                                         committedEpochReceipts.get(documentId);
@@ -2864,7 +2899,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
                             new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
-                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             requireRouteSelectionCurrent(batch, invocation);

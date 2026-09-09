@@ -7,6 +7,26 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedPublicationAuthorityTest {
+    @Test void retainedViewCannotMoveItsLogicalBoundaryToAnEarlierOrLaterEntry() throws IOException {
+        try (var fixture = new RootedSdkFixture()) {
+            var s = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var first = fixture.append(s, "rcp2/source", "tick", 100, "{}");
+            var second = fixture.append(s, "rcp2/source", "tick", 200, "{}");
+            var earlier = ((blue.language.processor.closure.ExternalEventCause) fixture.control.capture(s.id(), first.blueId(), null).cause()).sourceOrder();
+            var later = ((blue.language.processor.closure.ExternalEventCause) fixture.control.capture(s.id(), second.blueId(), null).cause()).sourceOrder();
+            var result = fixture.blue.processing().process(s, first).entry(first);
+            var key = result.closures().get(0).closureId();
+            var history = fixture.history(s);
+            assertDoesNotThrow(() -> fixture.control.verifyRetainedLogicalBoundary(s.id(), key, earlier));
+            assertThrows(IllegalStateException.class, () -> fixture.control.verifyRetainedLogicalBoundary(s.id(), key, later));
+            assertEquals(history, fixture.history(s));
+            var next = fixture.blue.processing().process(s, second).entry(second);
+            assertThrows(IllegalStateException.class, () -> fixture.control.verifyRetainedLogicalBoundary(
+                    s.id(), next.closures().get(0).closureId(), earlier));
+            assertEquals(2L, s.snapshot().longAt("/counter"));
+        }
+    }
+
     @Test void terminalVerifierRejectsExtraMissingDuplicateOwnersAndAnotherCause() throws IOException {
         try (var fixture = new RootedSdkFixture()) {
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());

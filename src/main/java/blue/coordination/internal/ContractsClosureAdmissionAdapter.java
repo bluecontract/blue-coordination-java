@@ -1252,7 +1252,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 for (OperationRouteIndex.Replacement replacement : routeReplacements) {
                     selectedRoutes.put(replacement.documentId(), replacement.activeSubscriptions());
                 }
-                transaction.stageRootedView(new RootedDocumentView(result, subscriptions, selectedRoutes));
+                transaction.stageRootedView(new RootedDocumentView(result, subscriptions, selectedRoutes,
+                        policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY ? null : frontier));
             }
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
@@ -1283,7 +1284,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
                             new ManagedRepresentationHistory(documents),
-                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), profile.rootedCheckpoint());
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
