@@ -86,7 +86,7 @@ final class RootedSdkFixture implements AutoCloseable {
 
     @Override public void close() { blue.close(); }
 
-    private static String resource(String name) throws IOException {
+    static String resource(String name) throws IOException {
         try (var in = RootedSdkFixture.class.getResourceAsStream("/rooted/" + name)) {
             if (in == null) throw new IOException("Missing rooted input " + name);
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
