@@ -14,24 +14,24 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.6'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.7'
 }
 ```
 
-`3.0.0-rc.6` is the bounded external-pilot candidate. Its required published
-dependency tuple is Language `3.1.0-rc.24`, BEX `1.1.0-rc.5`, and Repository
+`3.0.0-rc.7` is the bounded external-pilot candidate. Its required published
+dependency tuple is Language `3.1.0-rc.25`, BEX `1.1.0-rc.7`, and Repository
 `3.0.0-rc.22` from Maven Central. Coordination is compiled with `--release 17`.
 It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
 fragmentation, session-store, and fast-path APIs are not shimmed.
 
-Rc.6 adds authenticated historical representation positions to retained
-managed-epoch catch-up. It retains proof-aware exact-node resolution,
-reference-transparent SDK execution, authoritative fair-lane audit, a
-non-mutating host journal availability hint, and targeted one-selection
-processing for host-preleased durable execution. Unsupported nested authored
-lineage creation during retained catch-up returns a typed unpublished attempt
-and atomically blocks only its exact plan/barrier without partial publication.
+RC7 adds rooted checkpoint processing: a selected root calculates its required
+forward dependencies and publishes only its verified owned changes. Historical
+attachments retain their exact source positions and frozen input boundaries;
+incoming observers progress independently. Authenticated declared births,
+root-local history, gas failures, and retries preserve atomic publication.
+See the [RC7 release decision](docs/releases/3.0.0-rc.7.md) for the required
+evidence and supported profile.
 
 For application development, follow the
 [complete SDK developer guide](docs/guides/developer-guide.md). It covers both
@@ -135,7 +135,7 @@ effective occurrence with `expectOccurrence(...)`, and selects `fromNow`
 activation. One draft can bind several occurrences without duplicating the
 lineage. The runtime verifies the request fields, occurrence paths, exact
 values, and complete affected closure before one atomic publication; a
-terminal failure leaves no partial document or topology mutation. In rc.6,
+terminal failure leaves no partial document or topology mutation. In rc.7,
 imported draft state (`ManagedDocumentDraft.atEpoch(...)`) remains unsupported
 and fails closed. A distinct retained path provides automatic exact matching
 for existing current, authored-initial,
@@ -163,7 +163,7 @@ state to operational tooling.
 
 ## Build and verification
 
-The rc.6 release requires verification through the Maven-Central-only
+The rc.7 release requires verification through the Maven-Central-only
 artifact lane:
 
 ```bash
@@ -183,10 +183,10 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
 Central. The build and published POM retain the Repository and BEX transitive
-exclusions and directly own the complete Language rc.24 graph. Local
+exclusions and directly own the complete Language rc.25 graph. Local
 composites and Maven Local are rejected.
 
-The public rc.6 release lane uses the published-artifact mode by default. An
+The public rc.7 release lane uses the published-artifact mode by default. An
 invocation-owned immutable Contracts stage remains available only for
 development-candidate handoffs; when using it, pin its absolute repository and
 manifest identity explicitly:
@@ -195,7 +195,7 @@ manifest identity explicitly:
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17 \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.24 \
+  -PblueContractsVersion=3.1.0-rc.25 \
   -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```
@@ -211,17 +211,17 @@ Coordination versions plus both immutable repository manifest identities. The
 complete `releaseCheck` replays those same pins inside the extracted source
 archive; it never substitutes the published Language or BEX versions. This is
 candidate-verification evidence only. `verifyRcReadiness`, `stageRelease`, and
-JReleaser remain restricted to the published rc.6 lane.
+JReleaser remain restricted to the published rc.7 lane.
 
 Once those gates genuinely pass on a clean committed checkout, use the
 [immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
 to export and consumer-test an invocation-owned development Maven stage. A staged
 handoff is not a public release.
 
-The rc.6 release workflow runs the same gates, stages signed artifacts,
+The rc.7 release workflow runs the same gates, stages signed artifacts,
 publishes through JReleaser, and pushes its tag only after publication
 succeeds. See the [release procedure](docs/development/releasing.md) and
-[rc.6 release decision](docs/releases/3.0.0-rc.6.md).
+[rc.7 release decision](docs/releases/3.0.0-rc.7.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
@@ -234,7 +234,7 @@ limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
-[3.0.0-rc.6 decision](docs/releases/3.0.0-rc.6.md). The documents below are
+[3.0.0-rc.7 decision](docs/releases/3.0.0-rc.7.md). The documents below are
 retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
@@ -266,7 +266,8 @@ Developer references:
 - [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
-- [3.0.0-rc.6 release decision](docs/releases/3.0.0-rc.6.md)
+- [3.0.0-rc.7 release decision](docs/releases/3.0.0-rc.7.md)
+- [3.0.0-rc.6 historical release decision](docs/releases/3.0.0-rc.6.md)
 - [3.0.0-rc.5 historical release decision](docs/releases/3.0.0-rc.5.md)
 - [3.0.0-rc.4 historical release decision](docs/releases/3.0.0-rc.4.md)
 - [Canonical RC evidence report](docs/releases/3.0.0-rc.1-test-report.md)
