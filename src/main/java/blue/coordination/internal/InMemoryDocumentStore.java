@@ -668,7 +668,8 @@ final class InMemoryDocumentStore {
                 .map(DocumentSession::documentId)
                 .toList();
         return ProcessEmbeddedComponentIndex
-                .fromDocumentsAndOccurrenceInventory(documents, inventory);
+                .fromDocumentsAndOccurrenceInventory(documents, inventory)
+                .withReconstructedPendingJoins(sessions);
     }
 
     static long increment(long value, String label) {

@@ -47,6 +47,7 @@ final class ProcessEmbeddedComponentIndex {
     private final PersistentOrderedMap<DocumentId,
             PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument;
     private final boolean rootedViews;
+    private final RootedJoinCandidateIndex pendingJoins;
 
     private ProcessEmbeddedComponentIndex(
             PersistentOrderedMap<DocumentId, Component> componentByDocument,
@@ -63,7 +64,15 @@ final class ProcessEmbeddedComponentIndex {
             PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> targetsByDocument,
             PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument,
             boolean rootedViews) {
+        this(componentByDocument, targetsByDocument, sourcesByDocument, rootedViews, RootedJoinCandidateIndex.empty());
+    }
+
+    private ProcessEmbeddedComponentIndex(PersistentOrderedMap<DocumentId, Component> componentByDocument,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> targetsByDocument,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument,
+            boolean rootedViews, RootedJoinCandidateIndex pendingJoins) {
         this.rootedViews = rootedViews;
+        this.pendingJoins = Objects.requireNonNull(pendingJoins, "pendingJoins");
         this.componentByDocument = Objects.requireNonNull(
                 componentByDocument, "componentByDocument");
         this.targetsByDocument = Objects.requireNonNull(
@@ -73,6 +82,13 @@ final class ProcessEmbeddedComponentIndex {
     }
 
     boolean hasRootedViews() { return rootedViews; }
+
+    List<DocumentId> pendingJoinRootsFor(DocumentId member) { return pendingJoins.rootsFor(member); }
+
+    ProcessEmbeddedComponentIndex withReconstructedPendingJoins(Collection<DocumentSession> sessions) {
+        return new ProcessEmbeddedComponentIndex(componentByDocument, targetsByDocument, sourcesByDocument,
+                rootedViews, RootedJoinCandidateIndex.fromSessions(sessions));
+    }
 
     /** Builds a cycle-capable index over every binding endpoint. */
     static ProcessEmbeddedComponentIndex fromBindings(
@@ -382,7 +398,10 @@ final class ProcessEmbeddedComponentIndex {
         }
         local = new ProcessEmbeddedComponentIndex(persistentComponents(verified),
                 local.targetsByDocument, local.sourcesByDocument, true);
-        return replaceRegion(RootedResultScope.members(result), local);
+        var owners = RootedResultScope.members(result);
+        var replaced = replaceRegion(owners, local);
+        return new ProcessEmbeddedComponentIndex(replaced.componentByDocument, replaced.targetsByDocument,
+                replaced.sourcesByDocument, replaced.rootedViews, pendingJoins.replace(owners, calculated));
     }
 
     private ProcessEmbeddedComponentIndex replaceRegion(Collection<DocumentId> affected,
@@ -417,7 +436,7 @@ final class ProcessEmbeddedComponentIndex {
             targets = replaceBucket(targets, source, afterTargets);
         }
         return new ProcessEmbeddedComponentIndex(
-                components, targets, sources, rootedViews || local.rootedViews);
+                components, targets, sources, rootedViews || local.rootedViews, pendingJoins);
     }
 
     /** Orders only the components intersecting the selected forward region. */

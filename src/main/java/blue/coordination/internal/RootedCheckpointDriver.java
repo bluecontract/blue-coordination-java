@@ -22,6 +22,10 @@ final class RootedCheckpointDriver {
     }
 
     Selection select(DocumentId root, List<TimelineEntry> entries) {
+        return select(root, entries, RootedJoinEligibility.captureForRoot(documents, root));
+    }
+
+    private Selection select(DocumentId root, List<TimelineEntry> entries, List<RootedJoinEligibility.Fence> joins) {
         DocumentSession session = documents.require(root);
         RootedDocumentView view = java.util.Objects.requireNonNull(session.rootedView(), "Root has no rooted profile view");
         view.requireOwnerHead(root, session.currentRepresentation().blueId());
@@ -49,6 +53,9 @@ final class RootedCheckpointDriver {
                 return new Selection(null, work.get(), excluded, false);
             }
         }
+        if (live.isPresent() && RootedJoinEligibility.blocks(joins, owners, live.get().entry().sourceOrderKey())) {
+            return new Selection(null, null, excluded, true);
+        }
         return new Selection(live.orElse(null), null, excluded, false);
     }
 
@@ -56,6 +63,7 @@ final class RootedCheckpointDriver {
     Scan scan(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
         List<Head> heads = new ArrayList<>();
         Set<DocumentId> blocked = new LinkedHashSet<>();
+        var joins = RootedJoinEligibility.capture(documents);
         for (DocumentSession session : documents.sessions()) {
             if (session.rootedView() == null) continue;
             var component = session.rootedView().snapshot().components().stream()
@@ -66,7 +74,7 @@ final class RootedCheckpointDriver {
                     .map(ContractsClosureAdapter::coordinationId)
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElseThrow();
             if (!anchor.equals(session.documentId())) continue;
-            Selection selected = select(anchor, entries);
+            Selection selected = select(anchor, entries, joins);
             if (selected.blocked()) blocked.add(anchor);
             ExternalOrderKey order = selected.live() != null ? selected.live().entry().sourceOrderKey()
                     : selected.historical() != null ? order(selected.historical())
