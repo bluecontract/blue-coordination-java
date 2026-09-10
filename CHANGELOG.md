@@ -5,6 +5,10 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Run CI tests in four independent JVMs, including extracted-source checks,
+  and schedule the four PayNote acceptance cases independently. Preserve their
+  complete scenarios and enforce compiled-class execution coverage with no
+  failures, skips, or filtered release suites.
 - Count every newly committed owned PROCESS revision in rooted drain budgets,
   so a multi-document invocation stops further selection when the budget is
   reached. Exclude unowned dependency calculations and replayed publications;

@@ -31,6 +31,19 @@ standard development gate. `releaseCheck` adds `scenarioTest` and is the
 required final gate. This keeps slow scenarios out of routine checks without
 weakening release evidence.
 
+Parallel execution uses separate test JVMs, controlled by
+`-PtestMaxParallelForks`; methods inside a class remain serial. The PayNote
+completion, cancellation, adjustment, and late-refusal cases each own a
+separate test class and a fresh campaign. Shared scenario helpers contain no
+executable tests and do not share mutable runtime state between campaigns.
+
+The execution-scope gates discover classes from compiled test output through
+JUnit, then compare them with the executed XML inventory. They fail on missing
+or unexpected classes, failures, skips, empty suites, or filtered/excluded test
+tasks. The reports retain each executed case, including parameterized
+invocations. This complements source architecture and conformance checks;
+it does not replace any scenario, public API, artifact, or release gate.
+
 Shared engine fixtures live in `src/testSupport`. This private, non-executable
 source set contains no `@Test` methods, is available to `integrationTest` and
 `scenarioTest`, and is not published. In particular, scenarios do not compile

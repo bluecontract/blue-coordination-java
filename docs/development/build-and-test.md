@@ -110,6 +110,43 @@ RC7 uses the Maven-Central-only release gate:
 
 Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
 evidence, but does not itself publish rc.7 or make it production-ready.
+
+### Parallel test execution
+
+Use independent test JVMs to reduce elapsed time:
+
+```bash
+./gradlew --no-daemon --no-build-cache --max-workers=4 clean releaseCheck \
+  -PtestJavaVersion=17 -PtestMaxParallelForks=4
+```
+
+`testMaxParallelForks` defaults to `1`, must be a positive integer, and is
+capped by Gradle's worker limit. CI selects `4` for Build, RC release, and
+stable release. Each test JVM retains the existing 2 GiB heap limit and
+executes methods serially. The four PayNote acceptance cases have separate
+classes and create independent fixtures. No fixture preparation, gas budget,
+assertion, or repeatability scenario is removed by this scheduling change.
+
+The extracted-source smoke receives the same effective fork limit and still
+executes its complete existing focused inventory. Keep the same fork setting
+for subsequent readiness, staging, and publishing commands so Gradle can
+reuse valid results for the same inputs.
+
+`verifyCheckTestExecutionScope` and `verifyReleaseTestExecutionScope` compare
+JUnit-discovered compiled test classes with the JUnit XML results. They reject
+missing or unexpected classes, empty execution, failures, skipped tests, and
+filtered or excluded suite tasks. Parameterized methods participate in class
+discovery, and every executed invocation is recorded in the receipt. Filtered
+`test --tests ...` runs remain available for development; they cannot satisfy
+the complete `check` or `releaseCheck` gate.
+
+Receipts and discovered inventories are written under
+`build/reports/test-execution-scope/`. CI also archives `build/rooted-evidence/`
+alongside the existing reports and test results. Consumer test compilation and
+execution retain their JAR-only boundary; discovery runs in a separate JVM.
+
+### Suite boundaries
+
 The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |

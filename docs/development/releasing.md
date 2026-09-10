@@ -80,6 +80,29 @@ A failed gate or deployment leaves the remote tag untouched.
 The separate Build workflow independently repeats `releaseCheck` on Java 17
 and Java 21 and runs `verifyRcReadiness` on the canonical Java 17 lane.
 
+All three workflows select four independent test JVMs, including the
+extracted-source smoke. The runtime matrix and all release gates remain in
+place. Test execution-scope receipts and rooted gas evidence are included in
+the uploaded evidence.
+
+### Repeated post-merge verification
+
+The current workflow structure performs more work than the release requires:
+the merge push starts both the Build matrix and Release RC, Release RC runs
+its two Java gates sequentially, and the release commit starts the Build
+matrix again. For the RC6 release on September 7, 2026, the release job spent
+77m 04s in the Java 21 gate, 78m 05s in Java 17 staging, and 14m 45s publishing.
+The independent merge Build took 80m 55s; the release-commit Build took
+98m 37s. See the [release run](https://github.com/bluecontract/blue-coordination-java/actions/runs/34151341442).
+
+Parallel test execution reduces the test work's elapsed time in every path.
+Removing the repeated workflow executions is a separate release orchestration
+change: prepare one exact release commit, verify that commit on both Java
+versions concurrently, and publish the Java 17 staged artifacts only after
+both gates succeed. Such a handoff must bind the source commit, dependency
+identities, artifact hashes, and verification receipts. A PR result, a release
+commit message, or an unbound copied report cannot substitute for that proof.
+
 ## Manual diagnostics
 
 These commands are read-only with respect to remote Git and Maven Central:

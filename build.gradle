@@ -392,6 +392,12 @@ components.java.withVariantsFromConfiguration(
 components.java.withVariantsFromConfiguration(
         configurations.testFixturesRuntimeElements) { skip() }
 
+def requestedTestForks = providers.gradleProperty('testMaxParallelForks').getOrElse('1')
+if (!(requestedTestForks ==~ /[1-9][0-9]*/) || new BigInteger(requestedTestForks) > Integer.MAX_VALUE) {
+    throw new GradleException('testMaxParallelForks must be a positive integer')
+}
+def testForks = Math.min(requestedTestForks.toInteger(), gradle.startParameter.maxWorkerCount)
+
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     javaLauncher = javaToolchains.launcherFor {
@@ -399,7 +405,9 @@ tasks.withType(Test).configureEach {
                 providers.gradleProperty('testJavaVersion')
                         .getOrElse('17') as int)
     }
-    maxParallelForks = 1
+    maxParallelForks = testForks
+    inputs.property('testMaxParallelForks', testForks)
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     maxHeapSize = '2g'
     reports {
         junitXml.required = true
@@ -4281,6 +4289,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
+    inputs.property('testMaxParallelForks', testForks)
     inputs.property('extractedSourceArchiveProjectProperties',
             extractedSourceArchiveProjectProperties)
     if (immutableContractsRepository) {
@@ -4385,7 +4394,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 'blue.coordination.sdk.RootedLocalHistoryRecoveryTest'
         ]
         command.addAll([
-                '--no-daemon', '--no-build-cache', '--max-workers=1'
+                '--no-daemon', '--no-build-cache', '--max-workers=' + testForks,
+                '-PtestMaxParallelForks=' + testForks
         ])
         command.addAll(['clean', 'test'])
         focusedTests.each { focusedTest ->
@@ -5492,3 +5502,4 @@ tasks.named('check') {
 }
 
 apply from: 'gradle/coordination-staging.gradle'
+apply from: 'gradle/test-execution-scope.gradle'

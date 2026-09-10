@@ -33,6 +33,7 @@ jobs:
             setup-java: '21.0.11+10.0.LTS'
     env:
       CI: true
+      ORG_GRADLE_PROJECT_testMaxParallelForks: '4'
     defaults:
       run:
         working-directory: blue-coordination-java
@@ -137,4 +138,5 @@ jobs:
             blue-coordination-java/build/publications/**
             blue-coordination-java/build/reports/**
             blue-coordination-java/build/test-results/**
+            blue-coordination-java/build/rooted-evidence/**
             blue-coordination-java/build/staging-deploy/**
