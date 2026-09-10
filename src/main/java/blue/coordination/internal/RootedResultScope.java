@@ -56,6 +56,13 @@ final class RootedResultScope {
                 : result.rootedProjection().ownedPublicEvents();
     }
 
+    static long processTransitionCount(ClosureProcessResult result) {
+        RootedPublicationProjection scope = result.rootedProjection();
+        return result.managedTransitionReceipts().stream()
+                .filter(receipt -> scope == null || scope.owns(receipt.documentId()))
+                .count();
+    }
+
     static RootedPublicationProjection require(ClosureProcessResult result, RootedInvocationEvidence expected) {
         RootedPublicationProjection scope = result.rootedProjection();
         if (scope == null || expected == null || !result.commits()

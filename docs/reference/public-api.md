@@ -402,6 +402,12 @@ committed PROCESS transitions. It does not preempt one frozen PROCESS or
 INITIALIZE call and is not a wall-clock deadline. A later drain resumes from
 retained plan cursors and receipts.
 
+For rooted processing, the transition count includes each newly committed owned
+document revision, excluding unowned dependency calculations and replayed
+publications. An atomic invocation that commits two owned revisions counts as
+two transitions. It may exceed the remaining budget, but the drain then pauses
+before selecting another invocation.
+
 A durable host that must precommit its own lease before Coordination mutates
 state uses one-selection slices from the same retained scheduler:
 

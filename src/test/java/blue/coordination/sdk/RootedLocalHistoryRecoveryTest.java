@@ -25,6 +25,7 @@ final class RootedLocalHistoryRecoveryTest {
 
             // then
             assertTrue(result.quiescent());
+            assertEquals(1L, result.stats().committedTransitions(), "Calculated dependencies do not commit independent revisions");
             assertEquals(25, scenario.localConsumerTouches());
         }
     }
@@ -56,6 +57,7 @@ final class RootedLocalHistoryRecoveryTest {
                 assertEquals(reference.totalGas(), retained.totalGas());
                 assertEquals(reference.gasTraceIdentity(), retained.gasTraceIdentity());
                 assertEquals(retained.totalGas(), drained.stats().gas());
+                assertEquals(delta < 0 ? 0L : 1L, drained.stats().committedTransitions());
                 assertEquals(heads.subList(1, 3), scenario.heads().subList(1, 3));
                 assertEquals(histories.subList(1, 3), scenario.histories().subList(1, 3));
                 if (delta < 0) {
@@ -73,6 +75,7 @@ final class RootedLocalHistoryRecoveryTest {
                 var afterHeads = scenario.heads(); var afterHistories = scenario.histories();
                 CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 var repeated = f.blue.processing().processNext(scenario.root);
+                assertEquals(0L, repeated.stats().committedTransitions());
                 if (delta < 0) {
                     assertFalse(repeated.quiescent());
                     assertEquals(actual.closureId(), repeated.rootedRetainedResults().get(0).closureId());

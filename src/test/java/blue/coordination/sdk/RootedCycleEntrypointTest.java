@@ -11,6 +11,57 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Literal RUN-023: one exact A operation through either member, followed by splitting. */
 final class RootedCycleEntrypointTest {
     @Test
+    void transitionBudgetPausesAfterOneAtomicTwoDocumentInvocation() throws IOException {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var blue = fixture.blue;
+            var b = fixture.start("cycle-b.yaml", "rcp2/cycle", Map.of());
+            String aYaml = RootedSdkFixture.resource("cycle-a.yaml")
+                    + "\npeer:\n  blueId: " + b.snapshot().blueId() + "\n";
+            var authoredA = blue.values().yaml(aYaml);
+            fixture.exact.put(authoredA.blueId(), authoredA.json());
+            var a = fixture.startYaml(aYaml, "rcp2/cycle");
+            append(fixture, b, "connectA", 90, "a:\n  blueId: " + authoredA.blueId());
+            blue.processing().processNext(b);
+            assertTrue(blue.processing().processNext(b).quiescent());
+            var subject = append(fixture, a, "startFinite", 100, "{}");
+            var detach = append(fixture, b, "detachA", 110, "{}");
+            int aHistorySize = fixture.history(a).size();
+            int bHistorySize = fixture.history(b).size();
+
+            // when
+            var first = blue.processing().drain(new DrainBudget(2, 20));
+
+            // then
+            assertEquals(2L, first.stats().committedTransitions());
+            assertEquals(EntryDisposition.APPLIED, first.entry(subject).disposition());
+            assertTrue(first.find(detach).isEmpty(), "The next invocation must wait for another drain");
+            assertTrue(first.paused());
+            assertFalse(first.quiescent());
+            assertEquals("done", a.snapshot().textAt("/phase"));
+            assertEquals("relayed", b.snapshot().textAt("/phase"));
+            assertEquals(aHistorySize + 1, fixture.history(a).size());
+            assertEquals(bHistorySize + 1, fixture.history(b).size());
+
+            var replay = blue.processing().process(a, subject);
+            assertEquals(0L, replay.stats().committedTransitions());
+            assertEquals(aHistorySize + 1, fixture.history(a).size());
+            assertEquals(bHistorySize + 1, fixture.history(b).size());
+
+            // A smaller remaining budget still cannot split an atomic invocation.
+            var resumed = blue.processing().drain(new DrainBudget(1, 20));
+            assertEquals(2L, resumed.stats().committedTransitions());
+            assertEquals(EntryDisposition.APPLIED, resumed.entry(detach).disposition());
+            assertTrue(resumed.quiescent());
+            assertFalse(resumed.paused());
+            assertEquals("detached", b.snapshot().textAt("/phase"));
+            assertEquals(aHistorySize + 2, fixture.history(a).size());
+            assertEquals(bHistorySize + 2, fixture.history(b).size());
+            assertEquals(0L, blue.processing().drain().stats().committedTransitions());
+        }
+    }
+
+    @Test
     void alternateCycleViewsPreserveTheSameOperationAndSplitEvidence() throws IOException {
         // given
         var baseline = run(false);
