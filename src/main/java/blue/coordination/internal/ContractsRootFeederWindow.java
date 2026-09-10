@@ -120,6 +120,10 @@ final class ContractsRootFeederWindow {
                     "Cohort outcome members disagree with the selected lane");
         }
         ClosureAttemptResult attempt = actual.attempt();
+        if (actual.rejectedBirth() != null) {
+            recordTerminal(selected, actual.members(), false, false);
+            return;
+        }
         if (!attempt.isComplete()) {
             recordNeedsResources(
                     selected,
@@ -399,6 +403,22 @@ final class ContractsRootFeederWindow {
      */
     static final class DurableState {
         private final Map<LaneId, PendingProgress> pendingByLane;
+        private final Map<String, RootedDeclaredBirthRejection> rejectedBirths = new LinkedHashMap<>();
+
+        synchronized RootedDeclaredBirthRejection rejectedBirth(ContractsClosureAdapter.CohortInvocation input) {
+            if (input.rootedEvidence() == null) return null;
+            var retained = rejectedBirths.get(input.rootedEvidence().terminalKey());
+            if (retained != null) retained.requireSameObligation(input);
+            return retained;
+        }
+
+        synchronized RootedDeclaredBirthRejection rejectBirth(RootedDeclaredBirthRejection decision,
+                InMemoryDocumentStore documents) {
+            decision.requireCurrentFences(documents);
+            var prior = rejectedBirths.putIfAbsent(decision.terminalKey(), decision);
+            if (prior != null && prior != decision) throw new IllegalStateException("Conflicting declared-birth terminal decision");
+            return decision;
+        }
         private final Map<EventLaneKey, TerminalProgress> terminalByEventLane;
         private final Map<LaneId, ExternalOrderKey> terminalFrontierByLane;
 
@@ -418,10 +438,12 @@ final class ContractsRootFeederWindow {
         }
 
         synchronized DurableState copy() {
-            return new DurableState(
+            var copy = new DurableState(
                     new LinkedHashMap<>(pendingByLane),
                     new LinkedHashMap<>(terminalByEventLane),
                     new LinkedHashMap<>(terminalFrontierByLane));
+            copy.rejectedBirths.putAll(rejectedBirths);
+            return copy;
         }
     }
 

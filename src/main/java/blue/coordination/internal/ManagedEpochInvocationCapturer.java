@@ -118,7 +118,11 @@ final class ManagedEpochInvocationCapturer {
                         "Managed application occurrence retired before "
                                 + work.workIdentity()));
         ManagedRepresentationCause representation = work.representationCause().orElse(null);
-        if (representation != null) new ManagedRepresentationHistory(documents).verifyCause(representation, target);
+        ContractsClosureAdapter.RootedCapturedState rootedState = profile.rootedCheckpoint()
+                ? host.captureRootedState(work.consumerDocumentId()) : null;
+        if (representation != null) new ManagedRepresentationHistory(documents).forCapturedRoot(rootedState).verifyCause(representation, target,
+                profile.rootedCheckpoint() ? Objects.requireNonNull(documents.catchUpPlansSnapshot()
+                        .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder() : null);
         long fromEpoch = representation == null ? Math.subtractExact(work.sourceEpoch(), 1L) : work.sourceEpoch();
         String sourceBeforeBlueId = representation != null ? representation.beforeBlueId() : sourceTransition == null
                 ? sourceReceipt.beforeBlueId().orElseThrow(() ->
@@ -143,20 +147,21 @@ final class ManagedEpochInvocationCapturer {
                             + work.workIdentity());
         }
 
-        ContractsClosureAdapter.ConnectedSelection connected =
-                ContractsClosureAdapter.initialConnectedSelection(
-                        topology.occurrenceInventory(),
-                        topology.closureSubscriptions(),
-                        work.consumerDocumentId());
+        ContractsClosureAdapter.ConnectedSelection connected = rootedState == null
+                ? ContractsClosureAdapter.initialConnectedSelection(topology.occurrenceInventory(),
+                        topology.closureSubscriptions(), work.consumerDocumentId())
+                : new ContractsClosureAdapter.ConnectedSelection(
+                        canonical(rootedState.documents().keySet()), rootedState.snapshot().occurrences(),
+                        rootedState.snapshot().occurrences().size());
         runtime.metrics().add(
                 ContractsClosureAdapter.OCCURRENCE_ROWS_EXAMINED,
                 connected.rowsExamined());
         // Catch-up owns a verified pending occurrence, which ordinary active
         // selection deliberately excludes. Include its source and complete
         // forward inventory without discovering unrelated reverse consumers.
-        Set<DocumentId> members = ContractsClosureAdapter.forwardExistingMembers(
+        Set<DocumentId> members = rootedState == null ? ContractsClosureAdapter.forwardExistingMembers(
                 connected.members(), List.of(work.sourceDocumentId()),
-                topology.occurrenceInventory(), runtime.metrics());
+                topology.occurrenceInventory(), runtime.metrics()) : new LinkedHashSet<>(connected.members());
         InMemoryDocumentStore.ClosureSnapshot publication = documents
                 .closureSnapshot(members, topology);
         InMemoryDocumentStore.DocumentHead consumerHead = publication
@@ -173,10 +178,10 @@ final class ManagedEpochInvocationCapturer {
         TreeMap<DocumentId, ContractsClosureAdapter.CapturedDocument>
                 captured = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         for (DocumentId documentId : members) {
-            captured.put(documentId, host.captureDocument(
-                    documentId,
-                    publication.requireHead(documentId),
-                    members));
+            captured.put(documentId, rootedState == null ? host.captureDocument(documentId,
+                    publication.requireHead(documentId), members, publication.closureSubscriptions().statesFor(documentId))
+                    : java.util.Objects.requireNonNull(
+                    rootedState.documents().get(documentId), "Historical root view omits a selected document"));
             runtime.metrics().increment(
                     ManagedEpochApplicationExecutor
                             .AFFECTED_DOCUMENTS_OPENED);
@@ -212,7 +217,8 @@ final class ManagedEpochInvocationCapturer {
                 : captured.values()) {
             blue.language.processor.closure.DocumentId closureDocumentId =
                     ContractsClosureAdapter.closureId(document.documentId());
-            boolean publicRoot = profile.isPublicRoot(document.documentId());
+            boolean publicRoot = rootedState == null ? profile.isPublicRoot(document.documentId())
+                    : rootedState.snapshot().publicRootDocumentIds().contains(closureDocumentId);
             managedDocuments.add(new ManagedDocumentSnapshot(
                     closureDocumentId,
                     document.head().blueId(),
@@ -238,7 +244,7 @@ final class ManagedEpochInvocationCapturer {
             occurrences.addAll(rows);
         }
         occurrences.sort(java.util.Comparator.naturalOrder());
-        AffectedClosureSnapshot snapshot = ClosureEvidenceFactory
+        AffectedClosureSnapshot snapshot = rootedState != null ? rootedState.snapshot() : ClosureEvidenceFactory
                 .affectedClosure(
                         graphGeneration,
                         managedDocuments,
@@ -272,6 +278,23 @@ final class ManagedEpochInvocationCapturer {
                         invocationSourceAfter,
                         sourceTransition,
                         afterCyclicProof);
+        if (rootedState != null && representation == null) {
+            var boundary = Objects.requireNonNull(documents.catchUpPlansSnapshot()
+                    .barrier(work.barrierIdentity()).barrier(), "owning barrier").causeOrder();
+            var selectedSource = snapshot.managedDocument(ContractsClosureAdapter.closureId(work.sourceDocumentId()));
+            var history = new ManagedRepresentationHistory(documents).forCapturedRoot(rootedState);
+            if (work.successorRepresentationCause().isPresent()) {
+                history.verifySuccessor(work, selectedSource, boundary);
+                cause = ((ManagedRevisionCause) cause).withSuccessorRepresentationCause(
+                        work.successorRepresentationCause().orElseThrow());
+            } else if (history.terminalSuccessor(work.sourceDocumentId(), work.sourceEpoch(),
+                    work.targetOccurrenceIdentity(), boundary, selectedSource,
+                    id -> objects.cyclicSetProofFor(id).proof().orElse(null)).isPresent()) {
+                throw ContractsClosureAdapter.stale("Numbered work omitted its frozen terminal representation successor");
+            }
+        } else if (work.successorRepresentationCause().isPresent()) {
+            throw ContractsClosureAdapter.stale("A numbered successor requires the rooted terminal profile");
+        }
         ClosureInvocationInput input = ClosureEvidenceFactory.processClosure(
                 snapshot,
                 cause,
@@ -292,6 +315,14 @@ final class ManagedEpochInvocationCapturer {
                         profile.isPublicRoot(work.consumerDocumentId())
                                 ? List.of(work.consumerDocumentId())
                                 : List.of());
+        if (rootedState != null) {
+            String position = target.pendingRepresentationCursor() == null
+                    ? fromEpoch < 0 ? documents.require(work.sourceDocumentId()).requireRootedHistory().identity()
+                            : documents.managedEpochEvidence(work.sourceDocumentId(), fromEpoch).receipt().receiptIdentity()
+                    : target.pendingRepresentationCursor().positionIdentity();
+            invocation = invocation.withRootedAnchor(rootedState.anchor()).withRootedEvidence(
+                    RootedInvocationEvidence.retained(rootedState.anchor(), input, documents, target, position));
+        }
         return new Capture(
                 work, sourceReceipt, sourceTransition, invocation);
     }

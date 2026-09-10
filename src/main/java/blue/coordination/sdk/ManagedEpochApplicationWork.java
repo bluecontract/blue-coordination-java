@@ -20,14 +20,27 @@ public record ManagedEpochApplicationWork(
         long expectedConsumerCommittedEpoch,
         String expectedConsumerCommittedBlueId,
         long expectedGraphGeneration,
-        Optional<RepresentationStep> representationStep) {
+        Optional<RepresentationStep> representationStep,
+        Optional<RepresentationStep> successorRepresentationStep) {
 
     /** Compatibility constructor for ordinary numbered epoch work. */
     public ManagedEpochApplicationWork(String workIdentity, String planIdentity, String barrierIdentity, String sourceReceiptIdentity,
             DocumentId sourceDocumentId, long sourceEpoch, DocumentId consumerDocumentId,
             String targetOccurrenceIdentity, String targetPath, long activationGeneration,
             long expectedConsumerCommittedEpoch, String expectedConsumerCommittedBlueId, long expectedGraphGeneration) {
-        this(workIdentity, planIdentity, barrierIdentity, sourceReceiptIdentity, sourceDocumentId, sourceEpoch, consumerDocumentId, targetOccurrenceIdentity, targetPath, activationGeneration, expectedConsumerCommittedEpoch, expectedConsumerCommittedBlueId, expectedGraphGeneration, Optional.empty());
+        this(workIdentity, planIdentity, barrierIdentity, sourceReceiptIdentity, sourceDocumentId, sourceEpoch, consumerDocumentId, targetOccurrenceIdentity, targetPath, activationGeneration, expectedConsumerCommittedEpoch, expectedConsumerCommittedBlueId, expectedGraphGeneration, Optional.empty(), Optional.empty());
+    }
+
+    /** Compatibility constructor retaining the existing applied-position projection. */
+    public ManagedEpochApplicationWork(String workIdentity, String planIdentity, String barrierIdentity, String sourceReceiptIdentity,
+            DocumentId sourceDocumentId, long sourceEpoch, DocumentId consumerDocumentId,
+            String targetOccurrenceIdentity, String targetPath, long activationGeneration,
+            long expectedConsumerCommittedEpoch, String expectedConsumerCommittedBlueId, long expectedGraphGeneration,
+            Optional<RepresentationStep> representationStep) {
+        this(workIdentity, planIdentity, barrierIdentity, sourceReceiptIdentity, sourceDocumentId, sourceEpoch,
+                consumerDocumentId, targetOccurrenceIdentity, targetPath, activationGeneration,
+                expectedConsumerCommittedEpoch, expectedConsumerCommittedBlueId, expectedGraphGeneration,
+                representationStep, Optional.empty());
     }
 
     /** Exact historical position; the epoch alone cannot identify this progress. */
@@ -64,6 +77,16 @@ public record ManagedEpochApplicationWork(
     /** Validates the complete immutable SDK projection. */
     public ManagedEpochApplicationWork {
         representationStep = Objects.requireNonNull(representationStep, "representationStep");
+        successorRepresentationStep = Objects.requireNonNull(successorRepresentationStep, "successorRepresentationStep");
+        if (successorRepresentationStep.isPresent()) {
+            var successor = successorRepresentationStep.orElseThrow();
+            if (representationStep.isPresent() || !successor.before().positionIdentity().equals(sourceReceiptIdentity)
+                    || !successor.before().anchorReceiptIdentity().equals(sourceReceiptIdentity)
+                    || successor.before().targetPositionIdentity().equals(sourceReceiptIdentity)
+                    || successor.before().nextRevisionReceiptIdentity().isPresent()) {
+                throw new IllegalArgumentException("Numbered successor projection must start at its unconsumed source anchor");
+            }
+        }
         workIdentity = text(workIdentity, "workIdentity");
         planIdentity = text(planIdentity, "planIdentity");
         barrierIdentity = text(barrierIdentity, "barrierIdentity");

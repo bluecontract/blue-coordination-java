@@ -29,7 +29,7 @@ final class SdkNestedExistingSourceEpochTest {
 
     @Test
     void literalAuthoredNestedSourceRemainsExactWhileAnotherConsumerReplaysIt() throws IOException {
-        try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().contentDerivedDocumentIds().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(blue.advanced().rawEngine());
             TimelineHandle timeline = blue.timelines().register(
@@ -120,7 +120,7 @@ final class SdkNestedExistingSourceEpochTest {
 
     @Test
     void b3IntroducesRetainedCAndACatchesUpWithoutReprocessingEitherSource() {
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     blue.advanced().rawEngine());
@@ -225,7 +225,7 @@ final class SdkNestedExistingSourceEpochTest {
 
     @Test
     void sameStateNestedSourceReplayReadsThroughHistoricalChildReference() {
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     blue.advanced().rawEngine());

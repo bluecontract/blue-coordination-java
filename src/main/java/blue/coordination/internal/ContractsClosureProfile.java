@@ -17,6 +17,9 @@ import java.util.TreeSet;
 
 /** Immutable host policy used to construct one Contracts 1.0 environment. */
 final class ContractsClosureProfile {
+    /** Exact reviewed specification selecting the draft.2 execution path. */
+    static final String ROOTED_CONTRACTS_SPECIFICATION =
+            "sha256:e91381c970859a6bafecdd99e46f5115ba033bf0534be84bbd5582531e9e347f";
     private final String blueLanguageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
     private final String managedDocumentPolicyLabel;
@@ -122,6 +125,19 @@ final class ContractsClosureProfile {
                 sharedGasLimit,
                 Map.of(),
                 executionPolicyLabel);
+    }
+
+    boolean rootedCheckpoint() {
+        return ROOTED_CONTRACTS_SPECIFICATION.equals(
+                contractsSpecificationIdentity);
+    }
+
+    String rootedRuntimeSemanticsIdentity() {
+        BundledContracts10Release.Manifest release = BundledContracts10Release.manifest();
+        if (!rootedCheckpoint() || !contractsSpecificationIdentity.equals(release.contractsSpecification())) {
+            throw new IllegalStateException("Rooted history requires the matching immutable runtime release binding");
+        }
+        return release.contractsRelease();
     }
 
     synchronized boolean isPublicRoot(DocumentId documentId) {

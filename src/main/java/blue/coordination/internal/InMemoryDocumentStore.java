@@ -323,6 +323,24 @@ final class InMemoryDocumentStore {
                         publicationIdentity, "publicationIdentity")));
     }
 
+    /** Checks retained local-provider promises before accepting another exact entry. */
+    synchronized void requireAfterRootedProviderFrontier(blue.coordination.api.TimelineEntry entry) {
+        // The in-memory provider closes each required source through the
+        // selected input when retaining its terminal admission evidence. The
+        // promise survives response loss/restart with that atomic receipt;
+        // unrelated sources never inherit a global environment watermark.
+        for (ContractsClosurePublicationReceipt receipt : state.closurePublicationReceipts().values()) {
+            RootedTerminalEvidence evidence = receipt.rootedTerminalEvidence();
+            if (evidence == null || !evidence.requiredTimelineIds().contains(entry.timeline().timelineId())
+                    || !(evidence.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause)) continue;
+            long closedThrough = new java.math.BigInteger(cause.sourceOrder().components().get(0).toString()).longValueExact();
+            if (entry.timestampMicros() <= closedThrough) {
+                throw new IllegalArgumentException("Timeline Entry order " + entry.sourceOrderKey()
+                        + " is not after its required Timeline completeness frontier " + cause.sourceOrder());
+            }
+        }
+    }
+
     /** Looks up one typed admission receipt without opening document heads. */
     synchronized Optional<ContractsClosureAdmissionReceipt> admissionReceipt(
             String publicationIdentity) {
@@ -458,6 +476,20 @@ final class InMemoryDocumentStore {
                 read.barrierRowsRead(),
                 read.unrelatedPlanReads());
         return Optional.ofNullable(read.barrier());
+    }
+
+    /** Resolves a retained rooted terminal through the already authenticated application result. */
+    synchronized Optional<ContractsClosurePublicationReceipt> closureReceiptForApplication(
+            ManagedEpochApplicationReceipt application) {
+        ContractsClosurePublicationReceipt legacy = state.closurePublicationReceipts().get(application.workIdentity());
+        if (legacy != null) return Optional.of(legacy);
+        List<ContractsClosurePublicationReceipt> matches = state.closurePublicationReceipts().values().stream()
+                .filter(receipt -> receipt.attempt().processResult().commits())
+                .filter(receipt -> receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity()))
+                .filter(receipt -> receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
+                .toList();
+        if (matches.size() > 1) throw new IllegalStateException("Ambiguous retained rooted application result");
+        return matches.stream().findFirst();
     }
 
     synchronized Optional<ManagedEpochApplicationWork> catchUpWork(
@@ -1007,7 +1039,7 @@ final class InMemoryDocumentStore {
                                 exact.documentIds(),
                                 exact.attempt().processResult(),
                                 this.sessions,
-                                "Process receipt");
+                                "Process receipt", exact.publicationDocuments().values());
                     });
             this.closurePublicationReceiptIndex =
                     closurePublicationReceiptIndex(processReceipts);
@@ -1412,10 +1444,17 @@ final class InMemoryDocumentStore {
                 blue.language.processor.closure.ClosureProcessResult result,
                 Map<DocumentId, DocumentSession> sessions,
                 String label) {
+            requireRetainedResult(receiptDocuments, result, sessions, label, RootedResultScope.documents(result));
+        }
+
+        private static void requireRetainedResult(
+                List<DocumentId> receiptDocuments,
+                blue.language.processor.closure.ClosureProcessResult result,
+                Map<DocumentId, DocumentSession> sessions, String label,
+                Collection<ResultingDocument> authoritativeRecords) {
             TreeMap<DocumentId, ResultingDocument> resulting =
                     new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
-            for (ResultingDocument document : Objects.requireNonNull(
-                    result, "receipt result").resultingDocuments()) {
+            for (ResultingDocument document : authoritativeRecords) {
                 DocumentId documentId = DocumentId.of(
                         document.documentId().value());
                 if (resulting.putIfAbsent(documentId, document) != null) {

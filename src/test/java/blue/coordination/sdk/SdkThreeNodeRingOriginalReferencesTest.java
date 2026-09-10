@@ -15,7 +15,7 @@ final class SdkThreeNodeRingOriginalReferencesTest {
     @Test
     void closesThreeNodeRingWithoutReinterpretingRetainedReceipts() throws Exception {
         // given
-        try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().contentDerivedDocumentIds().build()) {
             CoordinationTestControl diagnostics = CoordinationTestControl.attach(blue.advanced().rawEngine());
             String template;
             try (var stream = getClass().getResourceAsStream("/tutorial-graphs/node.template.json")) {

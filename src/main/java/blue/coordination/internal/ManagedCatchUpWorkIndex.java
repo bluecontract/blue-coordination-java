@@ -480,6 +480,8 @@ final class ManagedCatchUpWorkIndex {
             ManagedEpochApplicationWork work,
             ManagedEpochApplicationReceipt receipt) {
         if (!receipt.representationCauseIdentity().equals(work.representationCause().map(cause -> cause.causeIdentity()))
+                || !receipt.successorRepresentationCauseIdentity().equals(
+                    work.successorRepresentationCause().map(cause -> cause.causeIdentity()))
                 || !receipt.workIdentity().equals(work.workIdentity())
                 || !receipt.planIdentity().equals(work.planIdentity())
                 || !receipt.sourceReceiptIdentity().equals(

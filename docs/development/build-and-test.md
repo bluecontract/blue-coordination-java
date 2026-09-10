@@ -8,23 +8,23 @@ Java 21.
 
 ## Dependency graph
 
-`blueDependencyMode=published-artifact` is the rc.6 build and release default.
+`blueDependencyMode=published-artifact` is the rc.7 build and release default.
 It resolves exact Maven Central artifacts and rejects sibling composites,
 Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
-| Modules | Rc.6 release lane |
+| Modules | RC7 release lane |
 | --- | --- |
-| `blue.language:*` | Maven Central `3.1.0-rc.24` |
-| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.5` |
+| `blue.language:*` | Maven Central `3.1.0-rc.25` |
+| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.7` |
 | `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.22` |
 
-Coordination directly owns the complete Language rc.24 graph, retains the
+Coordination directly owns the complete Language rc.25 graph, retains the
 Repository and BEX transitive exclusions in its published POM, and locks the
 exact graph in `gradle/published-artifact.lockfile`.
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
 remain available only for non-published upstream handoffs. They are not public
-release authority for rc.6. The development lane is valid
+release authority for rc.7. The development lane is valid
 candidate-verification evidence when every input and the Coordination version
 are commit-bound. It can bind separate, immutable Language/Contracts and BEX
 repositories; it never obtains either dependency from a sibling checkout or
@@ -37,7 +37,7 @@ required:
 ```bash
 ./gradlew --no-daemon verifyActiveDependencyLane dependencyPreflight \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.24 \
+  -PblueContractsVersion=3.1.0-rc.25 \
   -PblueContractsRepository=/absolute/path/to/contracts-maven-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```
@@ -56,7 +56,7 @@ In staged mode, Gradle uses repository-exclusive content routing for the
 Gradle plugins, and third-party dependencies. There is no fallback if a staged
 Language artifact is absent or different.
 
-For rc.6, verify fresh remote availability and the
+For rc.7, verify fresh remote availability and the
 conflict-free Maven Central graph with:
 
 ```bash
@@ -101,7 +101,7 @@ dependency report is written to
 
 ## Verification
 
-Rc.6 uses the Maven-Central-only release gate:
+RC7 uses the Maven-Central-only release gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
@@ -109,7 +109,7 @@ Rc.6 uses the Maven-Central-only release gate:
 ```
 
 Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
-evidence, but does not itself publish rc.6 or make it production-ready.
+evidence, but does not itself publish rc.7 or make it production-ready.
 The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |
@@ -179,21 +179,21 @@ isolation, source-archive hygiene, and an extracted source-archive build.
 
 ## RC readiness
 
-`verifyRcReadiness` is the rc.6 release-readiness gate:
+`verifyRcReadiness` is the rc.7 release-readiness gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 ```
 
-The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.6
+The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.7
 release authority and explicit non-claims, then records the
 fresh artifact hashes in
-`build/reports/release/3.0.0-rc.6-readiness.json`. It validates version
-`3.0.0-rc.6`, the published-artifact lane, and the focused rc.6 capability
+`build/reports/release/3.0.0-rc.7-readiness.json`. It validates version
+`3.0.0-rc.7`, the published-artifact lane, and the focused rc.7 capability
 inventory in addition to the complete current suite.
 
-The Build workflow prepares and seals the exact rc.6 version in its isolated
+The Build workflow prepares and seals the exact rc.7 version in its isolated
 checkout before this gate. Keep the preceding released version in the feature
 branch's `.cz.toml`; the release workflow owns the final version commit. A
 local readiness run requires the same preparation in a validation checkout.
@@ -214,7 +214,7 @@ also contains the canonical Coordination specification candidate under
 file and byte-identical to the canonical source file before the isolated build
 starts.
 
-For a downstream development handoff after the rc.6 gates pass on a clean
+For a downstream development handoff after the rc.7 gates pass on a clean
 committed source tree, export a separate
 invocation-owned immutable Coordination repository with:
 
@@ -267,4 +267,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.6 decision](../releases/3.0.0-rc.6.md).
+[3.0.0-rc.7 decision](../releases/3.0.0-rc.7.md).

@@ -51,7 +51,7 @@ final class SdkCanonicalRetainedManagedEpochScenarioTest {
     }
 
     private static ScenarioEvidence runCanonicalScenario() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle aTimeline = coordination.timelines().register(
                     A_TIMELINE, ACTOR);
             TimelineHandle bTimeline = coordination.timelines().register(

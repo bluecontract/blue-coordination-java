@@ -61,7 +61,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
 
     @Test
     void multiChildBarrierFinishesAtAttachmentCutoffBeforeLaterTimelineEntries() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
@@ -347,7 +347,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
 
     @Test
     void boundedDrainsCompleteCapturedSuffixBeforeContinuingFutureSourceTraffic() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
@@ -440,7 +440,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
 
     @Test
     void completedSiblingGatesLaterSourceUntilOlderWorkAcrossRestart() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
@@ -601,7 +601,7 @@ final class SdkManagedCatchUpBarrierAndLiveExtensionTest {
 
     @Test
     void retainedConsumerEpochPropagatesThroughAlreadyActiveParent() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());

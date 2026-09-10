@@ -147,6 +147,27 @@ final class ContractsJournalDrainCoordinator {
         return durableState.processedThrough;
     }
 
+    /** Reports each newly terminal transport row once, using root-local progress. */
+    synchronized List<TimelineEntry> completeRootedTransport(ExternalOrderKey cutoff,
+            RootedCheckpointDriver.Scan remaining) {
+        if (!remaining.blockedRoots().isEmpty()) return List.of();
+        List<TimelineEntry> completed = new ArrayList<>();
+        ExternalOrderKey firstPending = remaining.heads().isEmpty() ? null : remaining.heads().get(0).order();
+        for (TimelineEntry entry : journal.entries()) {
+            if (cutoff != null && entry.sourceOrderKey().compareTo(cutoff) > 0) continue;
+            if (firstPending != null && entry.sourceOrderKey().compareTo(firstPending) >= 0) continue;
+            if (durableState.terminalEntries.add(EntryKey.from(entry))) {
+                terminalEntryObserver.accept(entry);
+                completed.add(entry);
+                if (durableState.processedThrough == null || entry.sourceOrderKey().compareTo(durableState.processedThrough) > 0) {
+                    durableState.processedThrough = entry.sourceOrderKey();
+                }
+            }
+        }
+        completed.sort(java.util.Comparator.comparing(TimelineEntry::sourceOrderKey));
+        return List.copyOf(completed);
+    }
+
     /** Whether the ordinary lane has journal work at its retained frontier. */
     synchronized boolean hasPendingJournalTurn() {
         return journal.nextExternal(

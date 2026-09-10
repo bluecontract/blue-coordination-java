@@ -9,7 +9,29 @@ final class SdkEmbeddedEventPayloadTest {
     @Test
     void generatedPayloadRemainsReadableThroughEmbeddedDeliveryReference() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        var builder = LegacyContracts10TestProfile.builder();
+        // when
+        var result = runPayload(builder, java.util.List.of("payload-observed"),
+                java.util.List.of("payload-parent"));
+        // then
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+    }
+
+    @Test
+    void rootedPayloadPublishesSourceAndObserverEventsOnceWithTheirOwners() {
+        // given
+        var builder = BlueCoordination.builder();
+        // when
+        var result = runPayload(builder, java.util.List.of("payload-signal", "payload-observed"),
+                java.util.List.of("payload-child", "payload-parent"));
+        // then
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+    }
+
+    private static EntryResult runPayload(BlueCoordination.Builder builder,
+            java.util.List<String> expectedKinds, java.util.List<String> expectedOwners) {
+        // given
+        try (BlueCoordination coordination = builder.build()) {
             TimelineHandle timeline = coordination.timelines().register("payload/alice", "alice");
             ManagedClosure definition = ManagedClosure.builder()
                     .document("parent", DocumentId.of("payload-parent"), """
@@ -68,8 +90,13 @@ final class SdkEmbeddedEventPayloadTest {
             // then
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
             assertEquals(607L, closure.document("parent").snapshot().longAt("/observed"));
-            assertEquals(1, result.publicEvents().size());
-            assertEquals("607", result.publicEvents().get(0).exact().scalarAt("/amount").toString());
+            assertEquals(expectedKinds, result.publicEvents().stream()
+                    .map(event -> event.exact().scalarAt("/kind")).toList());
+            assertEquals(expectedOwners, result.publicEvents().stream()
+                    .map(event -> event.sourceDocument().orElseThrow().value()).toList());
+            result.publicEvents().forEach(event -> assertEquals("607", event.exact().scalarAt("/amount").toString()));
+            assertEquals(java.util.List.of(), coordination.processing().drain().entries());
+            return result;
         }
     }
 }

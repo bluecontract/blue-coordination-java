@@ -1,0 +1,37 @@
+# Root-local retained prerequisites — development repair
+
+Status: development repair; not an RC acceptance report.
+
+A live input in a selected parent can create a pending Process Embedded occurrence inside a calculated dependency. The dependency is not an independently writable source. Scheduling only persistent source-owned catch-up plans can therefore report readiness while the selected parent still contains pending required history.
+
+The new capture reads that pending occurrence from the complete committed selected view, obtains the real retained source receipt and companion, and invokes Contracts once with its existing managed-history cause under the frozen root ownership context. It does not manufacture an independent consumer epoch or replay the source business input. A successful result is retained with the owning root; SDK `rootedRetainedApplications` binds the actual root, source work and result; `rootedRetainedResults` exposes their outcomes and gas separately from external entries and independently committed consumer applications. Exact selection reports the local root, and `advanced().processRetained(root, workIdentity)` rejects a changed selection before processing. No work coordinate is an independently committed source receipt.
+
+The minimal A→B, then B→C regression exercises C initialization in A’s local B view. It verifies exact reference calculation gas415, one A-owned change, untouched independent B/C histories and heads, restart, and readiness only after the pending row activates. The saved-original three-document figure-eight passes finite event propagation and restart. The normal journal-driven saved-original three-node ring also passes its unchanged 32-selection bound, finite two-hop events and store restart. A separate root-only late cyclic join still rejects genuinely different independently owned state; that failing regression remains enabled. These results do not certify final packaged acceptance.
+
+The graph template used for this new profile reads `/event/to` and `/event/next` from the specified Embedded Event Delivery wrapper (Contracts §6.7). The older tutorial template is retained unchanged as historical input. Saved authored BlueIds are captured before admission; no current snapshot substitutes for them.
+
+Historical return paths can expose an existing owned document whose own channel has already processed a later input than an imported dependency channel. The experiment permits only the immutable prefix of the exact frozen owned head; independent sources retain their original attachment cutoff. It does not use an aggregate timestamp to replace channel checkpoints. Both unchanged frozen-frontier regressions still pass: attachment200 imports100/105/115; own250 precedes pending LIVE500, regardless of physical source-first scheduling.
+
+A same-epoch historical-target publication additionally reuses ManagedRepresentationTransition against the real current numbered anchor and complete ordered retained representation chain. Its existing checks bind lifecycle, pending target, predecessor, full body and binding inventory, original input/result, events and companion. An eventless flag alone is insufficient.
+
+The ordered journal ring exposed distinct operational graph-generation counters for an identical exact source head: selected view counter3 versus independent source counter2. The experimental `RootedInvocationEvidence` now captures actual head/generation publication fences separately. They do not replace semantic input bytes or contribute to input identity. Expansion may capture only newly introduced source fences; existing captures are never refreshed. Actual owned heads, occurrence rows, component proofs and compare-and-swap generations remain checked. A genuinely different independently owned head still rejects.
+
+Local owned revisions retain the actual source receipt's order and entry identity with EMBEDDED_REVISION_APPLICATION kind; the root's logical processing frontier stays at the original committed boundary. Pending local history keeps the committed root CATCHING_UP and preserves the earlier READY-only SDK head, including store restart. Completing the pending work makes the committed head ready atomically.
+
+The real C1 source event is applied inside calculated B and runs 25 handler reactions. Independent materialized calculation gives G=4457. Public SDK G−1/G/G+1 matches status, actual trace, rejected charge, owned records, independent-source isolation and restart/retry. Actual publication faults AFTER_CAS_CHECKS, BEFORE_SWAP and AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH preserve all-or-nothing publication and exactly-once completion. An earlier fixture wrongly expected this receipt's immediate-consumer event to execute a deeper ancestor handler; that failed probe is retained in the integration evidence, not used as a gas oracle.
+
+Open: complete root-only cyclic-join/replan behavior, coherent development export and MyOS persistence/public adapter/replay integration, then all remaining production obligations and final gates. Scope/API/Javadoc checks passed the typed-outcome/readiness selection; final release gates still remain. No footprint or semantic gate limit was raised.
+
+The first nested MyOS HTTP run rejected a same-epoch graph update for independent B: SDK managed-surface evidence still included calculated B changes. The SDK now projects published graph, component, subscription, occurrence-resolution, document-transition and route facts through the processor-derived rooted owner set. Complete calculated evidence remains in the advanced retained Contracts result. Seven focused SDK/publication/birth/ring checks plus API/Javadoc pass this correction; MyOS must rerun against its new immutable export.
+
+MyOS1b660436 subsequently passes the nested saved-original case with sole A publication,
+durable exact-work commands and verified ledger replay. Packaged04a14d6916d7 passes this
+case with14 commands, fresh JVM and relocation. Its broader HTTP run found that a later
+static parent admission compared processor topological component order with the durable
+rooted index's canonical proof order. Admission has no rooted projection flag, so the
+existing process-only branch missed it. Inventory comparison now follows the actual
+index format, including admission. It still compares every exact proof identity and
+its multiplicity; no missing, extra or changed proof is accepted. Legacy index ordering
+is unchanged. The new real two-pair SDK reproducer and adjacent admission/publication
+negatives pass, with both API boundary checks and strict Javadoc. A new immutable export
+and packaged rerun are required before accepting the broader preview.

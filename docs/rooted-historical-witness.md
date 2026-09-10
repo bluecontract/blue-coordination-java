@@ -1,0 +1,13 @@
+# Historical witnesses across the SDK adapter
+
+Development integration for rooted checkpoint draft.2; final RC and MyOS acceptance remain required. The Language dependency is 6997bbc611b3dfa699a494d042a8a8d998e0c051, BEX 01d9f0cd93490dd530773151ccb1305421dfbef4, and catalog 1ac499302a3b1f7c5a4285b71ea11872284e33af. Each was exported to a distinct immutable repository with verified manifests.
+
+Contracts authenticates immutable historical witnesses separately from calculating views. Coordination retains the processor-created snapshot at publication. Recapture reuses it only when the complete verified member, body, exact head, epoch, lifecycle, root, graph, component and occurrence evidence matches. A changed capture goes through normal validation. A resolution-only retry keeps the original input only after unchanged captured members/rows and the existing store/index/owner fences; real expansion retains its existing validation path.
+
+Operation routing recognizes an authenticated selected exact head and retained same-epoch component representations. This does not create numbered epochs or change historical epoch selection. Exact-version requests still match only the selected current exact head.
+
+The original saved-A5 regression applies exactly A6..A10, preserves independent A10 and its immutable receipt/event prefix, activates the final cyclic edge and reaches quiescence. It now also checks restart after A7, restart at the join, a subsequent LIVE tick and restart again. The first next-LIVE run exposed missing representation lineage routing; its repair passed that sequence and 14 adjacent routing checks. Capture mutations, current/foreign/stale representation targeting, the full rooted SDK slice, source-reference proof negatives and gas calibration are included in the maintained tests. See campaign evidence for exact run results.
+
+Three legacy atomic-publication/response-loss cases currently stop at empty FROM_NOW history-basis admission. Their rollback assertions are not counted as passing. The separate normative proposal remains unapplied. Full owning-proof aliases, births, imported-history interleaving, broader compositions, public HTTP execution and final artifact acceptance remain required.
+
+Latest full maintained rooted slice: **53 tests executed, 52 passed, 1 failed**. The sole failure is the unchanged empty FROM_NOW admission case. Saved A5 through five successors, mid-catch-up/end/next-LIVE restart, non-exact retained representation targeting, stale exact/foreign/unowned target rejection, full G-1/G/G+1 cache schedules and 11 source-reference proof negatives passed. Javadoc was not reached by the failed aggregate task and is run by the immutable exporter. No failed recovery case is counted as accepted.

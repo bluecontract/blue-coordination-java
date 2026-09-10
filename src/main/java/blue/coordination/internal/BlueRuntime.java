@@ -237,6 +237,34 @@ final class BlueRuntime implements AutoCloseable {
                 Objects.requireNonNull(snapshot, "snapshot"));
     }
 
+    /** Read-only driver eligibility through the same source/checkpoint implementation as PROCESS. */
+    List<blue.language.processor.closure.DirectLogicalDelivery> eligibleRootDeliveries(
+            blue.language.processor.closure.AffectedClosureSnapshot snapshot,
+            List<blue.language.processor.closure.DirectLogicalDelivery> deliveries,
+            blue.coordination.api.TimelineEntry entry) {
+        return processor.withCapturedConfiguration(() -> {
+            var event = blue.language.processor.ExactEventIdentityEvidence.verify(contracts.runtimeAccess(),
+                    entry.exactEvent().copyNode(), entry.blueId(), null);
+            try (var comparison = new blue.language.processor.ManagedDocumentStepRuntime(processor)) {
+                List<blue.language.processor.closure.DirectLogicalDelivery> eligible = new ArrayList<>();
+                for (var delivery : deliveries) {
+                    var classified = comparison.classifyExternalDelivery(
+                            snapshot.managedDocument(delivery.targetDocumentId()).document(), delivery.channelKey(),
+                            event, blue.language.processor.GasChargeContext.empty());
+                    if (classified.state() == blue.language.processor.ManagedExternalDeliveryClassification.State.ACCEPTED_NEW
+                            && classified.handlerMatched()) eligible.add(delivery);
+                }
+                return List.copyOf(eligible);
+            }
+        });
+    }
+
+    /** Clears only disposable Language snapshot caches, retaining exact evidence. */
+    void clearSnapshotCaches() {
+        ensureOpen();
+        language.snapshots().clear();
+    }
+
     BlueCacheStats cacheStats() {
         ensureOpen();
         return language.snapshots().stats();

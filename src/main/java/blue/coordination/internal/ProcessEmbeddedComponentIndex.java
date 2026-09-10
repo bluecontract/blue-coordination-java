@@ -46,6 +46,7 @@ final class ProcessEmbeddedComponentIndex {
             PersistentOrderedMap<DocumentId, Boolean>> targetsByDocument;
     private final PersistentOrderedMap<DocumentId,
             PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument;
+    private final boolean rootedViews;
 
     private ProcessEmbeddedComponentIndex(
             PersistentOrderedMap<DocumentId, Component> componentByDocument,
@@ -55,6 +56,14 @@ final class ProcessEmbeddedComponentIndex {
             PersistentOrderedMap<DocumentId,
                     PersistentOrderedMap<DocumentId, Boolean>>
                     sourcesByDocument) {
+        this(componentByDocument, targetsByDocument, sourcesByDocument, false);
+    }
+
+    private ProcessEmbeddedComponentIndex(PersistentOrderedMap<DocumentId, Component> componentByDocument,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> targetsByDocument,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> sourcesByDocument,
+            boolean rootedViews) {
+        this.rootedViews = rootedViews;
         this.componentByDocument = Objects.requireNonNull(
                 componentByDocument, "componentByDocument");
         this.targetsByDocument = Objects.requireNonNull(
@@ -62,6 +71,8 @@ final class ProcessEmbeddedComponentIndex {
         this.sourcesByDocument = Objects.requireNonNull(
                 sourcesByDocument, "sourcesByDocument");
     }
+
+    boolean hasRootedViews() { return rootedViews; }
 
     /** Builds a cycle-capable index over every binding endpoint. */
     static ProcessEmbeddedComponentIndex fromBindings(
@@ -344,6 +355,38 @@ final class ProcessEmbeddedComponentIndex {
         ProcessEmbeddedComponentIndex local = fromDirectedBindings(
                 affected, active);
 
+        return replaceRegion(affected, local);
+    }
+
+    /** Uses the real rooted finalizer's partition; one-way targets keep their independent components. */
+    ProcessEmbeddedComponentIndex replaceOwnedResult(blue.language.processor.closure.ClosureProcessResult result) {
+        if (!result.commits() || result.rootedProjection() == null) {
+            throw new IllegalArgumentException("Owned component replacement requires processor-derived authority");
+        }
+        var calculated = result.rootedProjection().resultingSnapshot();
+        List<DocumentId> selected = calculated.managedDocuments().stream()
+                .map(document -> DocumentId.of(document.documentId().value())).toList();
+        List<DirectedBinding> active = calculated.occurrences().stream().filter(row -> row.active())
+                .map(row -> new DirectedBinding(row.occurrenceIdentity(), DocumentId.of(row.sourceDocumentId().value()),
+                        DocumentId.of(row.targetDocumentId().value()))).toList();
+        ProcessEmbeddedComponentIndex local = fromDirectedBindings(selected, active);
+        // Each partition is authenticated by the actual root result. Independent
+        // roots can retain different exact forward views; their global edge union
+        // does not define another authoritative SCC or a single current DAG.
+        Map<DocumentId, Component> verified = new LinkedHashMap<>();
+        for (var proof : calculated.components()) {
+            Component component = new Component(proof.orderedMemberDocumentIds().stream()
+                    .map(id -> DocumentId.of(id.value())).toList(),
+                    proof.kind() == blue.language.processor.closure.ComponentKind.CYCLIC);
+            for (DocumentId member : component.members()) verified.put(member, component);
+        }
+        local = new ProcessEmbeddedComponentIndex(persistentComponents(verified),
+                local.targetsByDocument, local.sourcesByDocument, true);
+        return replaceRegion(RootedResultScope.members(result), local);
+    }
+
+    private ProcessEmbeddedComponentIndex replaceRegion(Collection<DocumentId> affected,
+            ProcessEmbeddedComponentIndex local) {
         PersistentOrderedMap<DocumentId, Component> components =
                 componentByDocument;
         for (DocumentId document : affected) {
@@ -374,7 +417,7 @@ final class ProcessEmbeddedComponentIndex {
             targets = replaceBucket(targets, source, afterTargets);
         }
         return new ProcessEmbeddedComponentIndex(
-                components, targets, sources);
+                components, targets, sources, rootedViews || local.rootedViews);
     }
 
     /** Orders only the components intersecting the selected forward region. */
@@ -386,7 +429,9 @@ final class ProcessEmbeddedComponentIndex {
         Map<Component, NavigableSet<Component>> targets =
                 componentAdjacency(selected, true);
         Map<Component, NavigableSet<Component>> sources =
-                componentAdjacency(selected, false);
+                componentAdjacency(selected);
+        targets.forEach((source, selectedTargets) -> selectedTargets.forEach(
+                target -> sources.get(target).add(source)));
         return targetBeforeSource(selected, targets, sources);
     }
 

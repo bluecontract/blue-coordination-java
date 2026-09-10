@@ -203,6 +203,66 @@ final class ClosureGraphGenerationInventory {
         return new ClosureGraphGenerationInventory(replacement, work);
     }
 
+    /** Installs only the processor-derived owned projection; dependency generations remain local. */
+    ClosureGraphGenerationInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGenerations) {
+        return applyOwned(result, expectedGenerations, List.of());
+    }
+
+    /** Adds only authenticated owned births, with distinct absent fences for every new lineage. */
+    ClosureGraphGenerationInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGenerations, Collection<DocumentId> expectedAbsent) {
+        var absent = new LinkedHashSet<>(expectedAbsent);
+        var owners = new LinkedHashSet<>(expectedGenerations.keySet());
+        if (absent.size() != expectedAbsent.size() || absent.stream().anyMatch(owners::contains)) {
+            throw new IllegalArgumentException("Rooted graph fences repeat or overlap a lineage");
+        }
+        owners.addAll(absent);
+        if (!result.commits() || result.rootedProjection() == null
+                || !owners.equals(new LinkedHashSet<>(RootedResultScope.members(result)))) {
+            throw new IllegalArgumentException("Rooted graph publication requires exactly the derived owner fences");
+        }
+        var input = result.rootedProjection().inputSnapshot();
+        if (!input.closureIdentity().equals(result.commitCompanion().inputClosureIdentity())
+                || input.graphGeneration() != result.commitCompanion().expectedInputGraphGeneration()) {
+            throw new IllegalArgumentException("Rooted graph evidence differs from the exact companion input");
+        }
+        Work work = new Work();
+        PersistentOrderedMap<DocumentId, Long> replacement = generations;
+        for (Map.Entry<DocumentId, Long> fence : canonicalExpectedGenerations(expectedGenerations).entrySet()) {
+            long actual = require(fence.getKey(), work);
+            if (actual != fence.getValue()) {
+                throw new MultiDocumentPublicationTransaction.AtomicPublicationCasException(
+                        "Stale rooted graph generation for " + fence.getKey());
+            }
+            if (result.graphGeneration() < actual) {
+                throw new IllegalArgumentException("A rooted publication cannot rewind an owned graph generation");
+            }
+            var mutation = replacement.put(fence.getKey(), safeGeneration(result.graphGeneration()));
+            work.mutation(mutation);
+            replacement = mutation.map();
+        }
+        for (DocumentId id : absent) {
+            var existing = generations.read(id);
+            work.read(existing);
+            if (existing.found()) {
+                throw new MultiDocumentPublicationTransaction.AtomicPublicationCasException(
+                        "Rooted graph birth already exists " + id);
+            }
+            var before = input.managedDocument(ContractsClosureAdapter.closureId(id));
+            var after = result.rootedProjection().ownedDocuments().stream()
+                    .filter(document -> document.documentId().value().equals(id.value())).findFirst().orElseThrow();
+            if (before == null || before.initialized() || before.epoch() != 0L
+                    || !after.initialized() || after.epoch() != 0L || !before.blueId().equals(after.beforeBlueId())) {
+                throw new IllegalArgumentException("Rooted graph birth lacks exact epoch-zero initialization " + id);
+            }
+            var mutation = replacement.put(id, safeGeneration(result.graphGeneration()));
+            work.mutation(mutation);
+            replacement = mutation.map();
+        }
+        return new ClosureGraphGenerationInventory(replacement, work);
+    }
+
     /**
      * Installs graph generations for one verified all-new closure admission.
      * Existing lineages are rejected rather than silently treated as updates.

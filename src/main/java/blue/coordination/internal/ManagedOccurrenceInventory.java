@@ -1128,7 +1128,7 @@ final class ManagedOccurrenceInventory {
                 && Objects.equals(left.pendingRepresentationCursor(), right.pendingRepresentationCursor());
     }
 
-    private static boolean sameRows(
+    static boolean sameRows(
             List<ManagedOccurrenceBinding> left,
             List<ManagedOccurrenceBinding> right) {
         if (left.size() != right.size()) {

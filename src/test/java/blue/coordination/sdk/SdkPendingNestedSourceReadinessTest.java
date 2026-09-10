@@ -28,7 +28,7 @@ final class SdkPendingNestedSourceReadinessTest {
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void bOwnedPendingCBlocksAUntilItsReadyFrontierAcrossRestartAndReceiptRecovery(boolean observes) {
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().build()) {
             CoordinationTestControl control = CoordinationTestControl.attach(blue.advanced().rawEngine());
             TimelineHandle timeline = blue.timelines().register(TIMELINE, "alice");
             DocumentHandle c = admit(blue, C, "/unused", observes);

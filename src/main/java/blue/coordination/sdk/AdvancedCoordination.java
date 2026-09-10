@@ -27,6 +27,93 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Processes one root input with an explicit low-level execution policy.
+     * Ordinary processing retains the configured release policy.
+     * @param root selected managed root
+     * @param input exact supplied entry
+     * @param policy immutable shared and member gas limits
+     * @return the complete processing outcome
+     */
+    public DrainResult process(DocumentHandle root, EntryHandle input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        return runtime.processRootInput(Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(input, "input"), Objects.requireNonNull(policy, "policy"));
+    }
+
+    /**
+     * Selects exact source-owned work required by a genuinely suspended root input.
+     * Each descriptor represents one source action; provider absence remains an explicit wait.
+     * @param root requesting managed root
+     * @return individual fenced prerequisites; empty when none are pending
+     */
+    public List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentHandle root) {
+        return runtime.sourceHistoryPrerequisites(Objects.requireNonNull(root, "root"));
+    }
+
+    /**
+     * Executes one selected source prerequisite without retrying its waiting parent.
+     * @param expected exact descriptor from sourceHistoryPrerequisites
+     * @return actual source result and its independent publication/meter evidence
+     */
+    public blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.processSourceHistoryPrerequisite(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
+     * Reads the SDK view retained by one completed source execution, without executing another obligation.
+     * @param expected complete exact descriptor used for that source execution
+     * @return actual mapped drain, or empty for an admission, unknown, or mismatched descriptor
+     */
+    public Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.sourceHistoryProcessingResult(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
+     * Applies only the selected root's exact retained prerequisite, failing before processing on mismatch.
+     * @param root authoritative root owning the calculation
+     * @param workIdentity exact work identity from the read-only processing selection
+     * @return complete local retained-work evidence
+     */
+    public DrainResult processRetained(DocumentHandle root, String workIdentity) {
+        return runtime.processNextRoot(Objects.requireNonNull(root, "root"),
+                SdkPreconditions.requireText(workIdentity, "workIdentity"));
+    }
+
+    /**
+     * Drains one eligible journal selection no later than the supplied exact entry.
+     * Repeated calls can finish separate rooted observers of that entry without
+     * consuming future inputs. Managed application turns remain separately scheduled.
+     * @param inclusiveEntry retained entry defining the full external-order cutoff
+     * @param budget deterministic between-invocation limits
+     * @return complete evidence for this bounded journal selection
+     */
+    public DrainResult drainJournalThrough(EntryHandle inclusiveEntry, DrainBudget budget) {
+        return runtime.drainJournalThrough(Objects.requireNonNull(inclusiveEntry, "inclusiveEntry"),
+                Objects.requireNonNull(budget, "budget"));
+    }
+
+    /**
+     * Reads the full retained processor evidence for a terminal closure identity.
+     * Calculated dependency records are local views; only the rooted projection's
+     * owners have authoritative publication rights. Failures carry no such rights.
+     * @param publicationIdentity terminal closure identity returned by processing
+     * @return exact retained result and gas trace, or empty if no terminal record exists
+     */
+    public Optional<blue.language.processor.closure.ClosureProcessResult> closureExecution(String publicationIdentity) {
+        return runtime.auditClosureExecution(requireIdentity(publicationIdentity, "publicationIdentity"));
+    }
+
+    /**
+     * Reads the original exact input of a retained closure decision, including rollback.
+     * @param publicationIdentity terminal closure identity returned by processing
+     * @return immutable original invocation, or empty when no such evidence was retained
+     */
+    public Optional<blue.language.processor.closure.ClosureInvocationInput> closureInvocation(String publicationIdentity) {
+        return runtime.auditClosureInvocation(requireIdentity(publicationIdentity, "publicationIdentity"));
+    }
+
+    /**
      * Exports bounded signed pages of already committed source history.
      * The receiving host must pin this producer's public key independently.
      * This evidence transport does not install receipts in another engine.

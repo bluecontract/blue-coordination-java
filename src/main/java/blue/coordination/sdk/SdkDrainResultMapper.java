@@ -69,7 +69,11 @@ final class SdkDrainResultMapper {
             throw new IllegalStateException(
                     "SDK drain result contains duplicate entry evidence");
         }
-        ProcessingStats stats = aggregateDrainStats(entries, drained);
+        List<DrainResult.RootedRetainedApplication> local = drained.rootedRetainedAttempts().stream()
+                .map(retained -> new DrainResult.RootedRetainedApplication(retained.rootDocumentId(),
+                        managedEpochApplicationWork(retained.work()), mapLocalRetained(retained.attempt()))).toList();
+        ProcessingStats stats = aggregateDrainStats(entries,
+                local.stream().map(DrainResult.RootedRetainedApplication::result).toList(), drained);
         Diagnostic diagnostic = drained.paused()
                 ? new Diagnostic(
                         "PROCESSING_PAUSED",
@@ -98,7 +102,30 @@ final class SdkDrainResultMapper {
                 drained.managedEpochEvidenceFailures().stream()
                         .map(SdkDrainResultMapper
                                 ::managedEpochEvidenceFailure)
-                        .toList());
+                        .toList(), local);
+    }
+
+    private ClosureResult mapLocalRetained(ContractsClosureDispatchAttempt retained) {
+        TimelineEntry anchor = Objects.requireNonNull(runtime.retainedCoreEntry(retained.entryBlueId()), "retained causal entry");
+        ClosureResult projected = mapClosure(anchor, retained, 0);
+        if (!retained.published() || !retained.attempt().isComplete()) return projected;
+        var result = retained.attempt().processResult();
+        var input = engine.auditClosureInvocation(retained.publicationIdentity()).orElseThrow();
+        if (!(input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause)
+                && !(input.cause() instanceof blue.language.processor.closure.ManagedRepresentationCause))
+            throw new IllegalStateException("Local retained outcome cannot relabel an external input");
+        List<DocumentChange> changes = new ArrayList<>();
+        for (var after : result.rootedProjection().ownedDocuments()) {
+            var before = input.snapshot().managedDocument(after.documentId());
+            if (before.blueId().equals(after.afterBlueId()) && before.epoch() == after.epoch()) continue;
+            var id = DocumentId.of(after.documentId().value());
+            changes.add(new DocumentChange(id, after.epoch(), runtime.retainedExactValue(before.blueId()).orElseThrow(),
+                    ExactBlueValue.wrap(ExactValue.fromVerifiedClosureResult(result, id)), projected.publicEvents().stream()
+                            .filter(event -> event.sourceDocument().filter(id::equals).isPresent()).toList()));
+        }
+        return new ClosureResult(projected.closureId(), projected.disposition(), changes, projected.publicEvents(),
+                stats(result, retained, changes), projected.diagnostic(), projected.resourceDemands(),
+                projected.processorAttemptCount(), projected.managedSurfaceEvidence());
     }
 
     private static ManagedEpochEvidenceFailure managedEpochEvidenceFailure(
@@ -290,14 +317,19 @@ final class SdkDrainResultMapper {
                 work.expectedConsumerCommittedEpoch(),
                 work.expectedConsumerCommittedBlueId(),
                 work.expectedGraphGeneration(),
-                work.representationCause().map(cause -> new ManagedEpochApplicationWork.RepresentationStep(
-                        cause.causeIdentity(), cause.beforeBlueId(), cause.afterBlueId(),
-                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
-                                cause.transition().predecessorPositionIdentity(), cause.targetPositionIdentity(),
-                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())),
-                        new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
-                                cause.transition().positionIdentity(), cause.targetPositionIdentity(),
-                                Optional.ofNullable(cause.nextRevisionReceiptIdentity())), cause.terminalPositionReached())));
+                work.representationCause().map(SdkDrainResultMapper::representationStep),
+                work.successorRepresentationCause().map(SdkDrainResultMapper::representationStep));
+    }
+
+    private static ManagedEpochApplicationWork.RepresentationStep representationStep(
+            blue.language.processor.closure.ManagedRepresentationCause cause) {
+        return new ManagedEpochApplicationWork.RepresentationStep(cause.causeIdentity(), cause.beforeBlueId(), cause.afterBlueId(),
+                new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                        cause.transition().predecessorPositionIdentity(), cause.targetPositionIdentity(),
+                        Optional.ofNullable(cause.nextRevisionReceiptIdentity())),
+                new ManagedEpochApplicationWork.Position(cause.transition().anchorReceiptIdentity(),
+                        cause.transition().positionIdentity(), cause.targetPositionIdentity(),
+                        Optional.ofNullable(cause.nextRevisionReceiptIdentity())), cause.terminalPositionReached());
     }
 
     private static ManagedEpochApplicationReceipt
@@ -319,7 +351,7 @@ final class SdkDrainResultMapper {
                 receipt.resultingSourceCursor(), receipt.representationCauseIdentity(),
                 receipt.resultingRepresentationCursor().map(cursor -> new ManagedEpochApplicationWork.Position(
                         cursor.anchorReceiptIdentity(), cursor.positionIdentity(), cursor.targetPositionIdentity(),
-                        Optional.ofNullable(cursor.nextRevisionReceiptIdentity()))));
+                        Optional.ofNullable(cursor.nextRevisionReceiptIdentity()))), receipt.successorRepresentationCauseIdentity());
     }
 
     private EntryResult mapEntry(
@@ -370,7 +402,12 @@ final class SdkDrainResultMapper {
             int index) {
         ClosureAttemptResult attempt = retained.attempt();
         if (!attempt.isComplete()) {
-            Diagnostic diagnostic = new Diagnostic(
+            boolean rejected = retained.managedOccurrenceResolutionIssues().stream().anyMatch(issue ->
+                    issue.status() == ContractsClosureDispatchAttempt.ResolutionStatus.REJECTED_MANAGED_DECLARATION);
+            Diagnostic diagnostic = rejected
+                    ? new Diagnostic("MANAGED_OCCURRENCE_BINDING_MISSING",
+                            "Operation supplied a different exact value than its declared birth; no effects were published", Map.of())
+                    : new Diagnostic(
                     "REQUIRED_EXACT_RESOURCES",
                     "Closure processing requires unavailable exact values",
                     Map.of(
@@ -378,7 +415,7 @@ final class SdkDrainResultMapper {
                             String.join(",", attempt.requiredExactBlueIds())));
             return new ClosureResult(
                     closureId(entry, retained, index),
-                    EntryDisposition.NEEDS_RESOURCES,
+                    rejected ? EntryDisposition.REJECTED : EntryDisposition.NEEDS_RESOURCES,
                     List.of(),
                     List.of(),
                     ProcessingStats.zero(),
@@ -477,14 +514,27 @@ final class SdkDrainResultMapper {
         if (!result.commits()) {
             return ManagedSurfaceEvidence.empty();
         }
+        var owned = result.rootedProjection();
+        // This SDK surface describes published records. Full calculated dependency
+        // evidence remains in the retained Contracts result, never a source mutation.
+        var before = owned == null ? inputComponents : inputComponents.stream()
+                .filter(component -> component.orderedMemberDocumentIds().stream().anyMatch(owned::owns)).toList();
+        var after = owned == null ? result.resultingComponents() : owned.ownedComponents();
         return new ManagedSurfaceEvidence(
                 result.graphGeneration(),
-                retainedResolutions.stream().map(SdkDrainResultMapper::occurrenceResolution).toList(),
-                result.graphChanges().stream().map(SdkDrainResultMapper::graphChange).toList(),
-                componentTransitions(inputComponents, result.resultingComponents()),
-                result.subscriptionDeltas().stream().map(SdkDrainResultMapper::subscriptionChange).toList(),
-                result.documentTransitionEvidence().stream().map(SdkDrainResultMapper::documentTransition).toList(),
+                retainedResolutions.stream().filter(resolution -> owned == null
+                        || owned.owns(resolution.occurrence().sourceDocumentId()))
+                        .map(SdkDrainResultMapper::occurrenceResolution).toList(),
+                result.graphChanges().stream().filter(change -> owned == null || owned.owns(change.sourceDocumentId()))
+                        .map(SdkDrainResultMapper::graphChange).toList(),
+                componentTransitions(before, after),
+                (owned == null ? result.subscriptionDeltas() : owned.ownedSubscriptionDeltas()).stream()
+                        .map(SdkDrainResultMapper::subscriptionChange).toList(),
+                result.documentTransitionEvidence().stream().filter(change -> owned == null || owned.owns(change.documentId()))
+                        .map(SdkDrainResultMapper::documentTransition).toList(),
                 java.util.stream.IntStream.range(0, operationRouteChanges.size())
+                        .filter(index -> owned == null || owned.owns(new blue.language.processor.closure.DocumentId(
+                                operationRouteChanges.get(index).documentId().value())))
                         .mapToObj(index -> operationRouteChange(index, operationRouteChanges.get(index)))
                         .toList());
     }
@@ -1083,14 +1133,16 @@ final class SdkDrainResultMapper {
     }
 
     private static ProcessingStats aggregateDrainStats(
-            List<EntryResult> entries,
+            List<EntryResult> entries, List<ClosureResult> local,
             ProcessingDrainReceipt receipt) {
         long gas = 0L;
         long opened = 0L;
         ArrayList<DocumentId> order = new ArrayList<>();
         LinkedHashMap<String, Long> counters = new LinkedHashMap<>();
-        for (EntryResult entry : entries) {
-            ProcessingStats stats = entry.stats();
+        List<ProcessingStats> measurements = new ArrayList<>();
+        entries.forEach(entry -> measurements.add(entry.stats()));
+        local.forEach(step -> measurements.add(step.stats()));
+        for (ProcessingStats stats : measurements) {
             gas = Math.addExact(gas, stats.gas());
             opened = Math.addExact(opened, stats.documentsOpened());
             order.addAll(stats.documentStepOrder());

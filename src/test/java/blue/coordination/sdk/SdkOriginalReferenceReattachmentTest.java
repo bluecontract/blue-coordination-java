@@ -14,7 +14,26 @@ final class SdkOriginalReferenceReattachmentTest {
     @Test
     void inlinePeerCanBeReplacedWithItsSavedOriginalAfterTheCycleForms() throws IOException {
         // given
-        try (BlueCoordination coordination = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+        var builder = LegacyContracts10TestProfile.builder();
+        // when
+        var result = runOriginalReferences(builder, ActivationPolicy.fromNow());
+        // then
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+    }
+
+    @Test
+    void rootedSavedOriginalReferencesRetainTheirFullHistoryBasis() throws IOException {
+        // given
+        var builder = BlueCoordination.builder();
+        // when
+        var result = runOriginalReferences(builder, ActivationPolicy.importFullHistory());
+        // then
+        assertEquals(EntryDisposition.APPLIED, result.disposition());
+    }
+
+    private static EntryResult runOriginalReferences(BlueCoordination.Builder builder, ActivationPolicy activation) throws IOException {
+        // given
+        try (BlueCoordination coordination = builder.contentDerivedDocumentIds().build()) {
             String sourceA = fixture("user-inline-cycle-a.yaml");
             String sourceB = fixture("cycle-b.yaml");
             String originalA = coordination.values().yaml(sourceA).blueId();
@@ -22,8 +41,8 @@ final class SdkOriginalReferenceReattachmentTest {
             assertEquals("H5PqsgVoN3ZL1Sg3b9wMfMK24R6ihV8n4t7zRFiivDbT", originalA);
             assertEquals("ARLSEvSXoDQbAfXNuKxj5d1cLh48caJbE74wZyJ6UYgB", originalB);
             TimelineHandle owner = coordination.timelines().register("tutorial/cycle/alice", "alice");
-            DocumentHandle b = coordination.documents().admitStaticProcessEmbedded(sourceB).publicRoots().get(0);
-            DocumentHandle a = coordination.documents().admitStaticProcessEmbedded(sourceA).publicRoots().get(0);
+            DocumentHandle b = coordination.documents().admitStaticProcessEmbedded(sourceB, activation).publicRoots().get(0);
+            DocumentHandle a = coordination.documents().admitStaticProcessEmbedded(sourceA, activation).publicRoots().get(0);
             coordination.processing().drain();
             assertEquals(originalA, a.id().value());
             assertEquals(originalB, b.id().value());
@@ -61,6 +80,7 @@ final class SdkOriginalReferenceReattachmentTest {
             assertEquals(1, events(a).size());
             assertEquals(1, events(b).size());
             assertFalse(finite.publicEvents().isEmpty());
+            return finite;
         }
     }
 

@@ -3,8 +3,8 @@
 Use `-PblueDependencyMode=immutable-local-rc-contracts` and
 `-PblueDevelopmentVersion=3.0.0-rc.6` to package the local Coordination RC.
 This explicit mode requires Language `3.1.0-rc.N`, BEX `1.1.0-rc.N`, and
-catalog `3.0.0-rc.N` from their immutable local RC repositories. For the current
-closeout the selected upstream versions are `3.1.0-rc.24`, `1.1.0-rc.5` and
+catalog `3.0.0-rc.N` from their immutable local RC repositories. For the historical RC6
+closeout the selected upstream versions were `3.1.0-rc.24`, `1.1.0-rc.5` and
 `3.0.0-rc.22` respectively.
 
 Supply each upstream's exact `Version`, `Repository`, `SourceCommit` and

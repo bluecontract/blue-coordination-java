@@ -22,6 +22,7 @@ public final class ProcessingDrainReceipt {
             managedEpochApplicationAttempts;
     private final List<ManagedEpochEvidenceFailure>
             managedEpochEvidenceFailures;
+    private final List<RootedRetainedAttempt> rootedRetainedAttempts;
     private final ExternalOrderKey processedThrough;
     private final boolean quiescent;
     private final boolean paused;
@@ -147,6 +148,28 @@ public final class ProcessingDrainReceipt {
                     managedEpochApplicationAttempts,
             List<ManagedEpochEvidenceFailure>
                     managedEpochEvidenceFailures) {
+        this(processedEntries, outcomesByEntry, contractsAttemptsByEntry, processedThrough, quiescent, paused,
+                committedProcessTransitions, elapsedNanos, managedEpochApplications, managedEpochApplicationAttempts,
+                managedEpochEvidenceFailures, List.of());
+    }
+
+    private ProcessingDrainReceipt(
+            List<TimelineEntry> processedEntries,
+            Map<String, List<DocumentDispatchOutcome>> outcomesByEntry,
+            Map<String, List<ContractsClosureDispatchAttempt>>
+                    contractsAttemptsByEntry,
+            ExternalOrderKey processedThrough,
+            boolean quiescent,
+            boolean paused,
+            long committedProcessTransitions,
+            long elapsedNanos,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts,
+            List<ManagedEpochEvidenceFailure>
+                    managedEpochEvidenceFailures,
+            List<RootedRetainedAttempt> rootedRetainedAttempts) {
         this.processedEntries = List.copyOf(Objects.requireNonNull(
                 processedEntries, "processedEntries"));
         Map<String, List<DocumentDispatchOutcome>> copied =
@@ -176,6 +199,7 @@ public final class ProcessingDrainReceipt {
                 Objects.requireNonNull(
                         managedEpochEvidenceFailures,
                         "managedEpochEvidenceFailures"));
+        this.rootedRetainedAttempts = List.copyOf(Objects.requireNonNull(rootedRetainedAttempts, "rootedRetainedAttempts"));
         this.processedThrough = processedThrough;
         this.quiescent = quiescent;
         this.paused = paused;
@@ -189,6 +213,38 @@ public final class ProcessingDrainReceipt {
         }
         this.committedProcessTransitions = committedProcessTransitions;
         this.elapsedNanos = elapsedNanos;
+    }
+
+    /**
+     * Returns a copy carrying distinct retained processing attempts without claiming another LIVE entry.
+     * @param attempts actual retained-history processor attempts in execution order
+     * @return a complete immutable drain receipt with those attempts
+     */
+    public ProcessingDrainReceipt withRootedRetainedAttempts(List<RootedRetainedAttempt> attempts) {
+        return new ProcessingDrainReceipt(processedEntries, outcomesByEntry, contractsAttemptsByEntry, processedThrough,
+                quiescent, paused, committedProcessTransitions, elapsedNanos, managedEpochApplications,
+                managedEpochApplicationAttempts, managedEpochEvidenceFailures, attempts);
+    }
+
+    /** Complete processor evidence for retained prerequisites of a selected root's calculated dependencies. */
+    public List<RootedRetainedAttempt> rootedRetainedAttempts() { return rootedRetainedAttempts; }
+
+    /**
+     * One retained prerequisite in a root's calculated dependency view.
+     * @param rootDocumentId authoritative root selecting the calculation
+     * @param work authenticated source position and selected local occurrence
+     * @param attempt complete metered processing and publication evidence
+     */
+    public record RootedRetainedAttempt(DocumentId rootDocumentId, ManagedEpochApplicationWork work,
+            ContractsClosureDispatchAttempt attempt) {
+        /** Requires the exact root, source work and processor attempt. */
+        public RootedRetainedAttempt {
+            Objects.requireNonNull(rootDocumentId, "rootDocumentId");
+            Objects.requireNonNull(work, "work");
+            Objects.requireNonNull(attempt, "attempt");
+            if (!attempt.documentIds().contains(rootDocumentId))
+                throw new IllegalArgumentException("Retained calculation must include its selected root");
+        }
     }
 
     /** Entries selected by the environment in exact canonical order. */

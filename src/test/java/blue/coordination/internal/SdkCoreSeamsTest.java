@@ -16,6 +16,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Focused regression coverage for additive SDK engine seams. */
@@ -48,10 +49,10 @@ final class SdkCoreSeamsTest {
                         "specifications/blue-contracts-and-processor-specification-1.0.md"),
                 manifest.contractsSpecification());
         assertEquals(
-                "sha256:0de1d6ff58cd8895eddbb8c891ca09ff0a5294458d40b0ec4b79ba2b4fec4056",
+                "sha256:156b58c6a19ab94cd3d1759dbbd115963c6d345c69511113798824cb5c749ced",
                 manifest.contractsRelease());
         assertEquals(
-                "sha256:094ad941eb688f4ea7f92c471daf9097411a0378fcfdcd27139901a60c6f739c",
+                "sha256:ff6ed64b9e41e9dd6436fd81893fbccf3a4895051d26ad5e1a9c2820c4e444b3",
                 manifest.fixturePackage());
         assertEquals(
                 blue.language.processor.GasSchedule.contracts10().packageIdentity(),
@@ -62,6 +63,18 @@ final class SdkCoreSeamsTest {
         assertEquals(
                 blue.language.processor.ClosureRuntimeDescriptor.CYCLIC_PROOF_VERIFIER_IDENTITY,
                 manifest.cyclicProofVerifier());
+        ContractsClosureProfile profile = ContractsClosureProfile.release10(
+                manifest.blueLanguageSpecification(),
+                manifest.contractsSpecification(), Set.of(A));
+        assertTrue(profile.rootedCheckpoint());
+        assertEquals(manifest.contractsRelease(),
+                profile.rootedRuntimeSemanticsIdentity());
+        ContractsClosureProfile wrongProfile = ContractsClosureProfile.release10(
+                manifest.blueLanguageSpecification(),
+                "sha256:" + "0".repeat(64), Set.of(A));
+        assertFalse(wrongProfile.rootedCheckpoint());
+        assertThrows(IllegalStateException.class,
+                wrongProfile::rootedRuntimeSemanticsIdentity);
     }
 
     private static String owningJarResourceIdentity(Class<?> owner, String resource) throws Exception {

@@ -163,6 +163,10 @@ public record ContractsClosureDispatchAttempt(
                     "Only a suspended unpublished attempt may expose typed "
                             + "unresolved matching evidence");
         }
+        if (managedOccurrenceResolutionIssues.stream().anyMatch(issue -> issue.status()
+                == ResolutionStatus.REJECTED_MANAGED_DECLARATION) && publicationIdentity == null) {
+            throw new IllegalArgumentException("Rejected managed declaration requires its retained feeder decision");
+        }
         java.util.Set<String> demandIdentities = attempt.resourceDemands()
                 .stream()
                 .map(demand -> demand.demandIdentity())
@@ -232,6 +236,8 @@ public record ContractsClosureDispatchAttempt(
         UNPROVEN_MANAGED_HISTORY,
         /** Explicit selection evidence disagrees with retained exact state. */
         EXACT_STATE_MISMATCH,
+        /** A durable feeder decision rejects the exact declared operation birth; no processor checkpoint commits. */
+        REJECTED_MANAGED_DECLARATION,
         /** Authored content cannot initialize a valid managed document. */
         INVALID_AUTHORED_DOCUMENT
     }

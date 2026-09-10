@@ -112,6 +112,34 @@ final class ClosureSubscriptionInventory {
     ClosureSubscriptionInventory apply(
             ClosureProcessResult result,
             Map<DocumentId, Long> expectedGraphGenerations) {
+        return applySelected(result, expectedGraphGenerations, false);
+    }
+
+    ClosureSubscriptionInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations) {
+        return applyOwned(result, expectedGraphGenerations, java.util.Set.of());
+    }
+
+    ClosureSubscriptionInventory applyOwned(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations, java.util.Set<DocumentId> expectedAbsent) {
+        var owners = new java.util.LinkedHashSet<>(expectedGraphGenerations.keySet());
+        for (DocumentId id : expectedAbsent) {
+            var input = result.rootedProjection() == null ? null
+                    : result.rootedProjection().inputSnapshot().managedDocument(ContractsClosureAdapter.closureId(id));
+            if (!owners.add(id) || input == null || input.initialized() || input.epoch() != 0L
+                    || !statesFor(id).isEmpty()) {
+                throw new IllegalArgumentException("Owned birth subscription fence must name an absent uninitialized input");
+            }
+        }
+        if (result.rootedProjection() == null
+                || !owners.equals(new java.util.LinkedHashSet<>(RootedResultScope.members(result)))) {
+            throw new IllegalArgumentException("Owned subscription publication requires exactly the derived owner fences");
+        }
+        return applySelected(result, expectedGraphGenerations, true);
+    }
+
+    private ClosureSubscriptionInventory applySelected(ClosureProcessResult result,
+            Map<DocumentId, Long> expectedGraphGenerations, boolean ownedOnly) {
         ClosureProcessResult verified = Objects.requireNonNull(result, "result");
         if (!verified.commits()) {
             throw new IllegalArgumentException(
@@ -129,11 +157,12 @@ final class ClosureSubscriptionInventory {
                     "Graph-generation fences escape the closure result");
         }
         Map<String, ResultingDocument> resultingDocuments =
-                resultingDocuments(verified.resultingDocuments());
+                resultingDocuments(ownedOnly ? verified.rootedProjection().ownedDocuments() : verified.resultingDocuments());
         Indexes next = new Indexes(
                 bySlot, slotByIdentity, byDocument);
         Work work = new Work();
-        for (SubscriptionDelta delta : verified.subscriptionDeltas()) {
+        for (SubscriptionDelta delta : ownedOnly ? verified.rootedProjection().ownedSubscriptionDeltas()
+                : verified.subscriptionDeltas()) {
             SubscriptionState before = delta.beforeSubscription();
             SubscriptionState after = delta.afterSubscription();
             SubscriptionState representative = after != null ? after : before;

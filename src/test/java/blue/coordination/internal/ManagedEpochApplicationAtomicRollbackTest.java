@@ -162,7 +162,7 @@ final class ManagedEpochApplicationAtomicRollbackTest {
     }
 
     private static Scenario prepared() {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             DocumentId consumerId = DocumentId.of(
                     "managed-epoch-atomic-rollback-consumer");

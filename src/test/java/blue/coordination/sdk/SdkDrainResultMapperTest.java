@@ -26,7 +26,7 @@ final class SdkDrainResultMapperTest {
         // given
         DocumentId source = DocumentId.of("sdk-demand-host");
         String timelineId = "sdk/typed-occurrence-demand";
-        try (BlueCoordination coordination = BlueCoordination.inMemory();
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build();
                 BlueCoordination foreign = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, "alice");
@@ -106,6 +106,96 @@ final class SdkDrainResultMapperTest {
                     Optional.of(ClosureResult.ManagedResolutionStatus
                             .MISSING_EXACT_CONTENT),
                     demand.managedResolutionStatus());
+            assertTrue(demand.managedResolutionDiagnostic().isPresent());
+            assertEquals(before, host.snapshot().blueId());
+            assertEquals(0L, host.snapshot().epoch());
+        }
+    }
+
+    @Test
+    void rootedOperationReportsSourceHistoryBeforeNestedExactResource() {
+        // given
+        DocumentId source = DocumentId.of("sdk-demand-host");
+        String timelineId = "sdk/typed-occurrence-demand";
+        try (BlueCoordination coordination = BlueCoordination.inMemory();
+                BlueCoordination foreign = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = coordination.timelines().register(
+                    timelineId, "alice");
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(source, """
+                            documentId: sdk-demand-host
+                            children: {}
+                            contracts:
+                              embedded:
+                                type: Process Embedded
+                                collectionPaths:
+                                  - /children
+                              ownerChannel:
+                                type: Coordination/Timeline Channel
+                                timeline:
+                                  type: MyOS/MyOS Timeline
+                                  timelineId: sdk/typed-occurrence-demand
+                                actor:
+                                  type: MyOS/Principal Actor
+                                  accountId: alice
+                              attach:
+                                type: Coordination/Sequential Workflow Operation
+                                channel: ownerChannel
+                                request:
+                                  child: {}
+                                steps:
+                                  - type: Coordination/Compute
+                                    do:
+                                      - $appendChange:
+                                          op: add
+                                          path: /children/one
+                                          val: {$binding: event/message/request/child}
+                                      - $return: true
+                            """)
+                            .publicRoot()
+                            .fromNow());
+            String unavailableBlueId = foreign.values().yaml(
+                    "state: unavailable-here").blueId();
+            String childYaml = """
+                    documentId: ignored-authored-child-id
+                    peer:
+                      blueId: %s
+                    contracts:
+                      embedded:
+                        type: Process Embedded
+                        paths:
+                          - /peer
+                    """.formatted(unavailableBlueId);
+            DocumentId childId = DocumentId.of(
+                    coordination.values().yaml(childYaml).blueId());
+            String before = host.snapshot().blueId();
+
+            // when
+            EntryResult result = coordination.operations()
+                    .on(host)
+                    .from(timeline)
+                    .call("attach")
+                    .through("ownerChannel")
+                    .requestYaml("child:\n" + childYaml.indent(2))
+                    .execute();
+
+            // then
+            assertEquals(EntryDisposition.NEEDS_RESOURCES,
+                    result.disposition(), result.toString());
+            assertEquals(1, result.closures().size());
+            ClosureResult closure = result.closures().get(0);
+            assertEquals(1L, closure.processorAttemptCount());
+            assertEquals(0L, closure.automaticRetryCount());
+            assertEquals(1, closure.resourceDemands().size());
+            var demand = closure.resourceDemands().get(0);
+            assertEquals("MANAGED_OCCURRENCE_EVIDENCE", demand.kind());
+            assertEquals(childId.value(), demand.blueId());
+            assertEquals(source, demand.sourceDocumentId());
+            assertEquals("/children/one", demand.sourcePath());
+            assertEquals(Optional.of(ClosureResult.ManagedResolutionStatus.UNPROVEN_MANAGED_HISTORY),
+                    demand.managedResolutionStatus());
+            assertEquals(0L, result.stats().committedTransitions());
+            assertTrue(result.publicEvents().isEmpty());
             assertTrue(demand.managedResolutionDiagnostic().isPresent());
             assertEquals(before, host.snapshot().blueId());
             assertEquals(0L, host.snapshot().epoch());

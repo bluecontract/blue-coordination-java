@@ -161,6 +161,8 @@ public final class DefaultCoordinationEngine
     private SequentialDrainCoordinator drainCoordinator;
     private ContractsRootFeederCoordinator contractsFeederCoordinator;
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
+    private final RootedSourceDiscoveryCoordinator rootedSourceDiscoveries;
+    private final blue.coordination.sdk.ExactNodeProvider rootedSourceProvider;
     private final Map<String, Timeline> timelines = new LinkedHashMap<>();
     private final Map<String, String> timelineActorKinds =
             new LinkedHashMap<>();
@@ -178,6 +180,7 @@ public final class DefaultCoordinationEngine
             ContractsBootstrap contractsBootstrap,
             blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
         metrics = new EngineMetrics();
+        rootedSourceProvider = exactNodeProvider == null ? id -> Optional.empty() : exactNodeProvider;
         objects = new WholeObjectStore(metrics);
         applicationExactNodeProvider = exactNodeProvider == null
                 ? null
@@ -186,7 +189,9 @@ public final class DefaultCoordinationEngine
         runtime = BlueRuntime.create(
                 objects, metrics, applicationExactNodeProvider);
         entryFactory = new WholeRequestEntryFactory(
-                runtime, objects, metrics, this::timelineActorKind);
+                runtime, objects, metrics, this::timelineActorKind,
+                contractsBootstrap != null && ContractsClosureProfile.ROOTED_CONTRACTS_SPECIFICATION
+                        .equals(contractsBootstrap.contractsSpecificationIdentity()));
         journal = new InMemoryTimelineJournal(entryFactory, metrics);
         documents = new InMemoryDocumentStore(metrics);
         routeIndex = new OperationRouteIndex(
@@ -215,6 +220,7 @@ public final class DefaultCoordinationEngine
             contractsRecoveryState = null;
             contractsFeederCoordinator = null;
             contractsJournalCoordinator = null;
+            rootedSourceDiscoveries = null;
         } else {
             ContractsClosureProfile profile = ContractsClosureProfile
                     .release10(
@@ -227,7 +233,7 @@ public final class DefaultCoordinationEngine
             contractsClosureProfile = profile;
             contractsActiveSourceTimelines =
                     new ContractsActiveSourceTimelineIndex(
-                            profile.publicRoots());
+                            profile.publicRoots(), metrics);
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,
@@ -235,7 +241,8 @@ public final class DefaultCoordinationEngine
                     documents,
                     routeIndex,
                     profile,
-                    contractsActiveSourceTimelines);
+                    contractsActiveSourceTimelines,
+                    journal::entries);
             contractsClosureAdmissionAdapter =
                     new ContractsClosureAdmissionAdapter(
                             runtime,
@@ -244,8 +251,14 @@ public final class DefaultCoordinationEngine
                             documents,
                             routeIndex,
                             profile,
-                            contractsActiveSourceTimelines);
+                            contractsActiveSourceTimelines,
+                            (input, result, project) -> RootedBeginningAdmission.verify(
+                                    input, result, journal, timelines, this::timelineActorKind, project));
+            rootedSourceDiscoveries = profile.rootedCheckpoint() ? new RootedSourceDiscoveryCoordinator(this, documents,
+                    contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider) : null;
+            if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
             contractsRecoveryState = new ContractsRecoveryState();
+            contractsClosureAdapter.feederDecisions(contractsRecoveryState.feederWindow);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
         }
@@ -697,6 +710,30 @@ public final class DefaultCoordinationEngine
                 sourceYaml, objects, "external-exact-value");
     }
 
+    /** Reads an already retained exact body without resolving to a current document head. */
+    public synchronized Optional<ExactValue> retainedExactValue(String blueId) {
+        ensureOpen();
+        Objects.requireNonNull(blueId, "blueId");
+        return objects.contains(blueId) ? Optional.of(objects.require(blueId)) : Optional.empty();
+    }
+
+    /** Reads the exact terminal processor result retained at the atomic publication boundary. */
+    public synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
+            String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity, "publicationIdentity"))
+                .map(receipt -> receipt.attempt().processResult());
+    }
+
+    /** Reads the original immutable input retained with a terminal closure decision. */
+    public synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
+            String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity, "publicationIdentity"))
+                .map(receipt -> receipt.rootedTerminalEvidence() == null
+                        ? receipt.managedSurfaceEvidence().originalInvocation() : receipt.rootedTerminalEvidence().input());
+    }
+
     /**
      * Parses provider content, preprocesses runtime aliases, and retains its
      * direct identity without resolving the value's type as an instance.
@@ -1035,9 +1072,221 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    /**
+     * Executes one already supplied exact input relative to a selected root.
+     * The caller's ordered driver owns input completeness; this method does
+     * not select an input by wall clock or advance the global journal cursor.
+     */
+    public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input) {
+        return processRootInput(root, input, null);
+    }
+
+    /** Executes the supplied root input using one frozen invocation budget. */
+    public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        try {
+            ensureOpen();
+            TimelineEntry entry = journal.requireCanonical(Objects.requireNonNull(input, "input"));
+            long started = System.nanoTime();
+            ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
+                    Objects.requireNonNull(root, "root"), entry, policy);
+            return rootedReadiness(root, executeRootBatch(batch, started), started);
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    private ProcessingDrainReceipt executeRootBatch(ContractsClosureAdapter.FrozenBatch batch, long started) {
+        TimelineEntry entry = batch.entry();
+            List<ContractsClosureDispatchAttempt> attempts = new ArrayList<>();
+            List<DocumentDispatchOutcome> outcomes = new ArrayList<>();
+            boolean complete = true;
+            long committed = 0L;
+            for (ContractsClosureAdapter.CohortInvocation invocation : batch.invocations()) {
+                ContractsClosureAdapter.CohortOutcome exact = contractsClosureAdapter.executeAndPublish(batch, invocation);
+                complete &= exact.attempt().isComplete() || exact.rejectedBirth() != null;
+                attempts.add(new ContractsClosureDispatchAttempt(entry.blueId(), exact.publicationMembers(),
+                        exact.attempt(), exact.published(), exact.publicationIdentity(), exact.replayed(),
+                        exact.automaticRetryCount(), managedOccurrenceResolutions(exact.managedSurfaceEvidence()),
+                        exact.managedSurfaceEvidence().inputComponents(),
+                        exact.managedSurfaceEvidence().operationRouteChanges().stream()
+                                .map(DefaultCoordinationEngine::operationRouteChange).toList(),
+                        exact.unresolvedDemands().stream().map(unresolved ->
+                                new ContractsClosureDispatchAttempt.ManagedOccurrenceResolutionIssue(
+                                        unresolved.demand().demandIdentity(),
+                                        ContractsClosureDispatchAttempt.ResolutionStatus.valueOf(unresolved.status().name()),
+                                        unresolved.diagnostic())).toList()));
+                if (exact.published() && !exact.replayed()) {
+                    committed++;
+                    for (DocumentId member : exact.publicationMembers()) {
+                        documents.require(member).revisionForEntry(entry.blueId()).ifPresent(revision ->
+                                outcomes.add(new DocumentDispatchOutcome(member, revision, 0L)));
+                    }
+                }
+            }
+            return new ProcessingDrainReceipt(complete ? List.of(entry) : List.of(),
+                    Map.of(entry.blueId(), outcomes), Map.of(entry.blueId(), attempts),
+                    complete ? entry.sourceOrderKey() : null, complete, false, committed,
+                    System.nanoTime() - started);
+    }
+
+    /** Reconciles only actual exact retained source publications after response loss. */
+    boolean sourceHistoryPrerequisiteCommitted(RootedSourceDiscoveryCoordinator.Prepared selected) {
+        if (selected.admission() != null) {
+            var input = selected.admission().invocation();
+            if (selected.admission().activationInputs().policy() != CoordinationEngine.AdmissionPolicy.FULL_HISTORY)
+                throw new IllegalArgumentException("Discovered sources require FULL_HISTORY");
+            var frontier = ExternalOrderKey.of(List.of(PORTABLE_FULL_HISTORY_ORDER,
+                    "contracts-full-history-admission", input.invocationIdentity()));
+            String identity = ContractsClosureAdmissionAdapter.publicationIdentity(input,
+                    CoordinationEngine.AdmissionPolicy.FULL_HISTORY, frontier);
+            return documents.admissionReceipt(identity).map(ContractsClosureAdmissionReceipt::published).orElse(false);
+        }
+        var step = Objects.requireNonNull(selected.step());
+        if (step.historical() != null) {
+            var application = documents.catchUpApplicationByWork(step.historical().workIdentity());
+            return application.isPresent() && documents.closureReceiptForApplication(application.orElseThrow())
+                    .map(ContractsClosurePublicationReceipt::commits).orElse(false);
+        }
+        var batch = step.live() != null ? step.live()
+                : contractsClosureAdapter.localHistoryBatch(Objects.requireNonNull(step.localHistorical()));
+        if (batch.invocations().size() != 1) throw new IllegalStateException("Source prerequisite requires exactly one rooted invocation");
+        return contractsClosureAdapter.publicationReceipt(batch, batch.invocations().get(0))
+                .map(ContractsClosurePublicationReceipt::commits).orElse(false);
+    }
+
+    /**
+     * Selects separately owned source prerequisites from actual suspended rooted attempts.
+     * Provider reads may retain immutable exact evidence; no source or parent is processed.
+     * @param root requesting root whose exact input remains pending
+     * @return bounded individual source actions and explicit resource waits
+     */
+    public synchronized List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentId root) {
+        ensureOpen();
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        return rootedSourceDiscoveries.selections(Objects.requireNonNull(root, "root"));
+    }
+
+    /**
+     * Revalidates and executes exactly one separately reported source prerequisite.
+     * The requesting parent is never retried inside this call.
+     * @param expected exact descriptor from sourceHistoryPrerequisites
+     * @return real source admission or one-step processing evidence
+     */
+    public synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        Objects.requireNonNull(expected, "expected");
+        var replay = rootedSourceDiscoveries.completed(expected);
+        if (replay.isPresent()) return replay.orElseThrow();
+        var committed = rootedSourceDiscoveries.committedSelection(expected);
+        var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        blue.coordination.api.SourceHistoryPrerequisiteResult result;
+        if (selected.admission() != null) {
+            var admission = selected.admission();
+            authorizeContractsPublicRoots(Set.of(admission.rootDocumentId()));
+            var activation = admission.activationInputs();
+            var receipt = admitContractsClosure(admission.invocation(), activation.policy(), activation.verifiedFrontier(),
+                    rootedSourceProvider);
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), committed.isPresent());
+        } else {
+            var receipt = executeRootSelection(Objects.requireNonNull(selected.step()), System.nanoTime());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), committed.isPresent());
+        }
+        rootedSourceDiscoveries.retain(result);
+        return result;
+    }
+
+    /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
+    public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root) {
+        return processNextRoot(root, null);
+    }
+
+    /** Executes only the exact retained local work selected for this root, before any mutation. */
+    public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork) {
+        try {
+            ensureOpen();
+            long started = System.nanoTime();
+            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+                    .select(Objects.requireNonNull(root, "root"), journal.entries());
+            if (expectedLocalWork != null && (next.localHistorical() == null
+                    || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
+                throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
+            }
+            return rootedReadiness(root, executeRootSelection(next, started), started);
+        } catch (RuntimeException failure) {
+            throw translateDispatchFailure(failure);
+        }
+    }
+
+    private ProcessingDrainReceipt executeRootSelection(RootedCheckpointDriver.Selection next, long started) {
+        if (next.live() != null) return executeRootBatch(next.live(), started);
+        if (next.localHistorical() != null) {
+            var step = next.localHistorical();
+            var batch = contractsClosureAdapter.localHistoryBatch(step);
+            var completed = executeRootBatch(batch, started);
+            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                    completed.quiescent(), completed.paused(), completed.committedProcessTransitions(),
+                    completed.elapsedNanos()).withRootedRetainedAttempts(completed.contractsAttemptsFor(step.anchor().blueId())
+                            .stream().map(attempt -> new ProcessingDrainReceipt.RootedRetainedAttempt(
+                                    step.root(), step.work(), attempt)).toList());
+        }
+        if (next.historical() != null) {
+            try {
+                var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
+                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                        outcome.published(), false, outcome.published() && !outcome.replayed() ? 1L : 0L,
+                        System.nanoTime() - started, outcome.receipt().stream().toList(),
+                        List.of(managedApplicationAttempt(outcome)), List.of());
+            } catch (ManagedEpochEvidenceException failure) {
+                documents.recordManagedEpochEvidenceFailure(failure);
+                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, false, false, 0L,
+                        System.nanoTime() - started, List.of(), List.of(), List.of(new ManagedEpochEvidenceFailure(
+                                failure.work(), failure.planStatus(), failure.code(), failure.message())));
+            }
+        }
+        return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, !next.blocked(), false,
+                0L, System.nanoTime() - started);
+    }
+
+    /** Recomputes pending work after the selected step; the one-step budget is not a resource wait. */
+    private ProcessingDrainReceipt rootedReadiness(DocumentId root, ProcessingDrainReceipt completed, long started) {
+        if (!completed.quiescent()) return completed;
+        RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+                .select(root, journal.entries());
+        boolean pending = remaining.live() != null || remaining.historical() != null || remaining.localHistorical() != null;
+        boolean quiescent = !pending && !remaining.blocked();
+        return new ProcessingDrainReceipt(completed.processedEntries(), completed.outcomesByEntry(),
+                completed.contractsAttemptsByEntry(), completed.processedThrough().orElse(null),
+                quiescent, pending && !remaining.blocked(), completed.committedProcessTransitions(),
+                System.nanoTime() - started, completed.managedEpochApplications(),
+                completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures())
+                .withRootedRetainedAttempts(completed.rootedRetainedAttempts());
+    }
+
     @Override
     public synchronized ProcessingDrainReceipt drainJournal(
             CoordinationEngine.DrainBudget budget) {
+        return drainJournalThroughOrder(null, budget);
+    }
+
+    /**
+     * Drains one ordinary selection at or before an exact retained input.
+     * Managed application turns remain separately scheduled.
+     * @param inclusiveEntry exact retained entry defining the inclusive cutoff
+     * @param budget deterministic between-invocation limits
+     * @return the complete bounded journal result
+     */
+    public synchronized ProcessingDrainReceipt drainJournalThrough(
+            TimelineEntry inclusiveEntry, CoordinationEngine.DrainBudget budget) {
+        ensureOpen();
+        return drainJournalThroughOrder(journal.requireCanonical(
+                Objects.requireNonNull(inclusiveEntry, "inclusiveEntry")).sourceOrderKey(), budget);
+    }
+
+    private ProcessingDrainReceipt drainJournalThroughOrder(
+            ExternalOrderKey cutoff, CoordinationEngine.DrainBudget budget) {
         ensureOpen();
         CoordinationEngine.DrainBudget selected = Objects.requireNonNull(
                 budget, "budget");
@@ -1048,7 +1297,7 @@ public final class DefaultCoordinationEngine
         }
         try {
             ProcessingDrainReceipt drained = drainContracts(
-                    null,
+                    cutoff,
                     new CoordinationEngine.DrainBudget(
                             selected.maxCommittedProcessTransitions(), 1L),
                     false);
@@ -1088,6 +1337,19 @@ public final class DefaultCoordinationEngine
                 || !expected.equals(actual)) {
             throw processingSelectionMismatch(
                     "MANAGED_EPOCH_APPLICATION", next, expected);
+        }
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter);
+            var selected = driver.scan(journal.entries(), null).heads().get(0);
+            long started = System.nanoTime();
+            var completed = executeRootSelection(selected.selection(), started);
+            if (!completed.quiescent()) return completed;
+            var remaining = driver.scan(journal.entries(), null);
+            return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
+                    remaining.quiescent(), !remaining.heads().isEmpty(), completed.committedProcessTransitions(),
+                    System.nanoTime() - started, completed.managedEpochApplications(),
+                    completed.managedEpochApplicationAttempts(), completed.managedEpochEvidenceFailures())
+                .withRootedRetainedAttempts(completed.rootedRetainedAttempts());
         }
         try {
             ProcessingDrainReceipt drained = drainContracts(
@@ -1360,6 +1622,8 @@ public final class DefaultCoordinationEngine
 
     synchronized WholeObjectStore objects() { return objects; }
 
+    synchronized BlueRuntime runtime() { return runtime; }
+
     synchronized void inject(FailurePoint point) {
         failureInjector.accept(Objects.requireNonNull(point, "point"));
     }
@@ -1465,8 +1729,12 @@ public final class DefaultCoordinationEngine
     public synchronized Optional<ManagedEpochApplicationWork>
             auditManagedEpochApplicationWork(String workIdentity) {
         ensureOpen();
-        return documents.catchUpWork(Objects.requireNonNull(
-                workIdentity, "workIdentity"));
+        String selected = Objects.requireNonNull(workIdentity, "workIdentity");
+        var independent = documents.catchUpWork(selected);
+        if (independent.isPresent() || !contractsClosureProfile.rootedCheckpoint()) return independent;
+        return new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null)
+                .heads().stream().map(head -> head.selection().localHistorical()).filter(Objects::nonNull)
+                .map(RootedLocalHistory.Step::work).filter(work -> selected.equals(work.workIdentity())).findFirst();
     }
 
     @Override
@@ -1482,6 +1750,15 @@ public final class DefaultCoordinationEngine
                 availability, "availability");
         if (contractsJournalCoordinator == null) {
             return ProcessingSelection.none();
+        }
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            if (supplied.journalAdmissionAvailable()) return ProcessingSelection.journal();
+            if (scan.heads().isEmpty()) return ProcessingSelection.none();
+            var next = scan.heads().get(0).selection();
+            if (next.localHistorical() != null) return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
+            return next.historical() == null ? ProcessingSelection.journal()
+                    : ProcessingSelection.managedEpochApplication(next.historical());
         }
         Optional<ManagedEpochApplicationWork> managed =
                 nextFairManagedEpochApplicationWork();
@@ -1537,7 +1814,7 @@ public final class DefaultCoordinationEngine
             return ManagedSurfacePublicationEvidence.empty();
         }
         ContractsClosurePublicationReceipt retained = documents
-                .closurePublicationReceipt(outcome.work().workIdentity())
+                .closureReceiptForApplication(outcome.receipt().orElseThrow())
                 .orElseThrow(() -> new IllegalStateException(
                         "Committed managed application is missing publication evidence"));
         var application = outcome.receipt().orElseThrow();
@@ -1925,6 +2202,12 @@ public final class DefaultCoordinationEngine
             ExternalOrderKey inclusiveCutoff,
             CoordinationEngine.DrainBudget budget,
             boolean managedAllowed) {
+        if (contractsClosureProfile.rootedCheckpoint()) {
+            return new RootedDrainCoordinator(new RootedCheckpointDriver(documents, contractsClosureAdapter),
+                    journal, contractsJournalCoordinator,
+                    head -> executeRootSelection(head.selection(), System.nanoTime()))
+                    .drain(inclusiveCutoff, budget, managedAllowed);
+        }
         long started = System.nanoTime();
         CoordinationEngine.DrainBudget limits = Objects.requireNonNull(
                 budget, "budget");
@@ -2032,43 +2315,7 @@ public final class DefaultCoordinationEngine
                     contractsRecoveryState.managedEpochTurn = false;
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
-                    ManagedSurfacePublicationEvidence managedSurface =
-                            committedManagedApplicationSurface(outcome);
-                    managedAttempts.add(new ManagedEpochApplicationAttempt(
-                            outcome.work(),
-                            outcome.attempt(),
-                            outcome.published(),
-                            outcome.replayed(),
-                            outcome.receipt(),
-                            outcome.automaticRetryCount(),
-                            outcome.automaticResolutionStopReason()
-                                    .map(reason -> ManagedEpochApplicationAttempt
-                                            .AutomaticResolutionStopReason
-                                            .valueOf(reason.name())),
-                            outcome.unresolvedDemands().stream()
-                                    .map(unresolved -> new
-                                            ManagedEpochApplicationAttempt
-                                                    .ManagedOccurrenceResolutionIssue(
-                                                    unresolved.demand()
-                                                            .demandIdentity(),
-                                                    ManagedEpochApplicationAttempt
-                                                            .ResolutionStatus
-                                                            .valueOf(
-                                                                    unresolved
-                                                                            .status()
-                                                                            .name()),
-                                                    unresolved.diagnostic()))
-                                    .toList(),
-                            outcome.publicationFailure().map(failure ->
-                                    new ManagedEpochApplicationAttempt
-                                            .PublicationFailure(
-                                            failure.code(),
-                                            failure.message(),
-                                            failure.details())),
-                            managedOccurrenceResolutions(managedSurface),
-                            managedSurface.inputComponents(),
-                            managedSurface.operationRouteChanges().stream()
-                                    .map(DefaultCoordinationEngine::operationRouteChange).toList()));
+                    managedAttempts.add(managedApplicationAttempt(outcome));
                     contractsRecoveryState.deferManagedEpochConsumer(
                             outcome.work().consumerDocumentId());
                     if (!outcome.published()) {
@@ -2201,6 +2448,46 @@ public final class DefaultCoordinationEngine
                 managedApplications,
                 managedAttempts,
                 managedEvidenceFailures);
+    }
+
+    private ManagedEpochApplicationAttempt managedApplicationAttempt(
+            ContractsClosureAdapter.ManagedApplicationOutcome outcome) {
+        ManagedSurfacePublicationEvidence managedSurface = committedManagedApplicationSurface(outcome);
+        return new ManagedEpochApplicationAttempt(
+                            outcome.work(),
+                            outcome.attempt(),
+                            outcome.published(),
+                            outcome.replayed(),
+                            outcome.receipt(),
+                            outcome.automaticRetryCount(),
+                            outcome.automaticResolutionStopReason()
+                                    .map(reason -> ManagedEpochApplicationAttempt
+                                            .AutomaticResolutionStopReason
+                                            .valueOf(reason.name())),
+                            outcome.unresolvedDemands().stream()
+                                    .map(unresolved -> new
+                                            ManagedEpochApplicationAttempt
+                                                    .ManagedOccurrenceResolutionIssue(
+                                                    unresolved.demand()
+                                                            .demandIdentity(),
+                                                    ManagedEpochApplicationAttempt
+                                                            .ResolutionStatus
+                                                            .valueOf(
+                                                                    unresolved
+                                                                            .status()
+                                                                            .name()),
+                                                    unresolved.diagnostic()))
+                                    .toList(),
+                            outcome.publicationFailure().map(failure ->
+                                    new ManagedEpochApplicationAttempt
+                                            .PublicationFailure(
+                                            failure.code(),
+                                            failure.message(),
+                                            failure.details())),
+                            managedOccurrenceResolutions(managedSurface),
+                            managedSurface.inputComponents(),
+                            managedSurface.operationRouteChanges().stream()
+                                    .map(DefaultCoordinationEngine::operationRouteChange).toList());
     }
 
     private Optional<ContractsClosureAdapter.ManagedApplicationOutcome>
@@ -2436,6 +2723,7 @@ public final class DefaultCoordinationEngine
         if (latest != null) {
             return latest;
         }
+        if (contractsClosureProfile.rootedCheckpoint()) return RootedBeginningAdmission.BOUND;
         return ExternalOrderKey.of(List.of(
                 BigInteger.ZERO,
                 "contracts-admission",
@@ -2479,6 +2767,10 @@ public final class DefaultCoordinationEngine
     }
 
     private void requireAfterProcessedFrontier(TimelineEntry entry) {
+        if (contractsClosureProfile != null && contractsClosureProfile.rootedCheckpoint()) {
+            documents.requireAfterRootedProviderFrontier(entry);
+            return;
+        }
         ExternalOrderKey processed = contractsJournalCoordinator == null
                 ? drainCoordinator.processedThrough()
                 : contractsJournalCoordinator.processedThrough();

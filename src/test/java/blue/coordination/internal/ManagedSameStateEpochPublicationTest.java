@@ -532,7 +532,7 @@ public final class ManagedSameStateEpochPublicationTest {
     private static Prepared prepared(
             DocumentId consumerId,
             boolean reactWithEvent) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             String consumerTimelineId = "same-state/"
                     + consumerId.value();
@@ -595,7 +595,7 @@ public final class ManagedSameStateEpochPublicationTest {
     private static Prepared preparedCyclic(
             DocumentId consumerId,
             DocumentId peerId) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             String consumerTimelineId = "same-state/"
                     + consumerId.value();

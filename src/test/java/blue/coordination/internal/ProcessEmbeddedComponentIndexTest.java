@@ -22,6 +22,28 @@ final class ProcessEmbeddedComponentIndexTest {
     private static final DocumentId D = DocumentId.of("d");
 
     @Test
+    void selectedOrderUsesOnlyEdgesBetweenSelectedComponents() {
+        // given
+        var bindings = new java.util.ArrayList<EmbeddingBinding>();
+        // when
+        bindings.add(binding("a-b", A, B));
+        bindings.add(binding("b-a", B, A));
+        bindings.add(binding("b-c", B, C));
+        bindings.add(binding("c-d", C, D));
+        for (int i = 0; i < 500; i++) {
+            DocumentId observer = DocumentId.of("observer-" + i);
+            bindings.add(binding("observer-edge-" + i, observer, C));
+        }
+        ProcessEmbeddedComponentIndex index = ProcessEmbeddedComponentIndex.fromBindings(bindings);
+        // then
+        assertEquals(List.of(index.component(D), index.component(C), index.component(A)),
+                index.orderedComponentsFor(List.of(A, B, C, D)));
+        assertEquals(List.of(index.component(C)), index.orderedComponentsFor(List.of(C)));
+        assertEquals(List.of(index.component(C), index.component(A)), index.orderedComponentsFor(List.of(A, C)));
+        assertEquals(List.of(), index.orderedComponentsFor(List.of()));
+    }
+
+    @Test
     void selfCycleIsOneCyclicComponentWithoutCondensationEdges() {
         // given
         List<EmbeddingBinding> bindings = List.of(binding("a-a", A, A));

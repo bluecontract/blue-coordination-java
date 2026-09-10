@@ -134,6 +134,19 @@ final class ComponentStateInventory {
     List<ComponentSnapshot> statesFor(
             Collection<DocumentId> documents,
             ProcessEmbeddedComponentIndex topology) {
+        if (Objects.requireNonNull(topology, "topology").hasRootedViews()) {
+            // These are retained publication fences, not a semantic closure.
+            // Root-local graphs can disagree with the global reference union.
+            // Keep every exact proof once; the rooted processor validates and
+            // orders its own selected component graph independently.
+            var selected = new java.util.TreeMap<DocumentId, ComponentSnapshot>(EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId document : documents) {
+                topology.component(document);
+                ComponentSnapshot proof = forDocument(document);
+                if (proof != null) selected.put(DocumentId.of(proof.orderedMemberDocumentIds().get(0).value()), proof);
+            }
+            return List.copyOf(selected.values());
+        }
         ArrayList<ComponentSnapshot> result = new ArrayList<>();
         for (ProcessEmbeddedComponentIndex.Component component
                 : Objects.requireNonNull(topology, "topology")

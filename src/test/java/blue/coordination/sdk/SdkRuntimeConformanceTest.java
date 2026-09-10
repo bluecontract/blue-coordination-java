@@ -130,6 +130,7 @@ final class SdkRuntimeConformanceTest {
                         content.get(blueId)))
                 .build();
         try {
+            coordination.timelines().register("sdk/runtime-conformance/premium", "premium");
             ExactBlueValue parent = coordination.values().providerContentYaml("""
                     name: Runtime conformance parent
                     phase:

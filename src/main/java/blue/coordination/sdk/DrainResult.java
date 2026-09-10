@@ -10,6 +10,7 @@ import java.util.Optional;
 public final class DrainResult {
     private final List<EntryResult> entries;
     private final Map<EntryHandle, EntryResult> byEntry;
+    private final List<RootedRetainedApplication> rootedRetainedApplications;
     private final ProcessingStats stats;
     private final boolean quiescent;
     private final boolean paused;
@@ -80,6 +81,24 @@ public final class DrainResult {
                     managedEpochApplicationAttempts,
             List<ManagedEpochEvidenceFailure>
                     managedEpochEvidenceFailures) {
+        this(entries, stats, quiescent, paused, diagnostic, managedEpochApplications, managedEpochApplicationAttempts,
+                managedEpochEvidenceFailures, List.of());
+    }
+
+    /** Creates a result with exact retained work in root-local calculated views. */
+    public DrainResult(
+            List<EntryResult> entries,
+            ProcessingStats stats,
+            boolean quiescent,
+            boolean paused,
+            Diagnostic diagnostic,
+            List<ManagedEpochApplicationReceipt>
+                    managedEpochApplications,
+            List<ManagedEpochApplicationAttempt>
+                    managedEpochApplicationAttempts,
+            List<ManagedEpochEvidenceFailure>
+                    managedEpochEvidenceFailures,
+            List<RootedRetainedApplication> rootedRetainedApplications) {
         this.entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
         Map<EntryHandle, EntryResult> indexed = new LinkedHashMap<>();
         for (EntryResult result : this.entries) {
@@ -93,6 +112,7 @@ public final class DrainResult {
             }
         }
         this.byEntry = Map.copyOf(indexed);
+        this.rootedRetainedApplications = List.copyOf(Objects.requireNonNull(rootedRetainedApplications, "rootedRetainedApplications"));
         this.stats = Objects.requireNonNull(stats, "stats");
         this.quiescent = quiescent;
         this.paused = paused;
@@ -110,6 +130,30 @@ public final class DrainResult {
         if (quiescent && paused) {
             throw new IllegalArgumentException(
                     "A drain cannot be quiescent and paused");
+        }
+    }
+
+    /** Separately metered retained-history steps within this root's calculated dependency views. */
+    public List<ClosureResult> rootedRetainedResults() {
+        return rootedRetainedApplications.stream().map(RootedRetainedApplication::result).toList();
+    }
+
+    /** Exact source work, selecting roots and outcomes of local retained steps. */
+    public List<RootedRetainedApplication> rootedRetainedApplications() { return rootedRetainedApplications; }
+
+    /**
+     * Retained work inside the selected root without a new external entry or independent consumer receipt.
+     * @param rootDocumentId authoritative root selecting the calculation
+     * @param work authenticated retained source and local occurrence
+     * @param result actual processor result and owned changes
+     */
+    public record RootedRetainedApplication(blue.coordination.api.DocumentId rootDocumentId,
+            ManagedEpochApplicationWork work, ClosureResult result) {
+        /** Requires the complete selected-work outcome. */
+        public RootedRetainedApplication {
+            Objects.requireNonNull(rootDocumentId, "rootDocumentId");
+            Objects.requireNonNull(work, "work");
+            Objects.requireNonNull(result, "result");
         }
     }
 

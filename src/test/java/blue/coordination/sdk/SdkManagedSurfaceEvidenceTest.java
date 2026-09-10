@@ -28,6 +28,7 @@ final class SdkManagedSurfaceEvidenceTest {
         try (BlueCoordination coordination = BlueCoordination.inMemory()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
+            coordination.timelines().register("sdk/managed-surface/contracts/retiring", "retiring");
             DocumentHandle document = coordination.documents().admit(
                     ManagedDocument.yaml(
                                     id,

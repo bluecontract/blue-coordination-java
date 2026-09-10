@@ -187,6 +187,9 @@ final class SdkDeveloperGuideTest {
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle sales = blue.timelines().register(
                     SALES_TIMELINE, "alice");
+            blue.timelines().register(BILLING_TIMELINE, "bob");
+            blue.timelines().register(LOGISTICS_TIMELINE, "carol");
+            blue.timelines().register(RECEIPT_TIMELINE, "dave");
             ClosureHandle closure = admitInitialClosure(blue);
             DocumentHandle order = closure.document("order");
             DocumentHandle shipment = closure.document("shipment");

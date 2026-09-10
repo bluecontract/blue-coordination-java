@@ -1117,11 +1117,9 @@ final class ContractsManagedDraftExpansionTest {
     }
 
     private static DefaultCoordinationEngine contractsEngine() {
-        BundledContracts10Release.Manifest release =
-                BundledContracts10Release.manifest();
         return DefaultCoordinationEngine.createContracts10Sdk(
-                release.blueLanguageSpecification(),
-                release.contractsSpecification());
+                LegacyContracts10TestProfile.LANGUAGE,
+                LegacyContracts10TestProfile.CONTRACTS);
     }
 
     private static long metricDelta(

@@ -441,7 +441,7 @@ final class ManagedEpochIndirectComponentRebindTest {
 
     private static Scenario prepared(
             boolean advanceBeforeAttachment, boolean mutateHistoricalSource) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             TimelineHandle aTimeline = coordination.timelines().register(
                     A_TIMELINE, ACTOR);

@@ -1,0 +1,23 @@
+documentId: rooted-rejected-birth-child
+state: draft
+initializationCount: 0
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+    order: 0
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /initializationCount
+              val: {$add: [{$document: /initializationCount}, 1]}
+          - $return: true

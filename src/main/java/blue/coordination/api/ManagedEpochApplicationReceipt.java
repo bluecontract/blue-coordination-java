@@ -15,7 +15,10 @@ public final class ManagedEpochApplicationReceipt {
 
     private static final String REPRESENTATION_DOMAIN =
             "blue-coordination-managed-representation-application-receipt/1.0";
+    private static final String SUCCESSOR_DOMAIN =
+            "blue-coordination-managed-epoch-with-representation-successor-receipt/1.0";
     private final String representationCauseIdentity;
+    private final String successorRepresentationCauseIdentity;
     private final ManagedRepresentationCursor resultingRepresentationCursor;
     private final String applicationReceiptIdentity;
     private final String workIdentity;
@@ -55,7 +58,7 @@ public final class ManagedEpochApplicationReceipt {
                 consumerRevisionEpoch,
                 consumerRevisionReceiptIdentity,
                 consumerCommittedBlueId,
-                resultingSourceCursor, null, null);
+                resultingSourceCursor, null, null, null);
     }
 
     private ManagedEpochApplicationReceipt(
@@ -71,11 +74,23 @@ public final class ManagedEpochApplicationReceipt {
             String consumerRevisionReceiptIdentity,
             String consumerCommittedBlueId,
             long resultingSourceCursor,
-            String representationCauseIdentity, ManagedRepresentationCursor resultingRepresentationCursor) {
+            String representationCauseIdentity, ManagedRepresentationCursor resultingRepresentationCursor,
+            String successorRepresentationCauseIdentity) {
         this.representationCauseIdentity = representationCauseIdentity == null ? null
                 : ManagedIdentity.requireSha256(representationCauseIdentity, "representationCauseIdentity");
+        this.successorRepresentationCauseIdentity = successorRepresentationCauseIdentity == null ? null
+                : ManagedIdentity.requireSha256(successorRepresentationCauseIdentity, "successorRepresentationCauseIdentity");
         this.resultingRepresentationCursor = resultingRepresentationCursor;
-        if (representationCauseIdentity == null && resultingRepresentationCursor != null) {
+        if (representationCauseIdentity != null && successorRepresentationCauseIdentity != null) {
+            throw new IllegalArgumentException("A numbered receipt cannot claim an applied representation cause");
+        }
+        if (successorRepresentationCauseIdentity != null && (resultingRepresentationCursor == null
+                || !resultingRepresentationCursor.anchorReceiptIdentity().equals(sourceReceiptIdentity)
+                || !resultingRepresentationCursor.positionIdentity().equals(sourceReceiptIdentity)
+                || resultingRepresentationCursor.nextRevisionReceiptIdentity() != null)) {
+            throw new IllegalArgumentException("A numbered successor receipt must stop at its immutable anchor");
+        }
+        if (representationCauseIdentity == null && successorRepresentationCauseIdentity == null && resultingRepresentationCursor != null) {
             throw new IllegalArgumentException("A positional cursor requires a representation application");
         }
         this.workIdentity = ManagedIdentity.requireSha256(
@@ -103,7 +118,7 @@ public final class ManagedEpochApplicationReceipt {
                 resultingSourceCursor, "resultingSourceCursor");
         this.applicationReceiptIdentity = ManagedIdentity.verify(
                 applicationReceiptIdentity,
-                representationCauseIdentity == null ? IDENTITY_DOMAIN : REPRESENTATION_DOMAIN,
+                representationCauseIdentity != null ? REPRESENTATION_DOMAIN : successorRepresentationCauseIdentity != null ? SUCCESSOR_DOMAIN : IDENTITY_DOMAIN,
                 identityValue(),
                 "applicationReceiptIdentity");
     }
@@ -172,7 +187,40 @@ public final class ManagedEpochApplicationReceipt {
                 coordinates.consumerRevisionEpoch(),
                 coordinates.consumerRevisionReceiptIdentity(),
                 coordinates.consumerCommittedBlueId(),
-                coordinates.resultingSourceCursor(), cause.causeIdentity(), resultingCursor);
+                coordinates.resultingSourceCursor(), cause.causeIdentity(), resultingCursor, null);
+    }
+
+    /** Records the numbered application at its anchor, before any successor position is executed. */
+    public static ManagedEpochApplicationReceipt identifiedWithSuccessorRepresentationCause(
+            ManagedEpochApplicationReceipt coordinates, ManagedEpochApplicationWork work,
+            ManagedRepresentationCursor resultingCursor) {
+        var successor = work.successorRepresentationCause().orElseThrow();
+        if (!coordinates.workIdentity().equals(work.workIdentity())
+                || coordinates.representationCauseIdentity().isPresent()
+                || coordinates.successorRepresentationCauseIdentity().isPresent()
+                || coordinates.resultingSourceCursor() != Math.addExact(work.sourceEpoch(), 1L)) {
+            throw new IllegalArgumentException("Numbered successor receipt does not belong to its exact +1 work");
+        }
+        var expected = new ManagedRepresentationCursor(work.sourceReceiptIdentity(), work.sourceReceiptIdentity(),
+                successor.targetPositionIdentity(), null);
+        if (!expected.equals(resultingCursor)) {
+            throw new IllegalArgumentException("Numbered application must retain the anchor, not consume its successor");
+        }
+        Map<String, Object> value = new LinkedHashMap<>(coordinates.identityValue());
+        value.put("successorRepresentationCauseIdentity", successor.causeIdentity());
+        value.put("resultingRepresentationCursor", resultingCursor.identityValue());
+        return new ManagedEpochApplicationReceipt(ManagedIdentity.identify(SUCCESSOR_DOMAIN, value),
+                coordinates.workIdentity(), coordinates.planIdentity(), coordinates.sourceReceiptIdentity(),
+                coordinates.contractsInvocationIdentity(), coordinates.contractsResultIdentity(),
+                coordinates.commitCompanionIdentity(), coordinates.consumerDocumentId(),
+                coordinates.consumerRevisionEpoch(), coordinates.consumerRevisionReceiptIdentity(),
+                coordinates.consumerCommittedBlueId(), coordinates.resultingSourceCursor(), null, resultingCursor,
+                successor.causeIdentity());
+    }
+
+    /** Authenticated future step captured by this numbered application; not an applied source event. */
+    public Optional<String> successorRepresentationCauseIdentity() {
+        return Optional.ofNullable(successorRepresentationCauseIdentity);
     }
 
     public Optional<String> representationCauseIdentity() { return Optional.ofNullable(representationCauseIdentity); }
@@ -226,6 +274,10 @@ public final class ManagedEpochApplicationReceipt {
         if (representationCauseIdentity != null) {
             value.put("representationCauseIdentity", representationCauseIdentity);
             value.put("resultingRepresentationCursor", resultingRepresentationCursor == null ? null : resultingRepresentationCursor.identityValue());
+        }
+        if (successorRepresentationCauseIdentity != null) {
+            value.put("successorRepresentationCauseIdentity", successorRepresentationCauseIdentity);
+            value.put("resultingRepresentationCursor", resultingRepresentationCursor.identityValue());
         }
         return value;
     }

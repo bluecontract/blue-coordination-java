@@ -10,6 +10,21 @@ public final class ProcessingGateway {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
     }
 
+    /**
+     * Processes one supplied exact input in the selected root's forward view.
+     * Requires the rooted checkpoint profile and a caller-established ordered
+     * input window. It leaves independent roots available for separate processing.
+     */
+    public DrainResult process(DocumentHandle root, EntryHandle input) {
+        return runtime.processRootInput(Objects.requireNonNull(root, "root"),
+                Objects.requireNonNull(input, "input"));
+    }
+
+    /** Processes one earliest pending LIVE or retained input in the selected root's exact view. */
+    public DrainResult processNext(DocumentHandle root) {
+        return runtime.processNextRoot(Objects.requireNonNull(root, "root"));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

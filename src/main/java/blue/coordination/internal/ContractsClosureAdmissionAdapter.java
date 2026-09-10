@@ -86,11 +86,13 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private final ClosureEnvironment environment;
     private final ContractsClosureExecutionMetricsObserver executionObserver;
     private final BlueClosureContracts contracts;
+    private final RootedBeginningAdmission.Verifier beginningVerifier;
     private Consumer<MultiDocumentPublicationTransaction.FailurePoint>
             failureInjector = ignored -> { };
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
             ignored -> { };
     private boolean closed;
+    private AdmissionInputEvidence lastAdmissionInputs;
 
     ContractsClosureAdmissionAdapter(
             BlueRuntime runtime,
@@ -118,6 +120,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             OperationRouteIndex routes,
             ContractsClosureProfile profile,
             ContractsActiveSourceTimelineIndex activeSourceTimelines) {
+        this(runtime, objects, layoutBuilder, documents, routes, profile, activeSourceTimelines, null);
+    }
+
+    ContractsClosureAdmissionAdapter(
+            BlueRuntime runtime, WholeObjectStore objects, EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents, OperationRouteIndex routes, ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines,
+            RootedBeginningAdmission.Verifier beginningVerifier) {
+        this.beginningVerifier = beginningVerifier;
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -195,6 +206,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             NodeProvider exactNodes,
             ContractsManagedEpochSelectionPlan selectionPlan) {
         ensureOpen();
+        lastAdmissionInputs = null;
         ClosureInvocationInput admission = Objects.requireNonNull(
                 input, "input");
         CoordinationEngine.AdmissionPolicy temporalPolicy =
@@ -283,12 +295,25 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                 publicationIdentity,
                 members,
                 before);
+        lastAdmissionInputs = new AdmissionInputEvidence(
+                publicationIdentity, admission, completedAdmission, selectionPlan);
         return new ContractsClosureAdmissionReceipt(
                 attempt,
                 publicationIdentity,
                 ContractsClosureAdmissionReceipt.PublicationOutcome.PUBLISHED,
                 members);
     }
+
+    /** Observation only: exact inputs of the latest newly published admission. */
+    synchronized Optional<AdmissionInputEvidence> lastAdmissionInputs() {
+        ensureOpen();
+        return Optional.ofNullable(lastAdmissionInputs);
+    }
+
+    /** The actual selected and expanded inputs; neither is reconstructed from a result. */
+    record AdmissionInputEvidence(String publicationIdentity,
+            ClosureInvocationInput originalInput, ClosureInvocationInput completedInput,
+            ContractsManagedEpochSelectionPlan selectionPlan) { }
 
     /** Exact implementation evidence from the latest completed admission. */
     synchronized Optional<ClosureImplementationEvidence>
@@ -558,7 +583,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
         Set<DocumentId> existingMembers = connectedExistingMembers(
                 current.existingMembers(),
                 selected.existingTargets(),
-                indexed.occurrenceInventory());
+                indexed.occurrenceInventory(),
+                profile.rootedCheckpoint());
         InMemoryDocumentStore.ClosureSnapshot durable =
                 documents.admissionSnapshot(existingMembers);
         requireIndexGenerations(indexed, durable);
@@ -827,7 +853,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
     private static Set<DocumentId> connectedExistingMembers(
             Collection<DocumentId> original,
             Collection<DocumentId> targets,
-            ManagedOccurrenceInventory inventory) {
+            ManagedOccurrenceInventory inventory,
+            boolean rooted) {
         TreeMap<DocumentId, Boolean> discovered = new TreeMap<>(
                 EmbeddingBinding.DOCUMENT_ORDER);
         Deque<DocumentId> pending = new ArrayDeque<>();
@@ -849,6 +876,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     pending.addLast(target);
                 }
             }
+            // Rooted admission follows declared forward views. Incoming
+            // observers are bookkeeping, unless a forward return path reaches them.
+            if (rooted) continue;
             // Active containing occurrences participate in the same exact
             // publication. Inactive reservations retain forward evidence but
             // do not make their containing documents live participants.
@@ -1018,6 +1048,15 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             List<DocumentId> members,
             InMemoryDocumentStore.ClosureSnapshot before) {
         ClosureInvocationInput input = invocation.input();
+        RootedBeginningAdmission beginning = null;
+        if (profile.rootedCheckpoint() && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
+                && RootedBeginningAdmission.BOUND.equals(frontier)) {
+            if (beginningVerifier == null) throw new blue.coordination.api.CoordinationException(
+                    blue.coordination.api.CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE,
+                    "BEGINNING admission lacks its owning provider verifier");
+            beginning = beginningVerifier.verify(input, result, contracts::projectRootSubscriptionSurface);
+            beginning.requireFor(input, result);
+        }
         Set<DocumentId> memberSet = new LinkedHashSet<>(members);
         ManagedOccurrenceInventory.DeltaResult inventoryDelta =
                 mergeAdmissionInventory(
@@ -1178,7 +1217,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         result,
                         documentId,
                         policy,
-                        frontier);
+                        frontier, beginning);
                 List<Node> emitted = result.publicEvents().stream()
                         .filter(event -> event.publicRootDocumentId().value()
                                 .equals(documentId.value()))
@@ -1223,6 +1262,10 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         activeSubscriptions,
                         frontier,
                         revision);
+                if (profile.rootedCheckpoint()) {
+                    session.establishRootedHistory(RootedDocumentHistory.admitted(documentId,
+                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity(), beginning));
+                }
                 session.restoreCoordinationState(
                         resulting.terminated()
                                 ? SessionStatus.TERMINATED
@@ -1242,6 +1285,14 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         documentId,
                         layout.routingSurface(),
                         activeSubscriptions));
+            }
+            if (profile.rootedCheckpoint()) {
+                Map<DocumentId, List<SubscriptionDelta.Entry>> selectedRoutes = new LinkedHashMap<>();
+                for (OperationRouteIndex.Replacement replacement : routeReplacements) {
+                    selectedRoutes.put(replacement.documentId(), replacement.activeSubscriptions());
+                }
+                transaction.stageRootedView(new RootedDocumentView(result, subscriptions, selectedRoutes,
+                        policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY ? null : frontier));
             }
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
@@ -1272,7 +1323,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
                             new ManagedRepresentationHistory(documents),
-                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null));
+                            blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), profile.rootedCheckpoint());
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
             OperationRouteIndex.PreparedReplacement preparedRoutes = routes
@@ -1283,7 +1334,19 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                     PublicationFailurePoint
                             .AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
             preparedRoutes.publish();
-            activeSourceTimelines.refresh(members, documents);
+            Set<DocumentId> changedSourceSurfaces = new LinkedHashSet<>(
+                    invocation.newDocuments().keySet());
+            for (DocumentId existing : invocation.existingMembers()) {
+                if (!sameActiveTopologyForSources(
+                        before.occurrenceInventory(),
+                        resultingInventory,
+                        List.of(existing))) {
+                    changedSourceSurfaces.add(existing);
+                }
+            }
+            // Existing admission members retain their exact heads and route surfaces.
+            // A new incoming observer does not change the source's forward surface.
+            activeSourceTimelines.refresh(changedSourceSurfaces, documents);
             objects.commit(objectMark);
         } catch (RuntimeException failure) {
             if (storeCommitted) {
@@ -1525,8 +1588,12 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             ClosureProcessResult result,
             DocumentId documentId,
             CoordinationEngine.AdmissionPolicy policy,
-            ExternalOrderKey frontier) {
+            ExternalOrderKey frontier, RootedBeginningAdmission beginning) {
         LinkedHashMap<String, Node> fields = new LinkedHashMap<>();
+        if (beginning != null) {
+            beginning.requireFor(input, result);
+            fields.put("beginningAdmissionEvidence", beginning.evidence());
+        }
         fields.put("causeType", new Node().value(
                 "Coordination/Contracts Closure Admission Cause/v1"));
         fields.put("documentId", new Node().value(documentId.value()));

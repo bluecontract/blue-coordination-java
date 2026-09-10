@@ -23,7 +23,14 @@ record ContractsClosurePublicationReceipt(
         ClosureAttemptResult attempt,
         long automaticRetryCount,
         ManagedSurfacePublicationEvidence managedSurfaceEvidence,
-        ContractsManagedDraftPlan rejectedDraftPlan) {
+        ContractsManagedDraftPlan rejectedDraftPlan,
+        RootedTerminalEvidence rootedTerminalEvidence) {
+
+    ContractsClosurePublicationReceipt(String identity, List<DocumentId> members,
+            ClosureAttemptResult attempt, long retries, ManagedSurfacePublicationEvidence evidence,
+            ContractsManagedDraftPlan rejectedDraftPlan) {
+        this(identity, members, attempt, retries, evidence, rejectedDraftPlan, null);
+    }
 
     ContractsClosurePublicationReceipt(String identity, List<DocumentId> members,
             ClosureAttemptResult attempt, long retries, ManagedSurfacePublicationEvidence evidence) {
@@ -74,11 +81,27 @@ record ContractsClosurePublicationReceipt(
         }
         documentIds = List.copyOf(canonical);
         ClosureProcessResult result = attempt.processResult();
-        ContractsClosureAdapter.resultingDocuments(result, canonical);
+        if (rootedTerminalEvidence == null) {
+            RootedResultScope.requireDocuments(result, canonical);
+        } else {
+            rootedTerminalEvidence.requireResult(result, publicationIdentity);
+            if (!rootedTerminalEvidence.publicationDocuments(result).keySet().equals(canonical)) {
+                throw new IllegalArgumentException("Rooted terminal record must name exactly its derived owners");
+            }
+        }
+        if (result.rootedProjection() != null) {
+            var rooted = result.rootedProjection();
+            if (!publicationIdentity.equals(rooted.context().terminalKey(rooted.deliveryBasisIdentity()))) {
+                throw new IllegalArgumentException("Rooted receipt terminal key differs from its processor context");
+            }
+        }
         if (rejectedDraftPlan != null && (!result.commits()
                 || managedSurfaceEvidence.present()
                 || !rejectedDraftPlan.missingExpectedOccurrence(result))) {
             throw new IllegalArgumentException("Host rejection requires an exact unmet managed occurrence expectation");
+        }
+        if (rejectedDraftPlan != null && rootedTerminalEvidence != null) {
+            rootedTerminalEvidence.requireRejectedDraftPlan(rejectedDraftPlan, result, publicationIdentity);
         }
         if (!result.commits()
                 && managedSurfaceEvidence.present()) {
@@ -100,7 +123,13 @@ record ContractsClosurePublicationReceipt(
                 documentIds,
                 attempt,
                 automaticRetryCount,
-                managedSurfaceEvidence.withOperationRouteChanges(changes));
+                managedSurfaceEvidence.withOperationRouteChanges(changes), rejectedDraftPlan, rootedTerminalEvidence);
+    }
+
+    java.util.Map<DocumentId, blue.language.processor.closure.ResultingDocument> publicationDocuments() {
+        return rootedTerminalEvidence == null
+                ? RootedResultScope.requireDocuments(attempt.processResult(), new java.util.LinkedHashSet<>(documentIds))
+                : rootedTerminalEvidence.publicationDocuments(attempt.processResult());
     }
 
     /** Whether the retained terminal result committed durable effects. */

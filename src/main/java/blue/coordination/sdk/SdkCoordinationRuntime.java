@@ -261,6 +261,23 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 Objects.requireNonNull(sourceYaml, "sourceYaml")));
     }
 
+    synchronized Optional<ExactBlueValue> retainedExactValue(String blueId) {
+        ensureOpen();
+        return engine.retainedExactValue(blueId).map(ExactBlueValue::wrap);
+    }
+
+    synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditClosureExecution(publicationIdentity);
+    }
+
+    synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditClosureInvocation(publicationIdentity);
+    }
+
     synchronized ExactBlueValue exactProviderValue(String sourceYaml) {
         ensureOpen();
         return ExactBlueValue.wrap(engine.exactProviderValue(
@@ -609,6 +626,60 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 entry.sourceOrderKey()));
     }
 
+    synchronized DrainResult processRootInput(DocumentHandle root, EntryHandle input) {
+        return processRootInput(root, input, null);
+    }
+
+    synchronized DrainResult processRootInput(DocumentHandle root, EntryHandle input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        ensureOpen();
+        if (input.owner() != owner) {
+            throw new IllegalArgumentException("Entry belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return mapper.map(engine.processRootInput(root.id(), requireCoreEntry(input), policy));
+    }
+
+    synchronized List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this)
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        exactNodeProvider.beginLookupScope();
+        try { return engine.sourceHistoryPrerequisites(root.id()); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    private final Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceHistoryProcessingResults = new LinkedHashMap<>();
+
+    synchronized Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        return Optional.ofNullable(sourceHistoryProcessingResults.get(Objects.requireNonNull(expected, "expected")));
+    }
+
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        exactNodeProvider.beginLookupScope();
+        try {
+            var result = engine.processSourceHistoryPrerequisite(Objects.requireNonNull(expected));
+            result.processing().ifPresent(processing -> sourceHistoryProcessingResults.put(expected, retain(mapper.map(processing))));
+            return result;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized DrainResult processNextRoot(DocumentHandle root) {
+        return processNextRoot(root, null);
+    }
+
+    synchronized DrainResult processNextRoot(DocumentHandle root, String expectedLocalWork) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
+    }
+
     synchronized DrainResult drain() {
         ensureOpen();
         return retain(mapper.map(engine.drain()));
@@ -630,6 +701,16 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 new CoordinationEngine.DrainBudget(
                         selected.maxCommittedProcessTransitions(),
                         selected.maxSelectedEntries()))));
+    }
+
+    synchronized DrainResult drainJournalThrough(EntryHandle inclusiveEntry, DrainBudget budget) {
+        ensureOpen();
+        if (Objects.requireNonNull(inclusiveEntry, "inclusiveEntry").owner() != owner) {
+            throw new IllegalArgumentException("Entry belongs to another runtime");
+        }
+        DrainBudget selected = Objects.requireNonNull(budget, "budget");
+        return retain(mapper.map(engine.drainJournalThrough(requireCoreEntry(inclusiveEntry),
+                new CoordinationEngine.DrainBudget(selected.maxCommittedProcessTransitions(), selected.maxSelectedEntries()))));
     }
 
     synchronized DrainResult drainManagedEpochApplication(

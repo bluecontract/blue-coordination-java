@@ -44,7 +44,7 @@ final class SdkManagedEpochSharedFailureIsolationTest {
     @Test
     void sharedSuffixSurvivesOneDeterministicConsumerGasFailure() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
             TimelineHandle bTimeline = coordination.timelines().register(
