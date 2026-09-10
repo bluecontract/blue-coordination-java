@@ -3993,7 +3993,8 @@ def sourceArchiveIncludes = [
         'gradle/**', 'gradle.properties', 'gradlew',
         'gradlew.bat', 'scripts/**', 'settings.gradle', 'smoke-tests/**',
         'specifications/**', 'src/**',
-        'stabilization/cyclic-topology-rc3-final/**'
+        'stabilization/cyclic-topology-rc3-final/**',
+        'stabilization/rooted-checkpoint/retained-topology-identities/**'
 ]
 def sourceArchiveExcludes = [
         '**/.git/**', '**/.gradle/**', '**/.idea/**', '**/build/**',
