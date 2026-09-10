@@ -126,7 +126,7 @@ final class SdkManagedDraftAcceptanceTest {
             DocumentId childId = DocumentId.of(
                     "sdk-managed-extra-child-" + suffix);
             String timelineId = "sdk/managed-extra/" + suffix;
-            try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
                 TimelineHandle timeline = coordination.timelines().register(
                         timelineId, ACTOR);
                 DocumentHandle host = coordination.documents().admit(
@@ -593,7 +593,7 @@ final class SdkManagedDraftAcceptanceTest {
         DocumentId childId = DocumentId.of("sdk-managed-growth-child");
         String hostTimelineId = "sdk/managed-growth/host";
         String parentTimelineId = "sdk/managed-growth/parent";
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle hostTimeline = coordination.timelines().register(
                     hostTimelineId, ACTOR);
             TimelineHandle parentTimeline = coordination.timelines().register(
@@ -656,6 +656,113 @@ final class SdkManagedDraftAcceptanceTest {
             // then
             assertApplied(parentCreated);
             assertApplied(childCreated);
+            // Promotion preserves the occurrence: later child creation
+            // propagates the parent's new exact state to its existing host.
+            assertEquals(parent.snapshot().blueId(),
+                    host.snapshot().valueAt("/parents/primary").blueId());
+            assertNotEquals(hostBeforeChild, host.snapshot().blueId());
+            assertEquals(hostHistoryBeforeChild + 1, host.history().size());
+            assertEquals(child.snapshot().blueId(),
+                    parent.snapshot().valueAt("/children/primary").blueId());
+            assertNotEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertTrue(changedDocuments(parentCreated).containsAll(
+                    Set.of(hostId, parentId)));
+            assertTrue(changedDocuments(childCreated).containsAll(
+                    Set.of(parentId, childId)));
+            assertTrue(host.snapshot().ready());
+            assertTrue(parent.snapshot().ready());
+            assertTrue(child.snapshot().ready());
+            assertFalse(host.exact().cyclicMember());
+            assertFalse(parent.exact().cyclicMember());
+            assertFalse(child.exact().cyclicMember());
+            assertEquals(List.of(
+                            DocumentRevision.Kind.INITIALIZATION,
+                            DocumentRevision.Kind.TIMELINE_ENTRY),
+                    parent.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+            assertEquals(List.of(DocumentRevision.Kind.INITIALIZATION),
+                    child.history().stream()
+                            .map(DocumentRevision::kind)
+                            .toList());
+        }
+    }
+
+    @Test
+    void rootedManagedGrandchildPublishesParentSeparatelyFromItsObserver() {
+        // given
+        DocumentId hostId = DocumentId.of("sdk-managed-growth-host");
+        DocumentId parentId = DocumentId.of("sdk-managed-growth-parent");
+        DocumentId childId = DocumentId.of("sdk-managed-growth-child");
+        String hostTimelineId = "sdk/managed-growth/host";
+        String parentTimelineId = "sdk/managed-growth/parent";
+        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+            TimelineHandle hostTimeline = coordination.timelines().register(
+                    hostTimelineId, ACTOR);
+            TimelineHandle parentTimeline = coordination.timelines().register(
+                    parentTimelineId, ACTOR);
+            DocumentHandle host = coordination.documents().admit(
+                    ManagedDocument.yaml(
+                                    hostId,
+                                    nestedGrowthHost(
+                                            hostId, hostTimelineId))
+                            .publicRoot()
+                            .fromNow());
+            ManagedDocumentDraft parentDraft = coordination.documents()
+                    .draft(
+                            parentId,
+                            coordination.values().yaml(nestedGrowthParent(
+                                    parentId, parentTimelineId)));
+            ManagedDocumentDraft childDraft = draft(
+                    coordination, childId, false);
+
+            // when
+            EntryResult parentCreated = coordination.operations()
+                    .on(host)
+                    .from(hostTimeline)
+                    .call("createParent")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "parent", parentDraft))
+                    .expectOccurrence("/parents/primary", parentDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle parent = coordination.documents().require(
+                    parentId);
+            String parentBeforeChild = parent.snapshot().blueId();
+            String hostBeforeChild = host.snapshot().blueId();
+            int hostHistoryBeforeChild = host.history().size();
+            long parentEpochBeforePromotion = parent.snapshot().epoch();
+            int parentHistoryBeforePromotion = parent.history().size();
+            int entriesBeforePromotion = coordination.advanced().rawEngine()
+                    .metrics().journalEntryCount();
+            DocumentHandle promoted = coordination.documents()
+                    .promotePublicRoot(parentId);
+            assertEquals(parentId, promoted.id());
+            assertEquals(parentBeforeChild, parent.snapshot().blueId());
+            assertEquals(parentEpochBeforePromotion, parent.snapshot().epoch());
+            assertEquals(parentHistoryBeforePromotion, parent.history().size());
+            assertEquals(entriesBeforePromotion, coordination.advanced()
+                    .rawEngine().metrics().journalEntryCount());
+            EntryResult childCreated = coordination.operations()
+                    .on(parent)
+                    .from(parentTimeline)
+                    .call("createChild")
+                    .through("ownerChannel")
+                    .request(request -> request.managed(
+                            "child", childDraft))
+                    .expectOccurrence("/children/primary", childDraft)
+                    .activation(ActivationPolicy.fromNow())
+                    .execute();
+            DocumentHandle child = coordination.documents().require(childId);
+
+            // then
+            assertApplied(parentCreated);
+            assertEquals(EntryDisposition.APPLIED, childCreated.disposition());
+            assertEquals(2, childCreated.closures().size());
+            assertEquals(2, childCreated.closures().stream().map(ClosureResult::closureId).distinct().count());
+            assertEquals(1, childCreated.closures().stream().filter(closure -> closure.changes().stream()
+                    .anyMatch(change -> change.documentId().equals(childId))).count());
             // Promotion preserves the occurrence: later child creation
             // propagates the parent's new exact state to its existing host.
             assertEquals(parent.snapshot().blueId(),
@@ -1029,7 +1136,7 @@ final class SdkManagedDraftAcceptanceTest {
         DocumentId childId = DocumentId.of(
                 "sdk-managed-failure-child-" + suffix);
         String timelineId = "sdk/managed-failure/" + suffix;
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             DocumentHandle host = coordination.documents().admit(

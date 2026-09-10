@@ -402,7 +402,12 @@ final class SdkDrainResultMapper {
             int index) {
         ClosureAttemptResult attempt = retained.attempt();
         if (!attempt.isComplete()) {
-            Diagnostic diagnostic = new Diagnostic(
+            boolean rejected = retained.managedOccurrenceResolutionIssues().stream().anyMatch(issue ->
+                    issue.status() == ContractsClosureDispatchAttempt.ResolutionStatus.REJECTED_MANAGED_DECLARATION);
+            Diagnostic diagnostic = rejected
+                    ? new Diagnostic("MANAGED_OCCURRENCE_BINDING_MISSING",
+                            "Operation supplied a different exact value than its declared birth; no effects were published", Map.of())
+                    : new Diagnostic(
                     "REQUIRED_EXACT_RESOURCES",
                     "Closure processing requires unavailable exact values",
                     Map.of(
@@ -410,7 +415,7 @@ final class SdkDrainResultMapper {
                             String.join(",", attempt.requiredExactBlueIds())));
             return new ClosureResult(
                     closureId(entry, retained, index),
-                    EntryDisposition.NEEDS_RESOURCES,
+                    rejected ? EntryDisposition.REJECTED : EntryDisposition.NEEDS_RESOURCES,
                     List.of(),
                     List.of(),
                     ProcessingStats.zero(),

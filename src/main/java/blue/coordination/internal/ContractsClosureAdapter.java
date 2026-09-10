@@ -388,7 +388,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true, state);
             if (invocation == null) continue;
             FrozenBatch batch = new FrozenBatch(entry, routes.generation(), List.of(invocation));
-            if (publicationReceipt(batch, invocation).isEmpty()) return Optional.of(new FrozenBatch(entry,
+            if (publicationReceipt(batch, invocation).isEmpty() && feederDecisions.rejectedBirth(invocation) == null) return Optional.of(new FrozenBatch(entry,
                     routes.generation(), applyManagedDraftPlan(entry, List.of(invocation))));
         }
         return Optional.empty();
@@ -614,6 +614,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 this::requireAutomaticRetryStillCurrent);
     }
 
+    private ContractsRootFeederWindow.DurableState feederDecisions = new ContractsRootFeederWindow.DurableState();
+
+    synchronized void feederDecisions(ContractsRootFeederWindow.DurableState state) {
+        feederDecisions = Objects.requireNonNull(state, "state");
+    }
+
     /** Executes and independently publishes exactly one frozen cohort lane. */
     synchronized CohortOutcome executeAndPublish(
             FrozenBatch batch,
@@ -625,6 +631,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
             throw new IllegalArgumentException(
                     "Cohort invocation does not belong to the frozen batch");
         }
+        var rejectedBirth = feederDecisions.rejectedBirth(selected);
+        if (rejectedBirth != null) return rejectedBirth.outcome(true);
         Optional<ContractsClosurePublicationReceipt> prior =
                 publicationReceipt(frozen, selected);
         if (prior.isPresent()) {
@@ -670,6 +678,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
             identity = publicationIdentity(frozen, executed);
             if (!attempt.isComplete()) {
+                var rejected = RootedDeclaredBirthRejection.capture(selected, executed, attempt,
+                        automatic.unresolvedDemands(), automatic.expansionCount());
+                if (rejected != null) {
+                    var retained = feederDecisions.rejectBirth(rejected, documents);
+                    publicationFailureInjector.accept(PublicationFailurePoint.AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
+                    return retained.outcome(false);
+                }
                 return new CohortOutcome(
                         selected.members(), executed.members(), attempt,
                         false, identity, false, automatic.expansionCount(),
@@ -2059,7 +2074,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     OCCURRENCE_ROWS_EXAMINED, sourceRows.size());
             for (ManagedOccurrenceBinding row : sourceRows) {
                 DocumentId target = coordinationId(row.targetDocumentId());
-                if (!existingMembers.contains(target)) {
+                if (!existingMembers.contains(target)
+                        && !(current.rootedEvidence() != null && drafts.containsKey(target))) {
                     throw stale("Forward managed closure omitted occurrence "
                             + "target " + target);
                 }
@@ -4624,7 +4640,16 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ManagedSurfacePublicationEvidence managedSurfaceEvidence,
             List<ManagedOccurrenceResolver.UnresolvedDemand>
                     unresolvedDemands,
-            ContractsManagedDraftPlan rejectedDraftPlan) {
+            ContractsManagedDraftPlan rejectedDraftPlan,
+            RootedDeclaredBirthRejection rejectedBirth) {
+        CohortOutcome(List<DocumentId> members, List<DocumentId> publicationMembers,
+                ClosureAttemptResult attempt, boolean published, String publicationIdentity,
+                boolean replayed, long retries, ManagedSurfacePublicationEvidence evidence,
+                List<ManagedOccurrenceResolver.UnresolvedDemand> demands, ContractsManagedDraftPlan rejectedDraftPlan) {
+            this(members, publicationMembers, attempt, published, publicationIdentity,
+                    replayed, retries, evidence, demands, rejectedDraftPlan, null);
+        }
+
         CohortOutcome(List<DocumentId> members, List<DocumentId> publicationMembers,
                 ClosureAttemptResult attempt, boolean published, String publicationIdentity,
                 boolean replayed, long retries, ManagedSurfacePublicationEvidence evidence,
@@ -4653,6 +4678,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         CohortOutcome {
+            if (rejectedBirth != null) rejectedBirth.requireOutcome(members, publicationMembers, attempt,
+                    published, publicationIdentity, automaticRetryCount, managedSurfaceEvidence, unresolvedDemands);
             if (rejectedDraftPlan != null && (published || publicationIdentity == null
                     || !attempt.isComplete() || !attempt.processResult().commits()
                     || !rejectedDraftPlan.missingExpectedOccurrence(attempt.processResult()))) {

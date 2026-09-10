@@ -131,6 +131,53 @@ final class SdkCatchAllCollectionRoutingTest {
         }
     }
 
+    @Test
+    void rootedReattachmentRetainsGenerationsAndEmitsEachSourceEventOnce() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle timeline = blue.timelines().register("f2/source", "alice");
+            ClosureHandle closure = blue.documents().admit(closure(false));
+            DocumentHandle root = closure.document("root");
+            DocumentHandle source = closure.document("source");
+            DocumentHandle nested = closure.document("nested");
+
+            // when
+            EntryResult removed = blue.operations().on(root).from(timeline)
+                    .call("removeMembers").through("owner")
+                    .requestYaml("{}").execute();
+            assertEquals(EntryDisposition.APPLIED, removed.disposition(),
+                    removed.diagnostic().toString());
+            EntryResult detached = emit(blue, source, timeline);
+            replaceMembers(blue, root, timeline, ExactBlueValue.wrap(
+                    ExactValue.verified(
+                    new blue.language.model.Node().properties(java.util.Map.of(
+                            "first", source.snapshot().exact().copyNode())))));
+            var readded = blue.advanced().auditManagedOccurrence(root.id(),
+                    "/members/first").orElseThrow();
+            EntryResult readdedEvent = emit(blue, source, timeline);
+            replaceMembers(blue, root, timeline, ExactBlueValue.wrap(
+                    ExactValue.verified(
+                    new blue.language.model.Node().properties(java.util.Map.of(
+                            "first", nested.snapshot().exact().copyNode())))));
+            var retargeted = blue.advanced().auditManagedOccurrence(root.id(),
+                    "/members/first").orElseThrow();
+            EntryResult irrelevant = emit(blue, source, timeline);
+            EntryResult retargetedEvent = emit(blue, nested, timeline);
+
+            // then
+            assertEquals(List.of("signal", "signal"), kinds(detached));
+            assertEquals(List.of("signal", "signal", "observed", "observed"), kinds(readdedEvent));
+            assertEquals(List.of("signal", "signal"), kinds(irrelevant));
+            assertEquals(List.of("signal", "signal", "observed", "observed"), kinds(retargetedEvent));
+            assertEquals(2L, readded.activationGeneration());
+            assertEquals(3L, retargeted.activationGeneration());
+            assertEquals(nested.id(), retargeted.targetDocumentId());
+            assertFalse(blue.advanced().auditManagedOccurrence(root.id(),
+                    "/members/second").orElseThrow().active());
+            assertEquals(4L, root.snapshot().longAt("/observed"));
+        }
+    }
+
     private static List<String> run(boolean reverse) {
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             TimelineHandle timeline = blue.timelines().register("f2/source", "alice");

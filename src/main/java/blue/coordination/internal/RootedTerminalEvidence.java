@@ -13,6 +13,7 @@ import java.util.TreeMap;
 /** Frozen input provenance for a rooted terminal decision, including noncommitting failures. */
 final class RootedTerminalEvidence {
     private final ClosureInvocationInput input;
+    private final ContractsManagedDraftPlan managedDraftPlan;
     private final RootedInvocationEvidence rooted;
     private final String executedInvocationIdentity;
     private final String historicalWorkIdentity;
@@ -22,6 +23,7 @@ final class RootedTerminalEvidence {
     private RootedTerminalEvidence(ContractsClosureAdapter.CohortInvocation invocation,
             blue.coordination.api.ManagedEpochApplicationWork work) {
         this.input = invocation.input();
+        this.managedDraftPlan = invocation.managedDraftPlan();
         this.rooted = Objects.requireNonNull(invocation.rootedEvidence(), "rooted evidence");
         this.executedInvocationIdentity = invocation.executionInvocationIdentity();
         var selectedWork = work == null ? rooted.historicalWork() : work;
@@ -99,6 +101,15 @@ final class RootedTerminalEvidence {
         }
         else if (!result.rollbackToInput() || result.commitCompanion() != null) {
             throw new IllegalArgumentException("Rooted failure must retain exact rollback evidence without a companion");
+        }
+    }
+
+    /** Binds a host rejection to the exact plan retained before the input was executed. */
+    void requireRejectedDraftPlan(ContractsManagedDraftPlan plan, ClosureProcessResult result, String key) {
+        requireResult(result, key);
+        if (plan == null || plan != managedDraftPlan || !entryOwners().contains(plan.targetDocumentId())
+                || !plan.missingExpectedOccurrence(result)) {
+            throw new IllegalArgumentException("Rooted rejection differs from its captured managed draft plan");
         }
     }
 

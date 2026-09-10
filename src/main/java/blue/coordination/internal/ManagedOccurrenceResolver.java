@@ -662,6 +662,7 @@ final class ManagedOccurrenceResolver {
         AMBIGUOUS_MANAGED_EPOCH,
         UNPROVEN_MANAGED_HISTORY,
         EXACT_STATE_MISMATCH,
+        REJECTED_MANAGED_DECLARATION,
         INVALID_AUTHORED_DOCUMENT
     }
 

@@ -100,6 +100,9 @@ record ContractsClosurePublicationReceipt(
                 || !rejectedDraftPlan.missingExpectedOccurrence(result))) {
             throw new IllegalArgumentException("Host rejection requires an exact unmet managed occurrence expectation");
         }
+        if (rejectedDraftPlan != null && rootedTerminalEvidence != null) {
+            rootedTerminalEvidence.requireRejectedDraftPlan(rejectedDraftPlan, result, publicationIdentity);
+        }
         if (!result.commits()
                 && managedSurfaceEvidence.present()) {
             throw new IllegalArgumentException(

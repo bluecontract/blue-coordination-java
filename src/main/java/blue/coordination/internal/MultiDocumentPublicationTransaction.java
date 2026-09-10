@@ -1016,13 +1016,13 @@ final class MultiDocumentPublicationTransaction {
                                         expectedAbsent)
                                 : before.graphGenerations().admit(
                                         stagedGraphGeneration, expectedAbsent)
+                        : stagedGraphGeneration.rootedProjection() != null
+                        ? before.graphGenerations().applyOwned(stagedGraphGeneration, expectedGraphGenerations, expectedAbsent)
                         : stagedManagedExpansionInput != null
                         ? before.graphGenerations().applyExpansion(
                                 stagedGraphGeneration,
                                 expectedGraphGenerations,
                                 expectedAbsent)
-                        : stagedGraphGeneration.rootedProjection() != null
-                        ? before.graphGenerations().applyOwned(stagedGraphGeneration, expectedGraphGenerations)
                         : before.graphGenerations().apply(
                                 stagedGraphGeneration,
                                 expectedGraphGenerations);
@@ -1421,7 +1421,13 @@ final class MultiDocumentPublicationTransaction {
                     "Managed expansion receipt does not authenticate its "
                             + "virtual-member input");
         }
-        var resultDocuments = ContractsClosureAdapter.resultingDocuments(processResult, expectedMembers);
+        var rooted = stagedClosurePublicationReceipt.rootedTerminalEvidence();
+        if (rooted != null && rooted.input() != stagedManagedExpansionInput) {
+            throw new IllegalStateException("Rooted expansion changed its authenticated calculation input");
+        }
+        var calculationMembers = rooted == null ? expectedMembers : inputDocuments.keySet();
+        ContractsClosureAdapter.resultingDocuments(processResult, calculationMembers);
+        var resultDocuments = RootedResultScope.requireDocuments(processResult, expectedMembers);
         LinkedHashSet<DocumentId> companionDocuments = new LinkedHashSet<>();
         if (commits) {
             processResult.platformCommitCompanion()
@@ -1429,9 +1435,10 @@ final class MultiDocumentPublicationTransaction {
                             companionDocuments.add(DocumentId.of(
                                     document.documentId().value())));
         }
-        if (!inputDocuments.keySet().equals(expectedMembers)
+        if (!inputDocuments.keySet().equals(calculationMembers)
+                || !inputDocuments.keySet().containsAll(expectedMembers)
                 || (commits
-                        && !companionDocuments.equals(expectedMembers))
+                        && !companionDocuments.equals(calculationMembers))
                 || !new LinkedHashSet<>(stagedClosurePublicationReceipt
                         .documentIds()).equals(expectedMembers)
                 || (commits
@@ -1503,13 +1510,18 @@ final class MultiDocumentPublicationTransaction {
         if (receipt.rejectedDraftPlan() != null) {
             ContractsManagedDraftPlan plan = receipt.rejectedDraftPlan();
             InMemoryDocumentStore.DocumentHead source = expectedHeads.get(plan.targetDocumentId());
-            if (stagedManagedExpansionInput == null || source == null
-                    || source.epoch() != plan.targetEpoch() || !source.blueId().equals(plan.targetBlueId())
-                    || !expectedAbsent.containsAll(plan.drafts().keySet())
+            if (source == null || source.epoch() != plan.targetEpoch() || !source.blueId().equals(plan.targetBlueId())
                     || !plan.missingExpectedOccurrence(result)) {
                 throw new IllegalStateException("Managed draft rejection does not match the exact staged input");
             }
-            plan.expectedOccurrences().forEach(expected -> plan.prospectiveOccurrence(stagedManagedExpansionInput, expected));
+            if (receipt.rootedTerminalEvidence() != null) {
+                receipt.rootedTerminalEvidence().requireRejectedDraftPlan(plan, result, receipt.publicationIdentity());
+            } else {
+                if (stagedManagedExpansionInput == null || !expectedAbsent.containsAll(plan.drafts().keySet())) {
+                    throw new IllegalStateException("Managed draft rejection lacks its prospective input and absent fences");
+                }
+                plan.expectedOccurrences().forEach(expected -> plan.prospectiveOccurrence(stagedManagedExpansionInput, expected));
+            }
             requireReceiptOnlyStaging();
             return;
         }

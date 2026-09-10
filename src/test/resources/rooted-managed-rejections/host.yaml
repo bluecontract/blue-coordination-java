@@ -1,0 +1,89 @@
+documentId: rooted-rejected-birth-host
+orders: {}
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths:
+      - /orders
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: rooted/rejected-birth
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  zeroMatches:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $return: true
+  wrongPath:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /wrongOrder
+              val: {$binding: event/message/request/order}
+          - $return: true
+  wrongExactState:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}, wrong: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /orders/expected
+              val: {$binding: event/message/request/wrong}
+          - $return: true
+  singlePatchExtra:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /orders
+              val:
+                expected: {$binding: event/message/request/order}
+                extra: {$binding: event/message/request/order}
+          - $return: true
+  sequentialExtra:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /orders/expected
+              val: {$binding: event/message/request/order}
+          - $appendChange:
+              op: add
+              path: /orders/extra
+              val: {$binding: event/message/request/order}
+          - $return: true
+  validCreate:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {order: {}}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /orders/expected
+              val: {$binding: event/message/request/order}
+          - $return: true

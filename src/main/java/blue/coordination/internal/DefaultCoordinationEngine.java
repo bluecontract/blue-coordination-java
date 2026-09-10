@@ -258,6 +258,7 @@ public final class DefaultCoordinationEngine
                     contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider) : null;
             if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
             contractsRecoveryState = new ContractsRecoveryState();
+            contractsClosureAdapter.feederDecisions(contractsRecoveryState.feederWindow);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
         }
@@ -1103,7 +1104,7 @@ public final class DefaultCoordinationEngine
             long committed = 0L;
             for (ContractsClosureAdapter.CohortInvocation invocation : batch.invocations()) {
                 ContractsClosureAdapter.CohortOutcome exact = contractsClosureAdapter.executeAndPublish(batch, invocation);
-                complete &= exact.attempt().isComplete();
+                complete &= exact.attempt().isComplete() || exact.rejectedBirth() != null;
                 attempts.add(new ContractsClosureDispatchAttempt(entry.blueId(), exact.publicationMembers(),
                         exact.attempt(), exact.published(), exact.publicationIdentity(), exact.replayed(),
                         exact.automaticRetryCount(), managedOccurrenceResolutions(exact.managedSurfaceEvidence()),

@@ -28,6 +28,16 @@ final class RootedBirthPublicationTest {
             var present = Map.of(scenario.parent.id(), before.graphGenerations().require(scenario.parent.id()));
             var absent = Set.of(scenario.child);
             var subscriptions = before.closureSubscriptions();
+            var generations = before.graphGenerations();
+            assertDoesNotThrow(() -> generations.applyOwned(result, present, absent));
+            assertThrows(IllegalArgumentException.class, () -> generations.applyOwned(result, present));
+            assertThrows(IllegalArgumentException.class, () -> generations.applyOwned(result, Map.of(), absent));
+            assertThrows(IllegalArgumentException.class, () -> generations.applyOwned(result, present,
+                    List.of(scenario.child, scenario.child)));
+            assertThrows(IllegalArgumentException.class, () -> generations.applyOwned(result, present,
+                    Set.of(scenario.parent.id(), scenario.child)));
+            assertThrows(IllegalArgumentException.class, () -> generations.applyOwned(result, present,
+                    Set.of(scenario.child, DocumentId.of("unrelated-graph-birth"))));
             assertDoesNotThrow(() -> subscriptions.applyOwned(result, present, absent));
             assertThrows(IllegalArgumentException.class, () -> subscriptions.applyOwned(result, present));
             assertThrows(IllegalArgumentException.class, () -> subscriptions.applyOwned(result, Map.of(), absent));

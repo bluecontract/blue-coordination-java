@@ -149,6 +149,8 @@ public record ClosureResult(
         UNPROVEN_MANAGED_HISTORY,
         /** Explicit selection disagrees with retained exact state. */
         EXACT_STATE_MISMATCH,
+        /** A durable feeder decision rejects the exact declared operation birth; no processor checkpoint commits. */
+        REJECTED_MANAGED_DECLARATION,
         /** Authored content cannot initialize a valid managed document. */
         INVALID_AUTHORED_DOCUMENT
     }

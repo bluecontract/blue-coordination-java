@@ -37,6 +37,7 @@ final class RootedManagedBirths {
         var plan = current.managedDraftPlan();
         if (plan == null) return resolution;
         List<ManagedOccurrenceResolver.ResolvedOccurrence> resolved = new ArrayList<>();
+        var unresolved = new ArrayList<>(resolution.unresolvedDemands());
         for (var occurrence : resolution.resolvedOccurrences()) {
             var expected = plan.expectedOccurrences().stream().filter(row ->
                     occurrence.demand().sourceDocumentId().value().equals(plan.targetDocumentId().value())
@@ -48,18 +49,35 @@ final class RootedManagedBirths {
             var draft = plan.drafts().get(expected.targetDocumentId());
             boolean fresh = occurrence.targetKind() == ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
                     && draft.initial().sameExactValue(occurrence.newDraft().initial());
+            // A separately admitted bare occurrence can share these authored bytes without owning this declared birth.
+            boolean independentInitial = occurrence.targetKind() == ManagedOccurrenceResolver.TargetKind.EXISTING_AUTHORED_INITIAL
+                    && current.rootedEvidence() != null && current.rootedEvidence().context().entryOwners()
+                            .contains(ContractsClosureAdapter.closureId(plan.targetDocumentId()))
+                    && documents.find(draft.documentId()).isEmpty()
+                    && draft.initial().blueId().equals(occurrence.demand().suppliedValueBlueId());
             boolean localReplay = occurrence.targetKind() == ManagedOccurrenceResolver.TargetKind.EXISTING_AUTHORED_INITIAL
                     && occurrence.targetDocumentId().equals(draft.documentId())
                     && isRetainedLocalBirth(current, plan, draft, documents);
-            if ((!fresh && !localReplay)
+            if ((!fresh && !independentInitial && !localReplay)
                     || !draft.initial().blueId().equals(occurrence.demand().suppliedValueBlueId())) {
+                if (current.rootedEvidence() != null && current.input().cause()
+                        instanceof blue.language.processor.closure.ExternalEventCause
+                        && current.rootedEvidence().context().entryOwners()
+                                .contains(ContractsClosureAdapter.closureId(plan.targetDocumentId()))
+                        && !draft.initial().blueId().equals(occurrence.demand().suppliedValueBlueId())) {
+                    unresolved.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
+                            ManagedOccurrenceResolver.ResolutionStatus.REJECTED_MANAGED_DECLARATION,
+                            "Declared birth requires " + draft.initial().blueId()
+                                    + " but operation supplied " + occurrence.demand().suppliedValueBlueId()));
+                    continue;
+                }
                 throw new IllegalArgumentException("Declared birth does not match the exact new authored demand");
             }
             resolved.add(new ManagedOccurrenceResolver.ResolvedOccurrence(occurrence.demand(),
                     draft.documentId(), draft.initial().blueId(), ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED, -1L, draft));
         }
         return new ManagedOccurrenceResolver.Resolution(resolution.demands(), resolved,
-                resolution.resolvedExactNodes(), resolution.unresolvedDemands(), resolution.resolvedSelectorPaths());
+                resolution.resolvedExactNodes(), unresolved, resolution.resolvedSelectorPaths());
     }
 
     static boolean isRetainedLocalBirth(ContractsClosureAdapter.CohortInvocation current,
