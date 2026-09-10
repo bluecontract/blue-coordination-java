@@ -1048,6 +1048,10 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             List<DocumentId> members,
             InMemoryDocumentStore.ClosureSnapshot before) {
         ClosureInvocationInput input = invocation.input();
+        RootedAdmissionSources admissionSources = profile.rootedCheckpoint()
+                && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
+                ? RootedAdmissionSources.capture(input, frontier, invocation.existingMembers(), documents)
+                : RootedAdmissionSources.NONE;
         RootedBeginningAdmission beginning = null;
         if (profile.rootedCheckpoint() && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
                 && RootedBeginningAdmission.BOUND.equals(frontier)) {
@@ -1264,7 +1268,8 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                         revision);
                 if (profile.rootedCheckpoint()) {
                     session.establishRootedHistory(RootedDocumentHistory.admitted(documentId,
-                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity(), beginning));
+                            authored, policy, frontier, input, result, profile.rootedRuntimeSemanticsIdentity(), beginning,
+                            admissionSources));
                 }
                 session.restoreCoordinationState(
                         resulting.terminated()
@@ -1322,7 +1327,7 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
                             documentId -> memberSet.contains(documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
-                            new ManagedRepresentationHistory(documents),
+                            new ManagedRepresentationHistory(documents).forAdmission(admissionSources),
                             blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), profile.rootedCheckpoint());
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());

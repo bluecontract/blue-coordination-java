@@ -14,7 +14,7 @@ import java.util.Objects;
 
 /** Admission-owned history facts retained with a document, independently of its head. */
 record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
-        String admissionInvocationIdentity, String admissionCompanionIdentity) {
+        String admissionInvocationIdentity, String admissionCompanionIdentity, RootedAdmissionSources admissionSources) {
     RootedDocumentHistory {
         descriptor = Map.copyOf(Objects.requireNonNull(descriptor, "descriptor"));
         if (!RootedProcessingContext.historyBasisIdentity(descriptor).equals(identity)) {
@@ -22,13 +22,14 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
         }
         Objects.requireNonNull(admissionInvocationIdentity, "admissionInvocationIdentity");
         Objects.requireNonNull(admissionCompanionIdentity, "admissionCompanionIdentity");
+        Objects.requireNonNull(admissionSources, "admissionSources");
     }
 
     /** Called only while staging a fully verified successful admission. */
     static RootedDocumentHistory admitted(DocumentId document, ExactValue authored,
             CoordinationEngine.AdmissionPolicy policy, ExternalOrderKey frontier,
             ClosureInvocationInput input, ClosureProcessResult result,
-            String runtimeSemanticsIdentity, RootedBeginningAdmission beginning) {
+            String runtimeSemanticsIdentity, RootedBeginningAdmission beginning, RootedAdmissionSources admissionSources) {
         if (input.operation() != ClosureInvocationInput.Operation.ADMIT_CLOSURE
                 || !result.commits() || result.platformCommitCompanion() == null
                 || !result.invocationIdentity().equals(input.invocationIdentity())
@@ -61,7 +62,7 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
                 "runtimeSemanticsIdentity", runtimeSemanticsIdentity, "admission", admission);
         return new RootedDocumentHistory(descriptor,
                 RootedProcessingContext.historyBasisIdentity(descriptor), input.invocationIdentity(),
-                result.platformCommitCompanion().companionIdentity());
+                result.platformCommitCompanion().companionIdentity(), admissionSources);
     }
 
     /** Staged only with the complete authenticated, owned birth transaction. */
@@ -101,6 +102,6 @@ record RootedDocumentHistory(Map<String, Object> descriptor, String identity,
                 "runtimeSemanticsIdentity", BundledContracts10Release.manifest().contractsRelease(),
                 "admission", admission);
         return new RootedDocumentHistory(descriptor, RootedProcessingContext.historyBasisIdentity(descriptor),
-                input.invocationIdentity(), result.platformCommitCompanion().companionIdentity());
+                input.invocationIdentity(), result.platformCommitCompanion().companionIdentity(), RootedAdmissionSources.NONE);
     }
 }

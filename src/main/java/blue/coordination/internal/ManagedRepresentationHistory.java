@@ -19,27 +19,39 @@ final class ManagedRepresentationHistory {
     private final Map<DocumentId, ManagedCatchUpPlanner.Head> stagedHeads;
     private final Map<DocumentId, ManagedEpochReceipt> stagedReceipts;
     private final ContractsClosureAdapter.RootedCapturedState capturedRoot;
+    private final RootedAdmissionSources admissionSources;
     ManagedRepresentationHistory(InMemoryDocumentStore documents) {
-        this(documents, null, Map.of(), Map.of(), null);
+        this(documents, null, Map.of(), Map.of(), null, RootedAdmissionSources.NONE);
     }
     private ManagedRepresentationHistory(InMemoryDocumentStore documents,
             ContractsClosurePublicationReceipt publication, Map<DocumentId, ManagedCatchUpPlanner.Head> heads,
-            Map<DocumentId, ManagedEpochReceipt> receipts, ContractsClosureAdapter.RootedCapturedState capturedRoot) {
+            Map<DocumentId, ManagedEpochReceipt> receipts, ContractsClosureAdapter.RootedCapturedState capturedRoot,
+            RootedAdmissionSources admissionSources) {
         this.documents = Objects.requireNonNull(documents, "documents");
         this.stagedPublication = publication;
         this.stagedHeads = Map.copyOf(heads);
         this.stagedReceipts = Map.copyOf(receipts);
         this.capturedRoot = capturedRoot;
+        this.admissionSources = Objects.requireNonNull(admissionSources);
+    }
+    ManagedRepresentationHistory forAdmission(RootedAdmissionSources sources) {
+        return new ManagedRepresentationHistory(documents, stagedPublication, stagedHeads, stagedReceipts, capturedRoot, sources);
+    }
+    ManagedRepresentationHistory forConsumer(DocumentId consumer) {
+        var session = documents.find(consumer).orElse(null);
+        return session == null ? this : forAdmission(session.requireRootedHistory().admissionSources());
     }
     ManagedRepresentationHistory forCapturedRoot(ContractsClosureAdapter.RootedCapturedState captured) {
         if (captured == null) return this;
         captured.requireCurrentView(documents);
-        return new ManagedRepresentationHistory(documents, stagedPublication, stagedHeads, stagedReceipts, captured);
+        return new ManagedRepresentationHistory(documents, stagedPublication, stagedHeads, stagedReceipts, captured,
+                documents.require(captured.anchor()).requireRootedHistory().admissionSources());
     }
     /** Used only to prepare work inside the same atomic publication; execution reauthenticates durable membership. */
     ManagedRepresentationHistory afterPublication(ContractsClosurePublicationReceipt publication,
             Map<DocumentId, ManagedCatchUpPlanner.Head> heads, Map<DocumentId, ManagedEpochReceipt> receipts) {
-        return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts, capturedRoot);
+        return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts, capturedRoot,
+                admissionSources);
     }
     /** A co-owned committed position is already part of this exact causal view, not an independent future head. */
     private RootedDocumentView sourceView(DocumentId source, blue.language.processor.ExternalOrderKey boundary) {
@@ -77,7 +89,8 @@ final class ManagedRepresentationHistory {
                 }
             }
         }
-        return session.rootedViewBefore(boundary);
+        RootedDocumentView admitted = admissionSources.selected(source, boundary, documents);
+        return admitted != null ? admitted : session.rootedViewBefore(boundary);
     }
     private ManagedEpochReceipt receipt(DocumentId id, long epoch) {
         ManagedEpochReceipt staged = stagedReceipts.get(id);
