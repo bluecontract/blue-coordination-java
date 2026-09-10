@@ -1986,7 +1986,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         Map<DocumentId, RootedDocumentView> attachmentViews = RootedAttachmentCapture.select(
-                current, selected.existingTargets(), documents);
+                current, selected, documents);
         Set<DocumentId> existingMembers;
         if (current.rootedEvidence() == null) {
             existingMembers = forwardExistingMembers(current.existingMemberSet(), selected.existingTargets(),
@@ -2095,6 +2095,31 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     occurrence.demand().sourcePath());
             ManagedOccurrenceBinding retained = rows.get(key);
             if (retained != null) {
+                // Read expansion cannot turn an original inactive reservation
+                // into another lineage. Keep that input so the processor can
+                // reject the attempted retarget under the reservation rule.
+                if (current.rootedEvidence() != null
+                        && !retained.active()
+                        && retained.pendingHistoricalEpoch() == null
+                        && !retained.targetDocumentId().value().equals(occurrence.targetDocumentId().value())
+                        && current.input().snapshot().occurrences().stream().anyMatch(row ->
+                                row.occurrenceIdentity().equals(retained.occurrenceIdentity())
+                                        && row.bindingIdentity().equals(retained.bindingIdentity()))) {
+                    ManagedDocumentSnapshot target = current.input().snapshot()
+                            .managedDocument(closureId(occurrence.targetDocumentId()));
+                    if (target != null && target.initialized()
+                            && target.epoch() == occurrence.admittedSourceEpoch()
+                            && target.blueId().equals(occurrence.demand().suppliedValueBlueId())) {
+                        ManagedOccurrenceEvidenceResolution exact = ManagedOccurrenceEvidenceResolution.derived(
+                                occurrence.demand(), target.documentId(), target.epoch());
+                        ManagedOccurrenceEvidenceResolution previous = retryResolutions.putIfAbsent(
+                                occurrence.demand().demandIdentity(), exact);
+                        if (previous != null && !previous.resolutionIdentity().equals(exact.resolutionIdentity())) {
+                            throw new IllegalStateException("Automatic retry changed an exact managed-occurrence resolution " + key);
+                        }
+                    }
+                    continue;
+                }
                 // A committed reservation is immutable input. Select its old
                 // source inside the processor retry, never by rewriting the read expansion.
                 boolean reservedHistory = !retained.active() && retained.pendingHistoricalEpoch() == null
