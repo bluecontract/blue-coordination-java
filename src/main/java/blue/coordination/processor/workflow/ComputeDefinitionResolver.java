@@ -31,6 +31,17 @@ final class ComputeDefinitionResolver {
         return resolve(stepNode, context, metrics);
     }
 
+    String definitionPointer(FrozenNode stepNode, StepExecutionContext context) {
+        FrozenNode definition = FrozenNodeUtil.property(stepNode, "definition");
+        if (definition == null || definition.getReferenceBlueId() != null) {
+            return null;
+        }
+        String text = FrozenNodeUtil.text(definition);
+        return text != null && !text.trim().isEmpty()
+                ? resolvePointer(text.trim(), context)
+                : null;
+    }
+
     FrozenNode resolve(FrozenNode stepNode,
                        StepExecutionContext context,
                        BexProcessingMetrics invocationMetrics) {

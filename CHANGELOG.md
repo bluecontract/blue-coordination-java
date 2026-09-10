@@ -25,6 +25,10 @@ the new 3.x API before the first stable 3.0.0 release.
   so a multi-document invocation stops further selection when the budget is
   reached. Exclude unowned dependency calculations and replayed publications;
   an individual invocation remains atomic even when it exceeds the budget.
+- Fix Compute definitions selected by name or document pointer during
+  initialization and operation execution. Exclude inherited empty definition
+  declarations from BEX input and validate static types through the selected
+  definition's working-document paths.
 
 ## 3.0.0-rc.6 - historical representation candidate
 

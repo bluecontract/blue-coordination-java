@@ -18,7 +18,7 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v10|exact-definition-identity|canonical-bex-source"
+            "compute-program-v11|exact-definition-identity|canonical-bex-source"
                     + "|strict-statements|exact-field-presence";
 
     private final BexProcessingMetrics metrics;
@@ -78,6 +78,10 @@ final class ComputeProgramNormalizer {
      * or asking BEX to interpret resolved contract structure.</p>
      */
     FrozenNode definitionSource(FrozenNode definitionNode) {
+        return definitionSource(definitionNode, false);
+    }
+
+    FrozenNode definitionSource(FrozenNode definitionNode, boolean resolvedDefinition) {
         if (definitionNode == null) {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
@@ -87,10 +91,29 @@ final class ComputeProgramNormalizer {
             return FrozenNode.fromResolvedNode(
                     canonicalStaticSource(definitionNode.toNode()));
         }
-        return FrozenNode.fromResolvedNode(
-                definitionSource(
-                        frozenDefinitionInput(
-                                definitionNode)));
+        Node input = frozenDefinitionInput(definitionNode);
+        if (resolvedDefinition) {
+            omitInheritedEmptyMap(input, definitionNode, "constants");
+            omitInheritedEmptyMap(input, definitionNode, "functions");
+        }
+        return FrozenNode.fromResolvedNode(definitionSource(input));
+    }
+
+    private void omitInheritedEmptyMap(Node input, FrozenNode definition, String key) {
+        FrozenNode field = FrozenNodeUtil.property(definition, key);
+        FrozenNode inherited = FrozenNodeUtil.property(definition.getType(), key);
+        if (field == null || inherited == null
+                || !field.resolvedStructuralKey().equals(inherited.resolvedStructuralKey())) {
+            return;
+        }
+        // Resolution adds optional Dictionary declarations even when the
+        // definition supplies no entries. Only an unchanged inherited empty
+        // declaration is absent executable input; malformed authored values
+        // and containers must still reach the ordinary compiler checks.
+        Node contents = field.toNode().name(null).description(null).type((Node) null);
+        if (NodeUtil.isEmpty(contents)) {
+            input.getProperties().remove(key);
+        }
     }
 
     Node program(Node stepNode) {
