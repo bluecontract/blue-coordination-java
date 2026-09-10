@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Isolated Coordination canonical document-view correction; focused evidence only, not full qualification or an exported candidate.",
+  "worktree": "/Users/kamil/Documents/Projects/Blue/worktrees/rooted-canonical-document-view-fix",
+  "branch": "codex/fix-rooted-canonical-document-view",
+  "baseCommit": "9807ca3901829f9ef965d1c6a8a63bff516081ff",
+  "java": {
+    "home": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home",
+    "version": "17.0.16+12-LTS-247"
+  },
+  "upstreamRepositoryRoot": "/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1",
+  "upstreamCommits": {
+    "language": "7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+    "bex": "ab72af14ee54c6123e6d80349956af373a887680",
+    "catalog": "0b68744ba6456ef312d1ba87a27096bd2ac5341f"
+  },
+  "red": {
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "codeState": "Base commit plus the retained nested SDK test method and source/consumer YAML resources; before adapter production change. The same nested test body remains in the green owner, which additionally tests a two-step typed preview.",
+    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew test --tests blue.coordination.sdk.RootedNestedDocumentValueIdentityTest -PblueDependencyMode=immutable-development-contracts -PblueDevelopmentVersion=3.0.0-dev.9807ca3901829f9ef965d1c6a8a63bff516081ff -PblueContractsRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/language -PblueContractsVersion=3.1.0-dev.7ec0fdaafff41ad8e41387e7e5647d5a800d807c -PblueContractsSourceCommit=7ec0fdaafff41ad8e41387e7e5647d5a800d807c -PblueContractsManifestSha256=sha256:4ec8cd6fb225503c32ea28b9174d96acacca426c9f6b0b41ddb16880c27bfb81 -PblueBexRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/bex -PblueBexVersion=1.1.0-dev.ab72af14ee54c6123e6d80349956af373a887680 -PblueBexSourceCommit=ab72af14ee54c6123e6d80349956af373a887680 -PblueBexManifestSha256=sha256:9053a287e0107eb145c4af8a3dae0ed2eabb1f06529ba7b2d8b0ee5c7fe61855 -PblueRepositoryRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/catalog -PblueRepositoryVersion=3.0.0-dev.0b68744ba6456ef312d1ba87a27096bd2ac5341f -PblueRepositorySourceCommit=0b68744ba6456ef312d1ba87a27096bd2ac5341f -PblueRepositoryManifestSha256=sha256:689fea3a72ce6bcc3488ae45437aa15ddfe05edb50e59c8a5ba356674ffec08d -PtestJavaVersion=17 --max-workers=1 --no-parallel --no-daemon --offline --console=plain",
+    "missingExactBlueId": "4rN9acTdLU58Pd8egeY6yNMjacuRksWvqKn6ZYyndyPk",
+    "exactC0": "HsqnMgReSkSYRbH6m4V6z8PS7wuTsRSMVFBiGk9Rkssp",
+    "workIdentity": "sha256:d34836b5f7c6ac5fc8f7ecb1fd68c6324c1f0fd3b2c65903ffe9b48db18fa27e"
+  },
+  "green": {
+    "tests": 23,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "command": "JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home ./gradlew test --rerun-tasks --tests blue.coordination.sdk.RootedNestedDocumentValueIdentityTest --tests blue.coordination.processor.bex.ScopedProcessorExecutionContextBexDocumentViewTest --tests blue.coordination.sdk.SdkBexLiteralTypeAdmissionTest --tests blue.coordination.processor.workflow.WorkflowBexGasLedgerHostTest --tests blue.coordination.processor.SelectedWorkflowBodyLocalityTest -PblueDependencyMode=immutable-development-contracts -PblueDevelopmentVersion=3.0.0-dev.9807ca3901829f9ef965d1c6a8a63bff516081ff -PblueContractsRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/language -PblueContractsVersion=3.1.0-dev.7ec0fdaafff41ad8e41387e7e5647d5a800d807c -PblueContractsSourceCommit=7ec0fdaafff41ad8e41387e7e5647d5a800d807c -PblueContractsManifestSha256=sha256:4ec8cd6fb225503c32ea28b9174d96acacca426c9f6b0b41ddb16880c27bfb81 -PblueBexRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/bex -PblueBexVersion=1.1.0-dev.ab72af14ee54c6123e6d80349956af373a887680 -PblueBexSourceCommit=ab72af14ee54c6123e6d80349956af373a887680 -PblueBexManifestSha256=sha256:9053a287e0107eb145c4af8a3dae0ed2eabb1f06529ba7b2d8b0ee5c7fe61855 -PblueRepositoryRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/catalog -PblueRepositoryVersion=3.0.0-dev.0b68744ba6456ef312d1ba87a27096bd2ac5341f -PblueRepositorySourceCommit=0b68744ba6456ef312d1ba87a27096bd2ac5341f -PblueRepositoryManifestSha256=sha256:689fea3a72ce6bcc3488ae45437aa15ddfe05edb50e59c8a5ba356674ffec08d -PtestJavaVersion=17 --max-workers=1 --no-parallel --no-daemon --offline --console=plain > /Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/source-stable-focused-green.log 2>&1",
+    "tasksExecuted": 10,
+    "sourceStable": true,
+    "sourceBefore": {
+      "files": {
+        "docs/rooted-canonical-document-view.md": "bcfb67fd5ab0e821925a221aa8d29ee3615d76fd0ed110669586c6e2968b120c",
+        "src/main/java/blue/coordination/processor/bex/ScopedProcessorExecutionContextBexDocumentView.java": "65025bb71592f3ecb025aedd95a51d575185feedd8b3794760d642154f63d51d",
+        "src/test/java/blue/coordination/processor/bex/ScopedProcessorExecutionContextBexDocumentViewTest.java": "85e39a1684ea5a1d4c5379840b7da4dd1a11d1972d28f82462285e8753db7e89",
+        "src/test/java/blue/coordination/sdk/RootedNestedDocumentValueIdentityTest.java": "9af9a6dc308baaaded3b0f8f8b1d3c86dc02b87ad73b2f12e21bdc42cccb33c3",
+        "src/test/resources/rooted/canonical-document-view-consumer.yaml": "13125de72eff52ff088c814b8ffad3b04b106584c5871c71a2c6f2c98c821fb5",
+        "src/test/resources/rooted/canonical-document-view-source.yaml": "02b29aafc5a45f74ce58936a23834d8ca29402f9ea506036a722800bb1b26cbe"
+      },
+      "all_source_files": 742,
+      "all_source_digest": "69ea54cc1de7ea302830626c24f160c341c9da9fc67788b0fdd476add0d3df04"
+    },
+    "sourceAfter": {
+      "all_source_files": 742,
+      "all_source_digest": "69ea54cc1de7ea302830626c24f160c341c9da9fc67788b0fdd476add0d3df04"
+    },
+    "reports": [
+      {
+        "path": "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/focused-green/TEST-blue.coordination.processor.SelectedWorkflowBodyLocalityTest.xml",
+        "sha256": "709ceabdc8c66390f50d85bbb6d072e3f094710b71951a2e98e7787de8011396",
+        "owner": "blue.coordination.processor.SelectedWorkflowBodyLocalityTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-10T23:20:23.420Z",
+        "seconds": "2.699"
+      },
+      {
+        "path": "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/focused-green/TEST-blue.coordination.processor.bex.ScopedProcessorExecutionContextBexDocumentViewTest.xml",
+        "sha256": "d6f85a4737e95d1a201d12e4205cf34ddd7fe851cb396c24e9042b5d394be40f",
+        "owner": "blue.coordination.processor.bex.ScopedProcessorExecutionContextBexDocumentViewTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-10T23:20:26.120Z",
+        "seconds": "0.109"
+      },
+      {
+        "path": "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/focused-green/TEST-blue.coordination.processor.workflow.WorkflowBexGasLedgerHostTest.xml",
+        "sha256": "807ecad481f1bd2bf6b87d6a8617b7075c33644fbe39242e9bbac07c6c903e14",
+        "owner": "blue.coordination.processor.workflow.WorkflowBexGasLedgerHostTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-10T23:20:26.229Z",
+        "seconds": "0.002"
+      },
+      {
+        "path": "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/focused-green/TEST-blue.coordination.sdk.RootedNestedDocumentValueIdentityTest.xml",
+        "sha256": "aa937530e39e655f1a9c9beedcf1245190fe76e666142222a578c0f5beb5d4a0",
+        "owner": "blue.coordination.sdk.RootedNestedDocumentValueIdentityTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-10T23:20:26.232Z",
+        "seconds": "3.851"
+      },
+      {
+        "path": "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/focused-green/TEST-blue.coordination.sdk.SdkBexLiteralTypeAdmissionTest.xml",
+        "sha256": "e950923f3cedd01fbe64a074e6921ecb5c1ac161b1dff914fd0491afe6146f9f",
+        "owner": "blue.coordination.sdk.SdkBexLiteralTypeAdmissionTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-10T23:20:30.083Z",
+        "seconds": "1.743"
+      }
+    ]
+  },
+  "artifactSha256": {
+    "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/sdk-red.log": "e45b2a4a6ae739a10e0dd471ea131722608d1b6994708587cbc1028d9454d7da",
+    "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/sdk-red/TEST-blue.coordination.sdk.RootedNestedDocumentValueIdentityTest.xml": "99554cbd7ee9db2bdd16062d03fd8f95d8f364c55011a975ac3b3ffa38cddb08",
+    "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/source-stable-focused-green.log": "9165ab54f1a3d1bf5d20feff4b91bf16fbd9ffeed67feda97d1ae4dee13a6e34",
+    "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/green-tested-source.tar": "39acb490bb799c44255cde30ac3101e3565b1243052ed494e64827dc5167726b",
+    "/Users/kamil/Documents/Projects/Blue/rooted-canonical-document-view-evidence.HyVo0V/tracked-source.patch": "aeaaaddebb0bac1011ba83f3f6e75722f456155d0210112eccbba14b44c5a692",
+    "/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/language/artifact-manifest.json": "4ec8cd6fb225503c32ea28b9174d96acacca426c9f6b0b41ddb16880c27bfb81",
+    "/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/bex/artifact-manifest.json": "9053a287e0107eb145c4af8a3dae0ed2eabb1f06529ba7b2d8b0ee5c7fe61855",
+    "/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/catalog/artifact-manifest.json": "689fea3a72ce6bcc3488ae45437aa15ddfe05edb50e59c8a5ba356674ffec08d"
+  },
+  "postGateChanges": "Documentation-only physical-cost note and this receipt. Tested production, tests, and resources are unchanged. green-tested-source.tar includes the exact documentation version present during the source-stable gate.",
+  "counting": "23 is the final focused gate count. Earlier overlapping focused runs and test-authoring failures are not summed. The SDK semantic red is retained separately.",
+  "constraints": [
+    "No Language/BEX source change",
+    "No artifact export",
+    "No baseline binding change",
+    "No MyOS test run",
+    "No full library suite",
+    "No remote publication"
+  ]
+}

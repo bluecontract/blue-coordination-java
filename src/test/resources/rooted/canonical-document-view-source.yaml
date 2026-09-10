@@ -1,0 +1,46 @@
+name: Nested existing source B
+initializationCount: 0
+counter: 0
+contracts:
+  lifecycleChannel:
+    type:
+      blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+    order: 0
+  onProcessingInitiated:
+    type: Coordination/Sequential Workflow
+    channel: lifecycleChannel
+    order: 0
+    event:
+      type:
+        blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /initializationCount
+              val: {$add: [{$document: /initializationCount}, 1]}
+          - $return: true
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: retained/nested-existing/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  increment:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /counter
+              val: {$add: [{$document: /counter}, 1]}
+          - $appendEvent:
+              type: Coordination/Event
+              kind: CatchUp/Source Changed
+          - $return: true

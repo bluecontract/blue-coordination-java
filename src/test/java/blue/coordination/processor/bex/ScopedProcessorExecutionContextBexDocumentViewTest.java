@@ -2,17 +2,53 @@ package blue.coordination.processor.bex;
 
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
+import blue.bex.value.BexFrozenWriter;
+import blue.coordination.processor.CoordinationTestRuntime;
 import blue.language.model.Node;
 import blue.language.snapshot.FrozenNode;
+import blue.repo.BlueRepository;
 
 import java.math.BigInteger;
 
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScopedProcessorExecutionContextBexDocumentViewTest {
+
+    @Test
+    void shouldKeepAuthenticatedCanonicalChildBodySeparateFromExpandedSemanticType() {
+        try (var runtime = CoordinationTestRuntime.create(BlueRepository.current())) {
+            var snapshot = runtime.resolveToSnapshot(runtime.yamlToNode("""
+                    candidateC:
+                      type: {name: Typed candidate}
+                      own: 7
+                    """));
+            var canonicalChild = snapshot.canonicalAt("/candidateC");
+            var resolvedChild = snapshot.resolvedAt("/candidateC");
+            assertTrue(canonicalChild.getType().isReferenceOnly());
+            assertFalse(resolvedChild.getType().isReferenceOnly());
+            RecordingFrozenAccess access = new RecordingFrozenAccess();
+            access.workingCanonical = snapshot.frozenCanonicalRoot();
+            access.workingResolved = snapshot.frozenResolvedRoot();
+            var view = new ScopedProcessorExecutionContextBexDocumentView(access, null);
+
+            var child = view.resolvedAt("/").get("candidateC");
+
+            assertEquals(canonicalChild.blueId(), child.exactBlueId());
+            assertEquals(BigInteger.valueOf(7), child.get("own").asInteger());
+            assertEquals("Typed candidate", child.toNode().getType().getName());
+            var output = BexFrozenWriter.toFrozen(child);
+            assertFalse(output.isReferenceOnly());
+            assertTrue(canonicalChild.sameResolvedStructure(output));
+            assertEquals(canonicalChild.blueId(), output.blueId());
+            assertEquals(2, access.workingDirectReads);
+            assertEquals(0, access.processorDirectReads);
+        }
+    }
 
     @Test
     void shouldPreserveResolvedSemanticsForWorkingDocumentDirectRead() {
@@ -53,6 +89,8 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         access.workingResolved = exact.canonical;
         access.processorCanonical = exact.canonical;
         access.processorResolved = exact.resolved;
+        access.descendantPointer = "/status/marker";
+        access.descendant = FrozenNode.fromNode(new Node().value("processor snapshot"));
         ScopedProcessorExecutionContextBexDocumentView view =
                 new ScopedProcessorExecutionContextBexDocumentView(
                         access, null);
@@ -67,7 +105,7 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         assertEquals(
                 "processor snapshot",
                 read.get("marker").asText());
-        assertEquals(2, access.workingDirectReads);
+        assertEquals(4, access.workingDirectReads);
         assertEquals(2, access.processorDirectReads);
         assertEquals(0, access.rootReads);
     }
@@ -114,6 +152,8 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
                         new Node().properties(
                                 "nested",
                                 exact.resolved.toNode()));
+        access.descendantPointer = "/nested/marker";
+        access.descendant = FrozenNode.fromNode(new Node().value("root fallback"));
         ScopedProcessorExecutionContextBexDocumentView view =
                 new ScopedProcessorExecutionContextBexDocumentView(
                         access, null);
@@ -128,7 +168,7 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         assertEquals(
                 "root fallback",
                 read.get("marker").asText());
-        assertEquals(2, access.workingDirectReads);
+        assertEquals(4, access.workingDirectReads);
         assertEquals(2, access.processorDirectReads);
         assertEquals(2, access.rootReads);
     }
@@ -180,8 +220,13 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
 
         // then
         assertTrue(child.isExact());
-        assertEquals(resolvedChild.blueId(), child.exactBlueId());
-        assertEquals("resolved", child.get("marker").asText());
+        assertEquals(canonicalChild.blueId(), child.exactBlueId());
+        FrozenNode output = BexFrozenWriter.toFrozen(child);
+        assertTrue(output.isReferenceOnly());
+        assertEquals(canonicalChild.blueId(), output.getReferenceBlueId());
+        // This deliberately invalid host pair supplies no canonical child
+        // evidence. It must not invent the resolved body's child identity.
+        assertThrows(blue.bex.BexException.class, () -> child.get("marker"));
     }
 
     @Test
@@ -316,6 +361,8 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         private FrozenNode processorResolved;
         private FrozenNode workingCanonicalRoot;
         private FrozenNode workingResolvedRoot;
+        private String descendantPointer;
+        private FrozenNode descendant;
         private int workingDirectReads;
         private int processorDirectReads;
         private int rootReads;
@@ -335,6 +382,7 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         public FrozenNode workingCanonicalAt(
                 String absolutePointer) {
             workingDirectReads++;
+            if (absolutePointer.equals(descendantPointer)) return descendant;
             return workingCanonical;
         }
 
@@ -342,6 +390,7 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
         public FrozenNode workingResolvedAt(
                 String absolutePointer) {
             workingDirectReads++;
+            if (absolutePointer.equals(descendantPointer)) return descendant;
             return workingResolved;
         }
 
