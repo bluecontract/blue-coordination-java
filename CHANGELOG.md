@@ -5,6 +5,8 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Bind RC preparation and staging readiness to the RC8 declaration after RC7
+  publication, retaining the complete capability inventory and release tier.
 - Collect exact topology identity evidence from its original JUnit cases and
   verify the complete artifact after parallel workers finish, preserving all
   scenarios and repeat counts without executing the same campaign twice.
