@@ -84,7 +84,7 @@ def registerScope = { String name, List<String> selected ->
     tasks.register(name) {
         group = 'verification'
         description = 'Verifies full class coverage and successful JUnit execution without skipped tests.'
-        dependsOn scopePolicy
+        dependsOn scopePolicy, 'verifyCyclicTopologyIdentityEvidence'
         selected.each { suiteName ->
             dependsOn tasks.named(suiteName)
             inputs.file(inventories[suiteName])
@@ -136,16 +136,24 @@ def registerScope = { String name, List<String> selected ->
                 results[suiteName] = inspectScope(expected, cases, fullTask) + [
                         maxParallelForks: task.maxParallelForks, testCases: cases]
             }
-            boolean passed = results.values().every { it.passed }
+            // The exporter case collects during a full run. Its exact runtime
+            // comparison must also have executed successfully in this graph;
+            // excluding or disabling it cannot leave a green release gate.
+            def topology = tasks.named('verifyCyclicTopologyIdentityEvidence').get()
+            boolean topologyVerified = gradle.taskGraph.hasTask(topology)
+                    && topology.enabled && topology.state.executed
+                    && !topology.state.skipped && topology.state.failure == null
+            boolean passed = results.values().every { it.passed } && topologyVerified
             File report = output.get().asFile
             report.parentFile.mkdirs()
             report.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
                     schemaId: 'blue-coordination-test-execution-scope-v1',
                     status: passed ? 'PASS' : 'FAIL', coordinationVersion: project.version.toString(),
                     javaVersion: providers.gradleProperty('testJavaVersion').getOrElse('17'),
+                    topologyEvidenceVerified: topologyVerified,
                     suites: results])) + '\n', 'UTF-8')
             if (!passed) {
-                throw new GradleException('Test execution scope is incomplete or unsuccessful; see ' + report)
+                throw new GradleException('Test execution scope or topology evidence is incomplete or unsuccessful; see ' + report)
             }
             logger.lifecycle('Complete execution scope verified: {} test cases across {} suites',
                     results.values().sum { it.executedTests }, selected.size())

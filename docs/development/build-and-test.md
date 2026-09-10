@@ -154,7 +154,8 @@ finish, `verifyCyclicTopologyIdentityEvidence` combines those fragments in the
 original scenario order and compares the generated JSON and Markdown exactly
 with the committed artifacts. The finalizer runs for `test`, `check`, and
 `releaseCheck`; missing contributors, changed identities, and incorrect repeat
-counts fail verification.
+counts fail verification. The execution-scope gates also reject an excluded,
+disabled, or skipped topology comparison, even when passing JUnit reports exist.
 
 This removes the exporter's second execution of the same 20 cases. All 32
 scenarios, six additional finite-ring repetitions, and the additional rollback
