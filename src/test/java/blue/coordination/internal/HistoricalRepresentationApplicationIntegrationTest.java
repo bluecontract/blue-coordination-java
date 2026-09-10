@@ -102,7 +102,7 @@ final class HistoricalRepresentationApplicationIntegrationTest {
     }
 
     private static final class Graph implements AutoCloseable {
-        final BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds().build();
+        final BlueCoordination blue = LegacyContracts10TestProfile.sdkBuilder().contentDerivedDocumentIds().build();
         final Map<String, ExactBlueValue> originals = new LinkedHashMap<>();
         final Map<String, DocumentHandle> handles = new LinkedHashMap<>();
         final TimelineHandle timeline;
