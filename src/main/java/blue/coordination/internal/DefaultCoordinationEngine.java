@@ -1169,6 +1169,22 @@ public final class DefaultCoordinationEngine
     }
 
     /**
+     * Observes a previously emitted prerequisite without executing its source or requesting parent.
+     * Frozen root, invocation, demand, source, authored identity and cutoff must remain unchanged;
+     * physical selection fields may refresh. Missing correlation or a terminal requester is STALE,
+     * never SATISFIED. Provider reads may retain immutable exact evidence.
+     * @param expected original descriptor whose frozen logical authority is being observed
+     * @return current typed observation, with a fresh descriptor only when still pending
+     * @throws IllegalArgumentException if retained correlation has different frozen logical operands
+     */
+    public synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        return rootedSourceDiscoveries.observe(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
      * Revalidates and executes exactly one separately reported source prerequisite.
      * The requesting parent is never retried inside this call.
      * @param expected exact descriptor from sourceHistoryPrerequisites

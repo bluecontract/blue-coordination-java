@@ -651,6 +651,15 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     private final Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceHistoryProcessingResults = new LinkedHashMap<>();
 
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        Objects.requireNonNull(expected, "expected");
+        exactNodeProvider.beginLookupScope();
+        try { return engine.observeSourceHistoryPrerequisite(expected); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+
     synchronized Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
         ensureOpen();
         return Optional.ofNullable(sourceHistoryProcessingResults.get(Objects.requireNonNull(expected, "expected")));

@@ -3,6 +3,7 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.SourceHistoryPrerequisite;
+import blue.coordination.api.SourceHistoryPrerequisiteObservation;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.Timeline;
 import blue.coordination.sdk.ExactNodeProvider;
@@ -52,7 +53,7 @@ final class RootedSourceDiscoveryCoordinator {
             Pending candidate = candidate(current, attempt, occurrence);
             if (candidate == null) { accepted.add(occurrence); continue; }
             Prepared next = prepare(candidate);
-            if (next == null) { pending.remove(candidate.key()); accepted.add(occurrence); continue; }
+            if (next == null) { accepted.add(occurrence); continue; }
             pending.put(candidate.key(), candidate);
             missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
                     ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
@@ -105,11 +106,33 @@ final class RootedSourceDiscoveryCoordinator {
             if (!candidate.owns(requestingRoot)) continue;
             if (!stillCurrent(candidate)) { pending.remove(candidate.key()); continue; }
             Prepared next = prepare(candidate);
-            if (next == null) pending.remove(candidate.key()); else values.add(next.descriptor());
+            if (next != null) values.add(next.descriptor());
         }
         values.sort(java.util.Comparator.comparing(SourceHistoryPrerequisite::demandIdentity)
                 .thenComparing(value -> value.sourceDocumentId().value()));
         return List.copyOf(values);
+    }
+
+    SourceHistoryPrerequisiteObservation observe(SourceHistoryPrerequisite expected) {
+        Pending candidate = pending.get(key(expected.requestingInvocationIdentity(), expected.demandIdentity()));
+        if (candidate == null) return new SourceHistoryPrerequisiteObservation(
+                SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
+        if (!expected.requestingRoot().value().equals(candidate.invocation().rootedEvidence()
+                        .context().canonicalRootDocumentId().value())
+                || !expected.sourceDocumentId().equals(candidate.source())
+                || !expected.authoredBlueId().equals(candidate.authored().blueId())
+                || !expected.cutoffExclusive().equals(candidate.cutoff()))
+            throw new IllegalArgumentException("Changed source-prerequisite logical authority");
+        if (!stillCurrent(candidate)) {
+            pending.remove(candidate.key());
+            return new SourceHistoryPrerequisiteObservation(
+                    SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
+        }
+        Prepared next = prepare(candidate);
+        return next == null ? new SourceHistoryPrerequisiteObservation(
+                SourceHistoryPrerequisiteObservation.Status.SATISFIED, Optional.empty())
+                : new SourceHistoryPrerequisiteObservation(
+                        SourceHistoryPrerequisiteObservation.Status.PENDING, Optional.of(next.descriptor()));
     }
 
     Optional<SourceHistoryPrerequisiteResult> completed(SourceHistoryPrerequisite expected) {
@@ -147,6 +170,8 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     private boolean stillCurrent(Pending candidate) {
+        // Terminal rejections can consume the exact requester without changing its document head.
+        if (documents.hasPublicationReceipt(candidate.invocation().rootedEvidence().terminalKey())) return false;
         for (var owner : candidate.invocation().rootedEvidence().context().entryOwners()) {
             DocumentId id = ContractsClosureAdapter.coordinationId(owner);
             var prior = candidate.invocation().rootedEvidence().publicationFence(id);
