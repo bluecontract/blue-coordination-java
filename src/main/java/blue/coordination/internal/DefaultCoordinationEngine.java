@@ -1755,7 +1755,8 @@ public final class DefaultCoordinationEngine
         if (contractsClosureProfile.rootedCheckpoint()) {
             var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
             if (supplied.journalAdmissionAvailable()) return ProcessingSelection.journal();
-            if (scan.heads().isEmpty()) return ProcessingSelection.none();
+            if (scan.heads().isEmpty()) return contractsJournalCoordinator.hasCompletableRootedTransport(scan)
+                    ? ProcessingSelection.journal() : ProcessingSelection.none();
             var next = scan.heads().get(0).selection();
             if (next.localHistorical() != null) return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
             return next.historical() == null ? ProcessingSelection.journal()
