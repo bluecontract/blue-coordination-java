@@ -162,9 +162,8 @@ final class RootedLocalHistoryRecoveryTest {
                 }
             }
 
-            // Include already-admitted transport envelopes, but allow only this one successful transition.
-            var completed = f.blue.processing().drainJournal(new DrainBudget(
-                    f.blue.advanced().auditTimelineEntries().size(), 1L));
+            // Select and commit at most one root input; transport completion is bookkeeping.
+            var completed = f.blue.processing().drainJournal(new DrainBudget(1L, 1L));
             assertEquals(EntryDisposition.APPLIED, completed.entry(entry).disposition());
             assertEquals(1L, completed.stats().committedTransitions());
             assertEquals(1L, independent.snapshot().longAt("/counter"));
@@ -179,8 +178,7 @@ final class RootedLocalHistoryRecoveryTest {
             assertEquals(ProcessingSelection.Kind.JOURNAL, f.blue.advanced().auditNextProcessingSelection().kind());
             assertEquals(ProcessingSelection.Kind.JOURNAL,
                     f.blue.advanced().auditNextProcessingSelection(ProcessingAvailability.of(true)).kind());
-            var second = f.blue.processing().drainJournal(new DrainBudget(
-                    f.blue.advanced().auditTimelineEntries().size(), 1L));
+            var second = f.blue.processing().drainJournal(new DrainBudget(1L, 1L));
             assertEquals(EntryDisposition.APPLIED, second.entry(secondEntry).disposition());
             assertEquals(1L, second.stats().committedTransitions());
             assertEquals(2L, independent.snapshot().longAt("/counter"));
@@ -190,7 +188,7 @@ final class RootedLocalHistoryRecoveryTest {
 
             // Only the retained local failure remains. It is reported once and deferred,
             // even when the full driver has room for two selected attempts in this call.
-            var bounded = f.blue.processing().drain(new DrainBudget(2L, 1L));
+            var bounded = f.blue.processing().drain(new DrainBudget(1L, 2L));
             assertTrue(bounded.entries().isEmpty());
             assertEquals(1, bounded.rootedRetainedResults().size());
             assertEquals(terminal.closureId(), bounded.rootedRetainedResults().get(0).closureId());

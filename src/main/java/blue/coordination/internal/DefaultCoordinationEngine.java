@@ -1215,10 +1215,21 @@ public final class DefaultCoordinationEngine
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
             }
-            return rootedReadiness(root, executeRootSelection(next, started), started);
+            var anchor = documents.sessions().stream().map(DocumentSession::documentId)
+                    .filter(id -> !next.excludedConsumers().contains(id))
+                    .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
+            var completed = executeRootSelection(next, started);
+            contractsRecoveryState.rootedSchedule.completed(anchor, next, completed);
+            return rootedReadiness(root, completed, started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
+    }
+
+    private ProcessingDrainReceipt executeScheduledRoot(RootedCheckpointDriver.Head head) {
+        var result = executeRootSelection(head.selection(), System.nanoTime());
+        contractsRecoveryState.rootedSchedule.completed(head.root(), head.selection(), result);
+        return result;
     }
 
     private ProcessingDrainReceipt executeRootSelection(RootedCheckpointDriver.Selection next, long started) {
@@ -1227,9 +1238,12 @@ public final class DefaultCoordinationEngine
             var step = next.localHistorical();
             var batch = contractsClosureAdapter.localHistoryBatch(step);
             var completed = executeRootBatch(batch, started);
+            var attempts = completed.contractsAttemptsFor(step.anchor().blueId());
+            // A terminal LIVE rejection consumes its input, but failed retained work remains pending.
+            boolean published = !attempts.isEmpty() && attempts.stream().allMatch(ContractsClosureDispatchAttempt::published);
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
-                    completed.quiescent(), completed.paused(), completed.committedProcessTransitions(),
-                    completed.elapsedNanos()).withRootedRetainedAttempts(completed.contractsAttemptsFor(step.anchor().blueId())
+                    published, completed.paused(), completed.committedProcessTransitions(),
+                    completed.elapsedNanos()).withRootedRetainedAttempts(attempts
                             .stream().map(attempt -> new ProcessingDrainReceipt.RootedRetainedAttempt(
                                     step.root(), step.work(), attempt)).toList());
         }
@@ -1341,9 +1355,9 @@ public final class DefaultCoordinationEngine
         }
         if (contractsClosureProfile.rootedCheckpoint()) {
             var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter);
-            var selected = driver.scan(journal.entries(), null).heads().get(0);
+            var selected = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
             long started = System.nanoTime();
-            var completed = executeRootSelection(selected.selection(), started);
+            var completed = executeScheduledRoot(selected);
             if (!completed.quiescent()) return completed;
             var remaining = driver.scan(journal.entries(), null);
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
@@ -1754,10 +1768,11 @@ public final class DefaultCoordinationEngine
         }
         if (contractsClosureProfile.rootedCheckpoint()) {
             var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
-            if (supplied.journalAdmissionAvailable()) return ProcessingSelection.journal();
-            if (scan.heads().isEmpty()) return contractsJournalCoordinator.hasCompletableRootedTransport(scan)
+            var selected = contractsRecoveryState.rootedSchedule.next(scan, supplied.journalAdmissionAvailable(), Set.of());
+            if (selected == null) return supplied.journalAdmissionAvailable()
+                    || contractsJournalCoordinator.hasCompletableRootedTransport(scan)
                     ? ProcessingSelection.journal() : ProcessingSelection.none();
-            var next = scan.heads().get(0).selection();
+            var next = selected.selection();
             if (next.localHistorical() != null) return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
             return next.historical() == null ? ProcessingSelection.journal()
                     : ProcessingSelection.managedEpochApplication(next.historical());
@@ -2206,8 +2221,8 @@ public final class DefaultCoordinationEngine
             boolean managedAllowed) {
         if (contractsClosureProfile.rootedCheckpoint()) {
             return new RootedDrainCoordinator(new RootedCheckpointDriver(documents, contractsClosureAdapter),
-                    journal, contractsJournalCoordinator,
-                    head -> executeRootSelection(head.selection(), System.nanoTime()))
+                    journal, contractsJournalCoordinator, contractsRecoveryState.rootedSchedule,
+                    this::executeScheduledRoot)
                     .drain(inclusiveCutoff, budget, managedAllowed);
         }
         long started = System.nanoTime();
@@ -2642,6 +2657,7 @@ public final class DefaultCoordinationEngine
 
     /** In-memory stand-in for the durable feeder publication boundary. */
     private static final class ContractsRecoveryState {
+        private final RootedProcessingSchedule rootedSchedule = new RootedProcessingSchedule();
         private final ContractsRootFeederWindow.DurableState feederWindow =
                 new ContractsRootFeederWindow.DurableState();
         private final ContractsJournalDrainCoordinator.DurableState

@@ -23,14 +23,16 @@ final class RootedDrainCoordinator {
     private final RootedCheckpointDriver driver;
     private final InMemoryTimelineJournal journal;
     private final ContractsJournalDrainCoordinator transport;
+    private final RootedProcessingSchedule schedule;
     private final Function<RootedCheckpointDriver.Head, ProcessingDrainReceipt> execute;
 
     RootedDrainCoordinator(RootedCheckpointDriver driver, InMemoryTimelineJournal journal,
-            ContractsJournalDrainCoordinator transport,
+            ContractsJournalDrainCoordinator transport, RootedProcessingSchedule schedule,
             Function<RootedCheckpointDriver.Head, ProcessingDrainReceipt> execute) {
         this.driver = driver;
         this.journal = journal;
         this.transport = transport;
+        this.schedule = schedule;
         this.execute = execute;
     }
 
@@ -48,9 +50,9 @@ final class RootedDrainCoordinator {
         List<ProcessingDrainReceipt.RootedRetainedAttempt> localAttempts = new ArrayList<>();
         RootedCheckpointDriver.Scan remaining = driver.scan(journal.entries(), cutoff);
         while (selected < budget.maxSelectedEntries() && committed < budget.maxCommittedProcessTransitions()) {
-            var next = remaining.heads().stream().filter(head -> !deferred.contains(head.root())).findFirst();
-            if (next.isEmpty() || !managedAllowed && (next.get().selection().historical() != null || next.get().selection().localHistorical() != null)) break;
-            var result = execute.apply(next.get());
+            var next = schedule.next(remaining, false, deferred);
+            if (next == null || !managedAllowed && next.selection().live() == null) break;
+            var result = execute.apply(next);
             selected = Math.addExact(selected, 1L);
             committed = Math.addExact(committed, result.committedProcessTransitions());
             merge(outcomes, result.outcomesByEntry());
@@ -59,7 +61,7 @@ final class RootedDrainCoordinator {
             managedAttempts.addAll(result.managedEpochApplicationAttempts());
             failures.addAll(result.managedEpochEvidenceFailures());
             localAttempts.addAll(result.rootedRetainedAttempts());
-            if (!result.quiescent()) deferred.add(next.get().root());
+            if (!result.quiescent()) deferred.add(next.root());
             remaining = driver.scan(journal.entries(), cutoff);
         }
         // This cursor describes transport completion only. Root selection always

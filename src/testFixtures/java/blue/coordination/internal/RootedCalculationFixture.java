@@ -81,7 +81,9 @@ public final class RootedCalculationFixture {
      * @return exact immutable input for the registered due work
      */
     public ClosureInvocationInput captureRegisteredOwnedHistory(DocumentId root) {
-        var work = registeredOwnedHistory(root);
+        var selected = new RootedCheckpointDriver(engine.documents(), engine.contractsClosureAdapter())
+                .select(root, engine.auditTimelineEntries());
+        var work = Objects.requireNonNull(selected.historical(), "No actual registered owned history");
         var admission = engine.contractsClosureAdmissionAdapter();
         var environment = admission.environment();
         var policy = admission.executionPolicy();
@@ -91,7 +93,7 @@ public final class RootedCalculationFixture {
         if (!profile.rootedCheckpoint() || !profile.executionPolicy().identity().equals(policy.identity()))
             throw new IllegalArgumentException("Expected the actual rooted release-profile SDK fixture");
         return new ManagedEpochInvocationCapturer(engine.contractsClosureAdapter(), engine.runtime(), engine.objects(),
-                engine.documents(), profile, environment).capture(work, java.util.Set.of()).invocation().input();
+                engine.documents(), profile, environment).capture(work, selected.excludedConsumers()).invocation().input();
     }
 
     /**
@@ -287,7 +289,22 @@ public final class RootedCalculationFixture {
      * direct deliveries, public-root flags, exact bodies, environment and budget remain.
      */
     public static ClosureProcessResult materializedReference(ClosureInvocationInput input) {
+        return materializedReference(input, java.util.List.of());
+    }
+
+    /**
+     * Executes with explicit exact cause resources, never reading the live host's provider/store.
+     * @param input the captured immutable calculation input
+     * @param exactCauseValues exact request/source values authenticated by the caller's cause evidence
+     * @return the complete materialized reference result
+     */
+    public static ClosureProcessResult materializedReference(ClosureInvocationInput input,
+            java.util.List<ExactValue> exactCauseValues) {
         WholeObjectStore objects = new WholeObjectStore(new EngineMetrics());
+        for (ExactValue value : exactCauseValues) {
+            objects.putVerifiedProviderEvidence(value, value.copyNode(), value.cyclicSetProof().orElse(null),
+                    "rooted reference exact cause");
+        }
         retainReferenceSnapshot(objects, input.snapshot());
         if (input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause revision
                 && revision.successorRepresentationCause().isPresent()) {
