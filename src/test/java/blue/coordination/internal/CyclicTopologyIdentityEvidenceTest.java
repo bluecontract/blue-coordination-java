@@ -17,13 +17,21 @@ import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.closure.SubscriptionDelta;
 import blue.language.processor.closure.WorkKind;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -32,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,6 +50,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * and one explicitly labeled package-private bounded-compatibility proof.
  */
 final class CyclicTopologyIdentityEvidenceTest {
+    private static final String COLLECTION_PROPERTY = "blue.test.collectTopologyEvidence";
+    private static final String DIRECTORY_PROPERTY = "blue.test.topologyEvidenceDirectory";
+    private static final ObjectMapper JSON_READER = new ObjectMapper();
+    private static final TypeReference<LinkedHashMap<String, Object>> JSON_MAP =
+            new TypeReference<>() { };
     private static final String WRITE_MODE_ENV =
             "BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE";
     private static final String WRITE_MODE = "WRITE";
@@ -51,6 +65,27 @@ final class CyclicTopologyIdentityEvidenceTest {
     private static final Path MARKDOWN_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
             "full-lifecycle-admission-identities.md");
     private static final ThreadLocal<Recorder> ACTIVE = new ThreadLocal<>();
+    private static final List<EvidenceCase> EVIDENCE_CASES = List.of(
+            new EvidenceCase(ContractsPublicThreeMemberCycleTest.class, "finiteReverseContainmentRingExecutesRequestedBusinessFlow"),
+            new EvidenceCase(ContractsPublicThreeMemberCycleTest.class, "canonicalAdmissionAndDiscoveryIgnoreEveryAuthoredOrderVariant"),
+            new EvidenceCase(ContractsPublicThreeMemberCycleTest.class, "sameEntryUsesCanonicalDirectSeedsAndClosesEachContinuation"),
+            new EvidenceCase(ContractsPublicThreeMemberCycleTest.class, "threeMemberLoopRollbackIsIdenticalAcrossFreshEngineRuns"),
+            new EvidenceCase(ContractsPublicBranchingCollectionCycleTest.class, "sharedAnchorCollectionCycleConvergesOnceInCanonicalOrder"),
+            new EvidenceCase(ContractsPublicBranchingCollectionCycleTest.class, "disjointCyclesRemainSeparateForBothAndSingleTargetEntries"),
+            new EvidenceCase(ContractsPublicCycleDetachmentTest.class, "splitDissolveAndReaddChangeRealCausalityAndLineage"),
+            new EvidenceCase(ContractsPublicCycleDetachmentTest.class, "retiredEdgeStillServesItsAlreadyFrozenSecondDelivery"),
+            new EvidenceCase(ContractsPublicComponentMergeSplitTest.class, "twoTwoMemberCyclesMergeIntoOneFourMemberCycle"),
+            new EvidenceCase(ContractsPublicComponentMergeSplitTest.class, "oneFourMemberCycleSplitsIntoTwoTwoMemberCycles"),
+            new EvidenceCase(ContractsPublicComponentMergeSplitTest.class, "oneTwoMemberCycleSplitsIntoTwoOrdinarySingletons"),
+            new EvidenceCase(ContractsPublicComponentMergeSplitTest.class, "selfCycleDissolvesIntoOneOrdinaryDocument"),
+            new EvidenceCase(ContractsPublicComponentMergeSplitTest.class, "laterHandlerFailureRollsBackAlreadyStagedSplitExactly"),
+            new EvidenceCase(ContractsPublicInitializationTopologyTest.class, "staticThreeMemberCycleInitializesOnceInCanonicalOrderAndPublishes"),
+            new EvidenceCase(ContractsPublicInitializationTopologyTest.class, "staticInitializationOrderAndIdentitiesIgnoreInputPermutation"),
+            new EvidenceCase(ContractsPublicInitializationTopologyTest.class, "dynamicTopologyPatchInsideCycleFailsAtManagedBindingBoundary"),
+            new EvidenceCase(ContractsPublicInitializationTopologyTest.class, "laterMemberInitializationFailureRollsBackEveryMarkerAndPublication"),
+            new EvidenceCase(ContractsPublicInitializationTopologyTest.class, "cClo08BoundedCompatibilityPreservesHistoricalFailClosedEvidence"),
+            new EvidenceCase(ContractsPublicNestedScopeBoundaryTest.class, "ordinaryPublicEngineExecutesTheNestedScopeNormally"),
+            new EvidenceCase(ContractsPublicNestedScopeBoundaryTest.class, "contractsDirectSeedsAndManagedStepsRemainPreciselyRootOnly"));
     private static final List<String> REQUIRED_SCENARIO_IDS = List.of(
             "P2.1.finite-three-member-ring",
             "P2.3.three-direct-seeds",
@@ -94,88 +129,172 @@ final class CyclicTopologyIdentityEvidenceTest {
     void exactRuntimeIdentitiesMatchTheCommittedArtifacts() throws Exception {
         // given
 
-        Recorder recorder = new Recorder();
-        if (ACTIVE.get() != null) {
-            throw new IllegalStateException(
-                    "Cyclic identity evidence capture is already active");
-        }
-        ACTIVE.set(recorder);
-        try {
-            runEvidenceScenarios();
-        } finally {
-            ACTIVE.remove();
-        }
+        validateContributors();
+        boolean collectFromSuite = Boolean.getBoolean(COLLECTION_PROPERTY);
+        String mode = artifactMode();
 
+        // when
+        if (collectFromSuite && mode == null) {
+            // The full-suite finalizer compares runtime fragments after every
+            // worker has finished. This case verifies the committed envelope.
+            Map<String, Object> committed = JSON_READER.readValue(
+                    readRequired(JSON_ARTIFACT), JSON_MAP);
+            Map<String, Object> envelope = new LinkedHashMap<>(committed);
+            envelope.put("scenarios", List.of());
+
+            // then
+            assertEquals(Json.render(new Recorder().document()), Json.render(envelope));
+            assertEquals(readRequired(MARKDOWN_ARTIFACT), renderMarkdown(committed));
+        } else if (!collectFromSuite) {
+            // Focused Gradle runs and IDE execution retain the direct exporter.
+            Recorder recorder = beginCapture();
+            try {
+                runEvidenceScenarios();
+            } finally {
+                ACTIVE.remove();
+            }
+            verifyOrWrite(recorder, null);
+        }
+    }
+
+    private static String artifactMode() {
+        String mode = System.getenv(WRITE_MODE_ENV);
+        if (mode != null && !WRITE_MODE.equals(mode)) {
+            throw new IllegalStateException(WRITE_MODE_ENV + " must be absent or exactly " + WRITE_MODE);
+        }
+        return mode;
+    }
+
+    private static Recorder beginCapture() {
+        if (ACTIVE.get() != null) {
+            throw new IllegalStateException("Cyclic identity evidence capture is already active");
+        }
+        Recorder recorder = new Recorder();
+        ACTIVE.set(recorder);
+        return recorder;
+    }
+
+    private static void validateContributors() throws ReflectiveOperationException {
+        if (EVIDENCE_CASES.stream().map(EvidenceCase::fileName).distinct().count()
+                != EVIDENCE_CASES.size()) {
+            throw new IllegalStateException("Duplicate topology evidence contributor");
+        }
+        for (EvidenceCase source : EVIDENCE_CASES) {
+            if (!source.type().getDeclaredMethod(source.method()).isAnnotationPresent(Test.class)) {
+                throw new IllegalStateException("Evidence contributor is not an executable test: " + source);
+            }
+            ExtendWith extension = source.type().getAnnotation(ExtendWith.class);
+            if (extension == null || !List.of(extension.value()).contains(CollectionExtension.class)) {
+                throw new IllegalStateException("Evidence contributor has no recorder: " + source);
+            }
+        }
+    }
+
+    private static void runEvidenceScenarios() throws Exception {
+        Map<Class<?>, Object> instances = new LinkedHashMap<>();
+        for (EvidenceCase source : EVIDENCE_CASES) {
+            if (!instances.containsKey(source.type())) {
+                instances.put(source.type(), source.type().getDeclaredConstructor().newInstance());
+            }
+            try {
+                source.type().getDeclaredMethod(source.method()).invoke(instances.get(source.type()));
+            } catch (InvocationTargetException wrapped) {
+                if (wrapped.getCause() instanceof Exception failure) throw failure;
+                if (wrapped.getCause() instanceof Error failure) throw failure;
+                throw new IllegalStateException(wrapped.getCause());
+            }
+        }
+    }
+
+    private static void verifyOrWrite(Recorder recorder, Path output) throws IOException {
         recorder.validateComplete();
         Map<String, Object> document = recorder.document();
         String json = Json.render(document) + "\n";
         String markdown = renderMarkdown(document);
-        String mode = System.getenv(WRITE_MODE_ENV);
-
-        // when
+        String mode = artifactMode();
         if (mode == null) {
-
-            // then
             assertEquals(readRequired(JSON_ARTIFACT), json,
-                    "regenerate explicitly with " + WRITE_MODE_ENV
-                            + "=" + WRITE_MODE);
+                    "regenerate explicitly with " + WRITE_MODE_ENV + "=" + WRITE_MODE);
             assertEquals(readRequired(MARKDOWN_ARTIFACT), markdown,
-                    "regenerate explicitly with " + WRITE_MODE_ENV
-                            + "=" + WRITE_MODE);
-            return;
+                    "regenerate explicitly with " + WRITE_MODE_ENV + "=" + WRITE_MODE);
+        } else {
+            writeAtomically(JSON_ARTIFACT, json);
+            writeAtomically(MARKDOWN_ARTIFACT, markdown);
         }
-        if (!WRITE_MODE.equals(mode)) {
-            throw new IllegalStateException(
-                    WRITE_MODE_ENV + " must be absent or exactly "
-                            + WRITE_MODE);
+        if (output != null) {
+            writeAtomically(output.resolve(JSON_ARTIFACT.getFileName()), json);
+            writeAtomically(output.resolve(MARKDOWN_ARTIFACT.getFileName()), markdown);
+            writeAtomically(output.resolve("verification.json"), Json.render(Map.of(
+                    "status", "PASS", "contributors", EVIDENCE_CASES.size(),
+                    "scenarios", recorder.scenarios.size(),
+                    "verifiedIdenticalRepeatCounts", recorder.repeatCounts)) + "\n");
         }
-        writeAtomically(JSON_ARTIFACT, json);
-        writeAtomically(MARKDOWN_ARTIFACT, markdown);
     }
 
-    private static void runEvidenceScenarios() throws Exception {
-        ContractsPublicThreeMemberCycleTest three =
-                new ContractsPublicThreeMemberCycleTest();
-        three.finiteReverseContainmentRingExecutesRequestedBusinessFlow();
-        three.canonicalAdmissionAndDiscoveryIgnoreEveryAuthoredOrderVariant();
-        three.sameEntryUsesCanonicalDirectSeedsAndClosesEachContinuation();
-        three.threeMemberLoopRollbackIsIdenticalAcrossFreshEngineRuns();
+    /** Aggregates only evidence produced by the original successful JUnit cases. */
+    public static void main(String[] args) throws Exception {
+        if (args.length != 2) throw new IllegalArgumentException("Expected fragment and report directories");
+        validateContributors();
+        Path directory = Path.of(args[0]);
+        Set<String> expected = new java.util.TreeSet<>(EVIDENCE_CASES.stream()
+                .map(EvidenceCase::fileName).toList());
+        Set<String> actual;
+        try (var files = Files.list(directory)) {
+            actual = new java.util.TreeSet<>(files.map(path -> path.getFileName().toString()).toList());
+        }
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException("Topology evidence contributor inventory mismatch: expected "
+                    + expected + ", actual " + actual);
+        }
+        Recorder merged = new Recorder();
+        for (EvidenceCase source : EVIDENCE_CASES) {
+            Map<String, Object> fragment = JSON_READER.readValue(
+                    Files.readString(directory.resolve(source.fileName())), JSON_MAP);
+            if (!source.identity().equals(fragment.get("contributor"))) {
+                throw new IllegalStateException("Topology evidence contributor identity mismatch: " + source);
+            }
+            merged.merge(fragment);
+        }
+        verifyOrWrite(merged, Path.of(args[1]));
+    }
 
-        ContractsPublicBranchingCollectionCycleTest branching =
-                new ContractsPublicBranchingCollectionCycleTest();
-        branching.sharedAnchorCollectionCycleConvergesOnceInCanonicalOrder();
-        branching.disjointCyclesRemainSeparateForBothAndSingleTargetEntries();
+    private record EvidenceCase(Class<?> type, String method) {
+        String identity() { return type.getName() + "#" + method; }
+        String fileName() { return type.getSimpleName() + "__" + method + ".json"; }
+    }
 
-        ContractsPublicCycleDetachmentTest detachment =
-                new ContractsPublicCycleDetachmentTest();
-        detachment.splitDissolveAndReaddChangeRealCausalityAndLineage();
-        detachment.retiredEdgeStillServesItsAlreadyFrozenSecondDelivery();
+    /** A recorder belongs to one test invocation, never to a shared engine. */
+    public static final class CollectionExtension
+            implements BeforeEachCallback, AfterTestExecutionCallback {
+        private static Optional<EvidenceCase> contributor(ExtensionContext context) {
+            return EVIDENCE_CASES.stream().filter(source -> source.type() == context.getRequiredTestClass()
+                    && source.method().equals(context.getRequiredTestMethod().getName())).findFirst();
+        }
 
-        ContractsPublicComponentMergeSplitTest mergeSplit =
-                new ContractsPublicComponentMergeSplitTest();
-        mergeSplit.twoTwoMemberCyclesMergeIntoOneFourMemberCycle();
-        mergeSplit.oneFourMemberCycleSplitsIntoTwoTwoMemberCycles();
-        mergeSplit.oneTwoMemberCycleSplitsIntoTwoOrdinarySingletons();
-        mergeSplit.selfCycleDissolvesIntoOneOrdinaryDocument();
-        mergeSplit.laterHandlerFailureRollsBackAlreadyStagedSplitExactly();
+        @Override
+        public void beforeEach(ExtensionContext context) {
+            if (Boolean.getBoolean(COLLECTION_PROPERTY) && contributor(context).isPresent()) {
+                beginCapture();
+            }
+        }
 
-        ContractsPublicInitializationTopologyTest initialization =
-                new ContractsPublicInitializationTopologyTest();
-        initialization
-                .staticThreeMemberCycleInitializesOnceInCanonicalOrderAndPublishes();
-        initialization
-                .staticInitializationOrderAndIdentitiesIgnoreInputPermutation();
-        initialization
-                .dynamicTopologyPatchInsideCycleFailsAtManagedBindingBoundary();
-        initialization
-                .laterMemberInitializationFailureRollsBackEveryMarkerAndPublication();
-        initialization
-                .cClo08BoundedCompatibilityPreservesHistoricalFailClosedEvidence();
-
-        ContractsPublicNestedScopeBoundaryTest nested =
-                new ContractsPublicNestedScopeBoundaryTest();
-        nested.ordinaryPublicEngineExecutesTheNestedScopeNormally();
-        nested.contractsDirectSeedsAndManagedStepsRemainPreciselyRootOnly();
+        @Override
+        public void afterTestExecution(ExtensionContext context) throws IOException {
+            if (!Boolean.getBoolean(COLLECTION_PROPERTY) || contributor(context).isEmpty()) return;
+            Recorder recorder = ACTIVE.get();
+            ACTIVE.remove();
+            if (context.getExecutionException().isPresent()) return;
+            if (recorder == null || recorder.scenarios.isEmpty()) {
+                throw new IllegalStateException("Successful contributor produced no topology evidence");
+            }
+            recorder.scenarios.forEach(Recorder::validateExecutionEvidence);
+            EvidenceCase source = contributor(context).orElseThrow();
+            Path directory = Path.of(Objects.requireNonNull(System.getProperty(DIRECTORY_PROPERTY)));
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve(source.fileName()), Json.render(Map.of(
+                    "contributor", source.identity(), "scenarios", recorder.document().get("scenarios")))
+                    + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+        }
     }
 
     static void capture(
@@ -373,6 +492,22 @@ final class CyclicTopologyIdentityEvidenceTest {
                         Json.render(scenario),
                         "repeated identity capture differs for " + scenarioId);
                 repeatCounts.merge(scenarioId, 1, Integer::sum);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        void merge(Map<String, Object> fragment) {
+            List<Map<String, Object>> rows = (List<Map<String, Object>>) fragment.get("scenarios");
+            if (rows == null || rows.isEmpty()) throw new IllegalStateException("Empty topology evidence fragment");
+            for (Map<String, Object> row : rows) {
+                Map<String, Object> scenario = new LinkedHashMap<>(row);
+                Object repeats = scenario.remove("verifiedIdenticalRepeatCount");
+                if (!(repeats instanceof Integer count) || count < 0) {
+                    throw new IllegalStateException("Invalid topology evidence repeat count");
+                }
+                String id = (String) scenario.get("id");
+                add(id, scenario);
+                if (count != 0) repeatCounts.merge(id, count, Math::addExact);
             }
         }
 

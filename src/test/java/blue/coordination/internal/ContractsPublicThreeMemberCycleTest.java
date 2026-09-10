@@ -33,6 +33,7 @@ import blue.language.processor.closure.PublicEventOccurrence;
 import blue.language.processor.closure.RejectedCharge;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -50,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public-engine acceptance for authored three-member Contracts cycles. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicThreeMemberCycleTest {
     private static final DocumentId A = DocumentId.of("three-ring-a");
     private static final DocumentId B = DocumentId.of("three-ring-b");

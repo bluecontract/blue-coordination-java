@@ -145,6 +145,28 @@ Receipts and discovered inventories are written under
 alongside the existing reports and test results. Consumer test compilation and
 execution retain their JAR-only boundary; discovery runs in a separate JVM.
 
+### Topology identity evidence
+
+A complete `test` run captures topology identities during the 20 original JUnit
+contributor cases. Each invocation uses its own recorder and writes a distinct
+fragment under `build/rooted-evidence/topology-fragments/`. After the workers
+finish, `verifyCyclicTopologyIdentityEvidence` combines those fragments in the
+original scenario order and compares the generated JSON and Markdown exactly
+with the committed artifacts. The finalizer runs for `test`, `check`, and
+`releaseCheck`; missing contributors, changed identities, and incorrect repeat
+counts fail verification.
+
+This removes the exporter's second execution of the same 20 cases. All 32
+scenarios, six additional finite-ring repetitions, and the additional rollback
+repetition remain required. The successful comparison and generated artifacts
+are saved under `build/reports/topology-identity-evidence/`. Current-input Gradle
+reuse retains the fragments and repeats the inexpensive comparison.
+
+Filtered Gradle runs and IDE execution retain the standalone exporter. For
+example, `test --tests '*CyclicTopologyIdentityEvidenceTest'` executes its full
+original contributor campaign directly. Explicit artifact regeneration still
+uses `BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE=WRITE`.
+
 ### Suite boundaries
 
 The suites remain separate because each protects a different boundary:

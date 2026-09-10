@@ -118,6 +118,23 @@ split, post-detach termination, remove/re-add, 1,000-unrelated locality, and
 the short topology smoke. The old long percentile campaign is not rerun for the
 SDK delta. Its retained receipts are historical evidence and remain unchanged.
 
+The committed topology identity artifact is checked against current runtime
+evidence. Complete Gradle runs record evidence from each of its 20 original
+JUnit contributors, then compare the ordered JSON and Markdown after all test
+workers finish. Every contributor is required exactly once; all 32 scenario
+identities and the original fresh-engine repeat counts remain mandatory.
+Focused exporter runs retain the direct campaign. Collection changes when the
+existing cases record evidence; it does not share engines or checkpoints
+between cases. See [build and test](build-and-test.md#topology-identity-evidence)
+for the finalizer and report locations.
+
+The 1,000-public-root managed catch-up locality fixture uses small independent
+admission batches. All 1,000 distinct documents are still admitted and
+initialized through the public path before measuring the same catch-up
+counters. The other 1,000-document topology fixtures retain their original
+admission batches and public-root declarations. Gas budgets, scale, structural
+assertions, and retry/restart matrices remain unchanged.
+
 ## Historical Round 10.1 semantic gates
 
 No test may choose processing order with a named entry. Tests append all facts,

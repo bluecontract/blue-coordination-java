@@ -5503,3 +5503,4 @@ tasks.named('check') {
 
 apply from: 'gradle/coordination-staging.gradle'
 apply from: 'gradle/test-execution-scope.gradle'
+apply from: 'gradle/topology-test-evidence.gradle'

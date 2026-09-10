@@ -201,16 +201,19 @@ final class SdkManagedEpochBudgetFairnessTest {
         try (Scenario reference = scenario()) {
             poisonASecondWork = null;
             for (int call = 0; call < 8 && poisonASecondWork == null; call++) {
-                DrainResult drained = drainSelected(reference.coordination());
-                poisonASecondWork = drained
-                        .managedEpochApplicationAttempts().stream()
-                        .map(ManagedEpochApplicationAttempt::work)
+                ProcessingSelection selected = reference.coordination()
+                        .advanced().auditNextProcessingSelection();
+                poisonASecondWork = selected.managedEpochApplicationWork()
                         .filter(work -> work.consumerDocumentId()
                                 .equals(POISON_A))
                         .filter(work -> work.sourceEpoch() == 2L)
-                        .map(ManagedEpochApplicationWork::workIdentity)
-                        .findFirst()
+                        .map(work -> work.workIdentity())
                         .orElse(null);
+                // The subject below verifies execution/failure. The reference
+                // only needs the selected work's already available identity.
+                if (poisonASecondWork == null) {
+                    drainSelected(reference.coordination(), selected);
+                }
             }
             assertTrue(poisonASecondWork != null);
         }

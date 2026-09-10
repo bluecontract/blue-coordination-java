@@ -39,6 +39,7 @@ import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ScopeAddress;
 import blue.language.processor.closure.SubscriptionDelta;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -56,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for component merge, split, and dissolution. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicComponentMergeSplitTest {
     private static final long ENTRY_TIME = 2_300_000_000_000_001L;
     private static final DocumentId A = DocumentId.of("merge-split-a");

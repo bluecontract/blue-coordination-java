@@ -25,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ManagedEpochCatchUpLocalityTest {
     private static final int AMBIENT_COUNT = 1_000;
-    private static final int ADMISSION_BATCH_SIZE = 25;
+    // All 1,000 public roots are still admitted and initialized. Small
+    // independent closures keep their setup outside the measured catch-up cheap.
+    private static final int ADMISSION_BATCH_SIZE = 5;
     private static final String ACTOR = "alice";
     private static final DocumentId A = DocumentId.of(
             "managed-epoch-locality-consumer");

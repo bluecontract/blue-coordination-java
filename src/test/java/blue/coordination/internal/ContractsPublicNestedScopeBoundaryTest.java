@@ -12,6 +12,7 @@ import blue.language.processor.closure.ClosureImplementationEvidence;
 import blue.language.processor.closure.ComponentKind;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.math.BigInteger;
 import java.util.List;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public characterization of ordinary and Contracts nested-scope routing. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicNestedScopeBoundaryTest {
     private static final DocumentId DOCUMENT =
             DocumentId.of("nested-scope-boundary");

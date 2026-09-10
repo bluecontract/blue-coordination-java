@@ -5,6 +5,13 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Collect exact topology identity evidence from its original JUnit cases and
+  verify the complete artifact after parallel workers finish, preserving all
+  scenarios and repeat counts without executing the same campaign twice.
+- Read the fairness reference's selected work identity before execution; keep
+  the subject's real gas failures, availability checks, and restart coverage.
+- Prepare the 1,000-public-root catch-up locality fixture in smaller independent
+  admission batches, retaining every document and the same structural checks.
 - Run CI tests in four independent JVMs, including extracted-source checks,
   and schedule the four PayNote acceptance cases independently. Preserve their
   complete scenarios and enforce compiled-class execution coverage with no
