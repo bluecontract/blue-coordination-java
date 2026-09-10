@@ -15,6 +15,68 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Actual local retained publication, shared-gas rollback and response-loss recovery. */
 final class RootedLocalHistoryRecoveryTest {
+    @Test void retainedCauseDoesNotRepeatItsOriginalOperationSelectors() throws Exception {
+        try (var scenario = new Scenario(100_000L, true)) {
+            var heads = scenario.heads();
+            var histories = completeHistories(scenario);
+            var input = scenario.f.control.captureLocalHistory(scenario.root.id());
+            var reference = RootedCalculationFixture.materializedReference(input);
+            assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
+            var result = scenario.f.blue.processing().processNext(scenario.root);
+            assertTrue(result.quiescent());
+            assertEquals(1, result.rootedRetainedResults().size());
+            var actual = scenario.f.blue.advanced().closureExecution(result.rootedRetainedResults().get(0).closureId()).orElseThrow();
+            assertEquals(reference.status(), actual.status());
+            assertEquals(reference.inputClosureIdentity(), actual.inputClosureIdentity());
+            assertEquals(reference.outputClosureIdentity(), actual.outputClosureIdentity());
+            assertEquals(reference.commitCompanion().companionIdentity(), actual.commitCompanion().companionIdentity());
+            assertEquals(reference.publicEventsIdentity(), actual.publicEventsIdentity());
+            assertEquals(reference.checkpointWritesIdentity(), actual.checkpointWritesIdentity());
+            assertEquals(reference.managedTransitionReceiptsIdentity(), actual.managedTransitionReceiptsIdentity());
+            assertEquals(reference.totalGas(), actual.totalGas());
+            assertEquals(reference.gasTraceIdentity(), actual.gasTraceIdentity());
+            assertEquals(fullTrace(reference), fullTrace(actual));
+            assertEquals(1L, result.stats().committedTransitions());
+            assertEquals(heads.subList(1, 3), scenario.heads().subList(1, 3));
+            assertEquals(histories.subList(1, 3), completeHistories(scenario).subList(1, 3));
+            assertEquals(25, scenario.localConsumerTouches());
+            var afterHeads = scenario.heads();
+            var afterHistories = completeHistories(scenario);
+            CoordinationTestControl.attach(scenario.f.blue.advanced().rawEngine()).restartFromStores();
+            var replay = scenario.f.blue.processing().processNext(scenario.root);
+            assertTrue(replay.quiescent());
+            assertEquals(0L, replay.stats().committedTransitions());
+            assertEquals(afterHeads, scenario.heads());
+            assertEquals(afterHistories, completeHistories(scenario));
+        }
+    }
+
+    @Test void liveOperationStillRejectsAnUnresolvedSelectorPath() throws Exception {
+        try (var f = new RootedSdkFixture()) {
+            String template;
+            try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
+                template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
+            }
+            var source = f.startYaml(template.replace("<NODE>", "C").replace("<NAMESPACE>", "selector-negative")
+                    .replace("<TIMELINE>", "selector-negative/C"), "selector-negative/C");
+            var root = f.startYaml(template.replace("<NODE>", "B").replace("<NAMESPACE>", "selector-negative")
+                    .replace("<TIMELINE>", "selector-negative/B"), "selector-negative/B");
+            var heads = List.of(root.snapshot().blueId(), source.snapshot().blueId());
+            var histories = List.of(completeHistory(f, root), completeHistory(f, source));
+            f.blue.operations().on(root).from(f.timelines.get("selector-negative/B"))
+                    .call("attach").through("owner")
+                    .requestYaml("edge: c\nsource: {blueId: " + source.snapshot().blueId() + "}")
+                    .selectManagedEpoch(ManagedEpochSelector.exact(source.id(), 0L,
+                            source.snapshot().blueId(), "/peers/not-c")).submit();
+            var failure = assertThrows(blue.coordination.api.CoordinationException.class,
+                    () -> f.blue.processing().processNext(root));
+            var cause = assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+            assertTrue(cause.getMessage().contains("MANAGED_EPOCH_SELECTOR_PATH_MISMATCH"), cause.toString());
+            assertTrue(cause.getMessage().contains("/peers/not-c"), cause.toString());
+            assertEquals(heads, List.of(root.snapshot().blueId(), source.snapshot().blueId()));
+            assertEquals(histories, List.of(completeHistory(f, root), completeHistory(f, source)));
+        }
+    }
     @Test void retainedSourceEventReachesItsCalculatedConsumer() throws Exception {
         // given
         try (var scenario = new Scenario(100_000L)) {
@@ -298,6 +360,9 @@ final class RootedLocalHistoryRecoveryTest {
         final LinkedHashMap<String, DocumentHandle> roots = new LinkedHashMap<>();
         final DocumentHandle root;
         Scenario(long gas) throws Exception {
+            this(gas, false);
+        }
+        Scenario(long gas, boolean explicitSelector) throws Exception {
             f = new RootedSdkFixture(ContractsExecutionPolicy.exactSharedGas(gas, "rooted-local-history-boundary"));
             String template;
             try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
@@ -318,8 +383,14 @@ final class RootedLocalHistoryRecoveryTest {
                     ContractsExecutionPolicy.releaseDefault()).entry(changedSource).disposition());
             for (String[] edge : new String[][]{{"A", "b", "B"}, {"B", "c", "C"}}) {
                 var owner = roots.get(edge[0]);
-                last = f.append(owner, "rcp/local-gas/" + edge[0], "attach", ++ordinal * 100L,
-                        "edge: " + edge[1] + "\nsource: {blueId: " + originals.get(edge[2]).blueId() + "}");
+                ++ordinal;
+                String request = "edge: " + edge[1] + "\nsource: {blueId: " + originals.get(edge[2]).blueId() + "}";
+                if (explicitSelector && edge[0].equals("B")) {
+                    last = f.blue.operations().on(owner).from(f.timelines.get("rcp/local-gas/B"))
+                            .call("attach").through("owner").requestYaml(request)
+                            .selectManagedEpoch(ManagedEpochSelector.exact(roots.get("C").id(), -1L,
+                                    originals.get("C").blueId(), "/peers/c")).submit();
+                } else last = f.append(owner, "rcp/local-gas/" + edge[0], "attach", ordinal * 100L, request);
                 assertEquals(EntryDisposition.APPLIED, f.blue.advanced().process(owner, last,
                         ContractsExecutionPolicy.releaseDefault()).entry(last).disposition());
                 boolean done = false;

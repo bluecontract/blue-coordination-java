@@ -1787,6 +1787,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private ContractsManagedEpochSelectionPlan managedEpochSelectionPlan(
             FrozenBatch batch,
             CohortInvocation invocation) {
+        // Local retained work shares the attachment's chronological anchor, not
+        // its operation. Its receipt-bound historical cause must not resolve
+        // the original LIVE operation's prospective selector paths again.
+        if (invocation.rootedEvidence() != null
+                && invocation.rootedEvidence().historicalWork() != null) {
+            return null;
+        }
         ContractsManagedEpochSelectionPlan plan =
                 managedEpochSelectionPlans.get(batch.entry().blueId());
         return plan != null && invocation.memberSet().contains(
