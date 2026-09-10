@@ -50,7 +50,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
 
     @Test
     void promotionPreservesNonPublicHistoryAndAuthoredInitialCatchUp() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             TimelineHandle sourceTimeline = coordination.timelines().register(
                     PROMOTED_TIMELINE, ACTOR);
@@ -185,7 +185,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
 
     @Test
     void detachReaddAndRetargetOwnDistinctPlansAndCursors() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
             // given
@@ -448,7 +448,7 @@ final class SdkManagedEpochPromotionAndRetargetTest {
 
     @Test
     void pendingPlanRetiresDuringHistoricalRetargetEvent() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());

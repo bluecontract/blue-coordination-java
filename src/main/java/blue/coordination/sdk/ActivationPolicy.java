@@ -62,7 +62,7 @@ public final class ActivationPolicy {
     /**
      * Makes history strictly after the exact frontier eligible for a later
      * drain. Admission expects retained external-order evidence encoded as
-     * {@code components: [timestamp, timelineId, entryBlueId]}.
+     * {@code components: [timestamp, exactTimelineBlueId, entryBlueId]} for the rooted profile (legacy: timeline label).
      */
     public static ActivationPolicy importFromFrontier(
             ExactBlueValue frontierEvidence) {

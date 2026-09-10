@@ -33,7 +33,7 @@ final class SdkStaticRetainedManagedEpochAdmissionTest {
     @Test
     void inlineStaticAdmissionMatchesEveryUnambiguousRetainedPosition() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             List<SourceHistory> sources = prepareIndependentSources(
                     coordination);
 
@@ -58,7 +58,7 @@ final class SdkStaticRetainedManagedEpochAdmissionTest {
         };
 
         // when
-        try (BlueCoordination coordination = BlueCoordination.builder()
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder()
                 .exactNodeProvider(provider)
                 .build()) {
             List<SourceHistory> sources = prepareIndependentSources(
@@ -89,7 +89,7 @@ final class SdkStaticRetainedManagedEpochAdmissionTest {
     @Test
     void collectionPathsShareOneAtomicBarrierUntilEverySuffixCompletes() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             SourceHistory source = prepareSource(coordination);
             RetainedCase authored = source.cases().get(0);
             RetainedCase retained = source.cases().get(2);
@@ -162,7 +162,7 @@ final class SdkStaticRetainedManagedEpochAdmissionTest {
     @Test
     void typedSelectorBindsAuthoredInitialAtStaticAdmission() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             SourceHistory source = prepareSource(coordination);
             RetainedCase authored = source.cases().get(0);
             String rootYaml = rootYaml(

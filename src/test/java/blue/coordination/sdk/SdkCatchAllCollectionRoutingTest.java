@@ -16,7 +16,30 @@ final class SdkCatchAllCollectionRoutingTest {
     @Test
     void omittedSourcePathRoutesRepeatedOccurrencesAndNestedEmissions() {
         // given
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        var builder = LegacyContracts10TestProfile.builder();
+        // when
+        var results = runRepeated(builder,
+                List.of("observed", "observed", "observed", "observed"));
+        // then
+        assertEquals(List.of(EntryDisposition.APPLIED, EntryDisposition.APPLIED), results.stream()
+                .map(EntryResult::disposition).toList());
+    }
+
+    @Test
+    void rootedCatchAllPreservesRepeatedSourceEventsAndSeparateOccurrenceDeliveries() {
+        // given
+        var builder = BlueCoordination.builder();
+        // when
+        var results = runRepeated(builder,
+                List.of("signal", "signal", "observed", "observed", "observed", "observed"));
+        // then
+        assertEquals(List.of(EntryDisposition.APPLIED, EntryDisposition.APPLIED), results.stream()
+                .map(EntryResult::disposition).toList());
+    }
+
+    private static List<EntryResult> runRepeated(BlueCoordination.Builder builder, List<String> expectedKinds) {
+        // given
+        try (BlueCoordination blue = builder.build()) {
             TimelineHandle timeline = blue.timelines().register("f2/source", "alice");
             ClosureHandle closure = blue.documents().admit(closure(false));
             DocumentHandle root = closure.document("root");
@@ -29,8 +52,7 @@ final class SdkCatchAllCollectionRoutingTest {
             assertEquals(EntryDisposition.APPLIED, direct.disposition());
             assertEquals(EntryDisposition.APPLIED, nested.disposition());
             assertEquals(8L, root.snapshot().longAt("/observed"));
-            assertEquals(List.of("observed", "observed", "observed", "observed"),
-                    kinds(direct));
+            assertEquals(expectedKinds, kinds(direct));
             assertEquals(kinds(direct), kinds(nested));
             var first = blue.advanced().auditManagedOccurrence(root.id(),
                     "/members/first").orElseThrow();
@@ -46,6 +68,7 @@ final class SdkCatchAllCollectionRoutingTest {
             assertEquals(events.get(0).eventBlueId(), events.get(1).eventBlueId());
             assertNotEquals(events.get(0).eventOccurrenceIdentity(),
                     events.get(1).eventOccurrenceIdentity());
+            return List.of(direct, nested);
         }
     }
 
@@ -64,7 +87,7 @@ final class SdkCatchAllCollectionRoutingTest {
     @Test
     void removingReaddingAndRetargetingPreservesOccurrenceGenerations() {
         // given
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle timeline = blue.timelines().register("f2/source", "alice");
             ClosureHandle closure = blue.documents().admit(closure(false));
             DocumentHandle root = closure.document("root");

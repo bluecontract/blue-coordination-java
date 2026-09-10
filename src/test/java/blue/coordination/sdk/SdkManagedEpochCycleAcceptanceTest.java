@@ -126,7 +126,7 @@ final class SdkManagedEpochCycleAcceptanceTest {
 
     @Test
     void completedRetainedLineageCanLaterMergeIntoCycleAndProcessAgain() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             // given
             DocumentId aId = DocumentId.of(
                     "sdk-managed-epoch-post-catch-up-cycle-a");
@@ -220,7 +220,7 @@ final class SdkManagedEpochCycleAcceptanceTest {
     private static CycleScenario prepared(
             String label,
             String sourceOperation) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.builder().build();
         try {
             DocumentId aId = DocumentId.of(
                     "sdk-managed-epoch-cycle-a-" + label);

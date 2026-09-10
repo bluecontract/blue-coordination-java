@@ -50,6 +50,34 @@ final class SdkEmbeddedCollectionChannelAcceptanceTest {
     @Test
     void coordCollection06RoutesDirectMembersAndDescendantsEndToEnd() {
         // given
+        var builder = LegacyContracts10TestProfile.builder();
+        // when
+        var results = runCollection(builder,
+                List.of("direct-observed", "descendant-observed"), List.of("descendant-observed"),
+                List.of("collection-channel-root", "collection-channel-root"), List.of("collection-channel-root"));
+        // then
+        assertEquals(List.of(EntryDisposition.APPLIED, EntryDisposition.APPLIED), results.stream()
+                .map(EntryResult::disposition).toList());
+    }
+
+    @Test
+    void rootedCollectionKeepsDirectAndDescendantDeliveryDistinctFromSourceOutboxes() {
+        // given
+        var builder = BlueCoordination.builder();
+        // when
+        var results = runCollection(builder,
+                List.of("collection-signal", "direct-observed", "descendant-observed"),
+                List.of("collection-signal", "descendant-observed"),
+                List.of("collection-channel-member", "collection-channel-root", "collection-channel-root"),
+                List.of("collection-channel-nested", "collection-channel-root"));
+        // then
+        assertEquals(List.of(EntryDisposition.APPLIED, EntryDisposition.APPLIED), results.stream()
+                .map(EntryResult::disposition).toList());
+    }
+
+    private static List<EntryResult> runCollection(BlueCoordination.Builder builder, List<String> directKinds,
+            List<String> nestedKinds, List<String> directOwners, List<String> nestedOwners) {
+        // given
         DocumentId rootId = DocumentId.of("collection-channel-root");
         DocumentId memberId = DocumentId.of("collection-channel-member");
         DocumentId nestedId = DocumentId.of("collection-channel-nested");
@@ -67,7 +95,7 @@ final class SdkEmbeddedCollectionChannelAcceptanceTest {
                 .fromNow()
                 .build();
 
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = builder.build()) {
             TimelineHandle memberTimeline = coordination.timelines().register(
                     memberTimelineId, ACTOR);
             TimelineHandle nestedTimeline = coordination.timelines().register(
@@ -101,9 +129,13 @@ final class SdkEmbeddedCollectionChannelAcceptanceTest {
                     .longAt("/directMemberEvents"));
             assertEquals(2L, admitted.document("root").snapshot()
                     .longAt("/descendantEvents"));
-            assertEquals(List.of("direct-observed", "descendant-observed"),
-                    eventKinds(direct));
-            assertEquals(List.of("descendant-observed"), eventKinds(nested));
+            assertEquals(directKinds, eventKinds(direct));
+            assertEquals(nestedKinds, eventKinds(nested));
+            assertEquals(directOwners, direct.publicEvents().stream()
+                    .map(event -> event.sourceDocument().orElseThrow().value()).toList());
+            assertEquals(nestedOwners, nested.publicEvents().stream()
+                    .map(event -> event.sourceDocument().orElseThrow().value()).toList());
+            assertEquals(List.of(), coordination.processing().drain().entries());
             Node currentRoot = admitted.document("root").snapshot()
                     .exact().copyNode();
             assertNull(NodePathEditor.getOrNull(
@@ -118,6 +150,7 @@ final class SdkEmbeddedCollectionChannelAcceptanceTest {
                             "declared collection has current members")),
                     coordination.advanced()
                             .auditEmbeddedCollections(rootId));
+            return List.of(direct, nested);
         }
     }
 

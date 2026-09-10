@@ -163,7 +163,8 @@ final class SdkAcceptanceTest {
                       - %s
                       - %s
                     """.formatted(
-                    firstTimestamp, timelineId, first.blueId()));
+                    firstTimestamp, coordination.advanced().auditTimelineEntries().get(0)
+                            .exact().valueAt("/timeline").blueId(), first.blueId()));
 
             // when
             DocumentHandle counter = coordination.documents().admit(
@@ -380,7 +381,7 @@ final class SdkAcceptanceTest {
                 .fromNow()
                 .build();
 
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle admitted = coordination.documents().admit(closure);
@@ -467,7 +468,7 @@ final class SdkAcceptanceTest {
                 .fromNow()
                 .build();
 
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle admitted = coordination.documents().admit(closure);
@@ -597,7 +598,7 @@ final class SdkAcceptanceTest {
     }
 
     private static DetachLoopEvidence runDetachLoop() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-detach");
             Map<DocumentId, DocumentHandle> handles = dynamicHandles(
@@ -736,7 +737,7 @@ final class SdkAcceptanceTest {
     @Test
     void removeAndReaddProducesFreshAuthenticatedCycleIdentity() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             DynamicLoop scenario = admitDynamicLoop(
                     coordination, "sdk-reactivation");
             Map<DocumentId, DocumentHandle> handles = dynamicHandles(
@@ -963,7 +964,7 @@ final class SdkAcceptanceTest {
                 .fromNow()
                 .build();
 
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.builder().build();
         try {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
@@ -1039,7 +1040,7 @@ final class SdkAcceptanceTest {
                 .fromNow()
                 .build();
 
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle timeline = coordination.timelines().register(
                     timelineId, ACTOR);
             ClosureHandle closure = coordination.documents().admit(

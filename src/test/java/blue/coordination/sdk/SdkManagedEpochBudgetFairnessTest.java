@@ -47,7 +47,7 @@ final class SdkManagedEpochBudgetFairnessTest {
     @Test
     void targetedSlicesRetainFailureIsolationUntilHealthyConsumerCompletes() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.builder().build()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
             TimelineHandle sourceTimeline = coordination.timelines().register(
@@ -544,7 +544,7 @@ final class SdkManagedEpochBudgetFairnessTest {
     }
 
     private static Scenario scenario(boolean submitDirectEntry) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.builder().build();
         try {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());

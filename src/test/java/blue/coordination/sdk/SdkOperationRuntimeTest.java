@@ -73,7 +73,7 @@ final class SdkOperationRuntimeTest {
     @Test
     void agentTimelineAuthorsAgentEvidenceAndMatchesAgentRoute() {
         // given
-        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+        try (BlueCoordination blue = LegacyContracts10TestProfile.builder().build()) {
             TimelineHandle agent = blue.timelines().register(
                     "agent-timeline",
                     "agent-account",
