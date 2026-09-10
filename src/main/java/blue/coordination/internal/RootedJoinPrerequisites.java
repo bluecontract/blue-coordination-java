@@ -108,6 +108,9 @@ final class RootedJoinPrerequisites {
     /** Reads authenticated pre-boundary forward graphs only; incoming indexes and newer heads are excluded. */
     private static boolean returnsToOwner(DocumentId source, Set<DocumentId> owners,
             ExternalOrderKey boundary, InMemoryDocumentStore documents) {
+        var session = documents.find(source).orElse(null);
+        if (session == null || session.rootedView() == null) return false;
+        var view = session.rootedViewBefore(boundary);
         var pending = new ArrayDeque<DocumentId>();
         var visited = new LinkedHashSet<DocumentId>();
         pending.add(source);
@@ -115,9 +118,6 @@ final class RootedJoinPrerequisites {
             DocumentId current = pending.removeFirst();
             if (owners.contains(current)) return true;
             if (!visited.add(current)) continue;
-            var session = documents.find(current).orElse(null);
-            if (session == null || session.rootedView() == null) continue;
-            var view = session.rootedViewBefore(boundary);
             view.snapshot().occurrences().stream().filter(row -> row.active()
                     && row.sourceDocumentId().value().equals(current.value()))
                     .forEach(row -> pending.addLast(ContractsClosureAdapter.coordinationId(row.targetDocumentId())));
