@@ -179,7 +179,8 @@ final class ManagedEpochInvocationCapturer {
                 captured = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
         for (DocumentId documentId : members) {
             captured.put(documentId, rootedState == null ? host.captureDocument(documentId,
-                    publication.requireHead(documentId), members) : java.util.Objects.requireNonNull(
+                    publication.requireHead(documentId), members, publication.closureSubscriptions().statesFor(documentId))
+                    : java.util.Objects.requireNonNull(
                     rootedState.documents().get(documentId), "Historical root view omits a selected document"));
             runtime.metrics().increment(
                     ManagedEpochApplicationExecutor

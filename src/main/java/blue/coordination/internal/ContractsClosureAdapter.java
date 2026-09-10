@@ -1316,7 +1316,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             captured.put(documentId, captureDocument(
                     documentId,
                     publication.requireHead(documentId),
-                    allowedMembers));
+                    allowedMembers, publication.closureSubscriptions().statesFor(documentId)));
         }
 
         List<ComponentSnapshot> components = captureComponents(
@@ -1560,6 +1560,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     CapturedDocument document = captured.get(documentId);
                     return document == null ? null : document.head().blueId();
                 });
+        ClosureSubscriptionInventory currentSubscriptions = documents.closureTopologySnapshot().closureSubscriptions();
         for (DocumentId documentId : forward.members()) {
             ManagedDocumentSnapshot exact = view.snapshot().managedDocument(closureId(documentId));
             CapturedDocument capturedView;
@@ -1569,7 +1570,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     throw stale("Selected rooted owner no longer has its captured causal state " + documentId);
                 }
                 capturedView = captureDocument(documentId,
-                        new InMemoryDocumentStore.DocumentHead(session.epoch(), exact.blueId()), selected);
+                        new InMemoryDocumentStore.DocumentHead(session.epoch(), exact.blueId()), selected,
+                        currentSubscriptions.statesFor(documentId));
             } else {
                 ExactValue body = objects.put(ExactValue.fromVerifiedClosureResult(view.result(), documentId),
                         "committed-rooted-selected-view");
@@ -2003,7 +2005,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 continue;
             }
             RootedDocumentView selectedView = attachmentViews.get(documentId);
-            captured.put(documentId, selectedView == null ? captureDocument(documentId, head, existingMembers)
+            captured.put(documentId, selectedView == null ? captureDocument(documentId, head, existingMembers,
+                    durable.closureSubscriptions().statesFor(documentId))
                     : captureSelectedDocument(documentId, selectedView));
         }
         long graphGeneration = maximumCapturedGraphGeneration(
@@ -2646,7 +2649,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     CapturedDocument captureDocument(
             DocumentId documentId,
             InMemoryDocumentStore.DocumentHead expectedHead,
-            Set<DocumentId> allowedMembers) {
+            Set<DocumentId> allowedMembers, List<SubscriptionState> closureSubscriptions) {
         runtime.metrics().increment(DOCUMENT_OPENS);
         if (!Objects.requireNonNull(allowedMembers, "allowedMembers")
                 .contains(documentId)) {
@@ -2682,7 +2685,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     session.nextApplicationOrder(),
                     initialized,
                     terminated,
-                    documents.closureTopologySnapshot().closureSubscriptions().statesFor(documentId));
+                    closureSubscriptions);
         }
     }
 
