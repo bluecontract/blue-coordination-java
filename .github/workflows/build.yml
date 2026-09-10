@@ -87,8 +87,8 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Verify release-version selection
-        run: node --test .github/scripts/prepare-rc-release.test.js
+      - name: Verify release automation
+        run: node --test .github/scripts/*.test.js
 
       - name: Prepare RC version for verification
         # Release commits on next already contain the version being verified.

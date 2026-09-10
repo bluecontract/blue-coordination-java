@@ -14,7 +14,9 @@ concurrency:
 
 jobs:
   release:
-    if: "${{ !startsWith(github.event.head_commit.message || '', 'chore: release ') }}"
+    if: >-
+      ${{ github.ref == 'refs/heads/next'
+        && !startsWith(github.event.head_commit.message || '', 'chore: release ') }}
     runs-on: ubuntu-24.04
     env:
       CI: true
@@ -70,6 +72,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Verify release automation
+        run: node --test .github/scripts/*.test.js
+
       - name: Require release credentials
         shell: bash
         env:
@@ -109,7 +114,7 @@ jobs:
 
       - name: Verify release ref permissions
         run: >-
-          git push --dry-run origin HEAD:next
+          git push --dry-run --no-follow-tags origin HEAD:refs/heads/next
           "v${{ steps.version.outputs.version }}"
 
       - name: Verify published dependency availability
@@ -132,6 +137,9 @@ jobs:
             -PblueDependencyMode=published-artifact \
             -PtestJavaVersion=17
 
+      - name: Push verified release commit
+        run: git push --no-follow-tags origin HEAD:refs/heads/next
+
       - name: Publish to Maven Central
         env:
           JRELEASER_GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
@@ -148,8 +156,8 @@ jobs:
             -PblueDependencyMode=published-artifact \
             -PtestJavaVersion=17
 
-      - name: Push release commit and tag
-        run: git push origin HEAD:next --follow-tags
+      - name: Push published release tag
+        run: git push --no-follow-tags origin "refs/tags/v${{ steps.version.outputs.version }}"
 
       - name: Archive release evidence
         uses: actions/upload-artifact@v4

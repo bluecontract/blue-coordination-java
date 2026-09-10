@@ -5,6 +5,9 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Restrict RC dispatch to `next` and push the verified release commit before
+  deployment; publish only its tag afterward so later merges cannot block
+  recording the published release.
 - Bind RC preparation and staging readiness to the RC8 declaration after RC7
   publication, retaining the complete capability inventory and release tier.
 - Collect exact topology identity evidence from its original JUnit cases and

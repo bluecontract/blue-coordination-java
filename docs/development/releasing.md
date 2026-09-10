@@ -40,7 +40,7 @@ in an isolated validation checkout; do not commit the prepared version to the
 feature branch. The release workflow owns the final version commit and tag.
 
 ```bash
-node --test .github/scripts/prepare-rc-release.test.js
+node --test .github/scripts/*.test.js
 ./gradlew --no-daemon dependencyPreflight --refresh-dependencies
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17
@@ -57,7 +57,9 @@ manually.
 
 ## Automated RC workflow
 
-A push to `next` starts `.github/workflows/release-rc.yml`. It:
+A push to `next` starts `.github/workflows/release-rc.yml`. Manual dispatch is
+also restricted to `next`; a selected feature branch cannot enter the release
+job. The workflow:
 
 1. checks out the complete history and tags;
 2. pins Temurin 17.0.19+10 for the canonical build and Temurin
@@ -69,13 +71,20 @@ A push to `next` starts `.github/workflows/release-rc.yml`. It:
 7. runs the complete Java 21 release gate before any staging;
 8. runs `stageRelease` on Java 17, including the complete release and rc.8
    gates;
-9. deploys the signed bundle to Maven Central;
-10. pushes the release commit, if any, and tag only after deployment succeeds;
-11. archives JARs, source distribution, reports, test results, staging output,
+9. pushes the verified release commit to `next` without publishing tags; a
+   competing change to `next` rejects this push before any external deployment;
+10. deploys the signed bundle to Maven Central;
+11. pushes only the release tag after deployment succeeds;
+12. archives JARs, source distribution, reports, test results, staging output,
     and JReleaser evidence.
 
 The tag is intentionally absent while Maven Central publication is pending.
 A failed gate or deployment leaves the remote tag untouched.
+The verified release commit is already on the remote before deployment starts.
+If `next` advances during deployment, the final tag-only push leaves the newer
+branch head in place and still identifies the exact published commit. A failed
+deployment can therefore leave a verified release commit on `next` without a
+published tag; the commit message alone is not evidence of publication.
 
 The separate Build workflow independently repeats `releaseCheck` on Java 17
 and Java 21 and runs `verifyRcReadiness` on the canonical Java 17 lane.
