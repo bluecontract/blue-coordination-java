@@ -1117,7 +1117,8 @@ public final class DefaultCoordinationEngine
                                         ContractsClosureDispatchAttempt.ResolutionStatus.valueOf(unresolved.status().name()),
                                         unresolved.diagnostic())).toList()));
                 if (exact.published() && !exact.replayed()) {
-                    committed++;
+                    committed = Math.addExact(committed,
+                            RootedResultScope.processTransitionCount(exact.attempt().processResult()));
                     for (DocumentId member : exact.publicationMembers()) {
                         documents.require(member).revisionForEntry(entry.blueId()).ifPresent(revision ->
                                 outcomes.add(new DocumentDispatchOutcome(member, revision, 0L)));

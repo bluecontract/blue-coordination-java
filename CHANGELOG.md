@@ -3,6 +3,13 @@
 This project follows Semantic Versioning. Release candidates may still refine
 the new 3.x API before the first stable 3.0.0 release.
 
+## Unreleased
+
+- Count every newly committed owned PROCESS revision in rooted drain budgets,
+  so a multi-document invocation stops further selection when the budget is
+  reached. Exclude unowned dependency calculations and replayed publications;
+  an individual invocation remains atomic even when it exceeds the budget.
+
 ## 3.0.0-rc.6 - historical representation candidate
 
 - Add authenticated historical representation positions and exact cursor

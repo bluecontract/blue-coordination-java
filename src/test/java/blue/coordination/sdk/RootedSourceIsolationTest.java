@@ -174,8 +174,10 @@ final class RootedSourceIsolationTest {
                 assertEquals(sourceHead, source.snapshot().blueId());
                 assertEquals(sourceHistory, receipts(blue, source.id()));
             }
-            EntryResult result = blue.processing().process(parent, input).entry(input);
+            DrainResult drained = blue.processing().process(parent, input);
+            EntryResult result = drained.entry(input);
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
+            assertEquals(1L, drained.stats().committedTransitions(), "Only the owned parent commits a PROCESS revision");
             assertAll(
                     () -> assertEquals(sourceHead, source.snapshot().blueId(), "root-local calculation must not publish S"),
                     () -> assertEquals(sourceHistory, receipts(blue, source.id())),
