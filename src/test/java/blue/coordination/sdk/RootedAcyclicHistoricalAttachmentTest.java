@@ -12,13 +12,16 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Acyclic retained history isolates the application boundary from the separately required cyclic join. */
 final class RootedAcyclicHistoricalAttachmentTest {
     @Test void savedA5AppliesFiveExactSuccessorsWithoutPublishingTheSourceAgain() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var b = fixture.start("historical-b.yaml", "rcp2/b", Map.of());
             var a = fixture.start("historical-a.yaml", "rcp2/a", Map.of());
             String a5 = null;
             for (int n = 1; n <= 10; n++) {
                 var input = fixture.append(a, "rcp2/a", "tick", 100 + n, "{}");
+                // then
                 assertEquals(EntryDisposition.APPLIED, blue.processing().process(a, input).entry(input).disposition());
                 assertEquals(n, a.snapshot().longAt("/counter"));
                 fixture.retain(a);

@@ -17,7 +17,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual SDK admission must not rebuild unchanged incoming source surfaces. */
 final class RootedAdmissionIndexLocalityTest {
     @Test void eachIndependentAdmissionRefreshesOnlyItsActualNewForwardSurface() throws Exception {
+        // given
         try (var fixture = new Fixture()) {
+            // when
             var source = fixture.source();
             String saved = fixture.retain(source);
             var first = fixture.parent("first", saved);
@@ -30,6 +32,7 @@ final class RootedAdmissionIndexLocalityTest {
             var third = fixture.parent("third", saved);
             // The previous members-based caller refreshes S plus all three
             // parents and fails these exact actual-work assertions.
+            // then
             assertEquals(1L, fixture.counter("sourceSurface.rootsResolved") - roots);
             assertEquals(2L, fixture.counter("sourceSurface.documentsResolved") - documents);
             assertEquals(sourceHistory, fixture.history(source));
@@ -50,7 +53,9 @@ final class RootedAdmissionIndexLocalityTest {
     }
 
     @Test void failedPreSwapAdmissionDoesNotPublishOrRefreshAndRetryInitializesOnce() throws Exception {
+        // given
         try (var fixture = new Fixture()) {
+            // when
             var source = fixture.source();
             String saved = fixture.retain(source);
             var first = fixture.parent("first", saved);
@@ -67,6 +72,7 @@ final class RootedAdmissionIndexLocalityTest {
                     throw new IllegalStateException("admission-before-swap");
                 }
             });
+            // then
             assertThrows(RuntimeException.class, () -> fixture.admit(pending));
             assertTrue(injected.get());
             assertEquals(before, fixture.engine.documents().publicationSnapshot());
@@ -82,7 +88,9 @@ final class RootedAdmissionIndexLocalityTest {
     }
 
     @Test void committedAdmissionRecoversItsDisposableIndexesWithoutDuplicateHistory() throws Exception {
+        // given
         try (var fixture = new Fixture()) {
+            // when
             var source = fixture.source();
             String saved = fixture.retain(source);
             var first = fixture.parent("first", saved);
@@ -99,6 +107,7 @@ final class RootedAdmissionIndexLocalityTest {
                     throw new IllegalStateException("admission-after-commit");
                 }
             });
+            // then
             assertThrows(RuntimeException.class, () -> fixture.admit(pending));
             assertTrue(injected.get());
             assertEquals(roots, fixture.counter("sourceSurface.rootsResolved"));

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual eventless containing-reference changes retain a strict independent proof owner. */
 final class RootedReadOnlyReferenceRebindTest {
     @Test void unmatchedSourceEventsRequireAuthenticatedSameEpochParentRebinds() throws Exception {
+        // given
         String sourceYaml = RootedSdkFixture.resource("source.yaml") + """
                   emitUnmatched:
                     type: Coordination/Sequential Workflow Operation
@@ -23,6 +24,7 @@ final class RootedReadOnlyReferenceRebindTest {
                               kind: RCP2/Unmatched
                           - $return: true
                 """;
+        // when
         try (var f = new RootedSdkFixture()) {
             var source = f.startYaml(sourceYaml, "rcp2/source");
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of("child", f.retain(source)));
@@ -37,6 +39,7 @@ final class RootedReadOnlyReferenceRebindTest {
                 entries.add(entry);
                 var drained = f.blue.processing().processNext(parent);
                 var applied = drained.entry(entry);
+                // then
                 assertEquals(EntryDisposition.APPLIED, applied.disposition());
                 assertTrue(drained.quiescent());
                 assertTrue(applied.publicEvents().isEmpty());

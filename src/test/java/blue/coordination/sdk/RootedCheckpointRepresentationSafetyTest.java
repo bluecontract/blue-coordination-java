@@ -22,10 +22,13 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void retainedPositionRejectsForgedProofAndAnUnownedSource() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var committed = scenario.checkpoint(100L);
             var before = scenario.state();
             var proof = committed.position().rootedCheckpointReferenceProofIdentity().orElseThrow();
+            // then
             assertDoesNotThrow(() -> scenario.f.control.verifyRetainedCheckpointPosition(committed.key(),
                     committed.result(), scenario.parent.id(), proof));
             assertDoesNotThrow(() -> scenario.f.control.verifySuppliedRepresentationPosition(committed.position()));
@@ -38,9 +41,12 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void anotherActualCheckpointResultAndCompanionCannotReplaceTheOriginalPublication() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var first = scenario.checkpoint(100L);
             var second = scenario.checkpoint(200L);
+            // then
             assertNotEquals(first.result().rootedProjection().companionIdentity(),
                     second.result().rootedProjection().companionIdentity());
             var before = scenario.state();
@@ -55,10 +61,13 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void sameCalculatedBytesAndBaseCompanionDoNotSupplyRootedCheckpointAuthority() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var entry = scenario.f.append(scenario.source, "rcp2/source", "emitUnmatched", 100L, "{}");
             var captured = scenario.f.control.capture(scenario.parent.id(), entry.blueId(), null);
             var materialized = RootedCalculationFixture.materializedReference(captured);
+            // then
             assertTrue(materialized.commits());
             assertNull(materialized.rootedProjection());
             var original = scenario.commit(entry);
@@ -78,9 +87,12 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void aCommittingCheckpointResultCannotLoseItsOriginalCompanion() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var original = scenario.checkpoint(100L);
             var before = scenario.state();
+            // then
             var base = assertDoesNotThrow(() -> copyPublicResult(original.input(), original.result(), original.result().commitCompanion()));
             assertNull(base.rootedProjection(), "Public reconstruction never manufactures rooted proof");
             assertThrows(IllegalArgumentException.class, () -> copyPublicResult(original.input(), original.result(), null));
@@ -89,9 +101,12 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void realEventlessOwnerWorkCannotMasqueradeAsACheckpointReference() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var entry = scenario.f.append(scenario.source, "rcp2/source", "tick", 100L, "{}");
             var applied = scenario.f.blue.processing().processNext(scenario.parent);
+            // then
             assertEquals(EntryDisposition.APPLIED, applied.entry(entry).disposition());
             String key = applied.entry(entry).closures().get(0).closureId();
             var input = scenario.f.blue.advanced().closureInvocation(key).orElseThrow();
@@ -114,9 +129,12 @@ final class RootedCheckpointRepresentationSafetyTest {
     }
 
     @Test void anOwnersOwnAcceptedCheckpointIsNotAReadOnlyDependencyRepresentation() throws Exception {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var entry = scenario.f.append(scenario.source, "rcp2/source", "noop", 100L, "{}");
             var applied = scenario.f.blue.processing().processNext(scenario.source);
+            // then
             assertEquals(EntryDisposition.APPLIED, applied.entry(entry).disposition());
             String key = applied.entry(entry).closures().get(0).closureId();
             var input = scenario.f.blue.advanced().closureInvocation(key).orElseThrow();

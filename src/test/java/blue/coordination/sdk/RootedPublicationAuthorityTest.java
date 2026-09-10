@@ -8,10 +8,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedPublicationAuthorityTest {
     @Test void capturedOwnerFenceRejectsARealCommittedHeadChangeWithoutRefreshingIt() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var entry = fixture.append(source, "rcp2/source", "tick", 100, "{}");
             var fence = fixture.control.capturedPublicationFence(source.id());
+            // then
             assertDoesNotThrow(fence::run);
             assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().process(source, entry).entry(entry).disposition());
             var committed = fixture.history(source);
@@ -24,7 +27,9 @@ final class RootedPublicationAuthorityTest {
     }
 
     @Test void retainedViewCannotMoveItsLogicalBoundaryToAnEarlierOrLaterEntry() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());
             var first = fixture.append(s, "rcp2/source", "tick", 100, "{}");
             var second = fixture.append(s, "rcp2/source", "tick", 200, "{}");
@@ -33,6 +38,7 @@ final class RootedPublicationAuthorityTest {
             var result = fixture.blue.processing().process(s, first).entry(first);
             var key = result.closures().get(0).closureId();
             var history = fixture.history(s);
+            // then
             assertDoesNotThrow(() -> fixture.control.verifyRetainedLogicalBoundary(s.id(), key, earlier));
             assertThrows(IllegalStateException.class, () -> fixture.control.verifyRetainedLogicalBoundary(s.id(), key, later));
             assertEquals(history, fixture.history(s));
@@ -44,12 +50,15 @@ final class RootedPublicationAuthorityTest {
     }
 
     @Test void terminalVerifierRejectsExtraMissingDuplicateOwnersAndAnotherCause() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());
             var p = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", s.snapshot().blueId()));
             var first = fixture.append(s, "rcp2/source", "tick", 100, "{}");
             var second = fixture.append(s, "rcp2/source", "tick", 110, "{}");
             var result = fixture.control.precompute(p.id(), first.blueId());
+            // then
             assertTrue(result.commits());
             var projection = result.rootedProjection();
             String key = projection.context().terminalKey(projection.deliveryBasisIdentity());

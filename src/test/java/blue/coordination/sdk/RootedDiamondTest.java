@@ -8,8 +8,14 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedDiamondTest {
-    @Test void canonicalNoncommutativeDiamondIsIndependentOfCacheEnumeration() throws IOException {
-        assertEquals(run(false), run(true));
+    @Test
+    void canonicalNoncommutativeDiamondIsIndependentOfCacheEnumeration() throws IOException {
+        // given
+        var baseline = run(false);
+        // when
+        var alternate = run(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     private static Outcome run(boolean reversed) throws IOException {

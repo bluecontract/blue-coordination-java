@@ -10,24 +10,51 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Saved authored graph inputs with explicit full-history admission. */
 final class RootedSavedOriginalGraphTest {
-    @Test void threeNodeRingKeepsExactHistoricalViewsAndFinishesWithin32Steps() throws Exception {
-        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}});
+    @Test
+    void threeNodeRingKeepsExactHistoricalViewsAndFinishesWithin32Steps() throws Exception {
+        // given
+        String[][] edges = {{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}};
+        // when
+        var restoredHeads = run(edges);
+        // then
+        assertEquals(3, restoredHeads.size());
     }
 
-    @Test void threeNodeRingCompletesAfterExactPreAnchorSourcePrerequisites() throws Exception {
-        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}, true);
+    @Test
+    void threeNodeRingCompletesAfterExactPreAnchorSourcePrerequisites() throws Exception {
+        // given
+        String[][] edges = {{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}};
+        // when
+        var restoredHeads = run(edges, true);
+        // then
+        assertEquals(3, restoredHeads.size());
     }
 
-    @Test void threeNodeRingWaitsForEarlierSourceWorkBeforeFreezingItsJoinAnchor() throws Exception {
-        run(new String[][]{{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}}, false, true);
+    @Test
+    void threeNodeRingWaitsForEarlierSourceWorkBeforeFreezingItsJoinAnchor() throws Exception {
+        // given
+        String[][] edges = {{"A", "b", "B"}, {"B", "c", "C"}, {"C", "a", "A"}};
+        // when
+        var restoredHeads = run(edges, false, true);
+        // then
+        assertEquals(3, restoredHeads.size());
     }
 
-    @Test void figureEightKeepsBothSavedOriginalLoopsAndTheirHistories() throws Exception {
-        run(new String[][]{{"A", "b", "B"}, {"B", "a", "A"}, {"A", "c", "C"}, {"C", "a", "A"}});
+    @Test
+    void figureEightKeepsBothSavedOriginalLoopsAndTheirHistories() throws Exception {
+        // given
+        String[][] edges = {{"A", "b", "B"}, {"B", "a", "A"}, {"A", "c", "C"}, {"C", "a", "A"}};
+        // when
+        var restoredHeads = run(edges);
+        // then
+        assertEquals(3, restoredHeads.size());
     }
 
-    @Test void localPendingHistoryMustFinishBeforeRootIsReady() throws Exception {
+    @Test
+    void localPendingHistoryMustFinishBeforeRootIsReady() throws Exception {
+        // given
         String template;
+        // when
         try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
             template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
         }
@@ -46,6 +73,7 @@ final class RootedSavedOriginalGraphTest {
                 var root = handles.get(edge[0]);
                 last = f.append(root, "rcp/local/" + edge[0], "attach", ++ordinal * 100L,
                         "edge: " + edge[1] + "\nsource: {blueId: " + originals.get(edge[2]).blueId() + "}");
+                // then
                 assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(root).entry(last).disposition());
                 for (int i = 0; i < 32; i++) if (f.blue.processing().processNext(root).quiescent()) break;
                 assertTrue(f.blue.processing().processNext(root).quiescent());
@@ -123,15 +151,15 @@ final class RootedSavedOriginalGraphTest {
         }
     }
 
-    private static void run(String[][] edges) throws Exception {
-        run(edges, false);
+    private static List<String> run(String[][] edges) throws Exception {
+        return run(edges, false);
     }
 
-    private static void run(String[][] edges, boolean settlePreAnchorSource) throws Exception {
-        run(edges, settlePreAnchorSource, false);
+    private static List<String> run(String[][] edges, boolean settlePreAnchorSource) throws Exception {
+        return run(edges, settlePreAnchorSource, false);
     }
 
-    private static void run(String[][] edges, boolean settlePreAnchorSource, boolean expectJoinPrerequisite) throws Exception {
+    private static List<String> run(String[][] edges, boolean settlePreAnchorSource, boolean expectJoinPrerequisite) throws Exception {
         String template;
         try (var in = RootedSavedOriginalGraphTest.class.getResourceAsStream("/rooted/node-graph.template.json")) {
             template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
@@ -272,6 +300,7 @@ final class RootedSavedOriginalGraphTest {
             assertTrue(f.blue.processing().processNext(handles.get("A")).quiescent());
             assertEquals(finalHeads, handles.values().stream().map(doc -> doc.snapshot().blueId()).toList());
             assertEquals(finalHistories, histories(f, handles));
+            return handles.values().stream().map(doc -> doc.snapshot().blueId()).toList();
         }
     }
 

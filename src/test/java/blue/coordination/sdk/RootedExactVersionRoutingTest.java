@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedExactVersionRoutingTest {
     @Test void savedAuthoredTargetRoutesOnlyWithANonExactPrecondition() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             String original = blue.advanced().auditDocument(source.id()).authoredInitialBlueId();
+            // then
             assertNotEquals(original, source.snapshot().blueId());
             var exactOriginal = fixture.appendReference(original, "rcp2/source", "tick", 10, "{}", true);
             assertTrue(blue.processing().process(source, exactOriginal).entries().stream()
@@ -30,12 +33,15 @@ final class RootedExactVersionRoutingTest {
     }
 
     @Test void exactTargetUsesTheSelectedViewAfterIndependentSourcePublication() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());
             String s0 = s.snapshot().blueId();
             var p = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", s0));
             var input = fixture.append(s, "rcp2/source", "tick", 100, "{}", true);
+            // then
             assertEquals(EntryDisposition.APPLIED, blue.processing().process(s, input).entry(input).disposition());
             String s1 = s.snapshot().blueId();
             var sourceHistory = fixture.history(s);

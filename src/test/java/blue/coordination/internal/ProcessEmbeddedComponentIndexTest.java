@@ -23,7 +23,9 @@ final class ProcessEmbeddedComponentIndexTest {
 
     @Test
     void selectedOrderUsesOnlyEdgesBetweenSelectedComponents() {
+        // given
         var bindings = new java.util.ArrayList<EmbeddingBinding>();
+        // when
         bindings.add(binding("a-b", A, B));
         bindings.add(binding("b-a", B, A));
         bindings.add(binding("b-c", B, C));
@@ -33,6 +35,7 @@ final class ProcessEmbeddedComponentIndexTest {
             bindings.add(binding("observer-edge-" + i, observer, C));
         }
         ProcessEmbeddedComponentIndex index = ProcessEmbeddedComponentIndex.fromBindings(bindings);
+        // then
         assertEquals(List.of(index.component(D), index.component(C), index.component(A)),
                 index.orderedComponentsFor(List.of(A, B, C, D)));
         assertEquals(List.of(index.component(C)), index.orderedComponentsFor(List.of(C)));

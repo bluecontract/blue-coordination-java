@@ -12,21 +12,29 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Public admission cases at empty and actual-entry logical frontiers. */
 final class RootedAdmissionBasisTest {
-    @Test void fromNowAtEmptyJournalRemainsAUsablePublicAdmission() {
+    @Test
+    void fromNowAtEmptyJournalRemainsAUsablePublicAdmission() {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var document = fixture.blue.documents().admitStaticProcessEmbedded(
                     "name: Rooted empty frontier\ncounter: 0\n", ActivationPolicy.fromNow()).document("root");
+            // then
             assertEquals(0L, document.snapshot().longAt("/counter"));
             assertEquals(0L, fixture.blue.advanced().auditDocument(document.id()).epoch());
         }
     }
 
-    @Test void emptyAuthoritativeTimelineRetainsBeginningThenProcessesFirstEntryOnceAcrossRestart() throws Exception {
+    @Test
+    void emptyAuthoritativeTimelineRetainsBeginningThenProcessesFirstEntryOnceAcrossRestart() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.timelines.put("rcp2/source", fixture.blue.timelines().register("rcp2/source", "alice"));
             var document = fixture.blue.documents().admitStaticProcessEmbedded(
                     RootedSdkFixture.resource("source.yaml"), ActivationPolicy.fromNow()).document("root");
             var history = fixture.control.historyBasis(document.id());
+            // then
             assertEquals(Map.of("mode", "FROM_NOW", "lowerExclusiveOrder", Map.of("kind", "BEGINNING")),
                     history.get("admission"));
             var initialReceipts = fixture.history(document);
@@ -49,14 +57,18 @@ final class RootedAdmissionBasisTest {
         }
     }
 
-    @Test void realFromNowActivationEntryKeepsItsExactThreeFieldOrder() throws Exception {
+    @Test
+    void realFromNowActivationEntryKeepsItsExactThreeFieldOrder() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var entry = fixture.append(source, "rcp2/source", "tick", 10L, "{}");
             var target = fixture.blue.documents().admitStaticProcessEmbedded(
                     RootedSdkFixture.resource("source.yaml").replace("RCP2 Source", "RCP2 Later"),
                     ActivationPolicy.fromNow()).document("root");
             var actual = ((blue.coordination.internal.DefaultCoordinationEngine) fixture.blue.advanced().rawEngine()).auditTimelineEntries().get(0).sourceOrderKey().components();
+            // then
             assertEquals(Map.of("mode", "FROM_NOW", "lowerExclusiveOrder", Map.of(
                     "timestampUs", actual.get(0).toString(), "timelineBlueId", actual.get(1), "entryBlueId", entry.blueId())),
                     fixture.control.historyBasis(target.id()).get("admission"));
@@ -64,19 +76,40 @@ final class RootedAdmissionBasisTest {
         }
     }
 
-    @Test void unknownProviderCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
-        rejectedBeginning(false, false);
+    @Test
+    void unknownProviderCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
+        // given
+        boolean registered = false;
+        boolean invalid = false;
+        // when
+        var code = rejectedBeginning(registered, invalid);
+        // then
+        assertEquals(CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE, code);
     }
 
-    @Test void unavailableProviderCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
-        rejectedBeginning(true, false);
+    @Test
+    void unavailableProviderCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
+        // given
+        boolean registered = true;
+        boolean invalid = false;
+        // when
+        var code = rejectedBeginning(registered, invalid);
+        // then
+        assertEquals(CoordinationErrorCode.NEEDS_RESOURCES, code);
     }
 
-    @Test void invalidProviderEvidenceCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
-        rejectedBeginning(true, true);
+    @Test
+    void invalidProviderEvidenceCannotTurnAnEmptyLocalStoreIntoBeginning() throws Exception {
+        // given
+        boolean registered = true;
+        boolean invalid = true;
+        // when
+        var code = rejectedBeginning(registered, invalid);
+        // then
+        assertEquals(CoordinationErrorCode.INVALID_ACTIVATION_EVIDENCE, code);
     }
 
-    private static void rejectedBeginning(boolean registered, boolean invalid) throws Exception {
+    private static CoordinationErrorCode rejectedBeginning(boolean registered, boolean invalid) throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             String yaml = RootedSdkFixture.resource("source.yaml");
             var id = DocumentId.of(fixture.blue.values().yaml(yaml).blueId());
@@ -95,20 +128,29 @@ final class RootedAdmissionBasisTest {
                     : "UNKNOWN_PROVIDER", failure.details().get("reason"));
             assertEquals(journalBefore, fixture.blue.advanced().auditTimelineEntries());
             assertThrows(CoordinationException.class, () -> fixture.blue.documents().require(id));
+            return failure.code();
         }
     }
 
-    @Test void beginningRejectsWrongRegisteredActorWithoutPublishing() throws Exception {
+    @Test
+    void beginningRejectsWrongRegisteredActorWithoutPublishing() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice");
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
                     .replace("accountId: alice", "accountId: bob"), "REGISTERED_ACTOR_MISMATCH");
         }
     }
 
-    @Test void beginningRejectsUnknownExactTimelineProviderType() throws Exception {
+    @Test
+    void beginningRejectsUnknownExactTimelineProviderType() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice");
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
                     .replace("      type: MyOS/MyOS Timeline\n", "      type:\n"
                             + "        name: Unregistered beginning provider\n"
@@ -116,9 +158,13 @@ final class RootedAdmissionBasisTest {
         }
     }
 
-    @Test void beginningRejectsCustomActorBytesDespiteMatchingAccount() throws Exception {
+    @Test
+    void beginningRejectsCustomActorBytesDespiteMatchingAccount() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice");
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
                     .replace("      type: MyOS/Principal Actor\n", "      type:\n"
                             + "        name: Unregistered beginning actor\n"
@@ -126,56 +172,108 @@ final class RootedAdmissionBasisTest {
         }
     }
 
-    @Test void beginningRejectsExtraFieldsOnTheExactTimelineProviderType() throws Exception {
+    @Test
+    void beginningRejectsExtraFieldsOnTheExactTimelineProviderType() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice");
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
                     .replace("timelineId: rcp2/source", "timelineId: rcp2/source\n      unregisteredEvidence: true"),
                     "UNSUPPORTED_COORDINATION_TYPE");
         }
     }
 
-    @Test void beginningRejectsExtraFieldsOnTheExactRegisteredActorType() throws Exception {
+    @Test
+    void beginningRejectsExtraFieldsOnTheExactRegisteredActorType() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice");
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml")
                     .replace("accountId: alice", "accountId: alice\n      unregisteredEvidence: true"),
                     "REGISTERED_ACTOR_MISMATCH");
         }
     }
 
-    @Test void beginningRejectsUnverifiedRegisteredActorKind() throws Exception {
+    @Test
+    void beginningRejectsUnverifiedRegisteredActorKind() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             fixture.blue.timelines().register("rcp2/source", "alice", TimelineActorKind.AGENT);
+            // then
             assertRejectedBeginning(fixture, RootedSdkFixture.resource("source.yaml"), "UNSUPPORTED_ACTOR_PROVIDER");
         }
     }
 
-    @Test void compositeBeginningVerifiesBothSourcesThenProcessesBothOnceAcrossRestart() throws Exception {
-        acceptedAggregateBeginning(false);
+    @Test
+    void compositeBeginningVerifiesBothSourcesThenProcessesBothOnceAcrossRestart() throws Exception {
+        // given
+        boolean allTimelines = false;
+        // when
+        long counter = acceptedAggregateBeginning(allTimelines);
+        // then
+        assertEquals(2L, counter);
     }
 
-    @Test void allTimelinesBeginningVerifiesBothSourcesThenProcessesBothOnceAcrossRestart() throws Exception {
-        acceptedAggregateBeginning(true);
+    @Test
+    void allTimelinesBeginningVerifiesBothSourcesThenProcessesBothOnceAcrossRestart() throws Exception {
+        // given
+        boolean allTimelines = true;
+        // when
+        long counter = acceptedAggregateBeginning(allTimelines);
+        // then
+        assertEquals(2L, counter);
     }
 
-    @Test void compositeBeginningCannotHideAnUnregisteredSecondSource() throws Exception {
-        rejectedAggregateBeginning(false, false);
+    @Test
+    void compositeBeginningCannotHideAnUnregisteredSecondSource() throws Exception {
+        // given
+        boolean allTimelines = false;
+        boolean wrongActor = false;
+        // when
+        var reason = rejectedAggregateBeginning(allTimelines, wrongActor);
+        // then
+        assertEquals("UNKNOWN_PROVIDER", reason);
     }
 
-    @Test void allTimelinesBeginningCannotHideAnUnregisteredSecondSource() throws Exception {
-        rejectedAggregateBeginning(true, false);
+    @Test
+    void allTimelinesBeginningCannotHideAnUnregisteredSecondSource() throws Exception {
+        // given
+        boolean allTimelines = true;
+        boolean wrongActor = false;
+        // when
+        var reason = rejectedAggregateBeginning(allTimelines, wrongActor);
+        // then
+        assertEquals("UNKNOWN_PROVIDER", reason);
     }
 
-    @Test void compositeBeginningCannotHideAWrongActorInSecondSource() throws Exception {
-        rejectedAggregateBeginning(false, true);
+    @Test
+    void compositeBeginningCannotHideAWrongActorInSecondSource() throws Exception {
+        // given
+        boolean allTimelines = false;
+        boolean wrongActor = true;
+        // when
+        var reason = rejectedAggregateBeginning(allTimelines, wrongActor);
+        // then
+        assertEquals("REGISTERED_ACTOR_MISMATCH", reason);
     }
 
-    @Test void allTimelinesBeginningCannotHideAWrongActorInSecondSource() throws Exception {
-        rejectedAggregateBeginning(true, true);
+    @Test
+    void allTimelinesBeginningCannotHideAWrongActorInSecondSource() throws Exception {
+        // given
+        boolean allTimelines = true;
+        boolean wrongActor = true;
+        // when
+        var reason = rejectedAggregateBeginning(allTimelines, wrongActor);
+        // then
+        assertEquals("REGISTERED_ACTOR_MISMATCH", reason);
     }
 
-    private static void acceptedAggregateBeginning(boolean all) throws Exception {
+    private static long acceptedAggregateBeginning(boolean all) throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             fixture.timelines.put("rcp2/source", fixture.blue.timelines().register("rcp2/source", "alice"));
             fixture.timelines.put("rcp2/second", fixture.blue.timelines().register("rcp2/second", "bob"));
@@ -199,14 +297,15 @@ final class RootedAdmissionBasisTest {
             assertTrue(fixture.blue.processing().processNext(document).entries().isEmpty());
             assertEquals(completed, fixture.history(document));
             assertEquals(2L, document.snapshot().longAt("/counter"));
+            return document.snapshot().longAt("/counter");
         }
     }
 
-    private static void rejectedAggregateBeginning(boolean all, boolean wrongActor) throws Exception {
+    private static String rejectedAggregateBeginning(boolean all, boolean wrongActor) throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             fixture.blue.timelines().register("rcp2/source", "alice");
             if (wrongActor) fixture.blue.timelines().register("rcp2/second", "carol");
-            assertRejectedBeginning(fixture, aggregateBeginningYaml(all),
+            return assertRejectedBeginning(fixture, aggregateBeginningYaml(all),
                     wrongActor ? "REGISTERED_ACTOR_MISMATCH" : "UNKNOWN_PROVIDER");
         }
     }
@@ -229,7 +328,7 @@ final class RootedAdmissionBasisTest {
                 .replace("channel: owner", "channel: aggregate");
     }
 
-    private static void assertRejectedBeginning(RootedSdkFixture fixture, String yaml, String reason) {
+    private static String assertRejectedBeginning(RootedSdkFixture fixture, String yaml, String reason) {
         var id = DocumentId.of(fixture.blue.values().yaml(yaml).blueId());
         var journal = fixture.blue.advanced().auditTimelineEntries();
         var failure = assertThrows(CoordinationException.class, () -> fixture.blue.documents()
@@ -238,6 +337,7 @@ final class RootedAdmissionBasisTest {
         assertEquals(reason, failure.details().get("reason"));
         assertEquals(journal, fixture.blue.advanced().auditTimelineEntries());
         assertThrows(CoordinationException.class, () -> fixture.blue.documents().require(id));
+        return failure.details().get("reason");
     }
 
     private static EntryHandle appendAggregateBeginning(RootedSdkFixture fixture, DocumentHandle target,

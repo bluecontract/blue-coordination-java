@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** The packaged two-pair sequence admits exact component inventories in either lexical order. */
 final class RootedMultiAdmissionTest {
     @Test void independentParentAdmissionsRetainCompleteExactComponents() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var handles = new LinkedHashMap<String, DocumentHandle>();
             var histories = new LinkedHashMap<String, java.util.List<String>>();
             for (String role : new String[]{"parent-first", "source-first"}) {
@@ -18,6 +20,7 @@ final class RootedMultiAdmissionTest {
                         + "\nchild:\n  blueId: " + source.snapshot().blueId() + "\n", pt);
                 var event = f.append(source, st, "tick", 100L, "{}", true);
                 if (role.equals("source-first"))
+                    // then
                     assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(source).entry(event).disposition());
                 var sourcePrefix = f.history(source);
                 assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(parent).entry(event).disposition());

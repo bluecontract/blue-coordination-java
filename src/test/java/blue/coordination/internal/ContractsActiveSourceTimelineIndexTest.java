@@ -98,7 +98,9 @@ final class ContractsActiveSourceTimelineIndexTest {
 
     @Test
     void independentAdmissionPreservesSharedTimelineReferencesAndImmutableSnapshots() {
+        // given
         DocumentId second = DocumentId.of("second-root");
+        // when
         ContractsActiveSourceTimelineIndex index = new ContractsActiveSourceTimelineIndex(List.of(ROOT));
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(active(ROOT, "/child", MEMBER)));
         Map<DocumentId, Set<String>> timelines = new LinkedHashMap<>();
@@ -116,6 +118,7 @@ final class ContractsActiveSourceTimelineIndexTest {
         inventory = inventory.replaceSources(List.of(second), List.of(active(second, "/child", MEMBER))).inventory();
         reads.clear();
         index.refresh(List.of(second), inventory, resolver);
+        // then
         assertEquals(Map.of(second, 1, MEMBER, 1), reads);
         assertEquals(Set.of("timeline/root", "timeline/shared"), originalSnapshot);
         assertEquals(Set.of("timeline/root", "timeline/second", "timeline/shared"), index.timelineIds());
@@ -138,7 +141,9 @@ final class ContractsActiveSourceTimelineIndexTest {
 
     @Test
     void failedMultiRootResolutionLeavesPreviousCountsAndSnapshotsIntact() {
+        // given
         DocumentId second = DocumentId.of("second-root");
+        // when
         ContractsActiveSourceTimelineIndex index = new ContractsActiveSourceTimelineIndex(List.of(ROOT, second));
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
                 active(ROOT, "/child", MEMBER), active(second, "/child", MEMBER)));
@@ -149,6 +154,7 @@ final class ContractsActiveSourceTimelineIndexTest {
         index.refresh(List.of(ROOT, second), inventory, timelines::get);
         Set<String> retained = index.timelineIds();
         timelines.put(MEMBER, Set.of("timeline/replacement"));
+        // then
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
                 index.refresh(List.of(MEMBER), inventory, document -> {
                     if (document.equals(second)) throw new IllegalStateException("source lookup failed");
@@ -169,7 +175,9 @@ final class ContractsActiveSourceTimelineIndexTest {
 
     @Test
     void parallelEdgesActivationAndRetargetKeepExactReverseMembership() {
+        // given
         DocumentId second = DocumentId.of("second-root");
+        // when
         ContractsActiveSourceTimelineIndex index = new ContractsActiveSourceTimelineIndex(List.of(ROOT, second));
         ManagedOccurrenceInventory inventory = ManagedOccurrenceInventory.of(List.of(
                 active(ROOT, "/one", MEMBER), active(ROOT, "/two", MEMBER), active(second, "/child", MEMBER)));
@@ -180,6 +188,7 @@ final class ContractsActiveSourceTimelineIndexTest {
         inventory = inventory.replaceSources(List.of(ROOT), List.of(
                 inactive(ROOT, "/one", MEMBER), active(ROOT, "/two", MEMBER))).inventory();
         index.refresh(List.of(ROOT), inventory, timelines::get);
+        // then
         assertEquals(Set.of("timeline/root", "timeline/second", "timeline/member"), index.timelineIds());
         inventory = inventory.replaceSources(List.of(ROOT), List.of(
                 inactive(ROOT, "/one", MEMBER), inactive(ROOT, "/two", MEMBER))).inventory();

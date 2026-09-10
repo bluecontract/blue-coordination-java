@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual local retained publication, shared-gas rollback and response-loss recovery. */
 final class RootedLocalHistoryRecoveryTest {
     @Test void retainedSourceEventReachesItsCalculatedConsumer() throws Exception {
+        // given
         try (var scenario = new Scenario(100_000L)) {
+            // when
             var input = scenario.f.control.captureLocalHistory(scenario.root.id());
             System.out.println("LOCAL_CAUSE=" + input.cause().getClass().getSimpleName());
             System.out.println("LOCAL_VIEW=" + scenario.f.control.localHistoryDescription(scenario.root.id()));
@@ -21,15 +23,19 @@ final class RootedLocalHistoryRecoveryTest {
             System.out.println("REFERENCE_RESULT=" + reference.status() + ":" + reference.totalGas());
             var result = scenario.f.blue.processing().processNext(scenario.root);
 
+            // then
             assertTrue(result.quiescent());
             assertEquals(25, scenario.localConsumerTouches());
         }
     }
 
     @Test void gasBoundariesRetainExactLocalHistoryAndIndependentSourcesOnRestart() throws Exception {
+        // given
         long gas;
+        // when
         try (var scenario = new Scenario(100_000L)) {
             var reference = RootedCalculationFixture.materializedReference(scenario.f.control.captureLocalHistory(scenario.root.id()));
+            // then
             assertTrue(reference.commits(), String.valueOf(reference.diagnostic())); gas = reference.totalGas();
             System.out.println("LOCAL_RETAINED_GAS_REFERENCE=" + gas);
         }
@@ -78,11 +84,14 @@ final class RootedLocalHistoryRecoveryTest {
     }
 
     @Test void failuresBeforeAndAfterStoreSwapNeverPublishAnIndependentSourceOrDuplicateTheRoot() throws Exception {
+        // given
         for (var point : List.of("AFTER_CAS_CHECKS", "BEFORE_SWAP", "AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH")) {
             try (var scenario = new Scenario(100_000L)) {
+                // when
                 var f = scenario.f; var heads = scenario.heads(); var histories = scenario.histories();
                 var controls = CoordinationTestControl.attach(f.blue.advanced().rawEngine());
                 f.control.failPublicationAt(point);
+                // then
                 assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(scenario.root), point);
                 assertEquals(heads.subList(1, 3), scenario.heads().subList(1, 3));
                 assertEquals(histories.subList(1, 3), scenario.histories().subList(1, 3));

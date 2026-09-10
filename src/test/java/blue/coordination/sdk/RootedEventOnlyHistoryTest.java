@@ -8,13 +8,16 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real source emissions, retained application and restart; no synthetic epoch producer. */
 final class RootedEventOnlyHistoryTest {
     @Test void eventOnlySourceRetainsItsActualPositionAndDoesNotRepeatAfterRestart() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             String yaml = sourceYaml();
             var source = f.startYaml(yaml, "rcp2/source");
             String savedZero = f.retain(source);
             var parent = f.startYaml(RootedSdkFixture.resource("parent.yaml"), "rcp2/parent");
             var event = f.append(source, "rcp2/source", "emitOnly", 100L, "{}");
             var emitted = f.blue.processing().processNext(source).entry(event);
+            // then
             assertEquals(EntryDisposition.APPLIED, emitted.disposition());
             assertEquals(2, emitted.publicEvents().size());
             assertEquals(0L, source.snapshot().longAt("/counter"));
@@ -58,13 +61,16 @@ final class RootedEventOnlyHistoryTest {
         }
     }
     @Test void repeatedEventOnlyPositionsRespectTheFrozenFrontierAndSurviveRestart() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var source = f.startYaml(sourceYaml(), "rcp2/source");
             String original = f.retain(source);
             var parent = f.startYaml(RootedSdkFixture.resource("parent.yaml"), "rcp2/parent");
             EntryHandle future = null;
             for (long time : List.of(100L, 150L, 500L)) {
                 var entry = f.append(source, "rcp2/source", "emitOnly", time, "{}");
+                // then
                 assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(source).entry(entry).disposition());
                 f.retain(source);
                 if (time == 500L) future = entry;

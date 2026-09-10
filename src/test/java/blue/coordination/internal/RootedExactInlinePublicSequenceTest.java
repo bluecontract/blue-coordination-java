@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** The exact original public report, including unchanged authored identities. */
 final class RootedExactInlinePublicSequenceTest {
-    @Test void retainedCaptureRejectsAnotherProjectionAndStalePublishedView() throws Exception {
+    @Test
+    void retainedCaptureRejectsAnotherProjectionAndStalePublishedView() throws Exception {
+        // given
         try (var blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
+            // when
             var timeline = blue.timelines().register("tutorial/cycle/alice", "alice");
             String yaml = resource("exact-user-cycle-b.yaml");
             var b = blue.documents().admitStaticProcessEmbedded(yaml, ActivationPolicy.importFullHistory()).document("root");
@@ -25,6 +28,7 @@ final class RootedExactInlinePublicSequenceTest {
             var adapter = engine.contractsClosureAdapter();
             var admission = adapter.captureRootedState(b.id());
             var first = append(blue, timeline, b, "touchB", null, null, 100, null);
+            // then
             assertThrows(IllegalArgumentException.class,
                     () -> admission.requireRetainedInput(input(engine, admission, first), engine.documents()));
             blue.advanced().drainJournalThrough(first, new DrainBudget(1, 1));
@@ -70,15 +74,27 @@ final class RootedExactInlinePublicSequenceTest {
                 environment);
     }
 
-    @Test void reattachesTheSavedOriginalAfterTheInlinePairJoined() throws Exception {
-        exactPair(false);
+    @Test
+    void reattachesTheSavedOriginalAfterTheInlinePairJoined() throws Exception {
+        // given
+        boolean sourceFirst = false;
+        // when
+        var restoredHeads = exactPair(sourceFirst);
+        // then
+        assertEquals(2, restoredHeads.size());
     }
 
-    @Test void independentlySelectedReturnWaitsWithoutMutationAndSurvivesRestart() throws Exception {
-        exactPair(true);
+    @Test
+    void independentlySelectedReturnWaitsWithoutMutationAndSurvivesRestart() throws Exception {
+        // given
+        boolean sourceFirst = true;
+        // when
+        var restoredHeads = exactPair(sourceFirst);
+        // then
+        assertEquals(2, restoredHeads.size());
     }
 
-    private static void exactPair(boolean sourceFirst) throws Exception {
+    private static List<String> exactPair(boolean sourceFirst) throws Exception {
         try (var blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
             var timeline = blue.timelines().register("tutorial/cycle/alice", "alice");
             String aYaml = resource("exact-user-inline-cycle-a.yaml");
@@ -155,6 +171,7 @@ final class RootedExactInlinePublicSequenceTest {
                         .filter(row -> row.kind().name().equals("INITIALIZATION")).count());
                 assertTrue(blue.advanced().auditManagedEpochs(document.id()).stream().allMatch(row -> row.emittedEvents().isEmpty()));
             }
+            return List.of(a.snapshot().blueId(), b.snapshot().blueId());
         }
     }
 

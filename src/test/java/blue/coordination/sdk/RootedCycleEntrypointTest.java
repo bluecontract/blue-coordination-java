@@ -10,8 +10,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Literal RUN-023: one exact A operation through either member, followed by splitting. */
 final class RootedCycleEntrypointTest {
-    @Test void alternateCycleViewsPreserveTheSameOperationAndSplitEvidence() throws IOException {
-        assertEquals(run(false), run(true));
+    @Test
+    void alternateCycleViewsPreserveTheSameOperationAndSplitEvidence() throws IOException {
+        // given
+        var baseline = run(false);
+        // when
+        var alternate = run(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     private static Outcome run(boolean throughB) throws IOException {

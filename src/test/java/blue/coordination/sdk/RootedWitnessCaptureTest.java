@@ -13,11 +13,14 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Reusing processor-owned witness provenance requires the complete unchanged selected view. */
 final class RootedWitnessCaptureTest {
     @Test void changedCaptureCannotInheritAnImmutableWitnessProof() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var b = fixture.start("historical-b.yaml", "rcp2/b", Map.of());
             var a = fixture.start("historical-a.yaml", "rcp2/a", Map.of("peer", b.snapshot().blueId()));
             String savedA0 = a.snapshot().blueId();
             var tick = fixture.append(a, "rcp2/a", "tick", 100, "{}");
+            // then
             assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().process(a, tick).entry(tick).disposition());
             var attach = fixture.append(b, "rcp2/b", "attach", 200, "child:\n  blueId: " + savedA0);
             assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().process(b, attach).entry(attach).disposition());

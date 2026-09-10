@@ -13,11 +13,14 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Genuine public source/consumer sequences; private controls only read inputs or invoke the exact negative admission boundary. */
 final class RootedTerminalTailSdkBoundaryTest {
     @Test void numberedSuccessorGasBoundaryRollsBackExactProgressAndSurvivesRestart() throws Exception {
+        // given
         long gas;
+        // when
         try (var calibration = new RootedTerminalTailSdkScenario(100_000L, false, 25)) {
             var input = calibration.f.control.captureRegisteredOwnedHistory(calibration.consumer.id());
             var historicalProof = ((ManagedRevisionCause) input.cause()).successorRepresentationCause()
                     .orElseThrow().transition().originalInput().snapshot();
+            // then
             assertTrue(historicalProof.managedDocuments().stream().anyMatch(document -> document.blueId()
                     .equals("G2Nwyqm7RXu15tudRxqa6fyh5XRWwZsxKioYdKP8F3Ff")),
                     "The exact demand from the empty reference store is already authenticated by the supplied proof");
@@ -91,11 +94,14 @@ final class RootedTerminalTailSdkBoundaryTest {
     }
 
     @Test void recomputedEarlierAndFutureGoalsCannotReplaceTheCanonicalFrozenWork() throws Exception {
+        // given
         try (var scenario = new RootedTerminalTailSdkScenario(100_000L, true, 1)) {
+            // when
             var f = scenario.f;
             var actual = f.control.registeredOwnedHistory(scenario.consumer.id());
             var successor = actual.successorRepresentationCause().orElseThrow();
             var unchangedSource = scenario.sourceState(); var unchangedConsumer = scenario.consumerProgress();
+            // then
             assertEquals(3, scenario.positions.size(), "The future target is an actual committed500 position");
             assertEquals(scenario.positions.get(1).positionIdentity(), successor.targetPositionIdentity());
             var controls = CoordinationTestControl.attach(f.blue.advanced().rawEngine());

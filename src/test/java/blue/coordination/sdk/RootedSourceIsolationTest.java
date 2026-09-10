@@ -25,44 +25,82 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 final class RootedSourceIsolationTest {
     @Test
     void literalSourcePublishesOneTickAndRetainsItAcrossStoreRestart() throws IOException {
-        verifySource(0);
+        // given
+        int observers = 0;
+        // when
+        var result = verifySource(observers);
+        // then
+        assertTrue(result.gas() > 0L);
     }
 
     @Test
     void oneIncomingParentCannotBecomePartOfTheSourcePublication() throws IOException {
-        verifySource(1);
+        // given
+        int observers = 1;
+        // when
+        var result = verifySource(observers);
+        // then
+        assertTrue(result.gas() > 0L);
     }
 
     @Test
     void twoIncomingParentsCannotBecomePartOfTheSourcePublication() throws IOException {
-        verifySource(2);
+        // given
+        int observers = 2;
+        // when
+        var result = verifySource(observers);
+        // then
+        assertTrue(result.gas() > 0L);
     }
 
     @Test
     void parentFirstAdvancesItsViewWithoutPublishingTheIndependentSource() throws IOException {
-        verifyParent(false);
+        // given
+        boolean sourceFirst = false;
+        // when
+        var result = verifyParent(sourceFirst);
+        // then
+        assertTrue(result.gas() > 0L);
     }
 
     @Test
     void sourceFirstStillProcessesTheParentsOriginalLiveView() throws IOException {
-        verifyParent(true);
+        // given
+        boolean sourceFirst = true;
+        // when
+        var result = verifyParent(sourceFirst);
+        // then
+        assertTrue(result.gas() > 0L);
     }
 
     @Test
     void incomingObserversCannotChangeSourceGasOrSemanticIdentities() throws IOException {
+        // given
         ExecutionIdentity sourceOnly = verifySource(0);
+        // when
         assertEquals(sourceOnly, verifySource(1));
+        // then
         assertEquals(sourceOnly, verifySource(2));
     }
 
     @Test
     void sourceFirstCannotChangeTheParentsLiveCalculation() throws IOException {
-        assertEquals(verifyParent(false), verifyParent(true));
+        // given
+        var baseline = verifyParent(false);
+        // when
+        var alternate = verifyParent(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     @Test
     void aGasFailedSiblingCannotChangeSourceOrParentProcessing() throws IOException {
-        assertEquals(verifyParent(true, false), verifyParent(true, true));
+        // given
+        var baseline = verifyParent(true, false);
+        // when
+        var alternate = verifyParent(true, true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     private static ExecutionIdentity verifyParent(boolean sourceFirst) throws IOException {

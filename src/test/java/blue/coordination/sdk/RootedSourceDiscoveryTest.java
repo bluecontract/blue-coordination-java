@@ -10,8 +10,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Physical first loading cannot become a bare source's semantic birth. */
 final class RootedSourceDiscoveryTest {
-    @Test void missingHistoryRemainsAWaitUntilCommittedEvidenceIsSupplied() throws IOException {
+    @Test
+    void missingHistoryRemainsAWaitUntilCommittedEvidenceIsSupplied() throws IOException {
+        // given
         String sourceYaml = RootedSdkFixture.resource("source.yaml");
+        // when
         String initialId;
         String providerJson;
         try (var preparation = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
@@ -25,6 +28,7 @@ final class RootedSourceDiscoveryTest {
             var source15 = fixture.appendReference(initialId, "rcp2/source", "setCounter", 15, "counterValue: 5", false);
             var attachment = fixture.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + initialId);
             var before = parent.snapshot().blueId();
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, blue.processing().processNext(parent).entry(attachment).disposition());
             fixture.exact.put(initialId, "name: wrong supplied source\ncounter: 999\n");
             var wrongIdentity = assertThrows(CoordinationException.class,
@@ -68,12 +72,24 @@ final class RootedSourceDiscoveryTest {
         }
     }
 
-    @Test void bareSourceKeepsHistoryBeforeTheLaterAttachment() throws IOException {
-        RootedSourcePrerequisiteTest.runDiscovery(false);
+    @Test
+    void bareSourceKeepsHistoryBeforeTheLaterAttachment() throws IOException {
+        // given
+        boolean suspended = false;
+        // when
+        var result = RootedSourcePrerequisiteTest.runDiscovery(suspended);
+        // then
+        assertEquals(2, ((java.util.List<?>) result.get("sourceHistory")).size());
     }
 
-    @Test void suspendingTheEarlierLoaderCannotDiscardTheSourcesEarlierInput() throws IOException {
-        RootedSourcePrerequisiteTest.runDiscovery(true);
+    @Test
+    void suspendingTheEarlierLoaderCannotDiscardTheSourcesEarlierInput() throws IOException {
+        // given
+        boolean suspended = true;
+        // when
+        var result = RootedSourcePrerequisiteTest.runDiscovery(suspended);
+        // then
+        assertEquals(2, ((java.util.List<?>) result.get("sourceHistory")).size());
     }
 
 }

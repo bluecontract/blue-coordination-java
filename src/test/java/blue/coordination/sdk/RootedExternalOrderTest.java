@@ -11,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedExternalOrderTest {
     @Test void anIndependentRootCanAdmitOlderHistoryWithoutRewindingTheProcessedRoot() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", java.util.Map.of());
             var first = fixture.append(source, "rcp2/source", "tick", 200, "{}");
+            // then
             assertEquals(EntryDisposition.APPLIED, blue.processing().drain().entry(first).disposition());
             var history = fixture.history(source);
             CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
@@ -30,13 +33,16 @@ final class RootedExternalOrderTest {
     }
 
     @Test void aTimelineAlreadyRequiredByAProcessedRootStillRejectsAnOlderAppend() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", java.util.Map.of());
             var other = fixture.startYaml(resource("source.yaml").replace("rcp2/source", "rcp2/other"), "rcp2/other");
             var parent = fixture.startYaml(resource("parent.yaml").replace("    - /child", "    - /child\n    - /other")
                     + "\nchild:\n  blueId: " + source.snapshot().blueId() + "\nother:\n  blueId: " + other.snapshot().blueId(), "rcp2/parent");
             fixture.append(source, "rcp2/source", "tick", 200, "{}");
+            // then
             assertTrue(blue.processing().drain().quiescent());
             assertEquals(1L, parent.snapshot().longAt("/seen"));
             var before = List.of(fixture.history(source), fixture.history(parent), fixture.history(other));
@@ -52,7 +58,9 @@ final class RootedExternalOrderTest {
     }
 
     @Test void aGasTerminalRetainsRequiredProviderFrontiersWithoutPublishingState() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", java.util.Map.of());
             var parent = fixture.start("parent.yaml", "rcp2/parent", java.util.Map.of("child", source.snapshot().blueId()));
@@ -60,6 +68,7 @@ final class RootedExternalOrderTest {
             var entry = fixture.append(source, "rcp2/source", "tick", 200, "{}");
             var result = blue.advanced().process(parent, entry,
                     ContractsExecutionPolicy.exactSharedGas(1, "provider-frontier-negative"));
+            // then
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, result.entry(entry).disposition());
             assertEquals(histories, List.of(fixture.history(source), fixture.history(parent)));
             CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
@@ -79,13 +88,16 @@ final class RootedExternalOrderTest {
     }
 
     @Test void equalTimestampsUseExactTimelineBlueIdsRatherThanNamesOrAppendOrder() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             List<String> names = List.of("rcp2/order-a", "rcp2/order-b", "rcp2/order-c", "rcp2/order-d");
             var ids = new java.util.LinkedHashMap<String, String>();
             for (String name : names) ids.put(name, blue.values().yaml(
                     "type: MyOS/MyOS Timeline\ntimelineId: " + name).blueId());
             List<String> ordered = names.stream().sorted(Comparator.comparing(ids::get)).toList();
+            // then
             assertNotEquals(names, ordered, "The counterexample must distinguish names from exact identities");
             String source;
             try (var in = getClass().getResourceAsStream("/rooted/source.yaml")) {

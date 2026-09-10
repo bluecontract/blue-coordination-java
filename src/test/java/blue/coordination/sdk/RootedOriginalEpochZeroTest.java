@@ -8,15 +8,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Saved authored references import initialization without republishing source zero. */
 final class RootedOriginalEpochZeroTest {
-    @Test void separatelyStartedPairUsesBothSavedOriginalsAndRestarts() throws IOException {
-        pair(false);
+    @Test
+    void separatelyStartedPairUsesBothSavedOriginalsAndRestarts() throws IOException {
+        // given
+        boolean inline = false;
+        // when
+        var phases = pair(inline);
+        // then
+        assertEquals(java.util.List.of("done", "relayed"), phases);
     }
 
-    @Test void inlineSavedSourceStartsBeforeAnyEntryAndCanBeReattachedAfterTheJoin() throws IOException {
-        pair(true);
+    @Test
+    void inlineSavedSourceStartsBeforeAnyEntryAndCanBeReattachedAfterTheJoin() throws IOException {
+        // given
+        boolean inline = true;
+        // when
+        var phases = pair(inline);
+        // then
+        assertEquals(java.util.List.of("done", "relayed"), phases);
     }
 
-    private static void pair(boolean inline) throws IOException {
+    private static java.util.List<String> pair(boolean inline) throws IOException {
         try (var fixture = new RootedSdkFixture()) {
             var blue = fixture.blue;
             String bYaml = RootedSdkFixture.resource("cycle-b.yaml").replace("ownerChannel", "owner");
@@ -74,16 +86,21 @@ final class RootedOriginalEpochZeroTest {
             assertEquals(histories, java.util.List.of(fixture.history(a), fixture.history(b)));
             assertTrue(blue.processing().processNext(a).quiescent());
             assertTrue(blue.processing().processNext(b).quiescent());
+            return java.util.List.of(a.snapshot().textAt("/phase"), b.snapshot().textAt("/phase"));
         }
     }
 
-    @Test void savedAuthoredSourceAtZeroPreservesItsRoutesHistoryAndNextLiveInput() throws IOException {
+    @Test
+    void savedAuthoredSourceAtZeroPreservesItsRoutesHistoryAndNextLiveInput() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var sourceValue = blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
             fixture.exact.put(sourceValue.blueId(), sourceValue.json());
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
+            // then
             assertEquals(sourceValue.blueId(), source.id().value());
             String sourceHead = source.snapshot().blueId();
             var sourceHistory = fixture.history(source);

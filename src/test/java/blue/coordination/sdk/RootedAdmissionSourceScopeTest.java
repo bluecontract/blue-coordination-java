@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Admission must use the same declared forward scope as later rooted work. */
 final class RootedAdmissionSourceScopeTest {
     @Test void aNewObserverAdmissionExcludesExistingIncomingObservers() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             String savedSource = fixture.retain(source);
             var sourceView = fixture.control.selectedView(source.id());
@@ -19,6 +21,7 @@ final class RootedAdmissionSourceScopeTest {
             var firstHistory = fixture.history(first);
             var second = fixture.startYaml(parent("second", savedSource), "rcp2/second");
             var selected = fixture.control.selectedView(second.id());
+            // then
             assertEquals(Set.of(second.id().value(), source.id().value()), selected.managedDocuments()
                     .stream().map(document -> document.documentId().value()).collect(Collectors.toSet()));
             assertEquals(1, selected.occurrences().size());

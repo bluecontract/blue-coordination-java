@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** The normal public journal driver owns scheduling across separately admitted roots. */
 final class RootedSavedOriginalJournalRingTest {
     @Test void savedOriginalRingCompletesWithOrderedJournalSchedulingAndRestart() throws Exception {
+        // given
         String template;
+        // when
         try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
             template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
         }
@@ -23,6 +25,7 @@ final class RootedSavedOriginalJournalRingTest {
                 var exact = f.blue.values().yaml(yaml);
                 originals.put(name, exact); f.exact.put(exact.blueId(), exact.json());
                 roots.put(name, f.startYaml(yaml, "rcp/journal/" + name));
+                // then
                 assertEquals(exact.blueId(), roots.get(name).id().value());
             }
             int ordinal = 0;

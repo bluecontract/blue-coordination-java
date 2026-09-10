@@ -18,10 +18,13 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RootedGasBoundaryTest {
     @Test
     void twelveLiteralBudgetSchedulesMatchTheMaterializedReference() throws IOException {
+        // given
         long gas;
+        // when
         try (Scenario scenario = new Scenario()) {
             var input = scenario.control.capture(scenario.parent.id(), scenario.entry.blueId(), null);
             var reference = RootedCalculationFixture.materializedReference(input);
+            // then
             assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
             assertNull(reference.rootedProjection(), "Reference has no optimized ownership projection");
             gas = reference.totalGas();
@@ -40,7 +43,12 @@ final class RootedGasBoundaryTest {
 
     @Test
     void parentGasFailureAfterCommittedSourceCannotUndoSourceOrAdvanceParent() throws IOException {
-        verify("source-committed", 1L, false);
+        // given
+        long budget = 1L;
+        // when
+        var result = verify("source-committed", budget, false);
+        // then
+        assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, result.disposition());
     }
 
     private static Boundary verify(String schedule, long budget, boolean succeeds) throws IOException {

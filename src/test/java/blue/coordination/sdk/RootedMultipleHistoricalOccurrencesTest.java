@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Production SDK sequences for the RCP-RUN-006 and RCP-RUN-008 obligations. */
 final class RootedMultipleHistoricalOccurrencesTest {
     @Test void twoSavedStatesOfOneSourceKeepTheirDistinctSuccessorSuffixes() throws IOException {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var a = f.start("historical-a.yaml", "rcp2/a", Map.of());
             String a5 = null, a8 = null;
             for (int n = 1; n <= 10; n++) {
@@ -27,6 +29,7 @@ final class RootedMultipleHistoricalOccurrencesTest {
             var right = new ArrayList<Long>();
             for (int step = 0; step < 7; step++) {
                 var result = f.blue.processing().processNext(parent);
+                // then
                 assertEquals(1, result.managedEpochApplications().size(), result.managedEpochApplicationAttempts().toString());
                 var work = result.managedEpochApplicationAttempts().get(0).work();
                 assertEquals(a.id(), work.sourceDocumentId());
@@ -51,7 +54,9 @@ final class RootedMultipleHistoricalOccurrencesTest {
     }
 
     @Test void retainedSourcesInterleaveBeforeTheNextDependentLiveInput() throws IOException {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var a = f.start("historical-a.yaml", "rcp2/a", Map.of());
             var c = f.startYaml(RootedSdkFixture.resource("historical-a.yaml")
                     .replace("Historical A", "Historical C").replace("rcp2/a", "rcp2/c"), "rcp2/c");
@@ -65,6 +70,7 @@ final class RootedMultipleHistoricalOccurrencesTest {
             var order = new ArrayList<String>();
             for (int step = 0; step < 4; step++) {
                 var result = f.blue.processing().processNext(parent);
+                // then
                 assertEquals(1, result.managedEpochApplications().size(), result.managedEpochApplicationAttempts().toString());
                 var work = result.managedEpochApplicationAttempts().get(0).work();
                 var source = f.blue.advanced().auditManagedEpoch(work.sourceDocumentId(), work.sourceEpoch()).orElseThrow();

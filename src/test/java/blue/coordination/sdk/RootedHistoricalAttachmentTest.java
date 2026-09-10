@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Exact literal RUN-007, including five retained successors and no current-state substitution. */
 final class RootedHistoricalAttachmentTest {
     @Test void attachingSavedA5ConsumesExactlyFiveSuccessorsAndClosesTheLiveCycle() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var b = fixture.start("historical-b.yaml", "rcp2/b", Map.of());
             var a = fixture.start("historical-a.yaml", "rcp2/a", Map.of("peer", b.snapshot().blueId()));
@@ -19,6 +21,7 @@ final class RootedHistoricalAttachmentTest {
             for (int n = 1; n <= 10; n++) {
                 var input = fixture.append(a, "rcp2/a", "tick", 100 + n, "{}");
                 var result = blue.processing().process(a, input).entry(input);
+                // then
                 assertEquals(EntryDisposition.APPLIED, result.disposition(), "A step " + n + " " + result.diagnostic());
                 assertEquals(n, blue.advanced().auditDocument(a.id()).epoch());
                 var receipt = blue.advanced().auditManagedEpoch(a.id(), n).orElseThrow();

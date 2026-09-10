@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real source admission and historical acquisition are individually observable SDK operations. */
 final class RootedSourcePrerequisiteTest {
-    @Test void inlineSourceBodyCanSelectAdmissionBeforeItsMissingEmbeddedResourceArrives() throws IOException {
+    @Test
+    void inlineSourceBodyCanSelectAdmissionBeforeItsMissingEmbeddedResourceArrives() throws IOException {
+        // given
         String missingJson;
+        // when
         String missingId;
         String childYaml;
         String childId;
@@ -33,6 +36,7 @@ final class RootedSourcePrerequisiteTest {
             var beforeHead = parent.snapshot().exact().json();
             var beforeHistory = f.history(parent);
             var attachment = f.append(parent, "rcp2/parent", "attach", 20L, "child:\n" + childYaml.indent(2));
+            // then
             assertFalse(f.exact.containsKey(childId), "The child is authored inline in the original request, not uploaded or prestarted");
             var exactEntry = blue.values().retained(attachment.blueId()).orElseThrow();
             var exactRequestChild = NodePathEditor.getOrNull(exactEntry.copyNode(), "/message/request/child");
@@ -93,8 +97,14 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void unknownAdmissionAndEarlierLiveAreSeparateAndDoNotProcessFuture50() throws IOException {
-        assertEquals(runDiscovery(false), runDiscovery(true));
+    @Test
+    void unknownAdmissionAndEarlierLiveAreSeparateAndDoNotProcessFuture50() throws IOException {
+        // given
+        var baseline = runDiscovery(false);
+        // when
+        var alternate = runDiscovery(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     static Map<String, Object> runDiscovery(boolean suspended) throws IOException {
@@ -182,13 +192,17 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void unavailableCompletenessBlocksTheNewAdmissionLane() throws IOException {
+    @Test
+    void unavailableCompletenessBlocksTheNewAdmissionLane() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var parent = setup(f, input, true);
             var control = CoordinationTestControl.attach(f.blue.advanced().rawEngine());
             control.makeHistoricalUnavailable("source Timeline completeness unavailable");
             String before = parent.snapshot().blueId();
+            // then
             assertFalse(f.blue.processing().processNext(parent).quiescent());
             var wait = one(f.blue, parent, SourceHistoryPrerequisite.Kind.WAIT);
             assertTrue(wait.diagnostic().contains("completeness unavailable"));
@@ -206,12 +220,16 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void sourceSelectionRejectsAChangedJournalBeforeAdmission() throws IOException {
+    @Test
+    void sourceSelectionRejectsAChangedJournalBeforeAdmission() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var parent = setup(f, input, true); f.blue.processing().processNext(parent);
             var original = one(f.blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION);
             f.appendReference(input.id(), "rcp2/source", "setCounter", 51, "counterValue: 100", false);
+            // then
             assertThrows(IllegalArgumentException.class, () -> f.blue.advanced().processSourceHistoryPrerequisite(original));
             var refreshed = one(f.blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION);
             assertNotEquals(original.selectionIdentity(), refreshed.selectionIdentity());
@@ -220,10 +238,14 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void alreadyKnownSourceSelectsLiveWithoutAnotherAdmission() throws IOException {
+    @Test
+    void alreadyKnownSourceSelectsLiveWithoutAnotherAdmission() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var source = f.startYaml(RootedSdkFixture.resource("source.yaml"), "rcp2/source");
+            // then
             assertEquals(input.id(), source.id().value());
             var parent = setup(f, input, false);
             assertFalse(f.blue.processing().processNext(parent).quiescent());
@@ -234,10 +256,14 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void alreadyKnownSourceRetainedHistoryRunsOneApplicationAtATime() throws IOException {
+    @Test
+    void alreadyKnownSourceRetainedHistoryRunsOneApplicationAtATime() throws IOException {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var leaf = f.start("source.yaml", "rcp2/source", Map.of());
             var leafEntry = f.append(leaf, "rcp2/source", "setCounter", 5, "counterValue: 5");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(leaf).entry(leafEntry).disposition());
             var source = f.startYaml(RootedSdkFixture.resource("parent.yaml").replace("RCP2 Parent", "Retained source")
                     .replace("rcp2/parent", "rcp2/retained-source"), "rcp2/retained-source");
@@ -263,8 +289,11 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void knownSourceRootedRetainedWorkIsOneDistinctPrerequisite() throws IOException {
+    @Test
+    void knownSourceRootedRetainedWorkIsOneDistinctPrerequisite() throws IOException {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var nodes = new java.util.LinkedHashMap<String, DocumentHandle>();
             String template = RootedSdkFixture.resource("node-graph.template.json");
             for (String name : List.of("A", "B", "C")) {
@@ -275,6 +304,7 @@ final class RootedSourcePrerequisiteTest {
             }
             var a = nodes.get("A"); var b = nodes.get("B"); var c = nodes.get("C");
             var ab = f.append(a, "rcp/source-prerequisite/A", "attach", 10, "edge: b\nsource: {blueId: " + b.id().value() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(a).entry(ab).disposition());
             assertEquals(1, f.blue.processing().processNext(a).managedEpochApplications().size());
             var bc = f.append(b, "rcp/source-prerequisite/B", "attach", 12, "edge: c\nsource: {blueId: " + c.id().value() + "}");
@@ -296,13 +326,17 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void exactBodyWithoutRegisteredTimelineRemainsUnavailable() throws IOException {
+    @Test
+    void exactBodyWithoutRegisteredTimelineRemainsUnavailable() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             f.exact.put(input.id(), input.json());
             var attach = f.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + input.id());
             String before = parent.snapshot().blueId();
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, f.blue.processing().processNext(parent).entry(attach).disposition());
             var wait = one(f.blue, parent, SourceHistoryPrerequisite.Kind.WAIT);
             assertTrue(wait.diagnostic().contains("not registered"));
@@ -314,21 +348,28 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test void wrongRegisteredActorCannotAuthenticateTheSourceWindow() throws IOException {
+    @Test
+    void wrongRegisteredActorCannotAuthenticateTheSourceWindow() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             f.timelines.put("rcp2/source", f.blue.timelines().register("rcp2/source", "mallory"));
             f.exact.put(input.id(), input.json());
             f.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + input.id());
             String before = parent.snapshot().blueId();
+            // then
             assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(parent));
             assertEquals(before, parent.snapshot().blueId()); assertEquals(1, f.history(parent).size());
         }
     }
 
-    @Test void unchangedDigestCannotAuthorizeAChangedSourceDescriptor() throws IOException {
+    @Test
+    void unchangedDigestCannotAuthorizeAChangedSourceDescriptor() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var parent = setup(f, input, true); f.blue.processing().processNext(parent);
             var exact = one(f.blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION);
@@ -336,20 +377,25 @@ final class RootedSourcePrerequisiteTest {
                     exact.requestingInvocationIdentity(), exact.demandIdentity(), parent.id(), exact.authoredBlueId(),
                     exact.cutoffExclusive(), exact.kind(), exact.sourceEpoch(), exact.sourceBlueId(), exact.workIdentity(),
                     exact.entryBlueId(), exact.journalRevision(), exact.routeGeneration(), exact.sourceSurfaceIdentity(), exact.diagnostic());
+            // then
             assertThrows(IllegalArgumentException.class, () -> f.blue.advanced().processSourceHistoryPrerequisite(forged));
             assertEquals(1, f.history(parent).size());
             assertEquals(exact, one(f.blue, parent, SourceHistoryPrerequisite.Kind.ADMISSION));
         }
     }
 
-    @Test void lostLivePublicationResponseReconcilesOnlyTheActualRetainedResult() throws IOException {
+    @Test
+    void lostLivePublicationResponseReconcilesOnlyTheActualRetainedResult() throws IOException {
+        // given
         SourceInput input = sourceInput();
+        // when
         try (var f = new RootedSdkFixture()) {
             var source = f.startYaml(RootedSdkFixture.resource("source.yaml"), "rcp2/source");
             var parent = setup(f, input, false); f.blue.processing().processNext(parent);
             var selected = one(f.blue, parent, SourceHistoryPrerequisite.Kind.LIVE);
             String before = parent.snapshot().blueId();
             f.control.failPublicationAt("AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH");
+            // then
             assertThrows(RuntimeException.class, () -> f.blue.advanced().processSourceHistoryPrerequisite(selected));
             f.control.clearPublicationFailure();
             assertEquals(2, f.history(source).size());

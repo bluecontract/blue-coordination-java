@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** A retired collection key reuses its reserved generation but starts at the saved exact source. */
 final class RootedRecreatedCollectionOccurrenceTest {
     @Test void retiredGenerationDoesNotFreezeTheNewAttachmentBeforeAnEarlierSourceEntry() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var source = f.start("historical-a.yaml", "rcp2/a", Map.of());
             String original = source.id().value();
             var parent = f.startYaml(consumer(), "rcp2/b");
@@ -30,6 +32,7 @@ final class RootedRecreatedCollectionOccurrenceTest {
                     ready = true; break;
                 }
                 var result = f.blue.processing().processNext(parent);
+                // then
                 assertFalse(result.blocked(), result.diagnostic().toString());
                 assertTrue(result.entries().isEmpty(), "Historical work cannot overtake the frozen 400 frontier");
             }
@@ -48,11 +51,14 @@ final class RootedRecreatedCollectionOccurrenceTest {
     }
 
     @Test void readdingSavedInitializedSourceTraversesHistoryForTheNewGeneration() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("historical-a.yaml", "rcp2/a", Map.of());
             String saved = source.snapshot().blueId();
             var parent = fixture.startYaml(consumer(), "rcp2/b");
+            // then
             assertEquals("{}", parent.snapshot().valueAt("/orders").json().replaceAll("\\s", ""));
             var original = apply(fixture, parent, fixture.append(parent, "rcp2/b", "attach", 100, reference(saved)));
             assertTrue(original.active());
@@ -118,7 +124,9 @@ final class RootedRecreatedCollectionOccurrenceTest {
     }
 
     @Test void retiredReservationCannotReaddAnotherLineage() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("historical-a.yaml", "rcp2/a", Map.of());
             var foreign = fixture.startYaml(RootedSdkFixture.resource("historical-a.yaml")
@@ -131,6 +139,7 @@ final class RootedRecreatedCollectionOccurrenceTest {
             var heads = List.of(parent.snapshot().blueId(), source.snapshot().blueId(), foreign.snapshot().blueId());
             var entry = fixture.append(parent, "rcp2/b", "attach", 300, reference(foreign.snapshot().blueId()));
             var result = blue.processing().processNext(parent);
+            // then
             assertNotEquals(EntryDisposition.APPLIED, result.entry(entry).disposition());
             assertEquals(retired, blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow());
             assertEquals(heads, List.of(parent.snapshot().blueId(), source.snapshot().blueId(), foreign.snapshot().blueId()));
@@ -139,9 +148,12 @@ final class RootedRecreatedCollectionOccurrenceTest {
     }
 
     @Test void lateGasFailureRollsBackTheHistoricalSelectionAndPreservesItOnRestart() throws Exception {
+        // given
         long required = readdAtGas(100_000L, true);
+        // when
         assertTrue(required > 1L);
         readdAtGas(required - 1L, false);
+        // then
         assertEquals(required, readdAtGas(required, true));
     }
 

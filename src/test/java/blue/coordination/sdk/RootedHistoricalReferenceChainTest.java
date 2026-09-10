@@ -8,14 +8,50 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Proposed SDK regression: genuine retained reference changes, never fabricated source positions. */
 final class RootedHistoricalReferenceChainTest {
-    @Test void savedAuthoredParentTraversesTheActualSameEpochTail() throws Exception { run(false); }
-    @Test void savedAuthoredParentTraversesTheActualIntermediateChain() throws Exception { run(true); }
-
-    @Test void terminalAnchorSurvivesRestartBeforeEitherRepresentationPosition() throws Exception {
-        run(false, false, true);
+    @Test
+    void savedAuthoredParentTraversesTheActualSameEpochTail() throws Exception {
+        // given
+        boolean followingRevision = false;
+        boolean futureRevision = false;
+        boolean restartAtAnchor = false;
+        // when
+        int appliedPositions = run(followingRevision, futureRevision, restartAtAnchor);
+        // then
+        assertEquals(2, appliedPositions);
     }
-    @Test void attachment400CompletesItsTailBeforeAnAlreadyCommittedNumbered500() throws Exception {
-        run(false, true, true);
+    @Test
+    void savedAuthoredParentTraversesTheActualIntermediateChain() throws Exception {
+        // given
+        boolean followingRevision = true;
+        boolean futureRevision = false;
+        boolean restartAtAnchor = false;
+        // when
+        int appliedPositions = run(followingRevision, futureRevision, restartAtAnchor);
+        // then
+        assertEquals(2, appliedPositions);
+    }
+
+    @Test
+    void terminalAnchorSurvivesRestartBeforeEitherRepresentationPosition() throws Exception {
+        // given
+        boolean followingRevision = false;
+        boolean futureRevision = false;
+        boolean restartAtAnchor = true;
+        // when
+        int appliedPositions = run(followingRevision, futureRevision, restartAtAnchor);
+        // then
+        assertEquals(2, appliedPositions);
+    }
+    @Test
+    void attachment400CompletesItsTailBeforeAnAlreadyCommittedNumbered500() throws Exception {
+        // given
+        boolean followingRevision = false;
+        boolean futureRevision = true;
+        boolean restartAtAnchor = true;
+        // when
+        int appliedPositions = run(followingRevision, futureRevision, restartAtAnchor);
+        // then
+        assertEquals(2, appliedPositions);
     }
 
     private static List<List<Object>> receiptState(RootedSdkFixture f, DocumentHandle document) {
@@ -32,11 +68,11 @@ final class RootedHistoricalReferenceChainTest {
                         event.eventBlueId(), event.exactEvent().json(), event.publicAtSource())).toList())).toList();
     }
 
-    private static void run(boolean followingRevision) throws Exception {
-        run(followingRevision, false, false);
+    private static int run(boolean followingRevision) throws Exception {
+        return run(followingRevision, false, false);
     }
 
-    private static void run(boolean followingRevision, boolean futureRevision, boolean restartAtAnchor) throws Exception {
+    private static int run(boolean followingRevision, boolean futureRevision, boolean restartAtAnchor) throws Exception {
         String sourceYaml = RootedSdkFixture.resource("source.yaml") + """
                   emitUnmatched:
                     type: Coordination/Sequential Workflow Operation
@@ -243,6 +279,7 @@ final class RootedHistoricalReferenceChainTest {
                 assertEquals(sourceHead, parent.snapshot().exact().json());
                 assertEquals(sourceHistory, receiptState(f, parent));
             }
+            return positions.size();
         }
     }
 }

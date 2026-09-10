@@ -9,10 +9,13 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Completed journal history must not multiply the cost of reconstructing one frozen root. */
 final class RootedSelectionCostTest {
     @Test void aScanCapturesOneViewAndTheNextScanSeesNewCommittedProgress() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             for (int n = 1; n <= 12; n++) {
                 var entry = fixture.append(source, "rcp2/source", "tick", n, "{}");
+                // then
                 assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().process(source, entry)
                         .entry(entry).disposition());
             }

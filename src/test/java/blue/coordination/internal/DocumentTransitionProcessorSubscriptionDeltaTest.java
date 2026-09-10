@@ -164,13 +164,16 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void unchangedRouteProofRejectsMissingExtraAndAlteredHeaders() {
+        // given
         var id = blue.coordination.api.DocumentId.of("unchanged-route");
+        // when
         var established = active("ownerChannel", "stable-key", "verified-domain", 0L, ADMISSION);
         ContractsClosureAdapter.requireUnchangedRouteSurface(id, List.of(established), List.of(established));
         for (var desired : List.of(List.<SubscriptionDelta.Entry>of(),
                 List.of(established, active("extra", "extra-key", "extra-domain", 0L, ADMISSION)),
                 List.of(active("ownerChannel", "changed-key", "verified-domain", 0L, ADMISSION)),
                 List.of(active("ownerChannel", "stable-key", "changed-domain", 0L, ADMISSION)))) {
+            // then
             assertThrows(ContractsClosureAdapter.ProjectionUnavailableException.class, () ->
                     ContractsClosureAdapter.requireUnchangedRouteSurface(id, List.of(established), desired));
         }
@@ -178,9 +181,12 @@ final class DocumentTransitionProcessorSubscriptionDeltaTest {
 
     @Test
     void actualManagedRouteTransitionsStillRequirePositiveRevision() {
+        // given
         var established = active("ownerChannel", "stable-key", "verified-domain", 0L, ADMISSION);
+        // when
         var metrics = new EngineMetrics();
         for (long invalidRevision : List.of(-1L, 0L)) {
+            // then
             assertThrows(IllegalArgumentException.class, () -> DocumentTransitionProcessor.applyManagedRootSubscriptionDelta(
                     List.of(established), new SubscriptionDelta(List.of(), List.of()), invalidRevision, TRANSITION, metrics));
         }

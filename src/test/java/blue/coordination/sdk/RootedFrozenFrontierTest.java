@@ -9,15 +9,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** A historical interval ends at attachment order, independently of a cached future source head. */
 final class RootedFrozenFrontierTest {
-    @Test void attachmentAt200ImportsOnly100105115ThenProcesses250BeforeLive500() throws Exception {
-        verify(true);
+    @Test
+    void attachmentAt200ImportsOnly100105115ThenProcesses250BeforeLive500() throws Exception {
+        // given
+        boolean sourceAlreadyAhead = true;
+        // when
+        var log = verify(sourceAlreadyAhead);
+        // then
+        assertEquals(List.of(1L, 2L, 3L, 4L), log);
     }
 
-    @Test void aSourcePublishedAfterAttachmentCannotExtendTheFrozenInterval() throws Exception {
-        verify(false);
+    @Test
+    void aSourcePublishedAfterAttachmentCannotExtendTheFrozenInterval() throws Exception {
+        // given
+        boolean sourceAlreadyAhead = false;
+        // when
+        var log = verify(sourceAlreadyAhead);
+        // then
+        assertEquals(List.of(1L, 2L, 3L, 4L), log);
     }
 
-    private void verify(boolean sourceAlreadyAhead) throws Exception {
+    private List<Long> verify(boolean sourceAlreadyAhead) throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             var blue = fixture.blue;
             var a = fixture.start("historical-a.yaml", "rcp2/a", Map.of());
@@ -78,6 +90,7 @@ final class RootedFrozenFrontierTest {
             assertEquals(heads, List.of(a.snapshot().blueId(), b.snapshot().blueId()));
             assertEquals(histories, List.of(fixture.history(a), fixture.history(b)));
             assertTrue(blue.processing().processNext(b).entries().isEmpty());
+            return java.util.stream.IntStream.range(0, 4).mapToObj(i -> b.snapshot().longAt("/log/" + i)).toList();
         }
     }
 

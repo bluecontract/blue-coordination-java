@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** A prior READY snapshot does not advertise the independently newer source frontier. */
 final class RootedLaggingObserverReadinessTest {
     @Test void sourceAdvancesTwiceWhileObserverRetainsItsExactOlderReadyView() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of("child", f.retain(source)));
             var oldReady = parent.snapshot();
@@ -17,6 +19,7 @@ final class RootedLaggingObserverReadinessTest {
             var first = f.append(source, "rcp2/source", "tick", 100, "{}");
             var second = f.append(source, "rcp2/source", "tick", 150, "{}");
             for (var entry : java.util.List.of(first, second)) {
+                // then
                 assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(source).entry(entry).disposition());
                 assertEquals(oldReady.blueId(), parent.snapshot().blueId());
                 assertEquals(oldReady.epoch(), parent.snapshot().epoch());

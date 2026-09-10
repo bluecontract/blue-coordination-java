@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /** The durable host may complete an entry's observers without consuming later inputs. */
 final class RootedJournalCutoffTest {
     @Test void journalSlicesFinishTheSameEntryAndLeaveFutureWorkPending() throws Exception {
+        // given
         try (var f = new RootedSdkFixture(); var foreign = new RootedSdkFixture()) {
+            // when
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of("child", f.retain(source)));
             var future = f.startYaml(RootedSdkFixture.resource("source.yaml")
@@ -16,6 +18,7 @@ final class RootedJournalCutoffTest {
             var later = f.append(future, "rcp2/future", "tick", 500, "{}");
             var input = f.append(source, "rcp2/source", "tick", 100, "{}");
             var first = f.blue.advanced().drainJournalThrough(input, DrainBudget.unlimited());
+            // then
             assertEquals(1, first.entry(input).closures().size());
             assertFalse(first.quiescent());
             assertEquals(1L, source.snapshot().longAt("/counter"));
@@ -37,10 +40,13 @@ final class RootedJournalCutoffTest {
         }
     }
     @Test void aHistoricalTurnCannotBeConsumedByTheJournalCutoff() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             String original = f.retain(source);
             var tick = f.append(source, "rcp2/source", "tick", 100, "{}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(source, tick).entry(tick).disposition());
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             var attach = f.append(parent, "rcp2/parent", "attach", 200, "child: {blueId: " + original + "}");

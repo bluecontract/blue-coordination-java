@@ -12,8 +12,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Proposed admission negatives: all inputs and histories come from real SDK work. */
 final class RootedJoinPrerequisiteNegativeTest {
     @Test void unavailableEarlierSourceBarrierCannotBecomeAFrozenJoinAnchor() throws Exception {
+        // given
         try (var s = new Scenario(250L)) {
+            // when
             var work = s.work;
+            // then
             assertEquals(1L, work.sourceEpoch());
             assertEquals("250", s.f.control.registeredHistoryBarrierOrder(work).components().get(0).toString());
             assertEquals("100", s.f.blue.advanced().auditManagedEpoch(s.x.id(), 1L).orElseThrow()
@@ -29,8 +32,11 @@ final class RootedJoinPrerequisiteNegativeTest {
     }
 
     @Test void requiredTimelineCompletenessRejectsBackdatedJoinBeforeProcessing() throws Exception {
+        // given
         try (var s = new Scenario(500L)) {
+            // when
             assertEquals("500", s.f.control.registeredHistoryBarrierOrder(s.work).components().get(0).toString());
+            // then
             assertEquals("100", s.f.blue.advanced().auditManagedEpoch(s.x.id(), 1L).orElseThrow()
                     .sourceOrder().orElseThrow().components().get(0).toString());
             var before = s.records();

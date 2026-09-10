@@ -17,9 +17,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real causal birth results exercise the independent store publication fences. */
 final class RootedBirthPublicationTest {
     @Test void newOwnedSubscriptionsRequireExactPresentAndAbsentFences() throws IOException {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var before = scenario.engine.documents().closureSnapshot(Set.of(scenario.parent.id()));
             var outcome = scenario.blue.processing().processNext(scenario.parent).entry(scenario.creation);
+            // then
             assertEquals(EntryDisposition.APPLIED, outcome.disposition());
             var result = scenario.blue.advanced().closureExecution(outcome.closures().get(0).closureId()).orElseThrow();
             var present = Map.of(scenario.parent.id(), before.graphGenerations().require(scenario.parent.id()));
@@ -41,9 +44,12 @@ final class RootedBirthPublicationTest {
     }
 
     @Test void lostBirthResponseRestoresRoutesWithoutPublishingAgain() throws IOException {
+        // given
         try (var scenario = new Scenario()) {
+            // when
             var adapter = scenario.engine.contractsClosureAdapter();
             adapter.onPublicationFailurePoint(point -> { throw new IllegalStateException("lost birth response"); });
+            // then
             assertThrows(RuntimeException.class, () -> scenario.blue.processing().processNext(scenario.parent));
             adapter.onPublicationFailurePoint(ignored -> { });
             var child = scenario.blue.documents().require(scenario.child);

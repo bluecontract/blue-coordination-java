@@ -11,30 +11,67 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** An operation-created child must retain its birth and later support independent publication. */
 final class RootedCreatedChildTest {
-    @Test void createdChildWorksInParentFirstAndSourceFirstSchedules() throws IOException {
-        assertEquals(run(false), run(true));
+    @Test
+    void createdChildWorksInParentFirstAndSourceFirstSchedules() throws IOException {
+        // given
+        var baseline = run(false);
+        // when
+        var alternate = run(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
-    @Test void sourceCreationCalculatedByParentBeforeIndependentSourcePublication() throws IOException {
-        runLocalCreation(false);
+    @Test
+    void sourceCreationCalculatedByParentBeforeIndependentSourcePublication() throws IOException {
+        // given
+        boolean sourceFirst = false;
+        // when
+        var result = runLocalCreation(sourceFirst);
+        // then
+        assertEquals(3, result.heads().size());
+        assertEquals(3, result.histories().size());
     }
 
-    @Test void sourceCreationCalculatedByParentAfterIndependentSourcePublication() throws IOException {
-        runLocalCreation(true);
+    @Test
+    void sourceCreationCalculatedByParentAfterIndependentSourcePublication() throws IOException {
+        // given
+        boolean sourceFirst = true;
+        // when
+        var result = runLocalCreation(sourceFirst);
+        // then
+        assertEquals(3, result.heads().size());
+        assertEquals(3, result.histories().size());
     }
 
-    @Test void localCreationSchedulesHaveIdenticalCommittedHeadsAndReceipts() throws IOException {
-        assertEquals(runLocalCreation(false), runLocalCreation(true));
+    @Test
+    void localCreationSchedulesHaveIdenticalCommittedHeadsAndReceipts() throws IOException {
+        // given
+        var baseline = runLocalCreation(false);
+        // when
+        var alternate = runLocalCreation(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
-    @Test void gasFailureAfterChildInitializationPublishesNeitherBirthNorParentProgress() throws IOException {
+    @Test
+    void gasFailureAfterChildInitializationPublishesNeitherBirthNorParentProgress() throws IOException {
+        // given
         long fullGas = birthWithBudget(null);
         assertTrue(fullGas > 1);
-        birthWithBudget(fullGas - 1);
+        // when
+        long consumed = birthWithBudget(fullGas - 1);
+        // then
+        assertTrue(consumed < fullGas);
     }
 
-    @Test void preBirthEntriesStayExcludedAcrossBothLocalCreationSchedules() throws IOException {
-        assertEquals(runLocalCreationWithPreBirthEntries(false), runLocalCreationWithPreBirthEntries(true));
+    @Test
+    void preBirthEntriesStayExcludedAcrossBothLocalCreationSchedules() throws IOException {
+        // given
+        var baseline = runLocalCreationWithPreBirthEntries(false);
+        // when
+        var alternate = runLocalCreationWithPreBirthEntries(true);
+        // then
+        assertEquals(baseline, alternate);
     }
 
     private static Outcome runLocalCreationWithPreBirthEntries(boolean sourceFirst) throws IOException {

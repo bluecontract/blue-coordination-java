@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedGlobalDriverTest {
     @Test void globalAuditSelectsEachExactHistoricalSuccessorBeforeResumingLiveWork() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var parent = fixture.start("historical-b.yaml", "rcp2/b", Map.of());
             var source = fixture.start("historical-a.yaml", "rcp2/a", Map.of());
@@ -25,6 +27,7 @@ final class RootedGlobalDriverTest {
             blue.processing().process(parent, attach);
             for (int n = 6; n <= 10; n++) {
                 var selected = blue.advanced().auditNextProcessingSelection();
+                // then
                 assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, selected.kind());
                 var work = selected.managedEpochApplicationWork().orElseThrow();
                 assertEquals(n, work.sourceEpoch());
@@ -41,12 +44,15 @@ final class RootedGlobalDriverTest {
     }
 
     @Test void boundedJournalReportsTheStillPendingParentAndResumesAfterStoreRestart() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", source.snapshot().blueId()));
             var input = fixture.append(source, "rcp2/source", "tick", 100, "{}");
             var sourceStep = blue.processing().drainJournal(new DrainBudget(1, 1));
+            // then
             assertTrue(sourceStep.paused()); assertFalse(sourceStep.quiescent());
             assertEquals(1L, source.snapshot().longAt("/counter"));
             assertEquals(0L, parent.snapshot().longAt("/seen"));
@@ -64,7 +70,9 @@ final class RootedGlobalDriverTest {
     }
 
     @Test void anOlderParentsInputPrecedesANewerIndependentSourceInput() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", source.snapshot().blueId()));
@@ -72,6 +80,7 @@ final class RootedGlobalDriverTest {
             var later = fixture.append(source, "rcp2/source", "tick", 110, "{}");
             blue.processing().process(source, first);
             var step = blue.processing().drainJournal(new DrainBudget(1, 1));
+            // then
             assertEquals(first, step.entries().get(0).entry());
             assertEquals(1L, parent.snapshot().longAt("/seen"));
             assertEquals(1L, source.snapshot().longAt("/counter"));
@@ -85,12 +94,15 @@ final class RootedGlobalDriverTest {
     }
 
     @Test void globalDrainSchedulesEachRootWithoutErasingAnotherRootsNewness() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var source = fixture.start("source.yaml", "rcp2/source", Map.of());
             var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", source.snapshot().blueId()));
             var entry = fixture.append(source, "rcp2/source", "tick", 100, "{}");
             var drained = blue.processing().drain();
+            // then
             assertTrue(drained.quiescent());
             assertEquals(1L, source.snapshot().longAt("/counter"));
             assertEquals(1L, parent.snapshot().longAt("/seen"), "Global progress must not erase P's local pending input");

@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedDriverTest {
     @Test void selectedRootConsumesOnlyItsNextNewInputAndKeepsIndependentSourceProgress() throws IOException {
+        // given
         try (var fixture = new RootedSdkFixture()) {
+            // when
             var blue = fixture.blue;
             var s = fixture.start("source.yaml", "rcp2/source", Map.of());
             var p = fixture.start("parent.yaml", "rcp2/parent", Map.of("child", s.snapshot().blueId()));
@@ -17,6 +19,7 @@ final class RootedDriverTest {
             var second = fixture.append(s, "rcp2/source", "tick", 110, "{}");
             var sourceHistory = fixture.history(s);
             var firstStep = blue.processing().processNext(p);
+            // then
             assertEquals(EntryDisposition.APPLIED, firstStep.entry(first).disposition());
             assertFalse(firstStep.quiescent(), "The second input is still pending in this same root");
             assertTrue(firstStep.paused(), "One-step budget exhaustion must not be reported as a resource block");

@@ -7,18 +7,48 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** RUN019's exact saved inputs and timestamps, using the maintained public SDK. */
 final class RootedDetachedPairReconnectTest {
-    @Test void reconnectFromSavedAuthoredBeforeFutureEntries() throws Exception { run(false, 3); }
-    @Test void reconnectFromSavedRetainedBeforeFutureEntries() throws Exception { run(true, 2); }
-
-    @Test void reconnectUsesTheDetachedSourcesNewChildAtTheAttachmentBoundary() throws Exception {
-        reconnectWithNewChild(false);
+    @Test
+    void reconnectFromSavedAuthoredBeforeFutureEntries() throws Exception {
+        // given
+        boolean retained = false;
+        long expectedAtReconnect = 3L;
+        // when
+        long afterFutureEntry = run(retained, expectedAtReconnect);
+        // then
+        assertEquals(expectedAtReconnect + 1L, afterFutureEntry);
+    }
+    @Test
+    void reconnectFromSavedRetainedBeforeFutureEntries() throws Exception {
+        // given
+        boolean retained = true;
+        long expectedAtReconnect = 2L;
+        // when
+        long afterFutureEntry = run(retained, expectedAtReconnect);
+        // then
+        assertEquals(expectedAtReconnect + 1L, afterFutureEntry);
     }
 
-    @Test void reconnectCannotImportTheDetachedSourcesLaterTopology() throws Exception {
-        reconnectWithNewChild(true);
+    @Test
+    void reconnectUsesTheDetachedSourcesNewChildAtTheAttachmentBoundary() throws Exception {
+        // given
+        boolean laterTopology = false;
+        // when
+        boolean ready = reconnectWithNewChild(laterTopology);
+        // then
+        assertTrue(ready);
     }
 
-    private static void reconnectWithNewChild(boolean laterTopology) throws Exception {
+    @Test
+    void reconnectCannotImportTheDetachedSourcesLaterTopology() throws Exception {
+        // given
+        boolean laterTopology = true;
+        // when
+        boolean ready = reconnectWithNewChild(laterTopology);
+        // then
+        assertTrue(ready);
+    }
+
+    private static boolean reconnectWithNewChild(boolean laterTopology) throws Exception {
         try (var f = new RootedSdkFixture()) {
             var a = f.startYaml(RootedSdkFixture.resource("graph-019-a.yaml"), "rcp/reconnect/A");
             var b = f.startYaml(RootedSdkFixture.resource("graph-019-b.yaml"), "rcp/reconnect/B");
@@ -58,11 +88,15 @@ final class RootedDetachedPairReconnectTest {
                 assertEquals(sourceHistory, f.history(b));
             }
             assertTrue(f.blue.processing().processNext(a).quiescent());
+            return f.blue.advanced().auditManagedDocumentReadiness(a.id()).orElseThrow().ready();
         }
     }
 
-    @Test void detachedSourceTopologyCannotBlockTheFormerParentsOwnEntry() throws Exception {
+    @Test
+    void detachedSourceTopologyCannotBlockTheFormerParentsOwnEntry() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
+            // when
             var a = f.startYaml(RootedSdkFixture.resource("graph-019-a.yaml"), "rcp/reconnect/A");
             var b = f.startYaml(RootedSdkFixture.resource("graph-019-b.yaml"), "rcp/reconnect/B");
             drain(f, f.append(a, "rcp/reconnect/A", "attach", 100, attach("b", b.id().value())));
@@ -72,6 +106,7 @@ final class RootedDetachedPairReconnectTest {
             var sourceHistory = f.history(b);
             String sourceHead = b.snapshot().blueId();
             drain(f, f.append(a, "rcp/reconnect/A", "touch", 400, "{}"));
+            // then
             assertEquals(sourceHead, b.snapshot().blueId());
             assertEquals(sourceHistory, f.history(b));
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
@@ -87,7 +122,7 @@ final class RootedDetachedPairReconnectTest {
         }
     }
 
-    private static void run(boolean retained, long expectedObserved) throws Exception {
+    private static long run(boolean retained, long expectedObserved) throws Exception {
         try (var f = new RootedSdkFixture()) {
             var a = f.startYaml(RootedSdkFixture.resource("graph-019-a.yaml"), "rcp/reconnect/A");
             var b = f.startYaml(RootedSdkFixture.resource("graph-019-b.yaml"), "rcp/reconnect/B");
@@ -123,6 +158,7 @@ final class RootedDetachedPairReconnectTest {
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
             assertTrue(f.blue.processing().processNext(a).quiescent());
             assertEquals(histories, List.of(f.history(a), f.history(b)));
+            return a.snapshot().longAt("/observed");
         }
     }
 
