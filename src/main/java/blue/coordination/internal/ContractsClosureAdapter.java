@@ -2107,11 +2107,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                         && row.bindingIdentity().equals(retained.bindingIdentity()))) {
                     ManagedDocumentSnapshot target = current.input().snapshot()
                             .managedDocument(closureId(occurrence.targetDocumentId()));
+                    long selectedEpoch = occurrence.admittedSourceEpoch();
                     if (target != null && target.initialized()
-                            && target.epoch() == occurrence.admittedSourceEpoch()
-                            && target.blueId().equals(occurrence.demand().suppliedValueBlueId())) {
+                            && selectedEpoch >= 0L && selectedEpoch <= target.epoch()
+                            && (selectedEpoch < target.epoch()
+                                    || target.blueId().equals(occurrence.demand().suppliedValueBlueId()))) {
                         ManagedOccurrenceEvidenceResolution exact = ManagedOccurrenceEvidenceResolution.derived(
-                                occurrence.demand(), target.documentId(), target.epoch());
+                                occurrence.demand(), target.documentId(), selectedEpoch);
                         ManagedOccurrenceEvidenceResolution previous = retryResolutions.putIfAbsent(
                                 occurrence.demand().demandIdentity(), exact);
                         if (previous != null && !previous.resolutionIdentity().equals(exact.resolutionIdentity())) {

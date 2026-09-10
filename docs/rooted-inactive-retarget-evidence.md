@@ -1,10 +1,12 @@
-# Inactive retarget: bounded correction and remaining gap
+# Inactive retarget: immutable input and historical rejection evidence
 
-This is an **incomplete correction family**, not a complete retarget qualification.
+This isolated correction closes the historical known-red case in a focused
+gate; it is not a full retarget qualification.
 Coordination remains an isolated candidate based on
 `04a1d8fb040a680a962d5d24e4c3cf3dae89ef99`; it is not exported as a completed fix.
 The separate Language correction is clean commit
-`80e0a3e5d11b80681fe48e563984f62f68c0f653` on the pinned `80653645` baseline.
+`7ec0fdaafff41ad8e41387e7e5647d5a800d807c`, following the original bounded
+`80e0a3e5d11b80681fe48e563984f62f68c0f653` correction on pinned `80653645`.
 
 ## Scenario and normative result
 
@@ -44,7 +46,7 @@ B epoch can equal C's current bytes. Language's full processor regression proves
 the same input succeeds with B's historical selector and rejects with C's exact
 selector. Original-input and retry/output continuity guards remain intact.
 
-## Remaining ordinary case: original C1 plus selected C0
+## Historical known-red case: original C1 plus selected C0
 
 P can also embed C at another path. C1 is then already an original frozen
 primary view when the operation installs C0 at the inactive B path. It is not
@@ -54,23 +56,38 @@ does not carry a freestanding second proof of the same document: Language
 read views; already-present/live/original witness IDs are skipped. Older aliases
 inside another newly captured source's complete proof are a different case.
 
-`RootedFrozenHistoricalRetargetReproductionTest` is executable and intentionally
-keeps the normative **REJECTED** expectation. It currently fails with
+`RootedFrozenHistoricalRetargetReproductionTest` keeps the normative
+**REJECTED** expectation. On the original bounded correction it failed with
 `NEEDS_RESOURCES` / `REQUIRED_EXACT_RESOURCES`; preceding assertions confirm all
 heads, histories and both occurrence rows remain unchanged. This is not a green
 outcome. Its XML is retained separately in
 `build/retarget-evidence/frozen-target-red/`.
 
-Completing that case needs an explicit design for authenticating a second exact
-historical role without replacing original C1, while preserving demand identity,
-lineage choice, ordering, authority and completed gas. No such API/schema/policy
-change is attempted here. The existing factory already accepts a list of source
-proof snapshots, so a new public method signature is not proven necessary;
-however its current one-source-role-per-DocumentId model and verification rules
-cannot express this case unchanged. Whether a compatible internal role extension
-is sufficient needs a separate serialization/recovery and authority design.
-Authored pre-initialization epoch −1 is likewise not
-covered by the new initialized-publication rejection witness.
+That observation initially suggested a second historical proof role. The narrower
+follow-up instead uses the existing `ManagedOccurrenceEvidenceResolution`
+contract: an exact host historical selection already identifies durable lineage
+and selected epoch independently of the newer primary view. Legal active
+historical replacement uses that same boundary today. In Coordination,
+`ManagedOccurrenceResolver.resolveExplicitSelection` authenticates the selected
+source, exact epoch and supplied BlueId against replayable retained state. A
+numeric epoch range, or the C1 body alone, is not proof of C0.
+
+The follow-up retains both original C1 and the inactive B row. It admits a
+demand-linked foreign selection only for initialized epochs from zero through
+the frozen source epoch; selection at that head must also match its exact BlueId.
+An older selection uses the existing trusted host-resolution boundary. Language
+then rejects only when the actual effect consumes that exact demand, at the
+existing `MANAGED_OCCURRENCE_BINDING_MISSING` reconciliation point. This is
+rejection evidence, never activation permission. No new API, role, schema,
+source publication, alias suppression or early demand-discovery rejection is
+introduced. Authored pre-initialization epoch −1 remains outside this initialized
+rejection-witness rule.
+
+The extended SDK reproduction observes the actual processor-issued demand,
+derives the C0 retry identity, and requires that identity in the retained result.
+It separately checks frozen C1, both original rows, rollback, positive completed
+gas, no committed effects, replay and restart. It passes in the follow-up 13/13
+SDK gate against the new clean immutable Language tuple.
 
 ## Proven legal-case boundary
 
@@ -92,14 +109,14 @@ These legal paths use the existing pending-history representation: active
 replacement obtains demand-linked historical retry evidence, while a fresh path
 gets a prospective pending row. They do not require substituting C0 for frozen
 C1 as an inactive-retarget rejection witness. This narrows the demonstrated gap;
-it does not qualify every untested topology or resolve the known-red case above.
+it does not qualify every untested topology.
 
 ## Evidence and reproduction
 
 The direct SDK witness was red on unchanged production: the original-input
 exception, with the separate active-retarget control passing. The new-target
 historical negative now passes against the corrected immutable upstream tuple.
-The final supported-scope gate passed 8/8 tests (3 + 4 + 1), explicitly selecting
+The original supported-scope gate passed 8/8 tests (3 + 4 + 1), explicitly selecting
 these owners only:
 
 ```
@@ -108,11 +125,11 @@ blue.coordination.sdk.RootedRecreatedCollectionOccurrenceTest
 blue.coordination.sdk.RootedReadOnlyReferenceRebindTest
 ```
 
-Run the known-red owner separately; do not aggregate it into a green-family
-claim. Exact commands, hashes, transitive bindings and source-clean export audit
+That gate excluded the then-known-red owner; do not represent it as a complete
+green family. Exact commands, hashes, transitive bindings and source-clean export audit
 are in `/Users/kamil/Documents/Projects/Blue/rooted-retarget-development.1tsGn1/`.
-Language's separate focused gate was 32/32. No full library matrix or MyOS test
-ran in this correction lane.
+Language's original separate focused gate was 32/32. No full library matrix or
+MyOS test ran in this correction lane.
 
 The separate legal-boundary diagnostic passed **4/4** on production commit
 `c16d2445dcfece1b0c190b4389e08633e9b10239`, against the same corrected immutable
@@ -128,11 +145,38 @@ The maintained class differs only in its name and class comment; all test/helper
 bodies and assertions are unchanged. No rerun is claimed for that naming-only
 retention. `EVIDENCE-RECEIPT.json` in the evidence root above records the exact
 run, source hashes, class-name mapping and XML paths separately from the earlier
-8/8 gate. The family remains partial with a known failure and is not exported.
+8/8 gate. That receipt remains an accurate historical partial result and is not
+rewritten by the follow-up. Coordination is not exported there.
+
+## Follow-up focused gate
+
+Language's four selected owners now pass **34/34**, including the unchanged
+original-input expansion guard and new historical foreign/alias controls in
+inline and reference forms. Future and authored epochs, absent source, wrong
+path, forged demand identity, wrong cause and equal-epoch wrong BlueId are
+rejected. The exact host historical membership boundary above is essential:
+Language cannot independently prove a historical body's membership from C1 alone.
+
+The SDK gate passes **13/13** across the prior three owners (8 tests),
+`RootedFrozenHistoricalRetargetReproductionTest` (1),
+`RootedFrozenSourceHistoricalAttachmentTest` (2) and
+`RootedMultipleHistoricalOccurrencesTest` (2). The former failure now reaches
+the normative terminal rejection. Its retained execution identity equals the
+retry derived from the actual processor demand and exact C epoch-zero selection;
+the immutable input still contains C epoch one. The control additionally proves
+unchanged independent source history, no output effects, replay and restart.
+
+Commands, complete XML, source hashes and fresh immutable upstream manifests
+are retained in
+`/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/`.
+The three exports bind clean Language `7ec0fdaa`, unchanged BEX `ab72af14` and
+unchanged catalog `0b68744b` sources. The old evidence root and baseline
+candidate/artifacts were not modified. Coordination is not exported by this
+gate. These focused results do not qualify the full library or release matrix.
 
 For the old MyOS fixture, preserve its invalid inactive-C operation as a rejected
 entry, reactivate B at the same reserved generation, then perform a distinct
 supported active C-current-head retarget at generation +1. Do not simply change
 the expected inactive generation to C. Historical C catch-up assertions do not
 belong to an active CURRENT_HEAD retarget. The already-frozen C1/C0 reproduction
-must remain visible until the separate proof-transport question is resolved.
+remains a maintained normative regression.
