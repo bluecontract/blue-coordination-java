@@ -72,6 +72,28 @@ is sufficient needs a separate serialization/recovery and authority design.
 Authored pre-initialization epoch −1 is likewise not
 covered by the new initialized-publication rejection witness.
 
+## Proven legal-case boundary
+
+The demonstrated C1/C0 proof gap is not reproduced by either of these legal
+operations when P already embeds C1 at `/orders/other`:
+
+- attaching saved C0 at the fresh path `/orders/fresh`;
+- replacing an active B occurrence at `/orders/same` with saved C0.
+
+`RootedFrozenSourceHistoricalAttachmentTest` retains both controls. They assert
+APPLIED, unchanged original frozen C1, exact pending C0 output (generation 1 for
+fresh attachment, generation 2 for active replacement), one retained catch-up
+application, quiescence, and restart continuity. The existing `/orders/other`
+occurrence and C's independent head/history remain unchanged. Pending C0 is
+checked in the closure output; the public parent snapshot need not expose the
+pending attachment before catch-up completes.
+
+These legal paths use the existing pending-history representation: active
+replacement obtains demand-linked historical retry evidence, while a fresh path
+gets a prospective pending row. They do not require substituting C0 for frozen
+C1 as an inactive-retarget rejection witness. This narrows the demonstrated gap;
+it does not qualify every untested topology or resolve the known-red case above.
+
 ## Evidence and reproduction
 
 The direct SDK witness was red on unchanged production: the original-input
@@ -91,6 +113,22 @@ claim. Exact commands, hashes, transitive bindings and source-clean export audit
 are in `/Users/kamil/Documents/Projects/Blue/rooted-retarget-development.1tsGn1/`.
 Language's separate focused gate was 32/32. No full library matrix or MyOS test
 ran in this correction lane.
+
+The separate legal-boundary diagnostic passed **4/4** on production commit
+`c16d2445dcfece1b0c190b4389e08633e9b10239`, against the same corrected immutable
+upstream tuple, using Java 17 and one Gradle worker. Its exact filter was
+`RootedFrozenHistoricalLegalDiagnosticTest` (the two retained controls) plus
+`RootedMultipleHistoricalOccurrencesTest` (two existing controls). It ran in
+`/Users/kamil/Documents/Projects/Blue/worktrees/rooted-retarget-legal-diagnostic`.
+The diagnostic XML SHA-256 is
+`49ad52a01e50c99c23cd2d4e5330f95f634aa8cb0a15f0e71e13bf38cbb8e049`;
+the existing-owner XML SHA-256 is
+`1e48ff420df6442a7dc0aebe719dda24bdcdef89e1a0d9941c46890acd8bcb75`.
+The maintained class differs only in its name and class comment; all test/helper
+bodies and assertions are unchanged. No rerun is claimed for that naming-only
+retention. `EVIDENCE-RECEIPT.json` in the evidence root above records the exact
+run, source hashes, class-name mapping and XML paths separately from the earlier
+8/8 gate. The family remains partial with a known failure and is not exported.
 
 For the old MyOS fixture, preserve its invalid inactive-C operation as a rejected
 entry, reactivate B at the same reserved generation, then perform a distinct
