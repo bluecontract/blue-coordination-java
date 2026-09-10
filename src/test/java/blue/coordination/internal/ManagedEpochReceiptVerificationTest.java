@@ -231,7 +231,7 @@ final class ManagedEpochReceiptVerificationTest {
     }
 
     private static Scenario prepared(String label) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             DocumentId failedConsumerId = DocumentId.of(
                     "managed-history-failed-consumer-" + label);

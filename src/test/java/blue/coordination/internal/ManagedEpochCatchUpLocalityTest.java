@@ -40,7 +40,7 @@ final class ManagedEpochCatchUpLocalityTest {
 
     @Test
     void oneThousandUnrelatedSessionsOpenOnlyExactCatchUpRows() {
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build()) {
             // given
             DefaultCoordinationEngine engine = (DefaultCoordinationEngine)
                     coordination.advanced().rawEngine();

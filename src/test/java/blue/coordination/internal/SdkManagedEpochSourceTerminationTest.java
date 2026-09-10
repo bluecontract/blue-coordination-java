@@ -63,7 +63,7 @@ final class SdkManagedEpochSourceTerminationTest {
     @Test
     void productionTerminationPublishesOneTerminalEpochAndEvent() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build()) {
             TimelineHandle timeline = coordination.timelines().register(
                     CONSUMER_TIMELINE, ACTOR);
             DocumentHandle source = coordination.documents().admit(
@@ -106,7 +106,7 @@ final class SdkManagedEpochSourceTerminationTest {
     @Test
     void terminatingEpochCompletesItsConsumerPlanWithoutSourceReprocessing() {
         // given
-        try (BlueCoordination coordination = BlueCoordination.inMemory()) {
+        try (BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build()) {
             CoordinationTestControl control = CoordinationTestControl.attach(
                     coordination.advanced().rawEngine());
             TimelineHandle consumerTimeline = coordination.timelines()

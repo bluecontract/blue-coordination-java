@@ -1388,7 +1388,7 @@ final class ContractsPublicCycleDetachmentTest {
 
     private static CoordinationEngine engine(Set<DocumentId> publicRoots) {
         return CoordinationEngine.inMemoryContracts10(
-                BundledContracts10Release.configuration(publicRoots));
+                LegacyContracts10TestProfile.configuration(publicRoots));
     }
 
     private record BranchingIds(

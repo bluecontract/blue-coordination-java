@@ -107,7 +107,7 @@ final class ContractsPublicNestedScopeBoundaryTest {
 
         try (CoordinationEngine publicEngine =
                      CoordinationEngine.inMemoryContracts10(
-                             BundledContracts10Release.configuration(
+                             LegacyContracts10TestProfile.configuration(
                                      Set.of(DOCUMENT)))) {
             DefaultCoordinationEngine engine =
                     (DefaultCoordinationEngine) publicEngine;

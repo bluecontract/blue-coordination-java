@@ -21,6 +21,8 @@ final class SdkOperationRouteAuditTest {
         // given
         DocumentId id = DocumentId.of("route-audit-aggregate");
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            blue.timelines().register("examples/routing/alice", "alice");
+            blue.timelines().register("examples/routing/bob", "bob");
             DocumentHandle document = admit(blue, id, """
                     documentId: route-audit-aggregate
                     contracts:
@@ -94,6 +96,7 @@ final class SdkOperationRouteAuditTest {
         // given
         DocumentId id = DocumentId.of("route-audit-ancestry");
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            blue.timelines().register("alice", "alice");
             admit(blue, id, """
                     documentId: route-audit-ancestry
                     contracts:
@@ -152,6 +155,7 @@ final class SdkOperationRouteAuditTest {
         // given
         DocumentId id = DocumentId.of("route-audit-request-presence");
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            blue.timelines().register("request-presence", "alice");
             admit(blue, id, """
                     documentId: route-audit-request-presence
                     contracts:

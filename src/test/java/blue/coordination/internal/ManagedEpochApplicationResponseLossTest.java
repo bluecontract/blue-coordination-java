@@ -77,7 +77,7 @@ final class ManagedEpochApplicationResponseLossTest {
     }
 
     private static Scenario prepared(String label) {
-        BlueCoordination coordination = BlueCoordination.inMemory();
+        BlueCoordination coordination = LegacyContracts10TestProfile.sdkBuilder().build();
         try {
             DocumentId consumerId = DocumentId.of(
                     "managed-epoch-response-loss-consumer-" + label);

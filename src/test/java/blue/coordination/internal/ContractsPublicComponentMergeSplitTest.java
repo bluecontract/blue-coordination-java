@@ -1036,7 +1036,7 @@ final class ContractsPublicComponentMergeSplitTest {
 
     private static CoordinationEngine engine(Set<DocumentId> roots) {
         return CoordinationEngine.inMemoryContracts10(
-                BundledContracts10Release.configuration(
+                LegacyContracts10TestProfile.configuration(
                         new LinkedHashSet<>(roots)));
     }
 
