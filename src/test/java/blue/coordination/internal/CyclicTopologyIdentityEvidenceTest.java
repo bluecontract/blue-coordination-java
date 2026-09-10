@@ -45,7 +45,7 @@ final class CyclicTopologyIdentityEvidenceTest {
             "BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE";
     private static final String WRITE_MODE = "WRITE";
     private static final Path ARTIFACT_DIRECTORY = Path.of(
-            "stabilization", "full-lifecycle-admission-phase2");
+            "stabilization", "rooted-checkpoint", "retained-topology-identities");
     private static final Path JSON_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
             "full-lifecycle-admission-identities.json");
     private static final Path MARKDOWN_ARTIFACT = ARTIFACT_DIRECTORY.resolve(
@@ -465,10 +465,9 @@ final class CyclicTopologyIdentityEvidenceTest {
                     "full-lifecycle-admission-phase2-identities/1.0");
             result.put("implementationConformanceClaimed", false);
             result.put("source",
-                    "runtime-derived mixed Coordination evidence: public "
-                            + "full-lifecycle paths plus one explicitly "
-                            + "labeled package-private bounded-compatibility "
-                            + "proof");
+                    "Current runtime executing retained broad-closure topology tests, "
+                            + "bundled-release initialization tests and the labeled bounded-compatibility proof; "
+                            + "this artifact does not claim all scenarios use rooted processing");
             result.put("inputs", normalizeMap(Map.of(
                     "blueLanguageSpecification",
                     manifest.blueLanguageSpecification(),
@@ -484,6 +483,12 @@ final class CyclicTopologyIdentityEvidenceTest {
                     manifest.cyclicFinalizer(),
                     "cyclicProofVerifier",
                     manifest.cyclicProofVerifier())));
+            result.put("profileSelection", normalizeMap(Map.of(
+                    "retainedLanguageSpecification", LegacyContracts10TestProfile.LANGUAGE,
+                    "retainedContractsSpecification", LegacyContracts10TestProfile.CONTRACTS,
+                    "P2-P5", "Explicit LegacyContracts10TestProfile.configuration in the retained fixture owners",
+                    "P6", "BundledContracts10Release.configuration; C-CLO-08 remains the separately labeled bounded proof",
+                    "P7", "Ordinary nested processing plus explicit LegacyContracts10TestProfile cyclic boundaries")));
             result.put("boundaryFacts", boundaryFacts());
             List<Map<String, Object>> values = new ArrayList<>();
             scenarios.forEach((id, scenario) -> {
