@@ -152,6 +152,25 @@ public final class RootedCalculationFixture {
                 engine.auditTimelineEntries()).step(), "No pending local history").invocation().input();
     }
 
+    /** Describes actual selected work and its local-versus-independent fences without executing it. */
+    public String rootSelectionDescription(DocumentId root) {
+        var next = new RootedCheckpointDriver(engine.documents(), engine.contractsClosureAdapter())
+                .select(root, engine.auditTimelineEntries());
+        String description = "root=" + root + " blocked=" + next.blocked()
+                + " live=" + (next.live() == null ? "none" : next.live().entry().blueId())
+                + " managed=" + (next.historical() == null ? "none" : next.historical().workIdentity());
+        if (next.localHistorical() == null) return description + " local=none";
+        var step = next.localHistorical();
+        var invocation = step.invocation();
+        return description + " local=" + step.work().workIdentity() + " boundary=" + step.anchor().sourceOrderKey()
+                + " source=" + step.work().sourceDocumentId()
+                + " epoch=" + step.work().sourceEpoch() + " invocation=" + invocation.input().invocationIdentity()
+                + " entryOwners=" + invocation.rootedEvidence().context().entryOwners()
+                + " selected=" + invocation.documents().values().stream().map(row ->
+                        row.documentId() + ":" + row.head() + ":graph=" + row.graphGeneration()).toList()
+                + " independentFences=" + invocation.rootedEvidence().publicationFences();
+    }
+
     /** Calculates one real pending local initialization successor without publishing any source or root. */
     public ClosureProcessResult precomputeLocalInitialization(DocumentId root, String causalEntry) {
         var selected = engine.contractsClosureAdapter().nextRootLocalHistory(root, engine.auditTimelineEntries());
@@ -318,6 +337,41 @@ public final class RootedCalculationFixture {
             var attempt = new BlueClosureContracts(runtime.documentProcessor()).processClosure(base);
             if (!attempt.isComplete()) {
                 throw new IllegalStateException("Materialized reference suspended: " + attempt.kind()
+                        + "; demands=" + attempt.resourceDemands().stream().map(demand ->
+                            demand.getClass().getSimpleName() + ":" + demand.demandIdentity()
+                            + ":" + demand.sourceDocumentId().value()).toList()
+                        + "; exactBlueIds=" + attempt.requiredExactBlueIds());
+            }
+            return attempt.processResult();
+        }
+    }
+
+    /**
+     * Executes the original rooted input unchanged in a fresh runtime with explicit immutable resources.
+     * Unlike {@link #materializedReference(ClosureInvocationInput, java.util.List)}, this retains the
+     * original rooted ownership/witness binding. It is fresh-execution parity, not an unrooted oracle.
+     * The caller must establish that the terminal used this ordinary input, not a distinct retry envelope.
+     * @param input complete captured rooted input, including its processor-owned private binding
+     * @param exactCauseValues authenticated immutable request/source values; no live provider is consulted
+     * @return the complete result of executing the unchanged input
+     */
+    public static ClosureProcessResult freshRootedReference(ClosureInvocationInput input,
+            java.util.List<ExactValue> exactCauseValues) {
+        WholeObjectStore objects = new WholeObjectStore(new EngineMetrics());
+        for (ExactValue value : exactCauseValues) {
+            objects.putVerifiedProviderEvidence(value, value.copyNode(), value.cyclicSetProof().orElse(null),
+                    "fresh rooted reference exact cause");
+        }
+        retainReferenceSnapshot(objects, input.snapshot());
+        if (input.cause() instanceof blue.language.processor.closure.ManagedRevisionCause revision
+                && revision.successorRepresentationCause().isPresent()) {
+            retainReferenceSnapshot(objects, revision.successorRepresentationCause().orElseThrow()
+                    .transition().originalInput().snapshot());
+        }
+        try (BlueRuntime runtime = BlueRuntime.create(objects)) {
+            var attempt = new BlueClosureContracts(runtime.documentProcessor()).processClosure(input);
+            if (!attempt.isComplete()) {
+                throw new IllegalStateException("Fresh rooted reference suspended: " + attempt.kind()
                         + "; demands=" + attempt.resourceDemands().stream().map(demand ->
                             demand.getClass().getSimpleName() + ":" + demand.demandIdentity()
                             + ":" + demand.sourceDocumentId().value()).toList()
