@@ -241,6 +241,44 @@ with independent publication must be established before changing either. No
 semantic correction or expected-value replacement is authorized by this result
 alone. Input14 and restart remain unqualified.
 
+The test-only `sdk-full-ring-04-forensics` rerun retains that failure (338.557
+JUnit seconds) but checks C's exact newly emitted token before the count oracle.
+Those token/receipt/source assertions pass. At reconnect selection 7, C imports
+A4→A5 and emits the token addressed to B. C is the sole entry/publication owner;
+B is an immutable historical witness at both topology boundaries. The actual
+Contracts trace contains C's containing-reference update and embedded-event
+reaction, not a B delivery. The later terminal join owns the live A/B/C cycle
+but emits no new token. This does **not** justify delivering into an immutable
+witness or restoring reverse-parent publication. The remaining question is
+whether B's own required calculation was preserved and selected; the historical
+Python count expectation is not replaced without resolving that question.
+
+The separate minimal acyclic B→C→A reduction passes on unchanged cf359 code in
+both source-first and B-first schedules (2/2, 20.036 JUnit seconds). C imports
+A's earlier token and emits one new token to B; B's own calculation increments
+once without publishing independent C/A. Each retained result matches a fresh
+materialized execution in full output/event/receipt/checkpoint/companion and
+gas/trace identity; restart preserves histories without duplicate reactions.
+This establishes the basic forwarding/isolation path, not the ring's historical
+B-witness/primary-B overlap or the correctness of every selected obligation.
+
+A separate four-input reduction adds A→B before A's token, so C's later
+attachment closes B→C→A→B. Its first comparison exposed a **test-reference gap**:
+the older materialized helper discarded the rooted binding, changing owner and
+witness roles. A new test-only fresh-runtime helper preserves the exact input
+and rejects omitted retry context; no library runtime was changed. With that
+reference, C-first completes with `[A0,B1,C1]` and exact result/gas parity.
+B-first reaches publication rejection (`captured C6`, independently current
+`C0`, graph generations 3 versus 1), before the final result assertions.
+`witness-forwarding-02` is therefore 1/2 passing, 30.247 JUnit seconds. This is
+under investigation, not an approved relaxation of the publication fence.
+Unlike the full ring, this reduction imports A's token at its terminal receipt;
+it does not settle the full ring's earlier, nonterminal-event obligation.
+
+The exclusion-free Language `34e9aa2f` clean build and subsequent maintained
+quality/RC checks have started in `final-language-34e9.2z9G7z`. Their result is
+pending. The earlier Language candidate's clean build is not reused as proof.
+
 The original, unchanged MyOS HTTP owner independently passes the previously
 failing duplicate attachment and detaches, but fails at operation13 (reconnect)
 on its existing 600-second readiness deadline. The batch is 1/1 failed,
@@ -279,9 +317,13 @@ External evidence under `rooted-successor-language-evidence.GlIOBx`:
 | `successor-immutable-bundle.tar.gz` | `aa9c48d7e373467456c0a17f7a0972632b77ecc405416313cd13a3233c8217fc` |
 | `sdk-full-ring-02-evidence.tar.gz` | `155b1e1ce3d2d50ba29ac433fbcdd510f5d56ec8da497cdc1667cd8ad1e22954` |
 | `sdk-full-ring-03-evidence.tar.gz` | `f3c3df1f307e0df671021a9d93bb0338624bc7fd0661122c822342e8469f7872` |
+| `sdk-full-ring-04-forensics-evidence.tar.gz` | `51553a8ee262d3d65a9796dda0be9ee598500faae36c6fea974810958e8bbf94` |
 | `myos-full-ring-01-evidence.tar.gz` | `0a6f18db805397596aee2742512b9c1da9d4dced4eadb8c5fd19392fb1f1d8f1` |
 | `proof-reuse-focused-01-evidence.tar.gz` | `4cad3da5fb01252947d74c5e1924b6ea6886e09510c9a4d1ff1bd38e9b201495` |
 | `proof-reuse-base-01-evidence.tar.gz` | `ec73814f0edd8bafb013d79cccac72835bd192aefccf0975124d667046ee9d48` |
+| `import-forwarding-01-evidence.tar.gz` | `0e122ec6a190776a06ec2e45b92d273f6dd1bbef5a276e810398e9ff839fc4b5` |
+| `witness-forwarding-01-evidence.tar.gz` | `24a40da4a1b15ec10229b75d395616d4f90fd80d7fc3b0bed7665acaebede409` |
+| `witness-forwarding-02-evidence.tar.gz` | `92c24e7651b102343e4637306e9448515692cc63c3e86d0f70038c8199c9c472` |
 
 The preceding application failures and focused passes below retain their own
 artifact bindings. No library is ready to merge.
