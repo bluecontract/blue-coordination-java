@@ -7,8 +7,6 @@ import blue.coordination.api.SourceHistoryPrerequisiteObservation;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.Timeline;
 import blue.coordination.sdk.ExactNodeProvider;
-import blue.language.codec.jackson.UncheckedObjectMapper;
-import blue.language.model.NodeWireForm;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
@@ -199,8 +197,7 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
                     window.identity(), window.diagnostic(), null);
         if (source == null) {
-            String json = UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(NodeWireForm.get(candidate.authored().copyNode()));
-            var compiled = new Contracts10StaticEmbeddedAdmissionCompiler(engine).compile(json, provider,
+            var compiled = new Contracts10StaticEmbeddedAdmissionCompiler(engine).compileExactAuthored(candidate.authored(),
                     Contracts10AuthoredClosureCompiler.ActivationInputs.fullHistory());
             if (!compiled.rootDocumentId().equals(candidate.source()))
                 throw new IllegalArgumentException("Source compiler changed the exact authored identity");

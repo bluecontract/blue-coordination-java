@@ -61,6 +61,19 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                 Objects.requireNonNull(activation, "activation");
         ExactValue authored = engine.exactProcessingSource(requireText(
                 authoredYaml, "authoredYaml"));
+        return compileExactAuthored(authored, selectedActivation);
+    }
+
+    /**
+     * A stopped Contracts demand already authenticated this exact authored body.
+     * Do not reparse it as new authored Source: provider-content preparation and
+     * processing-Source preparation are distinct supported ingress contracts.
+     */
+    CompiledStaticAdmission compileExactAuthored(
+            ExactValue authored,
+            Contracts10AuthoredClosureCompiler.ActivationInputs selectedActivation) {
+        Objects.requireNonNull(authored, "authored");
+        Objects.requireNonNull(selectedActivation, "selectedActivation");
         DocumentId rootDocumentId = DocumentId.of(authored.blueId());
         blue.language.processor.closure.DocumentId closureRoot =
                 new blue.language.processor.closure.DocumentId(
