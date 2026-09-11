@@ -31,6 +31,19 @@ standard development gate. `releaseCheck` adds `scenarioTest` and is the
 required final gate. This keeps slow scenarios out of routine checks without
 weakening release evidence.
 
+Parallel execution uses separate test JVMs, controlled by
+`-PtestMaxParallelForks`; methods inside a class remain serial. The PayNote
+completion, cancellation, adjustment, and late-refusal cases each own a
+separate test class and a fresh campaign. Shared scenario helpers contain no
+executable tests and do not share mutable runtime state between campaigns.
+
+The execution-scope gates discover classes from compiled test output through
+JUnit, then compare them with the executed XML inventory. They fail on missing
+or unexpected classes, failures, skips, empty suites, or filtered/excluded test
+tasks. The reports retain each executed case, including parameterized
+invocations. This complements source architecture and conformance checks;
+it does not replace any scenario, public API, artifact, or release gate.
+
 Shared engine fixtures live in `src/testSupport`. This private, non-executable
 source set contains no `@Test` methods, is available to `integrationTest` and
 `scenarioTest`, and is not published. In particular, scenarios do not compile
@@ -104,6 +117,23 @@ campaign: A-B-A, A-B-C-A, five-member shared-A, disconnected cycles, detach and
 split, post-detach termination, remove/re-add, 1,000-unrelated locality, and
 the short topology smoke. The old long percentile campaign is not rerun for the
 SDK delta. Its retained receipts are historical evidence and remain unchanged.
+
+The committed topology identity artifact is checked against current runtime
+evidence. Complete Gradle runs record evidence from each of its 20 original
+JUnit contributors, then compare the ordered JSON and Markdown after all test
+workers finish. Every contributor is required exactly once; all 32 scenario
+identities and the original fresh-engine repeat counts remain mandatory.
+Focused exporter runs retain the direct campaign. Collection changes when the
+existing cases record evidence; it does not share engines or checkpoints
+between cases. See [build and test](build-and-test.md#topology-identity-evidence)
+for the finalizer and report locations.
+
+The 1,000-public-root managed catch-up locality fixture uses small independent
+admission batches. All 1,000 distinct documents are still admitted and
+initialized through the public path before measuring the same catch-up
+counters. The other 1,000-document topology fixtures retain their original
+admission batches and public-root declarations. Gas budgets, scale, structural
+assertions, and retry/restart matrices remain unchanged.
 
 ## Historical Round 10.1 semantic gates
 

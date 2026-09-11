@@ -16,6 +16,7 @@ import blue.language.processor.closure.GasTraceEntry;
 import blue.language.processor.closure.PublicEventOccurrence;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for branching collection-backed cyclic topology. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicBranchingCollectionCycleTest {
     private static final long ENTRY_TIME = 2_100_000_000_000_001L;
     private static final int UNRELATED_ADMISSION_BATCH_SIZE = 25;

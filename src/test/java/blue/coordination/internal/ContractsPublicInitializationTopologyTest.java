@@ -28,6 +28,7 @@ import blue.language.processor.closure.TentativeFinalization;
 import blue.language.processor.closure.WorkKind;
 import blue.language.processor.util.ProcessorContractConstants;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts admission proofs for initialization and topology. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicInitializationTopologyTest {
     private static final DocumentId A = DocumentId.of("init-topology-a");
     private static final DocumentId B = DocumentId.of("init-topology-b");

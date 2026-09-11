@@ -23,6 +23,7 @@ import blue.language.processor.closure.ManagedOccurrenceBinding;
 import blue.language.processor.closure.ResultingDocument;
 import blue.language.processor.registry.RuntimeBlueIds;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -39,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Public Contracts proof for cyclic detachment and exact reactivation. */
+@ExtendWith(CyclicTopologyIdentityEvidenceTest.CollectionExtension.class)
 final class ContractsPublicCycleDetachmentTest {
     private static final long ENTRY_TIME = 2_200_000_000_000_001L;
 

@@ -1,0 +1,167 @@
+import groovy.json.JsonOutput
+import javax.xml.parsers.DocumentBuilderFactory
+
+// Discovery is a separate JVM. Consumer tests retain their original JAR-only
+// execution classpath; the inventory tool is never added to any Test task.
+def inventoryCompiler = tasks.register('compileTestClassInventory', JavaCompile) {
+    source = files('gradle/verification/TestClassInventory.java')
+    classpath = files(configurations.testCompileClasspath, configurations.testRuntimeClasspath)
+    destinationDirectory = layout.buildDirectory.dir('test-class-inventory-tool')
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+def suites = ['test', 'integrationTest', 'consumerTest', 'scenarioTest']
+def inventories = [:]
+suites.each { suiteName ->
+    def suite = sourceSets.getByName(suiteName)
+    def output = layout.buildDirectory.file(
+            "reports/test-execution-scope/${suiteName}-discovered-classes.txt")
+    inventories[suiteName] = output
+    def discovery = tasks.register("discover${suiteName.capitalize()}Classes", JavaExec) {
+        group = 'verification'
+        description = "Discovers the complete compiled ${suiteName} class inventory."
+        dependsOn inventoryCompiler, tasks.named(suite.classesTaskName)
+        classpath = files(inventoryCompiler.flatMap { it.destinationDirectory },
+                suite.runtimeClasspath)
+        mainClass = 'blue.coordination.verification.TestClassInventory'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(
+                    providers.gradleProperty('testJavaVersion').getOrElse('17') as int)
+        }
+        inputs.files(suite.output.classesDirs)
+        outputs.file(output)
+        args = [output.get().asFile.absolutePath] + suite.output.classesDirs.files
+                .collect { it.absolutePath }.sort()
+    }
+    tasks.named(suiteName, Test) {
+        dependsOn discovery
+    }
+}
+
+def inspectScope = { Collection<String> expected, List<Map> cases, boolean fullTask = true ->
+    def expectedClasses = expected as Set
+    def actualClasses = cases.collect { it.className } as Set
+    def missing = (expectedClasses - actualClasses).sort()
+    def unexpected = (actualClasses - expectedClasses).sort()
+    long failures = cases.count { it.failed }
+    long skipped = cases.count { it.skipped }
+    [passed: fullTask && !expectedClasses.empty && !cases.empty && missing.empty
+            && unexpected.empty && failures == 0 && skipped == 0,
+     fullTask: fullTask,
+     expectedClasses: expectedClasses.sort(), executedClasses: actualClasses.sort(),
+     executedTests: cases.size(), missingClasses: missing, unexpectedClasses: unexpected,
+     failures: failures, skipped: skipped]
+}
+
+def scopePolicy = tasks.register('verifyTestExecutionScopePolicyLogic') {
+    group = 'verification'
+    description = 'Proves that incomplete or unsuccessful execution cannot produce a passing scope receipt.'
+    doLast {
+        def success = [className: 'ExampleTest', name: 'example()', failed: false, skipped: false]
+        if (!inspectScope(['ExampleTest'], [success]).passed) {
+            throw new GradleException('Complete passing test execution was rejected')
+        }
+        def rejected = [
+                [expected: ['ExampleTest', 'MissingTest'], cases: [success]],
+                [expected: ['AnotherTest'], cases: [success]],
+                [expected: ['ExampleTest'], cases: []],
+                [expected: [], cases: []],
+                [expected: ['ExampleTest'], cases: [success + [failed: true]]],
+                [expected: ['ExampleTest'], cases: [success + [skipped: true]]],
+                [expected: ['ExampleTest'], cases: [success], fullTask: false]
+        ]
+        rejected.each { vector ->
+            if (inspectScope(vector.expected, vector.cases, vector.fullTask != false).passed) {
+                throw new GradleException('Incomplete test execution was accepted: ' + vector)
+            }
+        }
+    }
+}
+
+def registerScope = { String name, List<String> selected ->
+    tasks.register(name) {
+        group = 'verification'
+        description = 'Verifies full class coverage and successful JUnit execution without skipped tests.'
+        dependsOn scopePolicy, 'verifyCyclicTopologyIdentityEvidence'
+        selected.each { suiteName ->
+            dependsOn tasks.named(suiteName)
+            inputs.file(inventories[suiteName])
+            inputs.dir(providers.provider {
+                tasks.named(suiteName, Test).get().reports.junitXml.outputLocation.get().asFile
+            })
+        }
+        inputs.property('testJavaVersion', providers.gradleProperty('testJavaVersion').getOrElse('17'))
+        def output = layout.buildDirectory.file("reports/test-execution-scope/${name}.json")
+        outputs.file(output)
+        // Task exclusions and onlyIf predicates belong to this invocation, so
+        // an earlier passing receipt must never skip these inexpensive checks.
+        outputs.upToDateWhen { false }
+        doLast {
+            def factory = DocumentBuilderFactory.newInstance()
+            factory.setFeature('http://apache.org/xml/features/disallow-doctype-decl', true)
+            factory.setFeature('http://xml.org/sax/features/external-general-entities', false)
+            factory.setFeature('http://xml.org/sax/features/external-parameter-entities', false)
+            def results = [:]
+            selected.each { suiteName ->
+                def task = tasks.named(suiteName, Test).get()
+                List<Map> cases = []
+                fileTree(task.reports.junitXml.outputLocation.get().asFile) {
+                    include 'TEST-*.xml'
+                }.files.sort().each { xml ->
+                    def nodes = factory.newDocumentBuilder().parse(xml).getElementsByTagName('testcase')
+                    for (int index = 0; index < nodes.length; index++) {
+                        def node = nodes.item(index)
+                        cases << [className: node.getAttribute('classname'), name: node.getAttribute('name'),
+                                  failed: node.getElementsByTagName('failure').length > 0
+                                          || node.getElementsByTagName('error').length > 0,
+                                  skipped: node.getElementsByTagName('skipped').length > 0]
+                    }
+                }
+                cases.sort { a, b -> (a.className <=> b.className) ?: (a.name <=> b.name) }
+                def expected = inventories[suiteName].get().asFile.readLines('UTF-8')
+                        .findAll { !it.isBlank() }
+                // A stale report cannot replace a task omitted with -x, disabled,
+                // filtered, or skipped by onlyIf. Normal Gradle up-to-date/cache
+                // reuse still binds outputs to the task's current inputs.
+                boolean fullTask = gradle.taskGraph.hasTask(task) && task.enabled
+                        && !task.state.noSource && (!task.state.skipped
+                        || task.state.upToDate || task.state.skipMessage == 'FROM-CACHE')
+                        && task.filter.includePatterns.empty && task.filter.excludePatterns.empty
+                        && task.filter.commandLineIncludePatterns.empty
+                        && task.includes.empty && task.excludes.empty
+                        && task.options.includeTags.empty && task.options.excludeTags.empty
+                        && task.options.includeEngines.empty && task.options.excludeEngines.empty
+                results[suiteName] = inspectScope(expected, cases, fullTask) + [
+                        maxParallelForks: task.maxParallelForks, testCases: cases]
+            }
+            // The exporter case collects during a full run. Its exact runtime
+            // comparison must also have executed successfully in this graph;
+            // excluding or disabling it cannot leave a green release gate.
+            def topology = tasks.named('verifyCyclicTopologyIdentityEvidence').get()
+            boolean topologyVerified = gradle.taskGraph.hasTask(topology)
+                    && topology.enabled && topology.state.executed
+                    && !topology.state.skipped && topology.state.failure == null
+            boolean passed = results.values().every { it.passed } && topologyVerified
+            File report = output.get().asFile
+            report.parentFile.mkdirs()
+            report.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
+                    schemaId: 'blue-coordination-test-execution-scope-v1',
+                    status: passed ? 'PASS' : 'FAIL', coordinationVersion: project.version.toString(),
+                    javaVersion: providers.gradleProperty('testJavaVersion').getOrElse('17'),
+                    topologyEvidenceVerified: topologyVerified,
+                    suites: results])) + '\n', 'UTF-8')
+            if (!passed) {
+                throw new GradleException('Test execution scope or topology evidence is incomplete or unsuccessful; see ' + report)
+            }
+            logger.lifecycle('Complete execution scope verified: {} test cases across {} suites',
+                    results.values().sum { it.executedTests }, selected.size())
+        }
+    }
+}
+
+def checkScope = registerScope('verifyCheckTestExecutionScope', suites.take(3))
+def releaseScope = registerScope('verifyReleaseTestExecutionScope', suites)
+tasks.named('check') { dependsOn checkScope }
+tasks.named('releaseCheck') { dependsOn releaseScope }

@@ -8,14 +8,14 @@ Java 21.
 
 ## Dependency graph
 
-`blueDependencyMode=published-artifact` is the rc.7 build and release default.
+`blueDependencyMode=published-artifact` is the rc.8 build and release default.
 It resolves exact Maven Central artifacts and rejects sibling composites,
 Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
-| Modules | RC7 release lane |
+| Modules | RC8 release lane |
 | --- | --- |
 | `blue.language:*` | Maven Central `3.1.0-rc.25` |
-| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.7` |
+| `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.6` |
 | `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.22` |
 
 Coordination directly owns the complete Language rc.25 graph, retains the
@@ -24,7 +24,7 @@ exact graph in `gradle/published-artifact.lockfile`.
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
 remain available only for non-published upstream handoffs. They are not public
-release authority for rc.7. The development lane is valid
+release authority for rc.8. The development lane is valid
 candidate-verification evidence when every input and the Coordination version
 are commit-bound. It can bind separate, immutable Language/Contracts and BEX
 repositories; it never obtains either dependency from a sibling checkout or
@@ -56,7 +56,7 @@ In staged mode, Gradle uses repository-exclusive content routing for the
 Gradle plugins, and third-party dependencies. There is no fallback if a staged
 Language artifact is absent or different.
 
-For rc.7, verify fresh remote availability and the
+For rc.8, verify fresh remote availability and the
 conflict-free Maven Central graph with:
 
 ```bash
@@ -101,7 +101,7 @@ dependency report is written to
 
 ## Verification
 
-RC7 uses the Maven-Central-only release gate:
+RC8 uses the Maven-Central-only release gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
@@ -109,7 +109,67 @@ RC7 uses the Maven-Central-only release gate:
 ```
 
 Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
-evidence, but does not itself publish rc.7 or make it production-ready.
+evidence, but does not itself publish rc.8 or make it production-ready.
+
+### Parallel test execution
+
+Use independent test JVMs to reduce elapsed time:
+
+```bash
+./gradlew --no-daemon --no-build-cache --max-workers=4 clean releaseCheck \
+  -PtestJavaVersion=17 -PtestMaxParallelForks=4
+```
+
+`testMaxParallelForks` defaults to `1`, must be a positive integer, and is
+capped by Gradle's worker limit. CI selects `4` for Build, RC release, and
+stable release. Each test JVM retains the existing 2 GiB heap limit and
+executes methods serially. The four PayNote acceptance cases have separate
+classes and create independent fixtures. No fixture preparation, gas budget,
+assertion, or repeatability scenario is removed by this scheduling change.
+
+The extracted-source smoke receives the same effective fork limit and still
+executes its complete existing focused inventory. Keep the same fork setting
+for subsequent readiness, staging, and publishing commands so Gradle can
+reuse valid results for the same inputs.
+
+`verifyCheckTestExecutionScope` and `verifyReleaseTestExecutionScope` compare
+JUnit-discovered compiled test classes with the JUnit XML results. They reject
+missing or unexpected classes, empty execution, failures, skipped tests, and
+filtered or excluded suite tasks. Parameterized methods participate in class
+discovery, and every executed invocation is recorded in the receipt. Filtered
+`test --tests ...` runs remain available for development; they cannot satisfy
+the complete `check` or `releaseCheck` gate.
+
+Receipts and discovered inventories are written under
+`build/reports/test-execution-scope/`. CI also archives `build/rooted-evidence/`
+alongside the existing reports and test results. Consumer test compilation and
+execution retain their JAR-only boundary; discovery runs in a separate JVM.
+
+### Topology identity evidence
+
+A complete `test` run captures topology identities during the 20 original JUnit
+contributor cases. Each invocation uses its own recorder and writes a distinct
+fragment under `build/rooted-evidence/topology-fragments/`. After the workers
+finish, `verifyCyclicTopologyIdentityEvidence` combines those fragments in the
+original scenario order and compares the generated JSON and Markdown exactly
+with the committed artifacts. The finalizer runs for `test`, `check`, and
+`releaseCheck`; missing contributors, changed identities, and incorrect repeat
+counts fail verification. The execution-scope gates also reject an excluded,
+disabled, or skipped topology comparison, even when passing JUnit reports exist.
+
+This removes the exporter's second execution of the same 20 cases. All 32
+scenarios, six additional finite-ring repetitions, and the additional rollback
+repetition remain required. The successful comparison and generated artifacts
+are saved under `build/reports/topology-identity-evidence/`. Current-input Gradle
+reuse retains the fragments and repeats the inexpensive comparison.
+
+Filtered Gradle runs and IDE execution retain the standalone exporter. For
+example, `test --tests '*CyclicTopologyIdentityEvidenceTest'` executes its full
+original contributor campaign directly. Explicit artifact regeneration still
+uses `BLUE_CYCLIC_TOPOLOGY_IDENTITY_ARTIFACT_MODE=WRITE`.
+
+### Suite boundaries
+
 The suites remain separate because each protects a different boundary:
 
 | Task | Boundary | Execution policy |
@@ -179,21 +239,21 @@ isolation, source-archive hygiene, and an extracted source-archive build.
 
 ## RC readiness
 
-`verifyRcReadiness` is the rc.7 release-readiness gate:
+`verifyRcReadiness` is the rc.8 release-readiness gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 ```
 
-The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.7
+The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.8
 release authority and explicit non-claims, then records the
 fresh artifact hashes in
-`build/reports/release/3.0.0-rc.7-readiness.json`. It validates version
-`3.0.0-rc.7`, the published-artifact lane, and the focused rc.7 capability
+`build/reports/release/3.0.0-rc.8-readiness.json`. It validates version
+`3.0.0-rc.8`, the published-artifact lane, and the focused rc.8 capability
 inventory in addition to the complete current suite.
 
-The Build workflow prepares and seals the exact rc.7 version in its isolated
+The Build workflow prepares and seals the exact rc.8 version in its isolated
 checkout before this gate. Keep the preceding released version in the feature
 branch's `.cz.toml`; the release workflow owns the final version commit. A
 local readiness run requires the same preparation in a validation checkout.
@@ -214,7 +274,7 @@ also contains the canonical Coordination specification candidate under
 file and byte-identical to the canonical source file before the isolated build
 starts.
 
-For a downstream development handoff after the rc.7 gates pass on a clean
+For a downstream development handoff after the rc.8 gates pass on a clean
 committed source tree, export a separate
 invocation-owned immutable Coordination repository with:
 
@@ -267,4 +327,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.7 decision](../releases/3.0.0-rc.7.md).
+[3.0.0-rc.8 decision](../releases/3.0.0-rc.8.md).

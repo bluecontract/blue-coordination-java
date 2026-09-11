@@ -1,0 +1,63 @@
+// Capture evidence while its owning JUnit cases execute, then compare the
+// complete ordered artifact after all independent test workers have finished.
+def topologyFragments = layout.buildDirectory.dir('rooted-evidence/topology-fragments')
+def topologyReports = layout.buildDirectory.dir('reports/topology-identity-evidence')
+def topologyTest = tasks.named('test', Test)
+def completeTopologySelection = {
+    def selected = topologyTest.get()
+    selected.filter.includePatterns.empty && selected.filter.excludePatterns.empty
+            && selected.filter.commandLineIncludePatterns.empty
+            && selected.includes.empty && selected.excludes.empty
+            && selected.options.includeTags.empty && selected.options.excludeTags.empty
+            && selected.options.includeEngines.empty && selected.options.excludeEngines.empty
+}
+
+topologyTest.configure {
+    inputs.property('collectTopologyEvidence', providers.provider { completeTopologySelection() })
+    outputs.dir(topologyFragments)
+    systemProperty 'blue.test.topologyEvidenceDirectory', topologyFragments.get().asFile.absolutePath
+    doFirst {
+        systemProperty 'blue.test.collectTopologyEvidence', completeTopologySelection().toString()
+        File directory = topologyFragments.get().asFile
+        if (directory.exists() && !directory.deleteDir()) {
+            throw new GradleException('Could not clear old topology evidence: ' + directory)
+        }
+        if (!directory.mkdirs()) {
+            throw new GradleException('Could not create topology evidence directory: ' + directory)
+        }
+    }
+}
+
+def topologyEvidence = tasks.register('verifyCyclicTopologyIdentityEvidence', JavaExec) {
+    group = 'verification'
+    description = 'Compares all 32 topology scenarios and repeat counts from the 20 original JUnit contributors.'
+    dependsOn topologyTest
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'blue.coordination.internal.CyclicTopologyIdentityEvidenceTest'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(
+                providers.gradleProperty('testJavaVersion').getOrElse('17') as int)
+    }
+    maxHeapSize = '512m'
+    inputs.dir(topologyFragments)
+    inputs.files('stabilization/rooted-checkpoint/retained-topology-identities/full-lifecycle-admission-identities.json',
+            'stabilization/rooted-checkpoint/retained-topology-identities/full-lifecycle-admission-identities.md')
+    outputs.dir(topologyReports)
+    // Selection/exclusion and task state are properties of this invocation.
+    outputs.upToDateWhen { false }
+    args = [topologyFragments.get().asFile.absolutePath, topologyReports.get().asFile.absolutePath]
+    onlyIf {
+        completeTopologySelection() && topologyTest.get().state.failure == null
+    }
+    doFirst {
+        def selected = topologyTest.get()
+        if (!gradle.taskGraph.hasTask(selected) || !selected.enabled || selected.state.noSource
+                || (selected.state.skipped && !selected.state.upToDate
+                && selected.state.skipMessage != 'FROM-CACHE')) {
+            throw new GradleException('Topology evidence requires a complete successful test task')
+        }
+    }
+}
+
+topologyTest.configure { finalizedBy topologyEvidence }
+tasks.named('check') { dependsOn topologyEvidence }
