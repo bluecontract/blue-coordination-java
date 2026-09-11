@@ -1,0 +1,149 @@
+{
+  "scope": "Focused Coordination retained-source wire-consistency correction; not a full library or MyOS acceptance gate",
+  "baseCommit": "dd719fb6ec38a953b5814e6b08e6a93c29c90fa2",
+  "artifactExported": false,
+  "diagnosticLanguageOverlayUsed": false,
+  "upstream": {
+    "language": "7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+    "bex": "ab72af14ee54c6123e6d80349956af373a887680",
+    "catalog": "0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+    "immutableRepositoryRoot": "/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1"
+  },
+  "red": {
+    "xml": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/red.xml",
+    "sha256": "dbb84e957247dbe4ca1999f5798145753647ab38a968e0a53731a69709edab83",
+    "log": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/red-02.log",
+    "tests": 2,
+    "failures": 1,
+    "skipped": 0,
+    "meaning": "Terminal A3 SDK import produced zero applications; older A0 control passed. Raw XML, not a full source-stability receipt."
+  },
+  "initialGreen": {
+    "xml": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/green-01.xml",
+    "sha256": "69e0193628d678c62fb7f0ad3142bee4b14ae59d164ceda33110c969bc39e3c4",
+    "log": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/green-01.log",
+    "tests": 2,
+    "failures": 0,
+    "skipped": 0,
+    "meaning": "Same initial two-test control after the capturer-only production change; later assertions strengthened the maintained test."
+  },
+  "finalGate": {
+    "receipt": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/focused-final/receipt.json",
+    "receiptSha256": "6fdbdfeca3c31f9da6529a06061b5116debeb7d02a7b7e8b590894f3afe33dae",
+    "startedUtc": "2026-09-11T00:32:15Z",
+    "finishedUtc": "2026-09-11T00:40:31Z",
+    "totals": {
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "javadoc": "PASS",
+    "sourceStable": true,
+    "compilerInputCount": 616,
+    "compilerInputSha256": "4f9474b54fc34ffd80d3335b775bbb8003d9d6ddd9f7fe2c6edf4e48f61deca6",
+    "suites": {
+      "blue.coordination.internal.ManagedEpochApplicationAtomicRollbackTest": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.internal.ManagedEpochApplicationResponseLossTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.internal.ManagedEpochReceiptVerificationTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.internal.RootedJoinEligibilityTest": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.internal.RootedJoinPrerequisiteViewTest": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.internal.RootedRetainedSourceWireTest": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "blue.coordination.sdk.RootedLocalHistoryRecoveryTest": {
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "artifacts": {
+      "gradle.log": "55b4ccb3bb188202ae9703cd58c05766405f8f383fa85225c0cbddd55ba858b9",
+      "source-before.json": "a83e19b4018a51abe33daf98f4883c67c4f759ac768a02d17e2c7deb731689c0",
+      "source-after.json": "a83e19b4018a51abe33daf98f4883c67c4f759ac768a02d17e2c7deb731689c0",
+      "tested-source.tar.gz": "de43fa858afb56e5577d4e19cb16a8008abf7431520f9a8b174cd036cf55a602"
+    }
+  },
+  "reproduction": {
+    "runner": "/Users/kamil/Documents/Projects/Blue/rooted-retained-source-wire-evidence.YJBlid/run-focused.rb",
+    "runnerSha256": "25baad0e02843d44eb5808e61b94f23a67f89442876c87db40968c035461fc60",
+    "javaHome": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home",
+    "command": [
+      "./gradlew",
+      "test",
+      "--tests",
+      "*RootedRetainedSourceWireTest",
+      "--tests",
+      "*ManagedEpochReceiptVerificationTest",
+      "--tests",
+      "*ManagedEpochApplicationAtomicRollbackTest",
+      "--tests",
+      "*ManagedEpochApplicationResponseLossTest",
+      "--tests",
+      "*RootedJoinEligibilityTest",
+      "--tests",
+      "*RootedJoinPrerequisiteViewTest",
+      "--tests",
+      "*RootedLocalHistoryRecoveryTest",
+      "javadoc",
+      "-PblueDependencyMode=immutable-development-contracts",
+      "-PblueDevelopmentVersion=3.0.0-dev.dd719fb6ec38a953b5814e6b08e6a93c29c90fa2",
+      "-PblueContractsRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/language",
+      "-PblueContractsVersion=3.1.0-dev.7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+      "-PblueContractsSourceCommit=7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+      "-PblueContractsManifestSha256=sha256:4ec8cd6fb225503c32ea28b9174d96acacca426c9f6b0b41ddb16880c27bfb81",
+      "-PblueBexRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/bex",
+      "-PblueBexVersion=1.1.0-dev.ab72af14ee54c6123e6d80349956af373a887680",
+      "-PblueBexSourceCommit=ab72af14ee54c6123e6d80349956af373a887680",
+      "-PblueBexManifestSha256=sha256:9053a287e0107eb145c4af8a3dae0ed2eabb1f06529ba7b2d8b0ee5c7fe61855",
+      "-PblueRepositoryRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/catalog",
+      "-PblueRepositoryVersion=3.0.0-dev.0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+      "-PblueRepositorySourceCommit=0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+      "-PblueRepositoryManifestSha256=sha256:689fea3a72ce6bcc3488ae45437aa15ddfe05edb50e59c8a5ba356674ffec08d",
+      "-PtestJavaVersion=17",
+      "--max-workers=1",
+      "--no-parallel",
+      "--no-daemon",
+      "--offline",
+      "--console=plain"
+    ]
+  },
+  "observations": {
+    "gas": 463,
+    "gasTraceIdentity": "sha256:b663980dadb16ec6ca30c724f75815c70853ed6f91c30adb2146d5ed3ba3c249",
+    "applicationReceiptIdentity": "sha256:9f289cafea0e5b74f391236205588b344c8a9236758897315c8e050d40ee07cb",
+    "tightBudget": 462,
+    "coldReference": "Fresh materialized exact rooted input, preserving original authenticated witness roles/context; no live host/provider/history lookup during execution",
+    "sourceHistory": "Numbered source history unchanged; exact same-epoch terminal SCC representation checked against processor result"
+  },
+  "countingRule": "The new two-test owner is included in the final 20 tests. Do not sum overlapping development runs. red.log is a compile-only authoring failure; green-02 through green-06 are intermediate assertion/oracle development, not qualified green gates."
+}

@@ -253,8 +253,16 @@ final class ManagedEpochInvocationCapturer {
                         publicRoots);
         // One invocation must expose one deterministic wire representation
         // for each exact BlueId, including a same-state historical source.
-        Node invocationSourceAfter = providerBackedInvocationDocument(
-                sourceReceipt.afterDocument(), lineageIndex);
+        // Rooted capture already freezes the source's wire form. Reuse it only
+        // when the verified receipt names that exact lineage and successor;
+        // an older receipt must never be replaced by the selected source head.
+        var frozenSource = rootedState == null ? null : snapshot.managedDocument(
+                ContractsClosureAdapter.closureId(work.sourceDocumentId()));
+        Node invocationSourceAfter = frozenSource != null
+                && frozenSource.documentId().value().equals(sourceReceipt.documentId().value())
+                && frozenSource.blueId().equals(sourceReceipt.afterBlueId())
+                ? frozenSource.document()
+                : providerBackedInvocationDocument(sourceReceipt.afterDocument(), lineageIndex);
         ProcessingCause cause = representation != null ? representation : sourceTransition == null
                 ? ClosureEvidenceFactory.managedRevisionCause(
                         work.targetOccurrenceIdentity(),
