@@ -16,9 +16,13 @@ these corrected semantics.
 
 The follow-up is isolated from the previous qualified artifacts:
 
-- Language: `codex/legal-detached-retarget-language`, based on `34e9aa2f`;
-  legal current/historical selection and receipt/input guards are being qualified.
-- Coordination: `codex/legal-detached-retarget-coordination`, commit `4908265`;
+- Language: `codex/legal-detached-retarget-language`, source commit `1354663`,
+  based on `34e9aa2f`; **94/94 focused tests pass** for the corrected rule and
+  exact-input/receipt/rollback controls. The revised Contracts specification is
+  `sha256:5cc29e91cd8d4aa4d3dca98214da5ceb49b2daa82554ac561260bd98ce5063b8`.
+  Generated package rebinding and complete/downstream qualification are pending.
+- Coordination: `codex/legal-detached-retarget-coordination`, runtime commit
+  `4908265` plus exact specification binding `d739328`;
   removes rejection-only source capture, keeps the original B row and binds
   each retry demand to its actual expanded input. New authored/current/historical
   tests compile; downstream execution requires the corrected Language artifact.
@@ -28,6 +32,16 @@ The follow-up is isolated from the previous qualified artifacts:
   experiments are **not** release candidates or approved changes to join fences.
 
 No final full-library or MyOS acceptance is claimed for these follow-ups yet.
+
+The focused Language archive is
+`legal-detached-retarget-evidence.fKnxrU/language-focused-03.tar.gz`, SHA-256
+`5edb19b42f5e970259be11ee89b15d053cdc6f2c99bc8a23eb1b4431c80d9b7e`.
+Existing fixture regeneration preserves all business outcomes and gas quantities;
+identity rebinding alone is not a test of the new legal attachment. The new Java
+regressions supply that behavioral coverage. The cyclic diagnostic has reached
+the required A0/B1/C1 computation with unchanged owner/publication checks and
+exact fresh-reference result/gas equality, but real publication and automatic
+selection remain unqualified. It is not a replacement for the original full ring.
 
 `A → B` below means that A embeds B. Each row identifies an observed problem,
 its correction, and a small example; the linked notes retain the detailed
