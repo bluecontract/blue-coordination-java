@@ -1,5 +1,27 @@
 # Final Language candidate identity binding
 
+## Successor binding for imported-event source epochs
+
+The current candidate additionally contains the independently reproduced private
+Language source-epoch correction described in the
+[baseline registry](rooted-baseline-release-fixes.md#additional-language-correction-imported-events-with-deferred-activation).
+The regenerated Contracts release is
+`sha256:b36546b546c706aad52120afae93dec38211e66e0be596ff0946e54dfe4884ab`.
+Against the preceding 2ce package, exactly one source hash and the containing
+release identity change; the other 382 package files are byte-identical,
+including every fixture, receipt and gas oracle. Cumulative comparison against
+806536 changes only the same three previously reviewed source paths plus the
+release identity. The actual strict classifier reports one physical changed
+file and zero unexpected changes; its six exact-pair/mutation controls pass.
+
+The SDK property, its existing assertion and the two topology input headers
+now bind that release. All topology outcome bytes remain unchanged. BEX and
+Catalog require new dependency-bound development exports, not source fixes.
+No +85-line experimental cursor accommodation is included. Complete SDK,
+resident MyOS and library release verification remain required on the new
+coherent artifact set. The earlier identity and export receipts below are
+historical evidence, not certification of this successor.
+
 ## Problem and example
 
 The fixes-only Coordination candidate was first qualified using a development

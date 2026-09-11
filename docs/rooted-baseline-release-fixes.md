@@ -28,7 +28,7 @@ not establish a pass for this newly assembled candidate.
 | [FULL_HISTORY selected endpoint](rooted-full-history-admission-frontier.md) | B reaches E3; A starts with B's authored value or exact E1. The selected endpoint is E3, but later preparation chooses E0 using the FULL_HISTORY replay-beginning marker. The exact terminal guard rejects this mismatch. | Retain the source publication authenticated by the successful admission. Preserve the starting position, E0/ordered successor reactions and frozen E3 endpoint; later E4 remains LIVE. Required implementation-conformance correction; no new admission policy or weakened guard. |
 | [Borrowed-cycle activation position](rooted-borrowed-cycle-readiness.md) | Agreement observes Order attaching Payment0. If Order first publishes its own Order/Payment cycle, the later Agreement calculation classifies Payment0 against the physical Payment1 head and creates an impossible pending interval 0-to-0; Agreement stops at committed 2 / READY 1. | Candidate correction: classify only a new path against its authenticated numbered logical activation position. Existing reservations/cursors, genuinely older selections and distinct same-epoch representations stay historical. No READY override, source-head publication or gas policy change. All six controls, including negatives/gas boundaries, now pass in the combined SDK gate; original HTTP qualification remains required. |
 | [Terminal-successor planning context](rooted-ring-chord-successor-reproduction.md) | A → B → C → A; A adds another saved-authored C occurrence. Import reaches C7, but the planner omits its required same-epoch representation successor, which execution correctly rejects. | Use the same exact staged/committed consumer view in planning and capture. Bind the staged view to the actual result, original boundary, derived owners and receipt-backed head epochs. Preserve the exact terminal target, proof checks and CAS guards. Both SDK methods and selected adjacent/restart controls pass; original MyOS qualification remains required. |
-| [Exact-input eligibility memo](rooted-eligibility-cache.md) | The 54 negative BEX operations terminate correctly, but fresh MyOS replay exceeds the existing 120-second restart deadline. CPU samples show repeated delivery classification and body resolution. | Candidate physical optimization: reuse only a complete successful comparison mask for identical exact representations and ordered deliveries. Failures remain uncached; canonical selection, PROCESS, logical gas and publication checks remain unchanged. Its end-to-end benefit is still unverified, so this is not classified as a mandatory correctness repair. |
+| [Exact-input eligibility memo](rooted-eligibility-cache.md) | The 54 negative BEX operations terminate correctly, but fresh MyOS replay exceeds the existing 120-second restart deadline. CPU samples show repeated delivery classification and body resolution. | Physical optimization: reuse only a complete successful comparison mask for identical exact representations and ordered deliveries. Failures remain uncached; canonical selection, PROCESS, logical gas and publication checks remain unchanged. The later combined host/library candidate passes all 54 operations and restart under the unchanged deadline; this is not an isolated memo-only speedup measurement or a mandatory semantic repair. |
 
 ## Necessity review for the post-d038 additions
 
@@ -51,10 +51,13 @@ authority to change processing semantics.
   constrain cache/cold equivalence but do not mandate this particular cache.
   The comparison is internal to Coordination; a host cannot supply its cached
   result through an existing API. A different replay/index design remains an
-  alternative. Eighteen focused controls pass, but keeping this optimization
-  in the final candidate requires measuring the original restart on the new
-  artifacts. No claim of necessity, full heap bounds or scaling is made from
-  those unit tests. The extra disposable cache can retain an estimated 64 MiB;
+  alternative. Eighteen focused controls pass, including direct reuse and
+  cold-result equality. The original 54-operation restart subsequently passes
+  on sealed ef3965/4fdec artifacts with unchanged inputs, gas and deadline;
+  host code also changed, so this does not isolate the memo's speedup. The
+  final rebound tuple still needs complete acceptance. No claim of semantic
+  necessity, full heap bounds or scaling is made from these results. The extra
+  disposable cache can retain an estimated 64 MiB;
   journal scans and temporary key allocation remain.
 
 - **Borrowed-cycle classification is a library defect:** RCP-HISTORY-01 and
@@ -159,8 +162,15 @@ finalizer-only source change must still advance and measured G−1 failure after
 receipt/event work, with literal rollback and deterministic retry. Complete
 archive SHA-256:
 `dbd2fcbdde0b8fdab8be05b0d1d32f268118f5a8466f9ff101565381a84b64d1`.
-Release metadata is deliberately still pending on this implementation commit;
-only supported, reviewed source-identity rebinding may enter the final artifact.
+The runtime commit is followed by supported source-identity rebinding. Actual
+regeneration changes only the containing release manifest among 383 package
+files; strict cumulative classification passes with one changed file and zero
+unexpected changes. All six exact-pair/mutation controls pass. New Contracts
+release: `sha256:b36546b546c706aad52120afae93dec38211e66e0be596ff0946e54dfe4884ab`.
+Independent review verified all 741 runtime hashes against the exact source and
+all 382 unchanged fixture/package files. The old C-EVO fallback warnings are
+identical on unchanged 806536 and 2ce inputs, not new fixture drift; no generic
+classifier policy was broadened. The final clean artifact set remains pending.
 BEX and Catalog need no code correction, but their development exports must bind
 the new Language artifact explicitly rather than silently reuse old 2ce POMs.
 
@@ -247,9 +257,11 @@ its only changes at both finalization boundaries are `/peers/a/blueId`.
 Nevertheless, the result numbers C as epoch 9. The later terminal guard then
 observes precisely the predicted inactive C8/current C9 mismatch. This supports
 the source-classification diagnosis, not a new source history policy.
-The paired Language regression and causal red/green test must still qualify
-the repair. Run it against unchanged Coordination first; do not retain the
-later accommodation if the source fix makes it unnecessary.
+The paired Language regression and causal red/green test subsequently qualified
+the private correction, with the 62-method adjacent result recorded above.
+The full fourteen-input SDK test is now included without the experimental
+Coordination accommodation; it must pass against the rebound Language before
+this is treated as a complete MyOS repair.
 
 Evidence in `rooted-focused-followup-evidence.jtpYIX`:
 
