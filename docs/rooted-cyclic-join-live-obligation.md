@@ -2,7 +2,10 @@
 
 Status: reproduced on both the proposed candidate and unmodified Coordination
 RC9 with published Language RC25/BEX RC6/Catalog RC22. The behavior predates
-our candidate corrections; its prescribed repair is not yet established.
+our candidate corrections. On 12 September the user confirmed this is a bug:
+B's required reaction must not disappear. The remaining work is a correct
+implementation repair, not another behavioral-policy decision. See
+[confirmed corrections](rooted-confirmed-behavior-corrections.md).
 Do not change an event oracle or relax witness/publication checks to close this.
 
 ## Five-input example
@@ -19,15 +22,16 @@ token increments `observed`; `next=B` additionally emits a fresh token to B.
 | 300 | C attaches authored A and imports its history, forming C → A → B → C. |
 
 C receives A's old token and emits a **new C token addressed to B**. That token
-is present in C's committed event evidence. The original expectation is one
+is present in C's committed event evidence. The required result is one
 reaction in both C and B. Actual final counts are **A0/B0/C1**, all three roots
 are READY, all three edges are active, and B selects no remaining work.
 
 Removing only A's eventless action at250 produces **A0/B1/C1**. The distinction:
 the token-bearing A epoch5 is then the terminal source receipt. With action250,
 the endpoint is A6 and the same token is imported before terminal activation.
-This is a difference between logical histories, not by itself a determinism
-counterexample. Its effect on the already-active B receiver needs explanation.
+This is a difference between logical histories, not by itself a same-input
+determinism counterexample. However, the extra eventless step does not justify
+dropping B's required reaction. Both examples must finish at A0/B1/C1.
 
 ## Exact work that disappears
 
@@ -49,14 +53,15 @@ The longer original MyOS ring/chord/reconnect scenario shows the same shape:
 84 C-entry-owner publications; C's forwarded event exists; final join owns
 A/B/C but runs no B handler; expected B2, actual B1; final selection `NONE`.
 
-## Required clarification before a runtime fix
+## Constraints on the repair
 
 RCP-CAUSE-01 preserves an already-live root's original LIVE obligation despite
 source-first publication. RCP-PROGRESS-03 separates source progress from parent
 application progress. RCP-OWN-03 requires the exact causal joining view/fence;
 §8.7 says delayed notification cannot erase pending work. Conversely,
 RCP-SCOPE-04 and Contracts §16.8 preserve immutable witnesses and frozen event
-receivers. Neither set of rules alone specifies the missing discharge step.
+receivers. These constraints must all hold in the repair. They are not an
+alternative justification for dropping B's reaction.
 
 Exact source: Language `34e9aa2f`,
 `blue-contracts-core/src/main/resources/specifications/`:
@@ -76,10 +81,12 @@ Exact source: Language `34e9aa2f`,
 These are complementary constraints; the test exposes their interaction at
 one join boundary, not a license to discard either constraint.
 
-**May the final cyclic join discharge B's pending LIVE300 solely by installing
-C's newer checkpoint, without B's calculation? If not, how must that original
-obligation be retained/settled before the join; if yes, what exact evidence
-establishes that its required effects were preserved?**
+**The final cyclic join must not discharge B's pending LIVE300 merely by
+installing C's newer checkpoint while omitting B's required effects.** Preserve
+and settle that original obligation as part of the correct ordered calculation,
+with exact gas and publication evidence. The implementation must establish how
+this work survives the join; no further user/CTO decision on whether it may be
+lost is required.
 
 Changing the prerequisite comparison to include300, replaying at join, or
 weakening CAS is not an established solution. In the separate B-first control,
@@ -113,7 +120,7 @@ pass. The first launcher attempt had a test-only access error (`scalarAt` is
 package-private); the rerun reads the same textual fields through public `json()`.
 That compile failure is archived separately, not reported as a library defect.
 
-This independently reproduces the outcome on upstream. It does not supply
+This independently reproduces the bug on upstream. It does not supply
 the candidate's internal before/after LIVE-selection trace, prove the B-first
 conflict upstream, or by itself determine which layer must be corrected.
 

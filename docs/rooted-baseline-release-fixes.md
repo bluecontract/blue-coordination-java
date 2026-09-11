@@ -5,6 +5,15 @@ It starts at Coordination `next` commit `c0a689de8d0ccd89de94bf6316618c7760a68e2
 It does **not** contain the external-state POC, PostgreSQL adapters, runtime
 serialization, worker recovery, or a replacement processing model.
 
+**12 September correction:** the user confirms that the lost cyclic reaction
+is a bug and reports CTO confirmation that detach-B/later-attach-C at the same
+path must succeed. The earlier inactive-retarget prohibition is defective in
+both specification and implementation. Its rejection-only repair below is
+**superseded**, not accepted final behavior. See
+[confirmed corrections and requalification scope](rooted-confirmed-behavior-corrections.md).
+Earlier exact-source reports remain historical evidence, not qualification for
+these corrected semantics.
+
 `A → B` below means that A embeds B. Each row identifies an observed problem,
 its correction, and a small example; the linked notes retain the detailed
 reproduction and the original focused evidence. Those historical receipts do
@@ -18,7 +27,7 @@ not establish a pass for this newly assembled candidate.
 | [Static admission cutoff](rooted-static-admission-cutoff.md) | An explicitly `FROM_NOW` static admission freezes already managed B1 as the end of its catch-up interval, but later source preparation selects B0 as that end. | Retain the authenticated terminal cutoff, not replace the initial source position: initialization, successors and required reactions still run. This internal-command MyOS reproduction is distinct from ordinary public start's `importFullHistory`; no blanket strict-before-to-inclusive Timeline change. |
 | [Bounded selection across calls](rooted-sliced-selection.md) | A imports B1 while B2 and independent C work remain. Repeated small drains could repeatedly select a failing owner or disagree with audit. | Retain the scheduling state across calls and permit independent owners to progress. Failed historical work remains blocking for its own root; observation is read-only and physical failure does not consume work. |
 | [Source-prerequisite observation](rooted-source-prerequisite-observation.md) | A requests B's earlier history; another worker completes B before A inspects its descriptor. No remaining source actions alone cannot distinguish completion from a stale request. | Add `AdvancedCoordination.observeSourceHistoryPrerequisite(...)` and `SourceHistoryPrerequisiteObservation`: `PENDING` with an exact refreshed descriptor, `SATISFIED`, or `STALE`. Validate the original requesting authority and cutoff. This query neither publishes B nor authorizes stale execution. |
-| [Inactive retarget](rooted-inactive-retarget-evidence.md) | A detaches B from a reserved slot, then tries to install C there. The attempt could lose its original input or repeatedly demand evidence instead of reaching Contracts' deterministic rejection. | Preserve the B reservation and frozen C selection; authenticate the historical value needed for the rejection. Legal B reactivation, active retargets, and fresh-path attachments remain supported. Requires the separate Language correction below. |
+| [Inactive retarget — superseded](rooted-inactive-retarget-evidence.md) | A detaches B, then installs C at the same path. The old spec and our previous tests required rejection; the confirmed intended result is successful C attachment. | Replace the prohibition and rejection-only solution with a legal processor-owned new binding/history transition. Preserve original-input and exact-source authentication. Reassess Language/Coordination special cases and the MyOS workaround; old rejection passes do not qualify the corrected result. |
 | [Canonical BEX document values](rooted-canonical-document-view.md) | During A's import of B1, a workflow copies a saved exact C0 from `$document` into a child slot. An expanded representation supplied the wrong exact identity and triggered an unsatisfiable content demand. | Read canonical values from the current working document while keeping resolved lookup separate. Do not substitute a stale pre-step document. No BEX source change. |
 | [Retained selector scope](rooted-retained-selector-scope.md) | A → B; B attaches C at `/peers/c` using a LIVE attachment selection. A later imports B's retained result and incorrectly reapplies B's prospective selector in another scope. | Do not reapply the prospective selector to local retained historical work. Invalid LIVE selections are still rejected. |
 | [One selected prerequisite view](rooted-selected-source-prerequisite-view.md) | A retains X → B while X's independent head has already detached B. Discovering prerequisites for B → A could mix those two X views and miss A's required earlier input. | Walk one frozen selected source view throughout discovery, without jumping to independently newer heads. |
@@ -47,6 +56,9 @@ that audit are corrected. External report:
 `rooted-baseline-release-review.VamIZv/registry-completeness-cf359-34e9.md`,
 SHA-256 `5ade51082666668c9b18c4423a087bba56a293f32834cc3fbf9107584318d424`.
 This is a necessity/traceability review, not substitute full-suite acceptance.
+Its inactive-retarget conclusion used the then-selected specification. The
+12 September confirmed correction withdraws that behavioral justification;
+the affected implementation must now be reworked and requalified.
 
 - **FULL_HISTORY is a library defect:** RCP-SCOPE-06 and RCP-CAUSE-01/02 require
   the selected logical position and endpoint to survive later physical work.
@@ -193,11 +205,13 @@ The [final Language identity binding](rooted-final-language-binding.md) records
 the matching SDK profile, manifest and input-metadata change. It does not
 replace semantic golden outputs or weaken the dependency authentication guard.
 
-Language needs two internal corrections for the inactive-retarget case: reserve
-and classify the original occurrence correctly, and resolve an authenticated
-historical selected value even when the frozen source head is later. A later
-head's hash does not itself prove an earlier value; existing authenticated
-resolution rules still apply. These changes live in the separate Language PR.
+The existing Language branch contains two changes built for the old
+inactive-retarget rejection: preserving/classifying the reserved occurrence and
+resolving its selected historical value. Their rejection-only purpose is now
+superseded; retain or adapt only the parts needed by a legal C attachment and
+independent authentication invariants. A later head's hash still does not prove
+an earlier value. The separate Language PR needs the corresponding correction
+before it can be presented as the final candidate.
 
 There are no BEX or Repository source corrections in this set. Local
 development exports of those unchanged sources bind the exact Language
@@ -298,12 +312,13 @@ no work without having run its own LIVE300 calculation. This is a concrete
 join/progress concern, not proof that immutable-witness routing is wrong.
 `witness-forwarding-03` totals 3 methods, 1 pass / 2 failures, 47.118 seconds;
 its B-first conflict leaves heads/history unchanged and C's own work blocked.
-No production fix or oracle rewrite follows until the obligation's required
-discharge is established. The public-only unmodified-RC9 comparison now reaches
+The user has since confirmed this as a bug: the required B reaction must run;
+the remaining task is its correct implementation, not a behavioral decision.
+The public-only unmodified-RC9 comparison now reaches
 the same outcome with published Language RC25/BEX RC6/Catalog RC22, exact same
 inputs and no candidate runtime edits: terminal passes, nonterminal fails at
 `[0,0,1]`, 2 methods / 1 failure, 19.433 JUnit seconds. The behavior therefore
-predates these candidate corrections; the repair is not yet established.
+predates these candidate corrections; the repair is not yet implemented.
 
 The exclusion-free Language `34e9aa2f` clean build passes in 18m54s, with
 3,750 JUnit tests across 415 suites and no failures/errors/skips. Its archived

@@ -1,5 +1,13 @@
 # Inactive retarget: immutable input and historical rejection evidence
 
+**Superseded on 12 September 2026.** The user reports CTO confirmation that
+detach-B/later-attach-C at the same path is legal. The prohibition cited below
+is a defect in the former specification and implementation, not intended
+behavior. This document retains historical rationale/results only. Its
+rejection-only solution and suggested MyOS workaround must not be carried
+forward as the final repair; see
+[the confirmed correction](rooted-confirmed-behavior-corrections.md).
+
 This note preserves the original isolated correction and its focused evidence;
 it is not a full retarget or final-baseline qualification. The correction was
 subsequently consolidated in Coordination `d0382bbc` with final Language
