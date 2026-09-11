@@ -143,6 +143,65 @@ gate; existing assertions and semantic fixtures remain mandatory.
 
 ## Verification and landing
 
+### Current qualification and open investigation
+
+The runtime candidate in this worktree is `ef3965bd87b39f3dcb047aaaf0e6a5db3a285137`.
+The sealed MyOS `4fdec4f` / Coordination `ef3965b` application batches now provide
+the following later evidence; references above to original HTTP qualification
+being pending describe the preceding SDK stage:
+
+- FULL_HISTORY: all three original public HTTP attachment parameters pass.
+- Borrowed-cycle position: the original full Commerce group14 plus restart passes.
+- Eligibility memo: all 54 BEX programs and fresh replay pass with the unchanged
+  deadline, exact input identities and total gas 36,715. Replay of 56 commands
+  takes 73.311 seconds. Host code also changed, so this is not a memo-only
+  speedup ratio. Direct memo controls separately prove reuse and cold equality.
+- Ring/chord: the first five inputs pass, but the seventh input adding a second
+  C occurrence still fails. The full fourteen-input owner is not qualified.
+
+Across focused candidates, 18/19 originally failing invocations have later passes;
+neither complete MyOS suite has passed on one final tuple. These are resident
+baseline results, not external-state performance or E2E acceptance.
+
+**F12 — investigate before adding another library correction.** The exact
+seven original inputs reproduce the MyOS failure directly on unchanged ef3965
+SDK code. During import of C8 into A49, the staged result contains numbered C9
+and conflicts with the occurrence's frozen null-next representation cursor.
+A private three-file Coordination accommodation (+85 lines) then completed a
+25/26 selected test run: it passes the first guard and strict prefix/consumer
+controls, but fails later when terminal C8 cannot activate against selected C9.
+It is **not included in this candidate** and is not an accepted fix.
+
+The existing Language activation equality guard is consistent with the
+numbered-revision rule. Removing it, accepting a stranded inactive null-next
+cursor, rewinding C9, or skipping a real C effect is not justified. An earlier
+possible source defect must be tested: successor-bearing historical work
+deliberately defers activation, while the existing imported-event finalizer-only
+source-epoch exception requires completed activation. The maintained
+`FullLifecycleAdmissionTest.managedRevisionEventAcceptsAuthenticatedSameEpochComponentRebind`
+covers that exception without a successor. Exact C9 local/finalizer evidence
+and a paired successor test must establish whether that omission applies.
+If it does, qualify the narrow Language repair against unchanged Coordination
+first; do not retain a later accommodation made unnecessary by the source fix.
+This is an implementation investigation, not a new processing-policy decision.
+
+Evidence in `rooted-focused-followup-evidence.jtpYIX`:
+
+| Archive | SHA-256 |
+| --- | --- |
+| `myos-library-packaged-01.tar.gz` (2/3, ring still red) | `53248afb9339d4055ac226425956bd1bd43c90932923e395bd1c633cdb90a120` |
+| `myos-library-http-01.tar.gz` (3/3) | `fee5905e8d296c921b65173f79de5d3e4982cdba55fb9f43e4b49d5552bd68e5` |
+| `library-duplicate-occurrence-red-01.tar.gz` (unchanged SDK red) | `72eb82528e3905a3b9d48821371e64cf481dad511510290a41a41ac760563da8` |
+| `library-duplicate-occurrence-candidate-03-complete.tar.gz` (25/26) | `15358ba82e865c7980d5ec29f7263cf3347bf84045dad1c8b3137a706c2601fd` |
+
+Language `2ce3e66b` separately passes one clean build with 3,745 fresh JUnit
+invocations and zero failures/errors/skips. Its subsequent quality/RC gate stops
+on a stale generated empty-sentinel source-location audit; release qualification
+is not green. Reviewing that generated report is separate from the suspected
+runtime defect above. No library is ready to merge.
+
+### Earlier SDK qualification and required final gates
+
 Latest source-local gate: [44/44 combined history controls](rooted-history-combined-qualification.md),
 zero failures/errors/skips, plus passing source-shape and test-architecture guards.
 The archived bytes and unchanged exact upstream dependencies are recorded there.
