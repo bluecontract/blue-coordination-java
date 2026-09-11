@@ -68,7 +68,17 @@ suite passes explain why these fixes were selected, but are not a substitute
 for this candidate's complete gate. In particular, the published default
 Language RC does not yet contain the retarget fix.
 
-Landing order is Language review/release, Coordination's exact published
-Language binding and complete release gates, then MyOS's published-dependency
-baseline acceptance. Maintainer approval owns merging and release. The
-persistence branch remains separate until this resident baseline is settled.
+Before either library PR is merged, the complete resident MyOS baseline must
+pass acceptance against one frozen, coherent set of immutable development
+artifacts built from the exact proposed library sources. This includes the
+full product acceptance aggregate and the independent public HTTP scenario
+suite. Focused corrections and an interrupted run do not satisfy this gate;
+the existing assertions and deadlines remain unchanged. GitHub publication
+permissions do not prevent this local pre-merge verification.
+
+Only after that gate and the required library checks pass does the landing
+order become Language review/release, Coordination's exact published Language
+binding and release checks, then MyOS's published-dependency qualification.
+The later published-artifact check supplements, rather than replaces, the
+pre-merge end-to-end evidence. Maintainer approval owns merging and release.
+The persistence branch remains separate until this resident baseline is settled.
