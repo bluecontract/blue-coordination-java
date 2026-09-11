@@ -72,9 +72,18 @@ Archive: `legal-detached-retarget-evidence.fKnxrU/coordination-old-language-cont
 (sibling of the worktrees), SHA-256
 `3f1b417ad5609e307ef24e63666f9c22ea9e39658b9c22ac2a46d3f993722341`.
 
-The corrected Language focused suite has passed the legal current/historical
-cases, but its complete focused gate, new source/manifest binding, downstream
-SDK tests and the final MyOS acceptance tuple are not yet qualified. The
+The corrected Language focused gate passed **94/94** tests on source `1354663`
+with the new specification binding. Archive `language-focused-03.tar.gz` in the
+same evidence directory has SHA-256
+`5edb19b42f5e970259be11ee89b15d053cdc6f2c99bc8a23eb1b4431c80d9b7e`.
+Its generated release is
+`sha256:56e69e4260d87261aafc5158a0c68815bb5451b6c33cf100795a820eccd490da`
+and fixture package is
+`sha256:9323cd0b2b4202c08d8165a99102aa6d8a52f3e718fc33647e34ba211859a60f`.
+Coordination's SDK profile and exact binding assertions select those reviewed
+identities; gas tariffs and cyclic identity/proof bindings do not change.
+The full library gates, downstream SDK tests and final MyOS acceptance tuple
+are not yet qualified. The
 independent cyclic-join B-reaction bug also remains a merge gate. No golden
 business result, logical gas rule, publication fence, or acceptance deadline
 is relaxed by this correction.
