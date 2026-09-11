@@ -59,24 +59,49 @@ manually.
 
 A push to `next` starts `.github/workflows/release-rc.yml`. Manual dispatch is
 also restricted to `next`; a selected feature branch cannot enter the release
-job. The workflow:
+job. RC and stable releases share `.github/workflows/release-candidate.yml`.
+The stable entry point remains restricted to `main` and a stable version.
+The shared workflow:
 
 1. checks out the complete history and tags;
 2. pins Temurin 17.0.19+10 for the canonical build and Temurin
    21.0.11+10.0.LTS for compatibility verification;
 3. validates release credentials and the wrapper;
-4. prepares the version authorized by `docs/releases/3.0.0-rc.8.md`;
-5. creates the annotated tag locally and verifies push permissions;
-6. resolves the exact published dependency graph;
-7. runs the complete Java 21 release gate before any staging;
-8. runs `stageRelease` on Java 17, including the complete release and rc.8
-   gates;
-9. pushes the verified release commit to `next` without publishing tags; a
-   competing change to `next` rejects this push before any external deployment;
-10. deploys the signed bundle to Maven Central;
-11. pushes only the release tag after deployment succeeds;
-12. archives JARs, source distribution, reports, test results, staging output,
+4. for RCs, prepares the version authorized by `docs/releases/3.0.0-rc.8.md`;
+5. for RCs, creates the annotated tag locally and verifies push permissions;
+6. exports that exact commit and local RC tag in a Git bundle, with its SHA-256
+   passed as a preparation-job output;
+7. restores the candidate on two separate runners and resolves the exact
+   published dependency graph on each;
+8. runs the complete Java 21 `releaseCheck` and Java 17 `stageRelease`
+   concurrently; staging includes the complete release and rc.8 gates;
+9. seals each successful job's artifacts and evidence in an archive whose
+   SHA-256 is passed directly to the publication job;
+10. waits for both jobs to succeed, checks both archive hashes and their source
+    commit, source tree, version, workflow run, dependency lock, complete test
+    inventories, topology and extracted-source receipts, and identical JARs,
+    POM and source archive; it also checks Java 17 readiness and staged bytes;
+11. restores the verified Java 17 staging output and pushes the verified release
+    commit to `next` without publishing tags for RCs; a competing change to
+    `next` rejects this push before any external deployment;
+12. deploys the signed bundle to Maven Central;
+13. for RCs, pushes only the release tag after deployment succeeds;
+14. archives JARs, source distribution, reports, test results, staging output,
     and JReleaser evidence.
+
+The two verification jobs depend only on preparation. The publication job
+depends on preparation **and both JDK jobs**. A failed or cancelled gate cannot
+start publication. Each runner retains four independent test JVMs.
+
+The publish job uses `jreleaserDeploy -x stageRelease` only after the handoff
+verification succeeds: it deploys the already verified bytes rather than
+rebuilding on a fresh runner. Normal Gradle deployment still depends on
+`stageRelease`; there is no new global test-skip option. Gradle module metadata
+is generated and checked in Java 17 staging; Java 21 retains its original
+`releaseCheck` scope. The successful Java 17 and Java 21 handoff artifacts
+contain all their original reports, test results, gas evidence, source
+distributions, JARs and publication files. Failed or cancelled jobs upload
+their available diagnostic evidence separately.
 
 The tag is intentionally absent while Maven Central publication is pending.
 A failed gate or deployment leaves the remote tag untouched.
@@ -96,21 +121,27 @@ the uploaded evidence.
 
 ### Repeated post-merge verification
 
-The current workflow structure performs more work than the release requires:
-the merge push starts both the Build matrix and Release RC, Release RC runs
-its two Java gates sequentially, and the release commit starts the Build
-matrix again. For the RC6 release on September 7, 2026, the release job spent
+The merge push still starts both the Build matrix and Release RC, and the
+release commit starts the Build matrix again. These independent Build runs
+are unchanged by the parallel release gates. For the RC6 release on September 7,
+2026, the previous sequential release job spent
 77m 04s in the Java 21 gate, 78m 05s in Java 17 staging, and 14m 45s publishing.
 The independent merge Build took 80m 55s; the release-commit Build took
 98m 37s. See the [release run](https://github.com/bluecontract/blue-coordination-java/actions/runs/34151341442).
 
-Parallel test execution reduces the test work's elapsed time in every path.
-Removing the repeated workflow executions is a separate release orchestration
-change: prepare one exact release commit, verify that commit on both Java
-versions concurrently, and publish the Java 17 staged artifacts only after
-both gates succeed. Such a handoff must bind the source commit, dependency
-identities, artifact hashes, and verification receipts. A PR result, a release
-commit message, or an unbound copied report cannot substitute for that proof.
+The completed PR #21 jobs took 52m 15s on Java 17 and 49m 05s on Java 21,
+including verification and setup. Running the release gates concurrently
+should remove approximately one 48–50 minute gate from the release path,
+less the cost of preparing and transferring the handoff. This is an estimate
+based on the [PR run](https://github.com/bluecontract/blue-coordination-java/actions/runs/34540487291),
+not a measured publication duration. The release duration is now approximately
+preparation + the slower JDK gate + handoff/publication, instead of the sum of
+the JDK gates. No test class rebalancing or further test-fixture optimization
+is part of this change.
+
+Removing repeated Build workflow executions remains a separate change. A PR
+result, a release commit message, or an unbound copied report cannot substitute
+for verification of the actual release candidate.
 
 ## Manual diagnostics
 

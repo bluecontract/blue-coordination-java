@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const workflow = fs.readFileSync(
-  path.join(__dirname, '../workflows/release-rc.yml'), 'utf8',
+  path.join(__dirname, '../workflows/release-candidate.yml'), 'utf8',
 );
 const version = '3.0.0-rc.8';
 const tag = `refs/tags/v${version}`;
@@ -18,7 +18,7 @@ function stepCommand(name) {
   const step = workflow.slice(start, end < 0 ? undefined : end);
   const command = step.match(/^        run: (.+)$/m)?.[1];
   assert.ok(command, `Expected a single command for ${name}`);
-  return command.replaceAll('${{ steps.version.outputs.version }}', version);
+  return command;
 }
 
 const pushCommit = stepCommand('Push verified release commit');
@@ -35,6 +35,7 @@ function fixture(t) {
     GIT_AUTHOR_EMAIL: 'release-test@example.invalid',
     GIT_COMMITTER_NAME: 'Release workflow test',
     GIT_COMMITTER_EMAIL: 'release-test@example.invalid',
+    RELEASE_VERSION: version,
   };
   const remote = path.join(root, 'remote.git');
   const publisher = path.join(root, 'publisher');
@@ -62,15 +63,16 @@ function fixture(t) {
   return { root, remote, publisher, contributor, git, shell, commit, releaseCommit };
 }
 
-test('publishes the commit after gates and the tag after deployment', () => {
+test('publishes the commit after both gates and the tag after deployment', () => {
+  const publisher = workflow.slice(workflow.indexOf('\n  publish:\n'));
+  assert.match(publisher, /needs:\n      - prepare\n      - java17\n      - java21/);
   const names = [
-    'Verify the Java 21 release gate',
-    'Build and stage from published dependencies',
+    'Verify both gates and restore staged artifacts',
     'Push verified release commit',
     'Publish to Maven Central',
     'Push published release tag',
   ];
-  const positions = names.map((name) => workflow.indexOf(`      - name: ${name}\n`));
+  const positions = names.map((name) => publisher.indexOf(`      - name: ${name}\n`));
   assert.ok(positions.every((position, i) => position >= 0
     && (i === 0 || position > positions[i - 1])));
 });

@@ -1,0 +1,311 @@
+name: Verify and publish one release candidate
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: rc or stable
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CI: true
+  ORG_GRADLE_PROJECT_testMaxParallelForks: '4'
+  RELEASE_CHANNEL: ${{ inputs.channel }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.candidate.outputs.commit }}
+      version: ${{ steps.candidate.outputs.version }}
+      bundle-sha: ${{ steps.candidate.outputs.bundle-sha }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Require the release branch
+        shell: bash
+        run: |-
+          set -euo pipefail
+          case "$RELEASE_CHANNEL" in
+            rc) test "$GITHUB_REF" = "refs/heads/next" ;;
+            stable)
+              test "$GITHUB_REF" = "refs/heads/main"
+              version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' .cz.toml)"
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify release automation
+        run: node --test .github/scripts/*.test.js
+
+      - name: Require release credentials
+        shell: bash
+        env:
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
+          GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          for name in WORKFLOW_PAT MAVENCENTRAL_USERNAME \
+              MAVENCENTRAL_PASSWORD GPG_PASSPHRASE \
+              GPG_PUBLIC_KEY GPG_SECRET_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required release secret ${name} is missing"
+              exit 1
+            fi
+          done
+
+      - name: Fetch RC base and tags
+        if: ${{ inputs.channel == 'rc' }}
+        run: git fetch origin main:refs/remotes/origin/main --tags
+
+      - name: Prepare RC version
+        id: version
+        run: node .github/scripts/prepare-rc-release.js
+        if: ${{ inputs.channel == 'rc' }}
+
+      - name: Commit and tag RC version
+        if: ${{ inputs.channel == 'rc' }}
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |-
+          set -euo pipefail
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          if ! git diff --quiet -- .cz.toml; then
+            git add .cz.toml
+            git commit -m "chore: release $RELEASE_VERSION"
+          fi
+          git tag -a "v$RELEASE_VERSION" -m "Release $RELEASE_VERSION"
+          git push --dry-run --no-follow-tags origin HEAD:refs/heads/next "v$RELEASE_VERSION"
+
+      - name: Seal the release candidate
+        id: candidate
+        run: node .github/scripts/release-handoff.js candidate "$RUNNER_TEMP/release-candidate"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-candidate
+          path: ${{ runner.temp }}/release-candidate/candidate.bundle
+          if-no-files-found: error
+          overwrite: true
+
+  java17:
+    name: Java 17 verification and staging
+    needs: prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      handoff-sha: ${{ steps.handoff.outputs.handoff-sha }}
+    env:
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '17'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-candidate
+          path: ${{ runner.temp }}/release-candidate
+
+      - name: Restore the exact release candidate
+        run: node .github/scripts/release-handoff.js restore "$RUNNER_TEMP/release-candidate"
+
+      - name: Verify published dependency availability
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon dependencyPreflight \
+            -PblueDependencyMode=published-artifact
+
+      - name: Build and stage from published dependencies
+        run: ./gradlew --no-daemon --no-build-cache clean stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=17
+
+      - name: Seal the verified Java 17 artifacts and evidence
+        id: handoff
+        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java17.tar.gz" 17
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-java17
+          path: ${{ runner.temp }}/java17.tar.gz
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+
+      - name: Archive incomplete Java 17 evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-java17-failure
+          path: |-
+            build/reports/**
+            build/test-results/**
+            build/rooted-evidence/**
+          overwrite: true
+
+  java21:
+    name: Java 21 verification
+    needs: prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      handoff-sha: ${{ steps.handoff.outputs.handoff-sha }}
+    env:
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '21'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-candidate
+          path: ${{ runner.temp }}/release-candidate
+
+      - name: Restore the exact release candidate
+        run: node .github/scripts/release-handoff.js restore "$RUNNER_TEMP/release-candidate"
+
+      - name: Verify published dependency availability
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon dependencyPreflight \
+            -PblueDependencyMode=published-artifact
+
+      - name: Verify the Java 21 release gate
+        run: ./gradlew --no-daemon --no-build-cache clean releaseCheck -PblueDependencyMode=published-artifact -PtestJavaVersion=21
+
+      - name: Seal the verified Java 21 artifacts and evidence
+        id: handoff
+        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java21.tar.gz" 21
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-java21
+          path: ${{ runner.temp }}/java21.tar.gz
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+
+      - name: Archive incomplete Java 21 evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-java21-failure
+          path: |-
+            build/reports/**
+            build/test-results/**
+            build/rooted-evidence/**
+          overwrite: true
+
+  publish:
+    name: Publish verified artifacts
+    needs:
+      - prepare
+      - java17
+      - java21
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
+      JAVA17_HANDOFF_SHA: ${{ needs.java17.outputs.handoff-sha }}
+      JAVA21_HANDOFF_SHA: ${{ needs.java21.outputs.handoff-sha }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '17'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-candidate
+          path: ${{ runner.temp }}/release-candidate
+
+      - name: Restore the exact release candidate
+        run: node .github/scripts/release-handoff.js restore "$RUNNER_TEMP/release-candidate"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-java17
+          path: ${{ runner.temp }}/release-handoffs
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-java21
+          path: ${{ runner.temp }}/release-handoffs
+
+      - name: Verify both gates and restore staged artifacts
+        run: node .github/scripts/release-handoff.js verify "$RUNNER_TEMP/release-handoffs"
+
+      - name: Push verified release commit
+        if: ${{ inputs.channel == 'rc' }}
+        run: git push --no-follow-tags origin HEAD:refs/heads/next
+      # stageRelease passed on Java 17. Both job-bound archive hashes and full
+      # receipts are checked above. Deploy those bytes without repeating gates.
+
+      - name: Publish to Maven Central
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
+          JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
+          JRELEASER_REPRODUCIBLE: true
+        run: ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=17
+
+      - name: Push published release tag
+        if: ${{ inputs.channel == 'rc' }}
+        run: git push --no-follow-tags origin "refs/tags/v$RELEASE_VERSION"
+
+      - name: Archive publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coordination-${{ inputs.channel }}-release
+          path: |-
+            build/release-handoff.json
+            build/libs/**
+            build/distributions/**
+            build/publications/**
+            build/reports/**
+            build/test-results/**
+            build/rooted-evidence/**
+            build/staging-deploy/**
+            build/jreleaser/**
+          overwrite: true
