@@ -1,0 +1,61 @@
+name: Alice-Bob Agreement
+documentId: tutorial-agreement
+paidOrders: 0
+orders: {}
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths:
+      - /orders
+  aliceChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: tutorial/business/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  attachOrder:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      orderKey:
+        type: Text
+        schema:
+          required: true
+      order: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path:
+                $pointerJoin:
+                  - orders
+                  - $binding: event/message/request/orderKey
+              val:
+                $binding: event/message/request/order
+          - $return: true
+  fromOrderPaid:
+    type: Embedded Node Channel
+    sourcePath: /orders/order-001
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Paid
+  countPaidOrder:
+    type: Coordination/Sequential Workflow
+    channel: fromOrderPaid
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Paid
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /paidOrders
+              val:
+                $add:
+                  - $document: /paidOrders
+                  - 1
+          - $return: true

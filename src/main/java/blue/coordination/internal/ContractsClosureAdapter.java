@@ -1994,6 +1994,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
         Map<DocumentId, RootedDocumentView> attachmentViews = RootedAttachmentCapture.select(
                 current, selected, documents);
+        selected = RootedAttachmentCapture.classifyAtBoundary(current, selected, attachmentViews, documents);
         Set<DocumentId> existingMembers;
         if (current.rootedEvidence() == null) {
             existingMembers = forwardExistingMembers(current.existingMemberSet(), selected.existingTargets(),
@@ -3180,9 +3181,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 committedEpochReceipts.put(
                         entry.getKey(), epochReceipt);
             }
-            if (result.rootedProjection() != null) {
-                transaction.stageRootedView(new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, batch.entry().sourceOrderKey()));
-            }
+            RootedDocumentView resultingRootedView = result.rootedProjection() == null ? null
+                    : new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, batch.entry().sourceOrderKey());
+            if (resultingRootedView != null) transaction.stageRootedView(resultingRootedView);
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
@@ -3215,7 +3216,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
-                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts,
+                                    resultingRootedView),
                             blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());

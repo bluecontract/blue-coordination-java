@@ -161,9 +161,11 @@ final class ManagedCatchUpPlanner {
                 Head sourceHead = headLookup.require(source);
                 ExternalOrderKey historyBoundary = existing.isEmpty() ? order : Objects.requireNonNull(
                         plans.barrier(existing.get(0).barrierIdentity()).barrier(), "owning barrier").causeOrder();
+                ManagedRepresentationHistory consumerHistory = frozenHistoricalIntervals && representationHistory != null
+                        ? representationHistory.forConsumer(consumer) : representationHistory;
                 boolean pendingTail = admitted == sourceHead.epoch() && representationHistory != null
                         && (frozenHistoricalIntervals
-                            ? representationHistory.atRootedCaptured(source, admitted, row.pendingRepresentationCursor(), historyBoundary)
+                            ? consumerHistory.atRootedCaptured(source, admitted, row.pendingRepresentationCursor(), historyBoundary)
                             : representationHistory.atCaptured(source, admitted, row.pendingRepresentationCursor()))
                             .next(row.pendingRepresentationCursor(), row.expectedTargetBlueId()).isPresent();
                 if (admitted >= sourceHead.epoch() && !pendingTail) {

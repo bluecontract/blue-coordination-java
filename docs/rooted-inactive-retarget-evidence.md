@@ -1,10 +1,13 @@
 # Inactive retarget: immutable input and historical rejection evidence
 
-This isolated correction closes the historical known-red case in a focused
-gate; it is not a full retarget qualification.
-Coordination remains an isolated candidate based on
-`04a1d8fb040a680a962d5d24e4c3cf3dae89ef99`; it is not exported as a completed fix.
-The separate Language correction is clean commit
+This note preserves the original isolated correction and its focused evidence;
+it is not a full retarget or final-baseline qualification. The correction was
+subsequently consolidated in Coordination `d0382bbc` with final Language
+`2ce3e66b`; see the [current change register](rooted-baseline-release-fixes.md)
+and [final dependency binding](rooted-final-language-binding.md).
+The original Coordination donor was based on
+`04a1d8fb040a680a962d5d24e4c3cf3dae89ef99`. At that stage the separate
+Language correction was clean commit
 `7ec0fdaafff41ad8e41387e7e5647d5a800d807c`, following the original bounded
 `80e0a3e5d11b80681fe48e563984f62f68c0f653` correction on pinned `80653645`.
 

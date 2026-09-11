@@ -1,0 +1,29 @@
+{
+  "format": "rooted-borrowed-cycle-red-receipt/1",
+  "status": "original-defect-red; correction-awaiting-combined-gate",
+  "originalSourceWorktree": "/Users/kamil/Documents/Projects/Blue/worktrees/rooted-baseline-library-followups",
+  "sourceAttestation": "Preserved diagnostic source as observed alongside the red XML; the shared original worktree was not asserted clean.",
+  "suite": "blue.coordination.internal.RootedBorrowedCycleReadinessTest",
+  "method": "oneWayObserverSettlesItsBorrowedCycleWithoutPublishingIndependentSources",
+  "timestamp": "2026-09-11T15:49:06.837Z",
+  "tests": 1,
+  "failures": 1,
+  "errors": 0,
+  "skipped": 0,
+  "failure": "Expected READY but CATCHING_UP; committed epoch 2, ready epoch 1; pending Order/payment cursor 0 at exact selected Payment epoch 0, with no next representation and no next pre-boundary epoch.",
+  "frozenPaymentBlueId": "ANGwUqG4S9xui7RVuTvW7U3zdFWmx3g1DnMjP59rG6T",
+  "defectiveAgreementBlueId": "5TcuuWZQgvi7DnPdFPRSN9QN2hPNPUpTs1A6s7W5QGVX",
+  "archiveRoot": "/Users/kamil/Documents/Projects/Blue/rooted-borrowed-cycle-evidence.mNeDA4",
+  "files": [
+    {
+      "name": "original-red.xml",
+      "bytes": 19848,
+      "sha256": "dbeb127d2f150f552c45801536261687486bb023fc2345043ecb919ebd46547a"
+    },
+    {
+      "name": "original-diagnostic-source.java",
+      "bytes": 15528,
+      "sha256": "68e335cba2253123abf825371095dc2ee8c4666c2c5790f3cb8c07eb93e7dc56"
+    }
+  ]
+}

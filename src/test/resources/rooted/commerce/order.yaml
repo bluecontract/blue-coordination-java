@@ -1,0 +1,101 @@
+name: Agreement Order
+documentId: tutorial-business-order
+status: draft
+confirmed: false
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /payment
+  aliceChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: tutorial/business/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  bobChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: tutorial/business/bob
+    actor:
+      type: MyOS/Principal Actor
+      accountId: bob
+  attachPayment:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      payment: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /payment
+              val:
+                $binding: event/message/request/payment
+          - $return: true
+  confirm:
+    type: Coordination/Sequential Workflow Operation
+    channel: bobChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /confirmed
+              val: true
+          - $appendChange:
+              op: replace
+              path: /status
+              val: confirmed
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Tutorial/Order Confirmed
+          - $return: true
+  fromPaymentAuthorized:
+    type: Embedded Node Channel
+    sourcePath: /payment
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Payment Authorized
+  markAuthorized:
+    type: Coordination/Sequential Workflow
+    channel: fromPaymentAuthorized
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Payment Authorized
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: payment-authorized
+          - $return: true
+  fromPaymentCaptured:
+    type: Embedded Node Channel
+    sourcePath: /payment
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Payment Captured
+  markPaid:
+    type: Coordination/Sequential Workflow
+    channel: fromPaymentCaptured
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Payment Captured
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /status
+              val: paid
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Tutorial/Order Paid
+          - $return: true

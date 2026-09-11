@@ -1049,8 +1049,9 @@ final class ContractsClosureAdmissionAdapter implements AutoCloseable {
             InMemoryDocumentStore.ClosureSnapshot before) {
         ClosureInvocationInput input = invocation.input();
         RootedAdmissionSources admissionSources = profile.rootedCheckpoint()
-                && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
-                ? RootedAdmissionSources.capture(input, frontier, invocation.existingMembers(), documents)
+                && (policy == CoordinationEngine.AdmissionPolicy.FROM_NOW
+                        || policy == CoordinationEngine.AdmissionPolicy.FULL_HISTORY)
+                ? RootedAdmissionSources.capture(input, frontier, invocation.existingMembers(), documents, policy)
                 : RootedAdmissionSources.NONE;
         RootedBeginningAdmission beginning = null;
         if (profile.rootedCheckpoint() && policy == CoordinationEngine.AdmissionPolicy.FROM_NOW

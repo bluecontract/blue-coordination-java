@@ -59,6 +59,7 @@ import java.util.TreeMap;
 final class BlueRuntime implements AutoCloseable {
     static final String PROVIDER_EXACT_NODE_READS =
             "provider.exactNodeReads";
+    static final String ROOT_ELIGIBILITY_COMPARISONS = "rooted.eligibilityComparisons";
 
     private final NodeProvider nodeProvider;
     private final BlueLanguage language;
@@ -66,6 +67,7 @@ final class BlueRuntime implements AutoCloseable {
     private final DocumentProcessor processor;
     private final ConformanceEngine processorConformanceEngine;
     private final EngineMetrics metrics;
+    private final RootedEligibilityCache rootEligibility = new RootedEligibilityCache();
     private boolean closed;
 
     private BlueRuntime(
@@ -242,26 +244,31 @@ final class BlueRuntime implements AutoCloseable {
             blue.language.processor.closure.AffectedClosureSnapshot snapshot,
             List<blue.language.processor.closure.DirectLogicalDelivery> deliveries,
             blue.coordination.api.TimelineEntry entry) {
-        return processor.withCapturedConfiguration(() -> {
+        ensureOpen();
+        return rootEligibility.select(snapshot, deliveries, entry, () -> processor.withCapturedConfiguration(() -> {
             var event = blue.language.processor.ExactEventIdentityEvidence.verify(contracts.runtimeAccess(),
                     entry.exactEvent().copyNode(), entry.blueId(), null);
             try (var comparison = new blue.language.processor.ManagedDocumentStepRuntime(processor)) {
-                List<blue.language.processor.closure.DirectLogicalDelivery> eligible = new ArrayList<>();
-                for (var delivery : deliveries) {
+                boolean[] eligible = new boolean[deliveries.size()];
+                for (int index = 0; index < deliveries.size(); index++) {
+                    var delivery = deliveries.get(index);
+                    metrics.increment(ROOT_ELIGIBILITY_COMPARISONS);
                     var classified = comparison.classifyExternalDelivery(
                             snapshot.managedDocument(delivery.targetDocumentId()).document(), delivery.channelKey(),
                             event, blue.language.processor.GasChargeContext.empty());
-                    if (classified.state() == blue.language.processor.ManagedExternalDeliveryClassification.State.ACCEPTED_NEW
-                            && classified.handlerMatched()) eligible.add(delivery);
+                    eligible[index] = classified.state()
+                            == blue.language.processor.ManagedExternalDeliveryClassification.State.ACCEPTED_NEW
+                            && classified.handlerMatched();
                 }
-                return List.copyOf(eligible);
+                return eligible;
             }
-        });
+        }));
     }
 
-    /** Clears only disposable Language snapshot caches, retaining exact evidence. */
+    /** Clears disposable snapshots and eligibility memos, retaining exact evidence. */
     void clearSnapshotCaches() {
         ensureOpen();
+        rootEligibility.clear();
         language.snapshots().clear();
     }
 
@@ -430,6 +437,7 @@ final class BlueRuntime implements AutoCloseable {
             return;
         }
         closed = true;
+        rootEligibility.clear();
         close(contracts);
         close(processor);
         close(processorConformanceEngine);

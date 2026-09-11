@@ -2,7 +2,7 @@
 
 ## Problem and example
 
-MyOS's packaged `ProviderAuthoredMutualReferenceHttpTest` exposed a source
+MyOS's packaged `ProviderAuthoredReferencePublicApiAcceptanceTest` exposed a source
 admission failure: `Source compiler changed the exact authored identity`.
 The SDK supports two distinct ingress operations: preparing authored processing
 Source and storing exact provider content. Their resulting BlueIds need not be

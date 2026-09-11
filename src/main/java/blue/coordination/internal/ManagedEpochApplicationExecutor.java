@@ -717,6 +717,8 @@ final class ManagedEpochApplicationExecutor {
             CatchUpPlanStore advancedCatchUpPlans = beforeCatchUpPlans
                     .withCommittedApplication(
                             work, application, excludedConsumers);
+            RootedDocumentView resultingRootedView = result.rootedProjection() == null ? null
+                    : new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder());
             ManagedCatchUpPlanner.PlanningResult catchUp =
                     ManagedCatchUpPlanner.afterPublication(
                             advancedCatchUpPlans,
@@ -746,7 +748,8 @@ final class ManagedEpochApplicationExecutor {
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
-                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts,
+                                    resultingRootedView),
                             blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
@@ -756,8 +759,7 @@ final class ManagedEpochApplicationExecutor {
                     .withOperationRouteChanges(
                             preparedRoutes.operationRouteChanges());
             transaction.stageClosurePublicationReceipt(retainedReceipt);
-            if (result.rootedProjection() != null) transaction.stageRootedView(
-                    new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder()));
+            if (resultingRootedView != null) transaction.stageRootedView(resultingRootedView);
             transaction.commit();
             storeCommitted = true;
             runtime.metrics().increment(OCCURRENCES_ADVANCED);

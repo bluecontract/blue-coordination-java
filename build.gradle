@@ -688,8 +688,14 @@ def currentProductionShapeLimits = [
         // Exact measured delta: +5 sources, +617 lines, +1 public source type.
         // See docs/rooted-baseline-release-fixes.md; these are source-shape guards,
         // not changes to any protocol, closure, execution, or gas limit.
-        classes: 250,
-        lines: 73_157L,
+        // The private complete-call eligibility memo adds one internal source
+        // and 150 production lines; retaining the FULL_HISTORY source endpoint
+        // adds 5 more. Logical-anchor attachment classification adds 93 lines;
+        // staged terminal-source context alignment adds 70 lines.
+        // No public type or protocol limit changes.
+        // See docs/rooted-eligibility-cache.md for its independent controls.
+        classes: 251,
+        lines: 73_475L,
         publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
