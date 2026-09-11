@@ -16,16 +16,21 @@ these corrected semantics.
 
 The follow-up is isolated from the previous qualified artifacts:
 
-- Language: `codex/legal-detached-retarget-language`, source commit `1354663`,
-  based on `34e9aa2f`; **94/94 focused tests pass** for the corrected rule and
+- Language: `codex/legal-detached-retarget-language`, sealed source commit
+  `5a103afb369b710e3bf2b1158362220607604a07`, based on `34e9aa2f`;
+  **94/94 focused tests pass** on the runtime/specification slice `1354663`
+  for the corrected rule and
   exact-input/receipt/rollback controls. The revised Contracts specification is
   `sha256:5cc29e91cd8d4aa4d3dca98214da5ceb49b2daa82554ac561260bd98ce5063b8`.
-  Generated package rebinding and complete/downstream qualification are pending.
-- Coordination: `codex/legal-detached-retarget-coordination`, runtime commit
-  `4908265` plus exact specification binding `d739328`;
+  Supported generated package rebinding, documentation and immutable development
+  export are complete. Exclusion-free clean/quality qualification remains pending.
+- Coordination: `codex/legal-detached-retarget-coordination`, tested source
+  `661423fab0b836c380e5fa207e111e8b02e1c6c2`;
   removes rejection-only source capture, keeps the original B row and binds
-  each retry demand to its actual expanded input. New authored/current/historical
-  tests compile; downstream execution requires the corrected Language artifact.
+  each retry demand to its actual expanded input. Automatic foreign discovery
+  preserves old-B preference when the supplied value belongs to B. The focused
+  immutable SDK03 gate passes **48/48** against the exact sealed Language above;
+  full Coordination/SDK and MyOS acceptance remain pending.
 - MyOS: `codex/legal-detached-retarget-myos`, commit `2522fa3`;
   restores the original direct C attachment test, not a runtime workaround.
 - Cyclic-join reproduction work remains separate. Diagnostic scheduling
@@ -36,12 +41,21 @@ No final full-library or MyOS acceptance is claimed for these follow-ups yet.
 The focused Language archive is
 `legal-detached-retarget-evidence.fKnxrU/language-focused-03.tar.gz`, SHA-256
 `5edb19b42f5e970259be11ee89b15d053cdc6f2c99bc8a23eb1b4431c80d9b7e`.
+The immutable SDK03 archive is
+`legal-detached-retarget-evidence.fKnxrU/legal-retarget-sdk-03.tar.gz`, SHA-256
+`5c87b670bcad5b7866c67367d78b5779d117b1811f390e7b744604159db799a4`.
+Its 48 tests comprise 33 resolver controls and 15 SDK/seam cases across six
+classes, with zero failures, errors or skipped cases. The focused invocation
+omitted `verifyCyclicTopologyIdentityEvidence`; this is not a full inventory
+or library qualification claim.
 Existing fixture regeneration preserves all business outcomes and gas quantities;
 identity rebinding alone is not a test of the new legal attachment. The new Java
 regressions supply that behavioral coverage. The cyclic diagnostic has reached
-the required A0/B1/C1 computation with unchanged owner/publication checks and
-exact fresh-reference result/gas equality, but real publication and automatic
-selection remain unqualified. It is not a replacement for the original full ring.
+the required A0/B1/C1 computation, real all-owner publication and resident restart
+under an explicitly arranged valid schedule, with unchanged publication checks
+and exact fresh-reference result/gas equality. The latest unified automatic
+gate remains pending, as do complete root-order/multi-interior and original
+full-ring qualification. That local proof is not a replacement for those gates.
 
 `A → B` below means that A embeds B. Each row identifies an observed problem,
 its correction, and a small example; the linked notes retain the detailed
