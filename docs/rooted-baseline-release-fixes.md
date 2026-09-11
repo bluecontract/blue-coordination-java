@@ -105,6 +105,65 @@ and `library-ring-chord-candidate-01.tar.gz` in the external focused-evidence se
 
 ## Dependency and API impact
 
+### Additional Language correction: imported events with deferred activation
+
+**Status: causal component red/green and 62 adjacent tests pass; full SDK/MyOS
+qualification pending.**
+In the ring case, A imports C8 with a required later representation tail. C8's
+event changes A. Reencoding C's active reference to A changes C's exact BlueId
+but performs no C-local work. Language incorrectly numbers C9 because its
+existing finalizer-only imported-event exception requires completed activation,
+which the tail deliberately defers.
+
+The isolated Language candidate changes one private predicate: retain the
+existing activated case, and additionally accept a reconciled numbered
+`ManagedRevisionCause` with an authenticated `successorRepresentationCause`.
+Every existing exact-event, import-depth, non-self target, local-change and
+complete finalizer-delta check remains. §7.5a.1 preserves ordinary numbered
+receipt reactions during deferred activation; the maintained same-epoch
+component-rebind test establishes the existing imported-event exception.
+There is no new admission, activation, ownership or gas policy. The correction
+does intentionally remove the spurious numbered epoch; source runtime identity
+must be rebound and the new exact artifact set requalified.
+
+Why the library: MyOS cannot repair a misclassified Contracts epoch by changing
+scheduling or renumbering an identity-bound result without invalidating its
+transition/companion identities. Broadly exempting every reconciled history step
+would also change older nonterminal imports; removing terminal activation guards
+or introducing cursor workarounds would address the later symptom. These
+alternatives are rejected. Genuine C-local mutation remains epoch-advancing.
+
+The same four component methods run on unchanged 2ce production give 3/4;
+only the carrier's finalizer-only case fails (expected source epoch 2, actual3).
+With this predicate correction and byte-identical tests, all four pass (2.850
+JUnit seconds). The paired ordinary import and actual source-local mutation
+controls pass before and after. Authoritative Language detail is
+`docs/rooted-imported-successor-source-epoch.md` on the isolated
+`codex/rooted-imported-successor-source-epoch` branch.
+
+In `rooted-language-release-evidence.IUktLY`, the complete red archive has SHA-256
+`263bee169ea989300d13c864631d8c42e0f2936119780e80bb717cb92973f185`;
+the complete green archive has SHA-256
+`a9ca47bd82d51c94e8fac87c4e3e20e5ea6958c6a35a7a0fcbfc0e5649882be4`.
+The production file SHA-256 is
+`1d4192f994be44cc1b7d5de00bb28ecf1f4f95fe0ea989400f842fd987e3df55`.
+These are source-local results, not a released library or proof that all fourteen
+ring inputs now pass. The private +85-line Coordination accommodation stays out
+of the candidate while the source repair is tested against unchanged ef3965.
+
+The correction is committed on the next-derived isolated Language branch as
+`535230e7b6ab4ffcf95f79a795d373504e9da755`. The subsequent complete two-owner gate
+passes **62/62** (46 FullLifecycleAdmission, 16 ManagedCheckpointSettlementOwnership),
+zero failures/errors/skips. It includes an older/no-carrier import whose
+finalizer-only source change must still advance and measured G−1 failure after
+receipt/event work, with literal rollback and deterministic retry. Complete
+archive SHA-256:
+`dbd2fcbdde0b8fdab8be05b0d1d32f268118f5a8466f9ff101565381a84b64d1`.
+Release metadata is deliberately still pending on this implementation commit;
+only supported, reviewed source-identity rebinding may enter the final artifact.
+BEX and Catalog need no code correction, but their development exports must bind
+the new Language artifact explicitly rather than silently reuse old 2ce POMs.
+
 The [final Language identity binding](rooted-final-language-binding.md) records
 the matching SDK profile, manifest and input-metadata change. It does not
 replace semantic golden outputs or weaken the dependency authentication guard.
@@ -181,9 +240,16 @@ source-epoch exception requires completed activation. The maintained
 `FullLifecycleAdmissionTest.managedRevisionEventAcceptsAuthenticatedSameEpochComponentRebind`
 covers that exception without a successor. Exact C9 local/finalizer evidence
 and a paired successor test must establish whether that omission applies.
-If it does, qualify the narrow Language repair against unchanged Coordination
-first; do not retain a later accommodation made unnecessary by the source fix.
-This is an implementation investigation, not a new processing-policy decision.
+The subsequent diagnostic04 run confirms the relevant shape: the C8 import has
+two work occurrences, a containing-reference update and its exact imported
+event, both targeting A. C has zero local work and zero new source events;
+its only changes at both finalization boundaries are `/peers/a/blueId`.
+Nevertheless, the result numbers C as epoch 9. The later terminal guard then
+observes precisely the predicted inactive C8/current C9 mismatch. This supports
+the source-classification diagnosis, not a new source history policy.
+The paired Language regression and causal red/green test must still qualify
+the repair. Run it against unchanged Coordination first; do not retain the
+later accommodation if the source fix makes it unnecessary.
 
 Evidence in `rooted-focused-followup-evidence.jtpYIX`:
 
@@ -193,6 +259,7 @@ Evidence in `rooted-focused-followup-evidence.jtpYIX`:
 | `myos-library-http-01.tar.gz` (3/3) | `fee5905e8d296c921b65173f79de5d3e4982cdba55fb9f43e4b49d5552bd68e5` |
 | `library-duplicate-occurrence-red-01.tar.gz` (unchanged SDK red) | `72eb82528e3905a3b9d48821371e64cf481dad511510290a41a41ac760563da8` |
 | `library-duplicate-occurrence-candidate-03-complete.tar.gz` (25/26) | `15358ba82e865c7980d5ec29f7263cf3347bf84045dad1c8b3137a706c2601fd` |
+| `library-duplicate-occurrence-diagnostic-04-complete.tar.gz` (1/1 expected diagnostic failure) | `2d8fe81214a4421ee48723862871935e80b1d69bfcf64a269c4e1a60ad094800` |
 
 Language `2ce3e66b` separately passes one clean build with 3,745 fresh JUnit
 invocations and zero failures/errors/skips. Its subsequent quality/RC gate stops
