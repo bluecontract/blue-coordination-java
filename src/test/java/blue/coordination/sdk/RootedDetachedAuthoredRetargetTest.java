@@ -178,9 +178,11 @@ final class RootedDetachedAuthoredRetargetTest {
                 assertEquals(pending.activationGeneration(), active.activationGeneration());
                 var finalHeads = heads(parent, b, c);
                 var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
-                var replay = f.blue.advanced().process(parent, entry, policy).entry(entry);
-                assertEquals(accepted.disposition(), replay.disposition());
-                assertEquals(accepted.stats(), replay.stats());
+                var repeated = f.blue.advanced().process(parent, entry, policy).entry(entry);
+                assertEquals(EntryDisposition.STALE, repeated.disposition());
+                assertEquals("STALE_TARGET_DOCUMENT", repeated.diagnostic().code());
+                assertEquals(output.invocationIdentity(), execution(f, accepted).invocationIdentity());
+                assertEquals(output.gasTraceIdentity(), execution(f, accepted).gasTraceIdentity());
                 CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 assertTrue(f.blue.processing().processNext(parent).quiescent());
                 assertEquals(finalHeads, heads(parent, b, c));

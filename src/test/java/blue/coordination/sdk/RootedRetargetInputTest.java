@@ -72,9 +72,15 @@ final class RootedRetargetInputTest {
             assertEquals(after.activationGeneration(), live.activationGeneration());
             var finalHeads = heads(parent, b, c);
             var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
-            var replayed = f.blue.processing().process(parent, retarget).entry(retarget);
-            assertEquals(result.disposition(), replayed.disposition());
-            assertEquals(result.stats(), replayed.stats());
+            // The supplied-input API evaluates against the current selected view.
+            // An old exact-version operation is stale after successful catch-up,
+            // not another application of its previously committed effects.
+            var repeated = f.blue.processing().process(parent, retarget).entry(retarget);
+            assertEquals(EntryDisposition.STALE, repeated.disposition());
+            assertEquals("STALE_TARGET_DOCUMENT", repeated.diagnostic().code());
+            var retained = f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
+            assertEquals(output.invocationIdentity(), retained.invocationIdentity());
+            assertEquals(output.gasTraceIdentity(), retained.gasTraceIdentity());
             assertEquals(finalHeads, heads(parent, b, c));
             assertEquals(finalHistories, List.of(f.history(parent), f.history(b), f.history(c)));
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();

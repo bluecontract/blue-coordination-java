@@ -32,6 +32,15 @@ After expansion, PROCESS emits a fresh demand and the adapter resolves that
 exact demand. It does not synthesize or rewrite demand identities. Resolutions
 are retained only when the input identity itself is unchanged.
 
+The automatic lineage resolver must also release the old target restriction
+for a committed inactive slot. Previously it selected B before even searching
+for C, so explicit C selectors worked while ordinary inline/BlueId C did not.
+It now falls through to ordinary exact C discovery only when the supplied
+value is absent from B's indexed current/authored/initialized/retained states.
+If it belongs to B, B keeps its stable-lineage preference and ordinary replay
+proof requirements. A pending import is not a detached slot; its existing
+source/receipt restriction remains. Ambiguous foreign lineages still fail.
+
 Rejected alternatives: rewriting B's original input reservation; accepting old
 demand identities on a new base; borrowing B's identity for C; replacing the
 newer C primary with C0; restoring the MyOS B-reactivation workaround.
@@ -87,3 +96,19 @@ are not yet qualified. The
 independent cyclic-join B-reaction bug also remains a merge gate. No golden
 business result, logical gas rule, publication fence, or acceptance deadline
 is relaxed by this correction.
+
+The first SDK run on sealed Language `5a103afb` and Coordination `204babc`
+completed 15 tests: eight passed, seven failed. Five exposed the remaining
+automatic resolver restriction above. Two completed the intended attachment
+and ordered catch-up, then failed a new test's incorrect replay expectation:
+`process(root, entry)` evaluates that supplied input against the current view;
+the old exact-version operation is `STALE_TARGET_DOCUMENT` after successful
+advancement. Tests retain exact head/history and original-receipt checks while
+requiring that stale result. Failed gas-boundary retries still use the unchanged
+input and retain their exact failure/result/gas checks. No runtime replay rule
+is changed to satisfy these assertions.
+
+Archive `legal-retarget-sdk-01.tar.gz`, SHA-256
+`5ace80b97f408f45c1fe66c160736b6afd77c5c53f2173fa0fcbd880fbd99b04`,
+preserves the complete red run. The automatic-resolver correction and adjusted
+API-level controls require a subsequent passing run; this is not a pass claim.

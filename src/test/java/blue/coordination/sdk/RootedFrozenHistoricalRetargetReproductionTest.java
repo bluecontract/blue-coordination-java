@@ -100,10 +100,12 @@ final class RootedFrozenHistoricalRetargetReproductionTest {
             assertEquals(other, f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/other").orElseThrow());
             var finalHeads = List.of(parent.snapshot().blueId(), b.snapshot().blueId(), c.snapshot().blueId());
             var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
-            var replayed = f.blue.processing().process(parent, entry).entry(entry);
-            assertEquals(result.disposition(), replayed.disposition());
-            assertEquals(result.stats(), replayed.stats());
-            assertEquals(result.diagnostic(), replayed.diagnostic());
+            var repeated = f.blue.processing().process(parent, entry).entry(entry);
+            assertEquals(EntryDisposition.STALE, repeated.disposition());
+            assertEquals("STALE_TARGET_DOCUMENT", repeated.diagnostic().code());
+            var retained = f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
+            assertEquals(output.invocationIdentity(), retained.invocationIdentity());
+            assertEquals(output.gasTraceIdentity(), retained.gasTraceIdentity());
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
             assertEquals(finalHeads, List.of(parent.snapshot().blueId(), b.snapshot().blueId(), c.snapshot().blueId()));
             assertEquals(finalHistories, List.of(f.history(parent), f.history(b), f.history(c)));

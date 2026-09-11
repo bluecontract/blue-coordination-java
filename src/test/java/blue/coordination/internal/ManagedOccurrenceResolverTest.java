@@ -648,6 +648,179 @@ final class ManagedOccurrenceResolverTest {
     }
 
     @Test
+    void detachedReservationDiscoversForeignCurrentOutsideTheInputMembers() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue oldHead = exact("detached-b-current");
+            ExactValue foreignHead = exact("detached-c-current");
+            DocumentSession old = lineage(B, exact("detached-b-authored"), oldHead);
+            DocumentSession foreign = lineage(C, exact("detached-c-authored"), foreignHead);
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+            var request = requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", foreignHead)), reserved, old, foreign);
+
+            // when
+            var result = resolver(engine).resolve(request);
+
+            // then
+            assertTrue(result.complete());
+            assertTrue(result.newDrafts().isEmpty());
+            assertEquals(1, result.resolvedOccurrences().size());
+            var selected = result.resolvedOccurrences().get(0);
+            assertEquals(C, selected.targetDocumentId());
+            assertEquals(ManagedOccurrenceResolver.TargetKind.CURRENT_EXISTING, selected.targetKind());
+            assertEquals(0L, selected.admittedSourceEpoch());
+            assertEquals(foreignHead.blueId(), selected.expectedTargetBlueId());
+            assertFalse(request.inputMembers().contains(C));
+            assertEquals(reserved.bindingIdentity(), request.storeState().occurrenceInventory()
+                    .find(A, "/child").orElseThrow().bindingIdentity());
+        }
+    }
+
+    @Test
+    void detachedReservationDiscoversForeignAuthoredInitialWithoutCreatingADraft() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue oldHead = exact("authored-retarget-b-current");
+            ExactValue foreignAuthored = exact("authored-retarget-c-authored");
+            DocumentSession old = lineage(B, exact("authored-retarget-b-authored"), oldHead);
+            DocumentSession foreign = lineage(C, foreignAuthored, exact("authored-retarget-c-initialized"));
+            appendRevision(foreign, exact("authored-retarget-c-current"));
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", foreignAuthored)), reserved, old, foreign));
+
+            // then
+            assertTrue(result.complete());
+            assertTrue(result.newDrafts().isEmpty());
+            assertEquals(1, result.resolvedOccurrences().size());
+            var selected = result.resolvedOccurrences().get(0);
+            assertEquals(C, selected.targetDocumentId());
+            assertEquals(ManagedOccurrenceResolver.TargetKind.EXISTING_AUTHORED_INITIAL, selected.targetKind());
+            assertEquals(-1L, selected.admittedSourceEpoch());
+            assertEquals(Long.valueOf(-1L), selected.pendingHistoricalEpoch());
+            assertEquals(foreignAuthored.blueId(), selected.expectedTargetBlueId());
+        }
+    }
+
+    @Test
+    void pendingReservationCannotDiscoverForeignCurrentWithoutAReceiptEvent() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue oldHead = exact("pending-b-current");
+            ExactValue foreignHead = exact("pending-c-current");
+            DocumentSession old = lineage(B, exact("pending-b-authored"), oldHead);
+            DocumentSession foreign = lineage(C, exact("pending-c-authored"), foreignHead);
+            ManagedOccurrenceBinding pending = detachedBReservation(oldHead, 0L);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", foreignHead)), pending, old, foreign));
+
+            // then
+            assertUnresolvedWithoutDraft(result, ManagedOccurrenceResolver.ResolutionStatus.EXACT_STATE_MISMATCH);
+            assertEquals(Long.valueOf(0L), pending.pendingHistoricalEpoch());
+        }
+    }
+
+    @Test
+    void detachedReservationDoesNotChooseBetweenTwoForeignLineages() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue oldHead = exact("ambiguous-foreign-b-current");
+            ExactValue shared = exact("ambiguous-foreign-current");
+            DocumentSession old = lineage(B, exact("ambiguous-foreign-b-authored"), oldHead);
+            DocumentSession first = lineage(C, exact("ambiguous-foreign-c-authored"), shared);
+            DocumentSession second = lineage(DocumentId.of("runtime-d"),
+                    exact("ambiguous-foreign-d-authored"), shared);
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", shared)), reserved, old, first, second));
+
+            // then
+            assertUnresolvedWithoutDraft(result, ManagedOccurrenceResolver.ResolutionStatus.AMBIGUOUS_MANAGED_LINEAGE);
+        }
+    }
+
+    @Test
+    void detachedReservationKeepsItsOldHistoricalLineageAheadOfForeignCurrent() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue saved = exact("stable-b-retained");
+            ExactValue oldHead = exact("stable-b-current");
+            DocumentSession old = lineage(B, exact("stable-b-authored"), exact("stable-b-initialized"));
+            appendRevision(old, saved);
+            appendRevision(old, oldHead);
+            DocumentSession foreign = lineage(C, exact("stable-c-authored"), saved);
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", saved)), reserved, old, foreign));
+
+            // then
+            assertTrue(result.complete());
+            assertTrue(result.newDrafts().isEmpty());
+            var selected = result.resolvedOccurrences().get(0);
+            assertEquals(B, selected.targetDocumentId());
+            assertEquals(ManagedOccurrenceResolver.TargetKind.EXISTING_RETAINED_EPOCH, selected.targetKind());
+            assertEquals(1L, selected.admittedSourceEpoch());
+        }
+    }
+
+    @Test
+    void detachedReservationKeepsOldEpochAmbiguityInsteadOfSelectingForeignCurrent() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue repeated = exact("stable-b-repeated");
+            ExactValue oldHead = exact("stable-b-final");
+            DocumentSession old = lineage(B, exact("repeated-b-authored"), exact("repeated-b-initialized"));
+            appendRevision(old, repeated);
+            appendRevision(old, exact("stable-b-between"));
+            appendRevision(old, repeated);
+            appendRevision(old, oldHead);
+            DocumentSession foreign = lineage(C, exact("repeated-c-authored"), repeated);
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", repeated)), reserved, old, foreign));
+
+            // then
+            assertUnresolvedWithoutDraft(result, ManagedOccurrenceResolver.ResolutionStatus.AMBIGUOUS_MANAGED_EPOCH);
+        }
+    }
+
+    @Test
+    void detachedReservationKeepsUnreplayableOldHistoryInsteadOfSelectingForeignCurrent() {
+        try (DefaultCoordinationEngine engine = DefaultCoordinationEngine.create()) {
+            // given
+            ExactValue saved = managedExact("unreplayable-b-initialized");
+            ExactValue oldHead = managedExact("unreplayable-b-representation");
+            DocumentSession old = lineage(B, exact("unreplayable-b-authored"), saved);
+            old.rebindComponentRepresentation(0L, layout(oldHead), old.activeSubscriptions(), hash('8'));
+            DocumentSession foreign = lineage(C, exact("unreplayable-c-authored"), saved);
+            ManagedOccurrenceBinding reserved = detachedBReservation(oldHead, null);
+
+            // when
+            var result = resolver(engine).resolve(requestWithLineagesAndBinding(engine, Set.of(A, B),
+                    List.of(demand(A, "/child", saved)), reserved, old, foreign));
+
+            // then
+            assertUnresolvedWithoutDraft(result, ManagedOccurrenceResolver.ResolutionStatus.EXACT_STATE_MISMATCH);
+        }
+    }
+
+    private static ManagedOccurrenceBinding detachedBReservation(ExactValue expected, Long pendingEpoch) {
+        return ManagedOccurrenceBinding.derived(BINDING_POLICY, closureId(A), ScopeAddress.embedded("/child", 2L),
+                closureId(B), expected.blueId(), false, pendingEpoch);
+    }
+
+    @Test
     void exactNodeDemandCompletesOnlyWhenProviderHasVerifiedContent() {
         try (DefaultCoordinationEngine engine =
                 DefaultCoordinationEngine.create()) {
