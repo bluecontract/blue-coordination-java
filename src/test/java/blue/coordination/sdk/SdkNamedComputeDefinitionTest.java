@@ -4,10 +4,13 @@ import blue.coordination.api.DocumentId;
 import blue.coordination.api.CoordinationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -21,13 +24,13 @@ final class SdkNamedComputeDefinitionTest {
               prepareCoffee:
                 do:
                   - $appendEvent:
-                      name: Kawa przygotowana
+                      name: Coffee prepared
             """;
     private static final String INLINE_STEP = """
             - type: Coordination/Compute
               do:
                 - $appendEvent:
-                    name: Kawa przygotowana
+                    name: Coffee prepared
             """;
 
     @ParameterizedTest
@@ -116,6 +119,38 @@ final class SdkNamedComputeDefinitionTest {
     }
 
     @Test
+    void shouldExecuteFunctionsInheritedByAPointerDefinition() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String base = blue.values().yaml(COFFEE_CODE).blueId();
+            String source = "library:\n  coffeeCode:\n    type: {blueId: " + base + "}\n"
+                    + initialization(namedStep(blue, DefinitionSelector.NAMED)
+                            .replace("definition: coffeeCode", "definition: /library/coffeeCode"));
+
+            // when
+            DocumentHandle document = admit(blue, source);
+
+            // then
+            assertCoffeeEvent(blue, document.snapshot().publicEvents());
+        }
+    }
+
+    @Test
+    void shouldExecuteWithBothOptionalDefinitionMapsInheritedAndEmpty() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String source = initialization("type: Coordination/Compute Definition\n",
+                    INLINE_STEP + "  definition: coffeeCode\n");
+
+            // when
+            DocumentHandle document = admit(blue, source);
+
+            // then
+            assertCoffeeEvent(blue, document.snapshot().publicEvents());
+        }
+    }
+
+    @Test
     void shouldReadADefinitionThroughAReferencedParent() {
         // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
@@ -135,12 +170,28 @@ final class SdkNamedComputeDefinitionTest {
     }
 
     @Test
-    void shouldValidateAStaticTypeReachedThroughTheNamedDefinition() {
+    void shouldResolveAnEscapedDefinitionName() {
         // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
-            String eventType = blue.values().yaml("name: Coffee Event").blueId();
-            String event = "type: {blueId: " + eventType + "}\n"
-                    + "name: Kawa przygotowana\n";
+            String source = initialization(namedStep(blue, DefinitionSelector.NAMED))
+                    .replace("coffeeCode", "coffee/~code");
+
+            // when
+            DocumentHandle document = admit(blue, source);
+
+            // then
+            assertCoffeeEvent(blue, document.snapshot().publicEvents());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"type", "nestedType", "itemType", "valueType"})
+    void shouldValidateAStaticTypeReachedThroughTheNamedDefinition(String field) {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String base = blue.values().yaml("name: Coffee Event").blueId();
+            String eventType = blue.values().yaml("type: {blueId: " + base + "}\n").blueId();
+            String event = eventWithStaticType(field, eventType);
             String source = initialization(definitionWithEvent(event),
                     namedStep(blue, DefinitionSelector.NAMED));
 
@@ -155,16 +206,12 @@ final class SdkNamedComputeDefinitionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "name: Invalid Coffee Event\npayload:\n  $add: [1, 2]\n",
-            "$add: [1, 2]\n"
-    })
-    void shouldRejectExpressionsHiddenInANamedDefinitionsStaticType(String type) {
+    @MethodSource("invalidStaticTypes")
+    void shouldRejectExpressionsHiddenInANamedDefinitionsStaticType(String field, String type) {
         // given
         try (BlueCoordination blue = BlueCoordination.inMemory()) {
             String eventType = blue.values().yaml(type).blueId();
-            String event = "type: {blueId: " + eventType + "}\n"
-                    + "name: Kawa przygotowana\n";
+            String event = eventWithStaticType(field, eventType);
             String source = initialization(definitionWithEvent(event),
                     namedStep(blue, DefinitionSelector.NAMED));
 
@@ -174,8 +221,140 @@ final class SdkNamedComputeDefinitionTest {
 
             // then
             assertTrue(failure.getMessage().contains(
-                    "BEX expressions inside Blue type fields"), failure.getMessage());
+                    "BEX expressions inside Blue " + (field.equals("nestedType") ? "type" : field)
+                            + " fields"), failure.getMessage());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"type", "itemType", "valueType"})
+    void shouldRejectInvalidNamedDefinitionOperationsWithoutChangingTheDocument(String field) {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle provider = blue.timelines().register(
+                    "coffee-shop", "myos-mini:principal:coffee-shop");
+            String eventType = blue.values().yaml("$add: [1, 2]\n").blueId();
+            String source = operation(namedStep(blue, DefinitionSelector.NAMED))
+                    .replace(COFFEE_CODE.indent(4),
+                            definitionWithEvent(eventWithStaticType(field, eventType)).indent(4));
+            DocumentHandle document = admit(blue, source);
+            var before = document.snapshot();
+
+            // when
+            EntryResult result = call(blue, document, provider, "prepareCoffee");
+
+            // then
+            assertEquals(EntryDisposition.REJECTED, result.disposition(), result.diagnostic().toString());
+            assertTrue(result.diagnostic().message().contains("BEX expressions inside Blue " + field + " fields"),
+                    result.diagnostic().toString());
+            assertTrue(result.publicEvents().isEmpty());
+            assertEquals(before.blueId(), document.snapshot().blueId());
+            assertEquals(before.epoch(), document.snapshot().epoch());
+        }
+    }
+
+    @Test
+    void shouldValidateBasicDictionaryKeyTypesInANamedDefinition() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String event = "name: Coffee prepared\npayload/~event:\n"
+                    + "  type: Dictionary\n  keyType: Text\n  ordinary: value\n";
+            String source = initialization(definitionWithEvent(event),
+                    namedStep(blue, DefinitionSelector.NAMED));
+
+            // when
+            DocumentHandle document = admit(blue, source);
+
+            // then
+            assertEquals(List.of(blue.values().yaml(event)), document.snapshot().publicEvents().stream()
+                    .map(PublicEvent::exact).toList());
+        }
+    }
+
+    @Test
+    void shouldRejectNonBasicDictionaryKeyTypesBeforeExecution() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String keyType = blue.values().yaml("$add: [1, 2]\n").blueId();
+            String source = initialization(definitionWithEvent(eventWithStaticType("keyType", keyType)),
+                    namedStep(blue, DefinitionSelector.NAMED));
+
+            // when
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> admit(blue, source));
+
+            // then
+            assertEquals("Dictionary key type must be a basic type", failure.getMessage());
+        }
+    }
+
+    @Test
+    void shouldUseAChangedNamedDefinitionAfterWarmingItsPlan() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            TimelineHandle provider = blue.timelines().register(
+                    "coffee-shop", "myos-mini:principal:coffee-shop");
+            String event = "name: Coffee recipe changed\n";
+            String replacementDefinition = blue.values().yaml(definitionWithEvent(event)).blueId();
+            String source = operation(namedStep(blue, DefinitionSelector.NAMED)) + """
+                      replaceCoffee:
+                        type: Coordination/Sequential Workflow Operation
+                        channel: providerChannel
+                        request: {}
+                        steps:
+                          - type: Coordination/Compute
+                            do:
+                              - $appendChange:
+                                  op: replace
+                                  path: /contracts/coffeeCode
+                                  val:
+                                    $literal: {blueId: %s}
+                    """.formatted(replacementDefinition);
+            DocumentHandle document = admit(blue, source);
+            EntryResult cold = call(blue, document, provider, "prepareCoffee");
+            EntryResult warm = call(blue, document, provider, "prepareCoffee");
+            var before = document.snapshot();
+
+            // when
+            EntryResult replacement = call(blue, document, provider, "replaceCoffee");
+            EntryResult changed = call(blue, document, provider, "prepareCoffee");
+
+            // then
+            assertEquals(EntryDisposition.APPLIED, cold.disposition(), cold.diagnostic().toString());
+            assertEquals(EntryDisposition.APPLIED, warm.disposition(), warm.diagnostic().toString());
+            assertEquals(EntryDisposition.APPLIED, replacement.disposition(), replacement.diagnostic().toString());
+            assertEquals(EntryDisposition.APPLIED, changed.disposition(), changed.diagnostic().toString());
+            assertCoffeeEvent(blue, cold.publicEvents());
+            assertCoffeeEvent(blue, warm.publicEvents());
+            assertCoffeeEvent(blue, before.publicEvents());
+            assertEquals(List.of(blue.values().yaml(event)), changed.publicEvents().stream()
+                    .map(PublicEvent::exact).toList());
+            assertEquals(changed.publicEvents(), document.snapshot().publicEvents());
+        }
+    }
+
+    private static EntryResult call(BlueCoordination blue, DocumentHandle document,
+                                    TimelineHandle provider, String operation) {
+        return blue.operations().on(document).from(provider).call(operation)
+                .through("providerChannel").requestYaml("{}").execute();
+    }
+
+    private static Stream<Arguments> invalidStaticTypes() {
+        return Stream.of("type", "nestedType", "itemType", "valueType").flatMap(field -> Stream.of(
+                Arguments.of(field, "name: Invalid Coffee Event\npayload:\n  $add: [1, 2]\n"),
+                Arguments.of(field, "$add: [1, 2]\n")));
+    }
+
+    private static String eventWithStaticType(String field, String blueId) {
+        String reference = ": {blueId: " + blueId + "}\n";
+        String staticField = switch (field) {
+            case "nestedType" -> "type" + reference;
+            case "itemType" -> "type: List\nitemType" + reference;
+            case "keyType", "valueType" -> "type: Dictionary\n" + field + reference;
+            default -> "type" + reference;
+        };
+        return "name: Coffee prepared\n" + (field.equals("type")
+                ? staticField : "payload/~event:\n" + staticField.indent(2));
     }
 
     private static String definitionWithEvent(String event) {
@@ -190,9 +369,13 @@ final class SdkNamedComputeDefinitionTest {
 
     private static String namedStep(
             BlueCoordination blue, DefinitionSelector selector) {
-        String definition = selector == DefinitionSelector.NAMED
-                ? "coffeeCode"
-                : "{blueId: " + blue.values().yaml(COFFEE_CODE).blueId() + "}";
+        String definition = switch (selector) {
+            case NAMED -> "coffeeCode";
+            case ABSOLUTE_POINTER -> "'  /contracts/coffeeCode  '";
+            case EXACT_REFERENCE -> "{blueId: " + blue.values().yaml(COFFEE_CODE).blueId() + "}";
+            case INLINE_DEFINITION -> "\n" + COFFEE_CODE
+                    .replace("type: Coordination/Compute Definition\n", "").indent(4).stripTrailing();
+        };
         return """
                 - type: Coordination/Compute
                   definition: %s
@@ -206,7 +389,7 @@ final class SdkNamedComputeDefinitionTest {
 
     private static String initialization(String definition, String step) {
         return """
-                name: Przygotowanie kawy
+                name: Coffee preparation
                 contracts:
                   lifecycle:
                     type: Lifecycle Event Channel
@@ -222,7 +405,7 @@ final class SdkNamedComputeDefinitionTest {
 
     private static String operation(String step) {
         return """
-                name: Przygotowanie kawy
+                name: Coffee preparation
                 contracts:
                   providerChannel:
                     type: Coordination/Timeline Channel
@@ -243,13 +426,15 @@ final class SdkNamedComputeDefinitionTest {
 
     private static void assertCoffeeEvent(
             BlueCoordination blue, List<PublicEvent> events) {
-        ExactBlueValue expected = blue.values().yaml("name: Kawa przygotowana");
+        ExactBlueValue expected = blue.values().yaml("name: Coffee prepared");
         assertEquals(List.of(expected), events.stream()
                 .map(PublicEvent::exact).toList());
     }
 
     private enum DefinitionSelector {
         NAMED,
-        EXACT_REFERENCE
+        ABSOLUTE_POINTER,
+        EXACT_REFERENCE,
+        INLINE_DEFINITION
     }
 }
