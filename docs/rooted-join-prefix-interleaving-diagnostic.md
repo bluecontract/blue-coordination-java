@@ -1,7 +1,8 @@
 # Original LIVE prefix before a cyclic terminal join
 
-Status: test-only probe02 completed with the eligibility failure below. Production remains byte-identical to
-Coordination `cf35914e`; the existing cycle03 and acyclic tests are unchanged.
+Status: probe02 completed with the eligibility failure below. This checkout now
+contains a separately committed **diagnostic-only comparator experiment**, not a
+merge candidate. The existing cycle03, acyclic and prefix02 tests are unchanged.
 The missing B reaction is a bug. This diagnostic chooses an implementation
 route; it does not ask whether the reaction is required.
 
@@ -81,3 +82,19 @@ join, so replacing the comparator alone is not a qualified correction.
 Parent-owned source/result archive:
 `legal-detached-retarget-evidence.fKnxrU/join-prefix-02.tar.gz`, SHA-256
 `e35a5d4cd1e1ffc722325c84057c5e25e6708a62e37ab7523be684a8c456076f`.
+
+## Isolated experiment for probe03 — not a candidate fix
+
+The parent authorized a one-line `>=` to `>` eligibility experiment solely to
+determine whether B's original prefix can reach exact prospective-owner alignment.
+This intentionally conflicts with the maintained boundary-equality unit control.
+It is **not** a proposal to weaken the barrier generally and must not be merged
+or exported. All test inputs/oracles and all execution/publication guards remain
+unchanged. No test has yet run on this experiment.
+
+If the prefix still fails an exact owner fence, a same-cause eligibility exception
+alone cannot repair the bug. If it aligns, the remaining candidate would still
+need authenticated original-cause eligibility, unavailable/later-entry negatives,
+and atomic reconciliation of C's registered plan with B's actual local result.
+Neither outcome permits substituting current heads or marking unexecuted work
+complete. Keep the experiment commit separate from any eventual repair.

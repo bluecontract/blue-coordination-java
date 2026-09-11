@@ -131,7 +131,7 @@ final class RootedJoinEligibility {
     }
 
     static boolean blocks(List<Fence> fences, Set<DocumentId> owners, ExternalOrderKey order) {
-        return fences.stream().anyMatch(fence -> order.compareTo(fence.boundary()) >= 0
+        return fences.stream().anyMatch(fence -> order.compareTo(fence.boundary()) > 0
                 && !java.util.Collections.disjoint(owners, fence.owners()));
     }
 
