@@ -212,6 +212,52 @@ gate; existing assertions and semantic fixtures remain mandatory.
 
 ## Verification and landing
 
+### Successor tuple: former C8 rejection removed; reconnect still exceeds time budget
+
+The sealed Language `34e9aa2f` / Coordination `cf35914e` / MyOS `c27ef0c`
+tuple passes all four immutable-export checks and the independent 72-file,
+transitive runtime-hash audit. BEX and Catalog code remain unchanged. Language
+package regeneration preserves all fixture results and gas oracles; 480/480
+generated conformance cases pass. None of this replaces full acceptance.
+
+The full SDK attempt reaches and publishes C8 at source epoch 8, without C9,
+then fails in a new diagnostic assertion that confused the enclosing managed
+chain receipt with its inner Contracts transition receipt. That test-only
+correction is isolated at `9bda552`; it retains independent validation of both
+receipt identities and all four cursor fields. No runtime fix is justified by
+that assertion failure; later SDK controls remain unqualified until rerun.
+
+The original, unchanged MyOS HTTP owner independently passes the previously
+failing duplicate attachment and detaches, but fails at operation13 (reconnect)
+on its existing 600-second readiness deadline. The batch is 1/1 failed,
+1027.265 seconds (1022.091 JUnit seconds); source/dependency receipts are exact
+and unchanged. C was still advancing through retained history, last observed
+58/87 positions. Operation14 and restart were not reached. This is a concrete
+performance acceptance failure, not permission to increase deadlines or change
+the import's observable result. Later H2 closed-channel errors occur during
+shutdown and are not established as its cause.
+
+A read-only thread sample and source inspection identify repeated complete
+representation-proof reconstruction in `ManagedRepresentationHistory.at()`:
+`verifyCause` builds the same chain twice and `verifySuccessor` three times,
+including full cyclic input validation. Frozen target clipping occurs after
+full chain construction; the sample does not establish target chasing. A
+separate candidate may reuse already-verified evidence **within one call**, while
+preserving every durable membership, exact target/head, ownership and supplied
+proof comparison. It is not yet accepted or measured. No cross-call cache,
+new API, publication/gas policy or relaxed guard is part of that investigation.
+
+External evidence under `rooted-successor-language-evidence.GlIOBx`:
+
+| Archive | SHA-256 |
+| --- | --- |
+| `successor-immutable-bundle.tar.gz` | `aa9c48d7e373467456c0a17f7a0972632b77ecc405416313cd13a3233c8217fc` |
+| `sdk-full-ring-02-evidence.tar.gz` | `155b1e1ce3d2d50ba29ac433fbcdd510f5d56ec8da497cdc1667cd8ad1e22954` |
+| `myos-full-ring-01-evidence.tar.gz` | `0a6f18db805397596aee2742512b9c1da9d4dced4eadb8c5fd19392fb1f1d8f1` |
+
+The preceding application failures and focused passes below retain their own
+artifact bindings. No library is ready to merge.
+
 ### Current qualification and open investigation
 
 The runtime candidate in this worktree is `ef3965bd87b39f3dcb047aaaf0e6a5db3a285137`.
