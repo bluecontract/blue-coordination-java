@@ -64,6 +64,12 @@ and downstream qualification must use the same pair.
 - `RootedFrozenHistoricalRetargetReproductionTest`: C1 is already present at a
   second path; C0 resolves the real demand without changing that frozen C1 or
   its binding. The retained result binds the actual retry identity.
+- `RootedDetachedAuthoredRetargetTest`: inline and BlueId forms of foreign
+  current/authored content attach legally, catch up where required and replay
+  the exact original captured operation without changing heads or histories.
+- `ManagedOccurrenceResolverTest`: seven added controls cover foreign current
+  and authored discovery, pending and foreign-ambiguity rejection, and old-B
+  historical preference including ambiguous or unreplayable old history.
 - MyOS `RetainedManagedEpochCatchUpIntegrationTest` restores the original
   direct C attachment after B1, B2 and reserved generation3, expecting C3 and
   complete B/C history plans. Commit `2522fa3` contains the test restoration,
@@ -91,9 +97,10 @@ and fixture package is
 `sha256:9323cd0b2b4202c08d8165a99102aa6d8a52f3e718fc33647e34ba211859a60f`.
 Coordination's SDK profile and exact binding assertions select those reviewed
 identities; gas tariffs and cyclic identity/proof bindings do not change.
-The full library gates, downstream SDK tests and final MyOS acceptance tuple
-are not yet qualified. The
-independent cyclic-join B-reaction bug also remains a merge gate. No golden
+The focused immutable SDK gate below is green. Exclusion-free full Language
+and Coordination qualification, the full SDK suite and final MyOS acceptance
+tuple remain pending. The independent cyclic-join B-reaction correction also
+remains a merge gate; its latest unified gate is not claimed here. No golden
 business result, logical gas rule, publication fence, or acceptance deadline
 is relaxed by this correction.
 
@@ -110,8 +117,8 @@ is changed to satisfy these assertions.
 
 Archive `legal-retarget-sdk-01.tar.gz`, SHA-256
 `5ace80b97f408f45c1fe66c160736b6afd77c5c53f2173fa0fcbd880fbd99b04`,
-preserves the complete red run. The automatic-resolver correction and adjusted
-API-level controls require a subsequent passing run; this is not a pass claim.
+preserves the complete red run. It is superseded for focused qualification by
+the third run below, not relabeled as a passing run.
 
 The second run on `b066f29` passed 44/48 tests, including all seven new resolver
 controls. The four new authored scenarios completed attachment and ordered
@@ -123,3 +130,22 @@ original result/gas identity and unchanged heads/histories. It does not recreate
 an input from the advanced current document and call that an exact retry.
 The complete red archive is `legal-retarget-sdk-02.tar.gz`, SHA-256
 `521878b3cb16671685a6bd4c5d04b4ea1f44f3dd9aa2206e75248f6a3c21985e`.
+
+The third immutable SDK run passed **48/48 tests, zero failures, errors or
+skips** on Language `5a103afb369b710e3bf2b1158362220607604a07` and
+Coordination `661423fab0b836c380e5fa207e111e8b02e1c6c2`. This consists of 33
+resolver tests and 15 focused SDK/seam tests across six classes, not the full
+Coordination test suite. The successful historical and authored controls retry
+the original captured operation and require its original result/gas identity;
+the two exact-version supplied-input controls additionally retain their
+distinct `STALE_TARGET_DOCUMENT` expectation against the advanced current view.
+
+The run verified the immutable Contracts repository manifest
+`sha256:2ef987ea0e95ebb63ec9495a5536d05e72beb85446603370c8d1dc6dad387e80`
+against the exact Language source above and completed in 1m04s. Its preserved
+archive is `legal-retarget-sdk-03.tar.gz`, SHA-256
+`5c87b670bcad5b7866c67367d78b5779d117b1811f390e7b744604159db799a4`.
+The focused invocation skipped the `verifyCyclicTopologyIdentityEvidence`
+Gradle task; zero skipped test cases does not qualify that omitted inventory
+gate or any remaining full gate. No production replay, witness, publication
+or gas rule was changed to turn the earlier assertion failures green.
