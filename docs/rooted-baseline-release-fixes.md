@@ -14,6 +14,21 @@ both specification and implementation. Its rejection-only repair below is
 Earlier exact-source reports remain historical evidence, not qualification for
 these corrected semantics.
 
+The follow-up is isolated from the previous qualified artifacts:
+
+- Language: `codex/legal-detached-retarget-language`, based on `34e9aa2f`;
+  legal current/historical selection and receipt/input guards are being qualified.
+- Coordination: `codex/legal-detached-retarget-coordination`, commit `4908265`;
+  removes rejection-only source capture, keeps the original B row and binds
+  each retry demand to its actual expanded input. New authored/current/historical
+  tests compile; downstream execution requires the corrected Language artifact.
+- MyOS: `codex/legal-detached-retarget-myos`, commit `2522fa3`;
+  restores the original direct C attachment test, not a runtime workaround.
+- Cyclic-join reproduction work remains separate. Diagnostic scheduling
+  experiments are **not** release candidates or approved changes to join fences.
+
+No final full-library or MyOS acceptance is claimed for these follow-ups yet.
+
 `A → B` below means that A embeds B. Each row identifies an observed problem,
 its correction, and a small example; the linked notes retain the detailed
 reproduction and the original focused evidence. Those historical receipts do
