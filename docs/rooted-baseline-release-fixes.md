@@ -170,7 +170,8 @@ release: `sha256:b36546b546c706aad52120afae93dec38211e66e0be596ff0946e54dfe4884a
 Independent review verified all 741 runtime hashes against the exact source and
 all 382 unchanged fixture/package files. The old C-EVO fallback warnings are
 identical on unchanged 806536 and 2ce inputs, not new fixture drift; no generic
-classifier policy was broadened. The final clean artifact set remains pending.
+classifier policy was broadened. The final clean development artifact set is
+now exported as recorded below; complete acceptance remains pending.
 BEX and Catalog need no code correction, but their development exports must bind
 the new Language artifact explicitly rather than silently reuse old 2ce POMs.
 
@@ -225,7 +226,20 @@ then fails in a new diagnostic assertion that confused the enclosing managed
 chain receipt with its inner Contracts transition receipt. That test-only
 correction is isolated at `9bda552`; it retains independent validation of both
 receipt identities and all four cursor fields. No runtime fix is justified by
-that assertion failure; later SDK controls remain unqualified until rerun.
+that assertion failure.
+
+The corrected diagnostic runs in `sdk-full-ring-03` with production bytes
+unchanged from cf359. The complete C8 proof now passes, including its exact
+source epoch, receipt, imported event and gas checks. Inputs 1–12 pass. Reconnect
+input13 consumes 85 selected turns, reaches selection `NONE` and all three roots
+are READY with the intended active topology. The next assertion fails: expected
+observed counts `[A4, B2, C3]`, actual `[A4, B1, C3]` (340.004 JUnit seconds).
+This is **not** an exhausted turn budget or evidence of full acceptance. The
+original Python scenario also expects the additional B reaction. Whether the
+library misses a required rooted reaction or the oracle confuses a local view
+with independent publication must be established before changing either. No
+semantic correction or expected-value replacement is authorized by this result
+alone. Input14 and restart remain unqualified.
 
 The original, unchanged MyOS HTTP owner independently passes the previously
 failing duplicate attachment and detaches, but fails at operation13 (reconnect)
@@ -247,13 +261,27 @@ preserving every durable membership, exact target/head, ownership and supplied
 proof comparison. It is not yet accepted or measured. No cross-call cache,
 new API, publication/gas policy or relaxed guard is part of that investigation.
 
+The isolated in-call refactor now passes all 13 focused controls (3 terminal-tail,
+2 ring/chord, 6 checkpoint safety, 2 historical representation), with no failed
+or skipped methods. The source-shape and test-architecture guards pass. New
+controls corrupt detached supplied proof bytes while keeping the claimed work
+identity, and require the same original authority checks to reject them. The
+production delta is one private file, +13 measured lines; it is still outside
+the central runtime and **not yet shown to remove the HTTP timeout**. The source
+line-count guard adjustment is a repository size check, not a protocol/gas limit.
+The identical complete terminal-tail owner passes 3/3 on unchanged cf359 code
+as well. This is paired validation evidence, not proof of an application speedup.
+
 External evidence under `rooted-successor-language-evidence.GlIOBx`:
 
 | Archive | SHA-256 |
 | --- | --- |
 | `successor-immutable-bundle.tar.gz` | `aa9c48d7e373467456c0a17f7a0972632b77ecc405416313cd13a3233c8217fc` |
 | `sdk-full-ring-02-evidence.tar.gz` | `155b1e1ce3d2d50ba29ac433fbcdd510f5d56ec8da497cdc1667cd8ad1e22954` |
+| `sdk-full-ring-03-evidence.tar.gz` | `f3c3df1f307e0df671021a9d93bb0338624bc7fd0661122c822342e8469f7872` |
 | `myos-full-ring-01-evidence.tar.gz` | `0a6f18db805397596aee2742512b9c1da9d4dced4eadb8c5fd19392fb1f1d8f1` |
+| `proof-reuse-focused-01-evidence.tar.gz` | `4cad3da5fb01252947d74c5e1924b6ea6886e09510c9a4d1ff1bd38e9b201495` |
+| `proof-reuse-base-01-evidence.tar.gz` | `ec73814f0edd8bafb013d79cccac72835bd192aefccf0975124d667046ee9d48` |
 
 The preceding application failures and focused passes below retain their own
 artifact bindings. No library is ready to merge.
