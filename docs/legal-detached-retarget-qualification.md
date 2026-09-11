@@ -112,3 +112,14 @@ Archive `legal-retarget-sdk-01.tar.gz`, SHA-256
 `5ace80b97f408f45c1fe66c160736b6afd77c5c53f2173fa0fcbd880fbd99b04`,
 preserves the complete red run. The automatic-resolver correction and adjusted
 API-level controls require a subsequent passing run; this is not a pass claim.
+
+The second run on `b066f29` passed 44/48 tests, including all seven new resolver
+controls. The four new authored scenarios completed attachment and ordered
+catch-up but stopped at a test's duplicate-call assertion: those fixtures are
+unversioned, unlike the two explicit-selector operations above. The test now
+retains the actual original captured operation and retries it through the
+ordinary idempotent publication boundary. It requires `replayed=true`, the same
+original result/gas identity and unchanged heads/histories. It does not recreate
+an input from the advanced current document and call that an exact retry.
+The complete red archive is `legal-retarget-sdk-02.tar.gz`, SHA-256
+`521878b3cb16671685a6bd4c5d04b4ea1f44f3dd9aa2206e75248f6a3c21985e`.

@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.internal.CoordinationTestControl;
+import blue.coordination.internal.RootedRetargetAttemptProbe;
 import blue.coordination.api.ContractsExecutionPolicy;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import java.util.List;
@@ -37,6 +38,7 @@ final class RootedRetargetInputTest {
                     .call("attach").through("owner").requestYaml(reference(savedC0))
                     .selectManagedEpoch(ManagedEpochSelector.exact(c.id(), 0L, savedC0, "/orders/same"))
                     .submit();
+            var frozen = RootedRetargetAttemptProbe.capture(f.blue.advanced().rawEngine(), parent.id(), retarget.blueId(), null);
 
             // when
             var result = f.blue.processing().processNext(parent).entry(retarget);
@@ -72,6 +74,10 @@ final class RootedRetargetInputTest {
             assertEquals(after.activationGeneration(), live.activationGeneration());
             var finalHeads = heads(parent, b, c);
             var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
+            var exactReplay = frozen.replay();
+            assertEquals(output.invocationIdentity(), exactReplay.invocationIdentity());
+            assertEquals(output.gasTraceIdentity(), exactReplay.gasTraceIdentity());
+            assertEquals(output.totalGas(), exactReplay.totalGas());
             // The supplied-input API evaluates against the current selected view.
             // An old exact-version operation is stale after successful catch-up,
             // not another application of its previously committed effects.

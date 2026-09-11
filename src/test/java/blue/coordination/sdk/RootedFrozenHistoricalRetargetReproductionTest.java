@@ -51,6 +51,7 @@ final class RootedFrozenHistoricalRetargetReproductionTest {
             var entry = f.blue.operations().on(parent).from(f.timelines.get("rcp2/b"))
                     .call("attach").through("owner").requestYaml(reference(savedC0))
                     .selectManagedEpoch(ManagedEpochSelector.exact(c.id(), 0L, savedC0, "/orders/same")).submit();
+            var frozen = RootedRetargetAttemptProbe.capture(f.blue.advanced().rawEngine(), parent.id(), entry.blueId(), null);
             var captured = f.control.capture(parent.id(), entry.blueId(), null);
             var first = RootedRetargetAttemptProbe.firstAttempt(f.blue.advanced().rawEngine(), captured);
             assertFalse(first.isComplete());
@@ -100,6 +101,10 @@ final class RootedFrozenHistoricalRetargetReproductionTest {
             assertEquals(other, f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/other").orElseThrow());
             var finalHeads = List.of(parent.snapshot().blueId(), b.snapshot().blueId(), c.snapshot().blueId());
             var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
+            var exactReplay = frozen.replay();
+            assertEquals(output.invocationIdentity(), exactReplay.invocationIdentity());
+            assertEquals(output.gasTraceIdentity(), exactReplay.gasTraceIdentity());
+            assertEquals(output.totalGas(), exactReplay.totalGas());
             var repeated = f.blue.processing().process(parent, entry).entry(entry);
             assertEquals(EntryDisposition.STALE, repeated.disposition());
             assertEquals("STALE_TARGET_DOCUMENT", repeated.diagnostic().code());

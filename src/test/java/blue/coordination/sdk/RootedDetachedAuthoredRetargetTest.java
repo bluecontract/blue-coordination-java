@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.internal.CoordinationTestControl;
+import blue.coordination.internal.RootedRetargetAttemptProbe;
 import blue.language.processor.closure.ClosureProcessResult;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import java.util.ArrayList;
@@ -91,6 +92,7 @@ final class RootedDetachedAuthoredRetargetTest {
             String request = inline ? "child:\n" + cYaml.indent(2) : reference(authoredC.blueId());
             var entry = f.append(parent, "rcp2/b", "attach", 400, request);
             var policy = ContractsExecutionPolicy.exactSharedGas(budget, "detached-authored-retarget-gas");
+            var frozen = RootedRetargetAttemptProbe.capture(f.blue.advanced().rawEngine(), parent.id(), entry.blueId(), policy);
             var accepted = f.blue.advanced().process(parent, entry, policy).entry(entry);
             assertEquals(succeeds ? EntryDisposition.APPLIED : EntryDisposition.GAS_LIMIT_EXCEEDED,
                     accepted.disposition(), accepted.diagnostic().toString());
@@ -178,9 +180,10 @@ final class RootedDetachedAuthoredRetargetTest {
                 assertEquals(pending.activationGeneration(), active.activationGeneration());
                 var finalHeads = heads(parent, b, c);
                 var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
-                var repeated = f.blue.advanced().process(parent, entry, policy).entry(entry);
-                assertEquals(EntryDisposition.STALE, repeated.disposition());
-                assertEquals("STALE_TARGET_DOCUMENT", repeated.diagnostic().code());
+                var replay = frozen.replay();
+                assertEquals(output.invocationIdentity(), replay.invocationIdentity());
+                assertEquals(output.gasTraceIdentity(), replay.gasTraceIdentity());
+                assertEquals(output.totalGas(), replay.totalGas());
                 assertEquals(output.invocationIdentity(), execution(f, accepted).invocationIdentity());
                 assertEquals(output.gasTraceIdentity(), execution(f, accepted).gasTraceIdentity());
                 CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
