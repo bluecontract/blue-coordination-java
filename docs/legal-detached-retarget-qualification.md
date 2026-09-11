@@ -36,6 +36,14 @@ Rejected alternatives: rewriting B's original input reservation; accepting old
 demand identities on a new base; borrowing B's identity for C; replacing the
 newer C primary with C0; restoring the MyOS B-reactivation workaround.
 
+The revised Contracts specification has SHA-256
+`5cc29e91cd8d4aa4d3dca98214da5ceb49b2daa82554ac561260bd98ce5063b8`.
+The Coordination profile, SDK release properties and two source-isolation
+fixture inputs are bound to those exact bytes. This is an explicit new
+Language/Coordination candidate pair, not permission to run the new selection
+rule under the old specification identity. Full generated release bindings
+and downstream qualification must use the same pair.
+
 ## Maintained regressions
 
 - `RootedRecreatedCollectionOccurrenceTest`: committed B removal followed by

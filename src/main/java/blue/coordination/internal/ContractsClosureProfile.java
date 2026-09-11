@@ -19,7 +19,7 @@ import java.util.TreeSet;
 final class ContractsClosureProfile {
     /** Exact reviewed specification selecting the draft.2 execution path. */
     static final String ROOTED_CONTRACTS_SPECIFICATION =
-            "sha256:e91381c970859a6bafecdd99e46f5115ba033bf0534be84bbd5582531e9e347f";
+            "sha256:5cc29e91cd8d4aa4d3dca98214da5ceb49b2daa82554ac561260bd98ce5063b8";
     private final String blueLanguageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
     private final String managedDocumentPolicyLabel;
