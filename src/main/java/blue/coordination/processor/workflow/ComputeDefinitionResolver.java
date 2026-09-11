@@ -3,6 +3,7 @@ package blue.coordination.processor.workflow;
 import blue.coordination.processor.bex.BexProcessingMetrics;
 import blue.language.model.Node;
 import blue.language.processor.SelectedExecutableBody;
+import blue.language.processor.util.PointerUtils;
 import blue.language.snapshot.FrozenNode;
 
 /**
@@ -37,9 +38,7 @@ final class ComputeDefinitionResolver {
             return null;
         }
         String text = FrozenNodeUtil.text(definition);
-        return text != null && !text.trim().isEmpty()
-                ? resolvePointer(text.trim(), context)
-                : null;
+        return text != null && !text.trim().isEmpty() ? resolvePointer(text.trim(), context) : null;
     }
 
     FrozenNode resolve(FrozenNode stepNode,
@@ -62,16 +61,15 @@ final class ComputeDefinitionResolver {
                     context,
                     invocationMetrics);
         }
-        String text = FrozenNodeUtil.text(definition);
-        if (text != null && !text.trim().isEmpty()) {
-            String pointer = resolvePointer(text.trim(), context);
+        String pointer = definitionPointer(stepNode, context);
+        if (pointer != null) {
             // This lookup is deliberately performed against the current
             // WorkingDocument on every invocation. The exact returned frozen
             // identity participates in the Compute plan key, so a definition
             // changed by an earlier step can never reuse a stale plan.
             FrozenNode frozen = context.workingResolvedAt(pointer);
             if (frozen == null) {
-                context.throwFatal("Compute definition not found: " + text);
+                context.throwFatal("Compute definition not found: " + FrozenNodeUtil.text(definition));
                 return null;
             }
             incrementFrozenDirectHit(invocationMetrics);
@@ -79,34 +77,6 @@ final class ComputeDefinitionResolver {
         }
         incrementFrozenDirectHit(invocationMetrics);
         return definition;
-    }
-
-    FrozenNode resolve(Node stepNode, StepExecutionContext context) {
-        Node definition = NodeUtil.property(stepNode, "definition");
-        if (definition == null || NodeUtil.isEmpty(definition)) {
-            return null;
-        }
-        if (definition.getBlueId() != null) {
-            return materializeExactDefinition(
-                    FrozenNode.fromNode(definition),
-                    context,
-                    metrics);
-        }
-        String text = NodeUtil.text(definition);
-        if (text != null && !text.trim().isEmpty()) {
-            String pointer = resolvePointer(text.trim(), context);
-            FrozenNode frozen = context.workingResolvedAt(pointer);
-            if (frozen == null) {
-                context.throwFatal("Compute definition not found: " + text);
-                return null;
-            }
-            incrementFrozenDirectHit(metrics);
-            return frozen;
-        }
-        if (metrics != null) {
-            metrics.incrementComputeDefinitionMaterializations();
-        }
-        return FrozenNode.fromResolvedNode(definition);
     }
 
     private FrozenNode materializeExactDefinition(
@@ -144,11 +114,13 @@ final class ComputeDefinitionResolver {
         if (reference.startsWith("/")) {
             return reference;
         }
-        String parent = parentPointer(currentContractPointer(context));
-        if (parent == null || parent.isEmpty()) {
-            parent = "/";
-        }
-        return appendPointer(parent, reference);
+        // A named definition is a sibling of the executing workflow contract.
+        String key = context.processorContext().contractKey();
+        String scope = context.processorContext().scopePath();
+        String parent = key != null && !key.trim().isEmpty()
+                ? PointerUtils.appendPointer(scope == null || scope.trim().isEmpty() ? "/" : scope, "contracts")
+                : parentPointer(scope);
+        return PointerUtils.appendPointer(parent, reference);
     }
 
     private void incrementFrozenDirectHit(BexProcessingMetrics invocationMetrics) {
@@ -160,16 +132,6 @@ final class ComputeDefinitionResolver {
         }
     }
 
-    private String currentContractPointer(StepExecutionContext context) {
-        String key = context.processorContext().contractKey();
-        if (key == null || key.trim().isEmpty()) {
-            return context.processorContext().scopePath();
-        }
-        String scope = context.processorContext().scopePath();
-        String contracts = appendPointer(scope == null || scope.trim().isEmpty() ? "/" : scope, "contracts");
-        return appendPointer(contracts, key.trim());
-    }
-
     private String parentPointer(String pointer) {
         if (pointer == null || pointer.isEmpty() || "/".equals(pointer)) {
             return "/";
@@ -179,17 +141,5 @@ final class ComputeDefinitionResolver {
             return "/";
         }
         return pointer.substring(0, last);
-    }
-
-    private String appendPointer(String parent, String segment) {
-        String escaped = escapePointerSegment(segment);
-        if (parent == null || parent.isEmpty() || "/".equals(parent)) {
-            return "/" + escaped;
-        }
-        return parent + "/" + escaped;
-    }
-
-    private String escapePointerSegment(String segment) {
-        return segment.replace("~", "~0").replace("/", "~1");
     }
 }

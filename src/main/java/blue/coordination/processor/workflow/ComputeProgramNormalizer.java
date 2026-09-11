@@ -45,7 +45,9 @@ final class ComputeProgramNormalizer {
         if (metrics != null) {
             metrics.incrementComputeProgramNormalizations();
         }
-        return FrozenNode.fromResolvedNode(program(frozenProgramInput(stepNode)));
+        return FrozenNode.fromResolvedNode(program(frozenInput(stepNode,
+                "expr", "do", "definition", "entry", "constants", "functions",
+                "gasLimit", "emitEvents", "returnResult")));
     }
 
     FrozenNode definition(FrozenNode definitionNode) {
@@ -91,7 +93,7 @@ final class ComputeProgramNormalizer {
             return FrozenNode.fromResolvedNode(
                     canonicalStaticSource(definitionNode.toNode()));
         }
-        Node input = frozenDefinitionInput(definitionNode);
+        Node input = frozenInput(definitionNode, "constants", "functions");
         if (resolvedDefinition) {
             omitInheritedEmptyMap(input, definitionNode, "constants");
             omitInheritedEmptyMap(input, definitionNode, "functions");
@@ -133,10 +135,6 @@ final class ComputeProgramNormalizer {
         return program;
     }
 
-    Node definition(Node definitionNode) {
-        return definitionSource(definitionNode);
-    }
-
     private Node definitionSource(Node definitionNode) {
         if (definitionNode == null) {
             throw new IllegalArgumentException(
@@ -150,48 +148,21 @@ final class ComputeProgramNormalizer {
         copyMetadata(definition, definitionNode);
         Map<String, Node> properties =
                 new LinkedHashMap<String, Node>();
-        putIfMeaningful(
-                properties,
-                "constants",
-                authoredMap(
-                        NodeUtil.property(
-                                definitionNode,
-                                "constants")));
-        putIfMeaningful(
-                properties,
-                "functions",
-                normalizeFunctions(
-                        NodeUtil.property(
-                                definitionNode,
-                                "functions")));
+        putIfMeaningful(properties, "constants",
+                authoredMap(NodeUtil.property(definitionNode, "constants")));
+        putIfMeaningful(properties, "functions",
+                normalizeFunctions(NodeUtil.property(definitionNode, "functions")));
         definition.properties(properties);
         return definition;
     }
 
-    private Node frozenProgramInput(FrozenNode source) {
+    private Node frozenInput(FrozenNode source, String... fields) {
         Node input = new Node();
         copyMetadata(input, source);
         Map<String, Node> properties = new LinkedHashMap<String, Node>();
-        copyFrozenProperty(properties, source, "expr");
-        copyFrozenProperty(properties, source, "do");
-        copyFrozenProperty(properties, source, "definition");
-        copyFrozenProperty(properties, source, "entry");
-        copyFrozenProperty(properties, source, "constants");
-        copyFrozenProperty(properties, source, "functions");
-        copyFrozenProperty(properties, source, "gasLimit");
-        copyFrozenProperty(properties, source, "emitEvents");
-        copyFrozenProperty(properties, source, "returnResult");
-        input.properties(properties);
-        return input;
-    }
-
-    private Node frozenDefinitionInput(FrozenNode source) {
-        Node input = new Node();
-        copyMetadata(input, source);
-        Map<String, Node> properties =
-                new LinkedHashMap<String, Node>();
-        copyFrozenProperty(properties, source, "constants");
-        copyFrozenProperty(properties, source, "functions");
+        for (String field : fields) {
+            copyFrozenProperty(properties, source, field);
+        }
         input.properties(properties);
         return input;
     }
