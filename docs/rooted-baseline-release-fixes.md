@@ -37,6 +37,17 @@ rule, why a host-only repair would not suffice, rejected alternatives, and
 positive/negative regression evidence. A test becoming green is not by itself
 authority to change processing semantics.
 
+The 11 September independent traceability audit covers all 15 included
+Coordination groups and both Language runtime groups. Each maps to a concrete
+reproduction, library-owned boundary, stated impact and named controls.
+The eligibility memo remains optional performance work, not a required semantic
+repair. No persistence or witness-routing change is hidden in this fixes-only
+range. The provider test-owner name and stale borrowed-cycle status found in
+that audit are corrected. External report:
+`rooted-baseline-release-review.VamIZv/registry-completeness-cf359-34e9.md`,
+SHA-256 `5ade51082666668c9b18c4423a087bba56a293f32834cc3fbf9107584318d424`.
+This is a necessity/traceability review, not substitute full-suite acceptance.
+
 - **FULL_HISTORY is a library defect:** RCP-SCOPE-06 and RCP-CAUSE-01/02 require
   the selected logical position and endpoint to survive later physical work.
   MyOS cannot repair the private SDK admission/source-view association by
@@ -125,6 +136,9 @@ Every existing exact-event, import-depth, non-self target, local-change and
 complete finalizer-delta check remains. §7.5a.1 preserves ordinary numbered
 receipt reactions during deferred activation; the maintained same-epoch
 component-rebind test establishes the existing imported-event exception.
+Contracts §5.7.1 does not separately spell out that maintained imported-event
+exception. The justification combines this existing conformance precedent with
+§7.5a.1; it is not a claim that the prose explicitly enumerates the new predicate.
 There is no new admission, activation, ownership or gas policy. The correction
 does intentionally remove the spurious numbered epoch; source runtime identity
 must be rebound and the new exact artifact set requalified.
@@ -275,9 +289,50 @@ under investigation, not an approved relaxation of the publication fence.
 Unlike the full ring, this reduction imports A's token at its terminal receipt;
 it does not settle the full ring's earlier, nonterminal-event obligation.
 
-The exclusion-free Language `34e9aa2f` clean build and subsequent maintained
-quality/RC checks have started in `final-language-34e9.2z9G7z`. Their result is
-pending. The earlier Language candidate's clean build is not reused as proof.
+The [five-input discriminator](rooted-cyclic-join-live-obligation.md) now adds
+one actual eventless A250 step before attachment300. It reproduces the missing
+B reaction in 18.730 seconds: `[A0,B0,C1]`, versus `[A0,B1,C1]` without A250.
+Exact C token, READY, topology and fresh-rooted result/gas comparisons pass.
+B's actual pre-join selection is LIVE300; after the co-owned join it selects
+no work without having run its own LIVE300 calculation. This is a concrete
+join/progress concern, not proof that immutable-witness routing is wrong.
+`witness-forwarding-03` totals 3 methods, 1 pass / 2 failures, 47.118 seconds;
+its B-first conflict leaves heads/history unchanged and C's own work blocked.
+No production fix or oracle rewrite follows until the obligation's required
+discharge is established. The public-only unmodified-RC9 comparison now reaches
+the same outcome with published Language RC25/BEX RC6/Catalog RC22, exact same
+inputs and no candidate runtime edits: terminal passes, nonterminal fails at
+`[0,0,1]`, 2 methods / 1 failure, 19.433 JUnit seconds. The behavior therefore
+predates these candidate corrections; the repair is not yet established.
+
+The exclusion-free Language `34e9aa2f` clean build passes in 18m54s, with
+3,750 JUnit tests across 415 suites and no failures/errors/skips. Its archived
+clean marker binds `[clean, build]`, no exclusions, the exact commit/epoch and
+the independently recomputed 2,998-file source identity
+`sha256:a5ce138ec812d5a85266cc6247dcfe1caa4a9f8d0cb282b1b9495e0b204f2133`.
+The subsequent maintained quality/RC invocation stopped after 7m05s because
+the launcher omitted `releaseVersion` and selected the rejected default
+`3.1.0-rc.25-SNAPSHOT`. This is a launch configuration failure, not a runtime
+correction or authority to relax the release guard. Its complete failed report
+archive is preserved. The maintained clean marker is source/epoch-bound and
+does not bind project version; a quality-only retry with the exact development
+version subsequently passes `finalQualityVerify rcVerify` in 2m45s, with
+218 tasks (142 executed, 76 up-to-date), no exclusions and unchanged source.
+Final quality is eligible with zero blockers; the new immutable development
+repository and independent artifact smoke validate the exact34e9 coordinates.
+The artifact manifest `5dfc0e43…` equals the previously sealed export; no tuple
+change is needed. Archive `quality-dev-34e9.yJHMEy/final-reports.tar.gz` SHA-256
+`6113c3ff54effdf60205139776ed68f8a6d66bd98dca993aa5101f8f67cf4865`.
+This qualifies the local DEVELOPMENT build, not a remote release or complete
+MyOS acceptance. The earlier candidate's clean build is not reused.
+The final aggregate reports 4,144 executions: the clean 3,750 plus 394 executions
+across five dedicated regression lanes. These are not 4,144 distinct freshly
+executed clean-build tests. The separate fixture package remains 480/480
+(185 Language, 295 Contracts). Independent audit rehashes all 2,998 source
+entries, artifact checksums and the complete archived receipt/report selection.
+Final independent audit:
+`rooted-successor-language-evidence.GlIOBx/FINAL-LANGUAGE-34E9-INDEPENDENT-PASS.md`,
+SHA-256 `1b4bedd4f39eea18a16dd309723178ef7264d6b9d7570a7984d667536b9c2e89`.
 
 The original, unchanged MyOS HTTP owner independently passes the previously
 failing duplicate attachment and detaches, but fails at operation13 (reconnect)
@@ -309,6 +364,10 @@ the central runtime and **not yet shown to remove the HTTP timeout**. The source
 line-count guard adjustment is a repository size check, not a protocol/gas limit.
 The identical complete terminal-tail owner passes 3/3 on unchanged cf359 code
 as well. This is paired validation evidence, not proof of an application speedup.
+Independent review additionally confirms the current safety assumptions:
+engine-serialized calls, privately owned store and immutable retained evidence.
+The removed reads were not atomic freshness barriers. This is not authority
+for future cross-call reuse or for a host that bypasses those boundaries.
 
 External evidence under `rooted-successor-language-evidence.GlIOBx`:
 
@@ -324,6 +383,9 @@ External evidence under `rooted-successor-language-evidence.GlIOBx`:
 | `import-forwarding-01-evidence.tar.gz` | `0e122ec6a190776a06ec2e45b92d273f6dd1bbef5a276e810398e9ff839fc4b5` |
 | `witness-forwarding-01-evidence.tar.gz` | `24a40da4a1b15ec10229b75d395616d4f90fd80d7fc3b0bed7665acaebede409` |
 | `witness-forwarding-02-evidence.tar.gz` | `92c24e7651b102343e4637306e9448515692cc63c3e86d0f70038c8199c9c472` |
+| `witness-forwarding-03-evidence.tar.gz` | `5121a93c8179bcd8a617b774b57a9f655f02bdfac326b19c35d7e06103766a5c` |
+| `upstream-forwarding-01-build-evidence.tar.gz` (consumer compile error, no tests) | `27626ce243d760876ac2439f7b8abaceca86252798348b95a7f4832eea6a3680` |
+| `upstream-forwarding-02-evidence.tar.gz` (unchanged RC9, terminal pass / nonterminal count failure) | `a9658fb0680a2d806871a2fff36b33b1d0d78efdc643ca14cfe6791a44e1118b` |
 
 The preceding application failures and focused passes below retain their own
 artifact bindings. No library is ready to merge.

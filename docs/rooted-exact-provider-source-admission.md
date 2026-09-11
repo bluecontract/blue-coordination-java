@@ -31,6 +31,13 @@ accepting a newly computed replacement ID was rejected as an incorrect fix.
 
 ## Evidence and boundary
 
+The direct SDK owner is
+`RootedExactProviderAdmissionTest.sourceAdmissionPreservesTheProviderAuthoredIdentity`;
+the original application owner is
+`ProviderAuthoredReferencePublicApiAcceptanceTest.providerAuthoredReferencePublishesOnceAndRestartsWithoutReinterpretation`.
+The former isolates the
+library defect without HTTP or persistence; the latter verifies the user path.
+
 The new focused test failed before the correction with the same identity error.
 After the correction, 40 focused SDK/source-admission controls and strict
 Javadocs passed, using Language `bd09c281`, BEX `ab72af14`, and Catalog `0b68744b`

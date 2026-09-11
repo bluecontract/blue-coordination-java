@@ -87,8 +87,9 @@ the classification that created the impossible interval.
 
 ## Regression scope
 
-`RootedBorrowedCycleReadinessTest` declares six maintained controls. An all-six
-pass from one frozen combined batch is still pending:
+`RootedBorrowedCycleReadinessTest` declares six maintained controls. All six
+subsequently passed in the frozen [combined 44-case gate](rooted-history-combined-qualification.md);
+the earlier failed harness attempts are retained below:
 
 - Exact original inputs in observer-first and source-first schedules, complete
   Agreement output and history equality, full Contracts result identities,
@@ -132,8 +133,8 @@ independent source isolation), `RootedTerminalTailSdkBoundaryTest` (authentic
 same-epoch/intermediate position guards), `RootedJoinEligibilityTest` (true
 pending return cycles and earlier source prerequisites), and
 `RootedMultipleHistoricalOccurrencesTest` (distinct saved-state suffixes).
-The same-epoch locally advanced control passed its separate one-test run, as
-recorded below; that does not replace a combined gate.
+The same-epoch locally advanced control first passed its separate one-test run,
+then passed with the other five in that combined gate, as recorded below.
 
 ## Recorded qualification and harness corrections
 
