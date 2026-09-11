@@ -1,0 +1,59 @@
+name: Set up release tools
+description: Pin the canonical compiler and selected test runtime for a release job.
+inputs:
+  test-java:
+    description: Test runtime, 17 or 21
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Configure Gradle user home
+      shell: bash
+      run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-release-gradle" >> "$GITHUB_ENV"
+
+    - name: Set up Java 17
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17.0.19+10'
+        architecture: x64
+        check-latest: false
+
+    - name: Set up Java 21 test JDK
+      if: ${{ inputs.test-java == '21' }}
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '21.0.11+10.0.LTS'
+        architecture: x64
+        check-latest: false
+
+    - name: Restrict Gradle to the pinned JDKs
+      shell: bash
+      env:
+        TEST_JAVA: ${{ inputs.test-java }}
+      run: |
+        set -euo pipefail
+        toolchain_paths="$JAVA_HOME_17_X64"
+        if [[ "$TEST_JAVA" == "21" ]]; then
+          toolchain_paths="$toolchain_paths,$JAVA_HOME_21_X64"
+        else
+          test "$TEST_JAVA" = "17"
+        fi
+        mkdir -p "$GRADLE_USER_HOME"
+        {
+          echo "org.gradle.java.installations.auto-detect=false"
+          echo "org.gradle.java.installations.auto-download=false"
+          echo "org.gradle.java.installations.paths=$toolchain_paths"
+        } >> "$GRADLE_USER_HOME/gradle.properties"
+
+    - name: Set up Node 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Validate Gradle wrapper
+      uses: gradle/actions/wrapper-validation@v4
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4

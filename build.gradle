@@ -2213,6 +2213,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.9.md',
                 'docs/releases/3.0.0-rc.8.md',
                 'docs/releases/3.0.0-rc.7.md',
                 'docs/releases/3.0.0-rc.6.md',
@@ -5310,7 +5311,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'docs/releases/3.0.0-rc.8.md')
+            'docs/releases/3.0.0-rc.9.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -5328,12 +5329,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.8-readiness.json')
+            'reports/release/3.0.0-rc.9-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.8') {
-            failures << "release version is ${version}; expected 3.0.0-rc.8"
+        if (version.toString() != '3.0.0-rc.9') {
+            failures << "release version is ${version}; expected 3.0.0-rc.9"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -5382,20 +5383,20 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             if (!testSource.isFile()
                     || !(testSource.getText('UTF-8') =~
                             /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
-                failures << "required rc.8 capability evidence is missing ${source}"
+                failures << "required rc.9 capability evidence is missing ${source}"
             }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.8.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.9.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC8_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC9_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC8_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC9_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC8_PUBLIC_ARTIFACT_READY: true')
+                'RC9_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC8_PRODUCTION_READY: false')) {
-            failures << 'rc.8 release notes do not state the exact release tier'
+                'RC9_PRODUCTION_READY: false')) {
+            failures << 'rc.9 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -5443,7 +5444,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence: 'complete current releaseCheck plus '
-                                + 'the rc.8 capability test inventory',
+                                + 'the rc.9 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -5460,7 +5461,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.8'
+    dependsOn(version.toString() == '3.0.0-rc.9'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -5475,7 +5476,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.8'
+    dependsOn(version.toString() == '3.0.0-rc.9'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'
