@@ -21,6 +21,7 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
 
     @Test
     void shouldKeepAuthenticatedCanonicalChildBodySeparateFromExpandedSemanticType() {
+        // given
         try (var runtime = CoordinationTestRuntime.create(BlueRepository.current())) {
             var snapshot = runtime.resolveToSnapshot(runtime.yamlToNode("""
                     candidateC:
@@ -36,8 +37,10 @@ class ScopedProcessorExecutionContextBexDocumentViewTest {
             access.workingResolved = snapshot.frozenResolvedRoot();
             var view = new ScopedProcessorExecutionContextBexDocumentView(access, null);
 
+            // when
             var child = view.resolvedAt("/").get("candidateC");
 
+            // then
             assertEquals(canonicalChild.blueId(), child.exactBlueId());
             assertEquals(BigInteger.valueOf(7), child.get("own").asInteger());
             assertEquals("Typed candidate", child.toNode().getType().getName());

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real stopped requester authority is independent of physical source-selection freshness. */
 final class RootedSourcePrerequisiteObservationTest {
     @Test void independentlyAdmittedAndAdvancedSourceSatisfiesWithoutRetryingParent() throws Exception {
+        // given
         try (var s = new Scenario(null)) {
             var original = s.selection();
             assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, original.kind());
@@ -23,10 +24,12 @@ final class RootedSourcePrerequisiteObservationTest {
             var live = s.observe(original);
             assertEquals(PENDING, live.status());
             assertEquals(SourceHistoryPrerequisite.Kind.LIVE, live.pending().orElseThrow().kind());
+            // when
             assertEquals(EntryDisposition.APPLIED,
                     s.f.blue.processing().processNext(source).entry(s.source15).disposition());
             var sourceHistory = s.f.history(source);
 
+            // then
             assertTrue(s.f.blue.advanced().sourceHistoryPrerequisites(s.parent).isEmpty());
             assertEquals(new SourceHistoryPrerequisiteObservation(SATISFIED, Optional.empty()), s.observe(original));
             assertEquals(SATISFIED, s.observe(live.pending().orElseThrow()).status());
@@ -43,11 +46,14 @@ final class RootedSourcePrerequisiteObservationTest {
     }
 
     @Test void pendingSelectionRefreshesPhysicalFencesWithoutChangingFrozenAuthority() throws Exception {
+        // given
         try (var s = new Scenario(null)) {
             var original = s.selection();
             var before = s.parentState();
             s.f.appendReference(original.authoredBlueId(), "rcp2/source", "setCounter", 51, "counterValue: 99", false);
+            // when
             var observed = s.observe(original);
+            // then
             assertEquals(PENDING, observed.status());
             var refreshed = observed.pending().orElseThrow();
             assertNotEquals(original.selectionIdentity(), refreshed.selectionIdentity());
@@ -67,12 +73,15 @@ final class RootedSourcePrerequisiteObservationTest {
     }
 
     @Test void waitAndUnavailableAuthorityNeverBecomeSatisfied() throws Exception {
+        // given
         try (var s = new Scenario(null)) {
             var original = s.selection();
             var before = s.parentState();
             var control = CoordinationTestControl.attach(s.f.blue.advanced().rawEngine());
             control.makeHistoricalUnavailable("exact source completeness unavailable");
+            // when
             var waiting = s.observe(original);
+            // then
             assertEquals(PENDING, waiting.status());
             assertEquals(SourceHistoryPrerequisite.Kind.WAIT, waiting.pending().orElseThrow().kind());
             assertEquals(before, s.parentState());
@@ -88,9 +97,11 @@ final class RootedSourcePrerequisiteObservationTest {
     }
 
     @Test void changedFrozenOperandsAreRejectedAndExceptionalQueriesReleaseTheirProviderScope() throws Exception {
+        // given
         try (var s = new Scenario(null)) {
             var original = s.selection();
             var before = s.parentState();
+            // when
             for (String field : List.of("root", "source", "authored", "cutoff")) {
                 assertThrows(IllegalArgumentException.class, () -> s.observe(changed(original, field)), field);
                 assertEquals(original, s.observe(original).pending().orElseThrow(),
@@ -101,12 +112,14 @@ final class RootedSourcePrerequisiteObservationTest {
                 assertEquals(STALE, absent.status(), field);
                 assertTrue(absent.pending().isEmpty());
             }
+            // then
             assertEquals(before, s.parentState());
             assertEquals(original, s.selection());
         }
     }
 
     @Test void terminalRejectionConsumesRequesterEvenWhenItsHeadDoesNotAdvance() throws Exception {
+        // given
         long required;
         try (var calibration = new Scenario(null)) {
             var source = calibration.f.startYaml(RootedSdkFixture.resource("source.yaml"), "rcp2/source");
@@ -126,7 +139,9 @@ final class RootedSourcePrerequisiteObservationTest {
             assertEquals(EntryDisposition.APPLIED,
                     s.f.blue.processing().processNext(source).entry(s.source15).disposition());
             assertEquals(SATISFIED, s.observe(original).status());
+            // when
             var rejected = s.retryParent();
+            // then
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, rejected.disposition(), rejected.diagnostic().toString());
             assertEquals(s.stopped.closures().get(0).closureId(), rejected.closures().get(0).closureId(),
                     "The same frozen logical requester has reached a terminal receipt");
@@ -138,10 +153,16 @@ final class RootedSourcePrerequisiteObservationTest {
     }
 
     @Test void observationShapeCannotConfuseAnEmptyPendingSelectionWithSatisfaction() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new SourceHistoryPrerequisiteObservation(PENDING, Optional.empty()));
-        assertThrows(NullPointerException.class,
-                () -> new SourceHistoryPrerequisiteObservation(null, Optional.empty()));
+        // given
+        Optional<SourceHistoryPrerequisite> absent = Optional.empty();
+        // when
+        org.junit.jupiter.api.function.Executable pendingWithoutSelection =
+                () -> new SourceHistoryPrerequisiteObservation(PENDING, absent);
+        org.junit.jupiter.api.function.Executable missingStatus =
+                () -> new SourceHistoryPrerequisiteObservation(null, absent);
+        // then
+        assertThrows(IllegalArgumentException.class, pendingWithoutSelection);
+        assertThrows(NullPointerException.class, missingStatus);
     }
 
     private static SourceHistoryPrerequisite changed(SourceHistoryPrerequisite p, String field) {

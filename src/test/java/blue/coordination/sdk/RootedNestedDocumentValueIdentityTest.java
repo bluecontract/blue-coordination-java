@@ -11,6 +11,7 @@ final class RootedNestedDocumentValueIdentityTest {
 
     @Test
     void laterWorkflowStepCopiesCurrentCanonicalValueAndReadsResolvedType() {
+        // given
         try (var f = new RootedSdkFixture()) {
             var a = f.startYaml("""
                     name: Canonical document preview
@@ -61,10 +62,12 @@ final class RootedNestedDocumentValueIdentityTest {
                     """);
             assertNotEquals(before.valueAt("/stored").blueId(), replacement.blueId());
 
+            // when
             var result = f.blue.operations().on(a).from(f.timelines.get(TIMELINE))
                     .call("replaceAndCopy").through("ownerChannel")
                     .request(request -> request.exact("replacement", replacement)).execute();
 
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
             assertEquals(replacement.blueId(), a.snapshot().valueAt("/stored").blueId());
             assertEquals(replacement.blueId(), a.snapshot().valueAt("/copied").blueId());
@@ -81,6 +84,7 @@ final class RootedNestedDocumentValueIdentityTest {
 
     @Test
     void retainedBEventCarriesInlineC0WithoutInventingAResolvedContentDemand() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var b = f.startYaml(RootedSdkFixture.resource("canonical-document-view-source.yaml"), TIMELINE);
             var c = f.startYaml(RootedSdkFixture.resource("canonical-document-view-source.yaml")
@@ -103,8 +107,10 @@ final class RootedNestedDocumentValueIdentityTest {
             assertEquals(cZero.blueId(), committed.valueAt("/candidateC").blueId());
             var originalPlan = f.blue.advanced().auditManagedCatchUpPlans(a.id()).get(0);
 
+            // when
             var appliedB = f.blue.processing().processNext(a);
 
+            // then
             assertEquals(1, appliedB.managedEpochApplications().size(),
                     () -> "The inline canonical C0 is already exact input: " + appliedB.managedEpochApplicationAttempts());
             assertTrue(appliedB.managedEpochApplicationAttempts().get(0).attempt().isComplete());

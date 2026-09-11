@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** An already authenticated provider value is not a request to re-author its source. */
 final class RootedExactProviderAdmissionTest {
     @Test void sourceAdmissionPreservesTheProviderAuthoredIdentity() throws Exception {
+        // given
         String providerId; String providerJson; String processingId;
         try (var preparation = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
             String source = RootedSdkFixture.resource("source.yaml");
@@ -32,7 +33,9 @@ final class RootedExactProviderAdmissionTest {
             assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, admission.kind());
             assertEquals(providerId, admission.authoredBlueId());
             assertEquals(providerId, admission.sourceDocumentId().value());
+            // when
             assertTrue(f.blue.advanced().processSourceHistoryPrerequisite(admission).admission().orElseThrow().published());
+            // then
             var source = f.blue.documents().require(DocumentId.of(providerId));
             assertEquals(1, f.history(source).size());
             assertEquals(beforeParent, parent.snapshot().blueId()); assertEquals(beforeHistory, f.history(parent));

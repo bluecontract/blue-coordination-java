@@ -8,8 +8,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Saved-state attachment and active replacement preserve an already-frozen newer source. */
 final class RootedFrozenSourceHistoricalAttachmentTest {
-    @Test void freshSavedC0AttachmentAlongsideFrozenC1() throws Exception { check(false); }
-    @Test void activeBRetargetToSavedC0AlongsideFrozenC1() throws Exception { check(true); }
+    @Test void freshSavedC0AttachmentAlongsideFrozenC1() throws Exception {
+        // given
+        boolean retarget = false;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> check(retarget);
+        // then
+        assertDoesNotThrow(scenario);
+    }
+    @Test void activeBRetargetToSavedC0AlongsideFrozenC1() throws Exception {
+        // given
+        boolean retarget = true;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> check(retarget);
+        // then
+        assertDoesNotThrow(scenario);
+    }
 
     private static void check(boolean retarget) throws Exception {
         try (var f = new RootedSdkFixture()) {

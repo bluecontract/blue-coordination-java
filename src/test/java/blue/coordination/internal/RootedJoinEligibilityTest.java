@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedJoinEligibilityTest {
     @Test void publicationRollbackCannotExposeAJoinLocatorAndRetryRetiresItAfterTheRealJoin() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var a = f.start("A"); var b = f.start("B");
             f.attach(a, "b", b); f.settle(a);
@@ -25,8 +26,10 @@ final class RootedJoinEligibilityTest {
             var index = f.engine.documents().occurrenceResolutionSnapshot().componentIndex();
             var control = new RootedCalculationFixture(f.engine);
             control.failPublicationAt("AFTER_TOPOLOGY_STAGED");
+            // when
             assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(b));
             control.clearPublicationFailure();
+            // then
             assertSame(index, f.engine.documents().occurrenceResolutionSnapshot().componentIndex());
             assertEquals(before, List.of(f.history(a), f.history(b)));
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(b).entry(join).disposition());
@@ -46,10 +49,13 @@ final class RootedJoinEligibilityTest {
     }
 
     @Test void locatorReplacementRetiresOldMembershipWithoutChangingThePriorSnapshot() {
+        // given
         var a = DocumentId.of("a"); var b = DocumentId.of("b"); var x = DocumentId.of("x");
         var first = RootedJoinCandidateIndex.empty().replaceRoot(b, Set.of(a, b, x));
         assertSame(first, first.replaceRoot(b, Set.of(x, a, b)));
+        // when
         var replaced = first.replaceRoot(b, Set.of(a, b));
+        // then
         assertEquals(List.of(b), first.rootsFor(x));
         assertTrue(replaced.rootsFor(x).isEmpty(), "A retired path must not leave a stale candidate");
         assertEquals(List.of(b), replaced.rootsFor(a));
@@ -60,12 +66,15 @@ final class RootedJoinEligibilityTest {
 
 
     @Test void oneWayPendingHistoryDoesNotBlockItsIndependentSource() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var a = f.start("A"); var b = f.start("B");
             f.attach(a, "b", b);
             assertFalse(f.blue.advanced().auditManagedDocumentReadiness(a.id()).orElseThrow().ready());
             assertTrue(RootedJoinEligibility.captureForRoot(f.engine.documents(), b.id()).isEmpty());
+            // when
             var tick = f.append(b, "touch", "{}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(b).entry(tick).disposition());
             assertFalse(f.blue.advanced().auditManagedDocumentReadiness(a.id()).orElseThrow().ready());
             var sourceHistory = f.history(b);
@@ -77,6 +86,7 @@ final class RootedJoinEligibilityTest {
     }
 
     @Test void unavailableRelatedJoinBlocksOnlyItsExactCycleAcrossRestart() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var a = f.start("A"); var b = f.start("B"); var c = f.start("C");
             f.attach(a, "b", b); f.settle(a);
@@ -91,7 +101,9 @@ final class RootedJoinEligibilityTest {
             assertTrue(earlier.compareTo(boundary) < 0);
             assertFalse(RootedJoinEligibility.blocks(fences, Set.of(a.id()), earlier), "Earlier source prerequisites remain eligible");
             assertTrue(RootedJoinEligibility.captureForRoot(f.engine.documents(), c.id()).isEmpty());
+            // when
             new RootedCalculationFixture(f.engine).deferRegisteredOwnedHistory(work);
+            // then
             for (boolean restart : List.of(false, true)) {
                 if (restart) CoordinationTestControl.attach(f.engine).restartFromStores();
                 assertTrue(new RootedCheckpointDriver(f.engine.documents(), f.engine.contractsClosureAdapter())
@@ -117,13 +129,16 @@ final class RootedJoinEligibilityTest {
     }
 
     @Test void sideBranchesAndIncomingObserversAreNotTerminalCycleMembers() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var a = f.start("A"); var b = f.start("B"); var c = f.start("C"); var observer = f.start("Observer");
             f.attach(a, "c", c); f.settle(a);
             f.attach(a, "b", b); f.settle(a);
             f.attach(observer, "c", c); f.settle(observer);
             f.attach(b, "a", a);
+            // when
             var fences = RootedJoinEligibility.captureForRoot(f.engine.documents(), a.id());
+            // then
             assertFalse(fences.isEmpty());
             assertTrue(fences.stream().allMatch(fence -> !fence.owners().contains(c.id()) && !fence.owners().contains(observer.id())));
             assertTrue(RootedJoinEligibility.captureForRoot(f.engine.documents(), c.id()).isEmpty());

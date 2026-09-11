@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** A transport-only result remains selectable without inventing a rooted operation. */
 final class RootedTransportSelectionTest {
     @Test void unmatchedBroadcastCompletesOnceWithoutProcessingOrChangingHistory() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var before = source.snapshot().exact().json();
@@ -20,7 +21,9 @@ final class RootedTransportSelectionTest {
 
             assertEquals(ProcessingSelection.Kind.JOURNAL,
                     f.blue.advanced().auditNextProcessingSelection().kind());
+            // when
             var drained = f.blue.advanced().drainJournalThrough(entry, DrainBudget.unlimited());
+            // then
             assertEquals(List.of(entry), drained.entries().stream().map(EntryResult::entry).toList());
             assertEquals(EntryDisposition.NO_MATCH, drained.entry(entry).disposition());
             assertEquals("NONE", drained.entry(entry).diagnostic().code());
@@ -38,6 +41,7 @@ final class RootedTransportSelectionTest {
     }
 
     @Test void transportCompletionHonorsCutoffAndDoesNotRepeatAfterRestart() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var before = source.snapshot().exact().json();
@@ -45,7 +49,9 @@ final class RootedTransportSelectionTest {
             var first = broadcast(f, "rcp2/source", "absent", 100L);
             var later = broadcast(f, "rcp2/source", "absent", 200L);
 
+            // when
             var drained = f.blue.advanced().drainJournalThrough(first, new DrainBudget(1, 1));
+            // then
             assertEquals(List.of(first), drained.entries().stream().map(EntryResult::entry).toList());
             assertEquals(EntryDisposition.NO_MATCH, drained.entry(first).disposition());
             assertEquals(0L, drained.stats().gas());
@@ -64,6 +70,7 @@ final class RootedTransportSelectionTest {
     }
 
     @Test void aLateUnmatchedImportBehindTheTransportFrontierIsStillReportedOnce() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var history = historyEvidence(f, source);
@@ -74,7 +81,9 @@ final class RootedTransportSelectionTest {
             var imported = broadcast(f, "rcp2/unsubscribed", "absent", 100L);
 
             assertEquals(ProcessingSelection.Kind.JOURNAL, f.blue.advanced().auditNextProcessingSelection().kind());
+            // when
             var drained = f.blue.advanced().drainJournalThrough(imported, DrainBudget.unlimited());
+            // then
             assertEquals(List.of(imported), drained.entries().stream().map(EntryResult::entry).toList());
             assertEquals(EntryDisposition.NO_MATCH, drained.entry(imported).disposition());
             assertEquals(0L, drained.stats().gas());
@@ -84,6 +93,7 @@ final class RootedTransportSelectionTest {
     }
 
     @Test void unavailableHistoricalWorkCannotBeBypassedByUnmatchedTransport() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             String sourceYaml = RootedSdkFixture.resource("source.yaml");
             String authoredSource = f.blue.values().yaml(sourceYaml).blueId();
@@ -105,8 +115,10 @@ final class RootedTransportSelectionTest {
             for (boolean restart : List.of(false, true)) {
                 if (restart) CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 assertEquals(ProcessingSelection.Kind.NONE, f.blue.advanced().auditNextProcessingSelection().kind());
+                // when
                 var failure = assertThrows(CoordinationException.class,
                         () -> f.blue.advanced().drainJournalThrough(unmatched, DrainBudget.unlimited()));
+                // then
                 assertEquals(CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH, failure.code());
                 var waiting = f.blue.processing().drain();
                 assertTrue(waiting.entries().isEmpty());

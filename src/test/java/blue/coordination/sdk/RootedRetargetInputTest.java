@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RootedRetargetInputTest {
     @Test
     void inactiveHistoricalRetargetRejectsWithoutRewritingTheReservedLineage() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var b = f.start("historical-a.yaml", "rcp2/a", Map.of());
             var c = f.startYaml(RootedSdkFixture.resource("historical-a.yaml")
@@ -35,8 +36,10 @@ final class RootedRetargetInputTest {
                     .selectManagedEpoch(ManagedEpochSelector.exact(c.id(), 0L, savedC0, "/orders/same"))
                     .submit();
 
+            // when
             var result = f.blue.processing().processNext(parent).entry(retarget);
 
+            // then
             assertEquals(EntryDisposition.REJECTED, result.disposition(), result.diagnostic().toString());
             assertEquals("MANAGED_OCCURRENCE_BINDING_MISSING", result.diagnostic().code());
             assertTrue(result.stats().gas() > 0L);
@@ -70,6 +73,7 @@ final class RootedRetargetInputTest {
 
     @Test
     void activeRetargetChangesOnlyOutputAndReceivesTheNextLiveSourceEvent() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var b = f.start("historical-a.yaml", "rcp2/a", Map.of());
             var c = f.startYaml(RootedSdkFixture.resource("historical-a.yaml")
@@ -85,8 +89,10 @@ final class RootedRetargetInputTest {
             var retarget = f.append(parent, "rcp2/b", "replace", 300,
                     reference(c.snapshot().blueId()));
 
+            // when
             var result = applied(f, parent, retarget);
 
+            // then
             var closure = result.closures().get(0);
             var input = f.blue.advanced().closureInvocation(closure.closureId()).orElseThrow();
             var output = f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
@@ -129,9 +135,12 @@ final class RootedRetargetInputTest {
 
     @Test
     void activeRetargetKeepsItsExactGasBoundaryAndRollsBackAtOneLess() throws Exception {
+        // given
         long required = activeRetargetAtGas(100_000L, true);
         assertTrue(required > 1L);
+        // when
         activeRetargetAtGas(required - 1L, false);
+        // then
         assertEquals(required, activeRetargetAtGas(required, true));
     }
 

@@ -10,14 +10,25 @@ import static org.junit.jupiter.api.Assertions.*;
 /** A FROM_NOW admission reuses the source position already committed at its activation entry. */
 final class RootedStaticAdmissionCutoffTest {
     @Test void inlineSourceAtAdmissionFrontierKeepsItsExistingHistory() throws Exception {
-        reuse(false);
+        // given
+        boolean reference = false;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> reuse(reference);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void referencedSourceAtAdmissionFrontierKeepsItsExistingHistory() throws Exception {
-        reuse(true);
+        // given
+        boolean reference = true;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> reuse(reference);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void laterNumberedPublicationCannotExtendAdmissionInterval() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             String yaml = RootedSdkFixture.resource("source.yaml");
             var source = f.startYaml(yaml, "rcp2/source");
@@ -30,7 +41,9 @@ final class RootedStaticAdmissionCutoffTest {
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(source, future).entry(future).disposition());
             var sourceHistory = f.history(source);
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+            // when
             finishHistory(f, parent);
+            // then
             assertEquals(3L, ((Number) f.selected(parent, "/child").scalarAt("/counter")).longValue());
             assertEquals(9L, source.snapshot().longAt("/counter"));
             assertEquals(sourceHistory, f.history(source));
@@ -39,6 +52,7 @@ final class RootedStaticAdmissionCutoffTest {
     }
 
     @Test void sameEpochAdmissionPositionDoesNotChaseLaterRepresentation() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             String sourceYaml = RootedSdkFixture.resource("source.yaml") + """
                       emitUnmatched:
@@ -83,7 +97,9 @@ final class RootedStaticAdmissionCutoffTest {
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
             assertEquals(target, f.control.registeredOwnedHistory(consumer.id()).successorRepresentationCause()
                     .orElseThrow().targetPositionIdentity());
+            // when
             finishHistory(f, consumer);
+            // then
             assertEquals(frozen, consumer.snapshot().valueAt("/child").blueId());
             assertEquals(later, parent.snapshot().blueId());
             assertEquals(parentHistory, f.history(parent));

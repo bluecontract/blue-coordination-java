@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Cross-root scheduling must not change a root's ordered history or consume another command's work. */
 final class RootedSlicedSelectionTest {
     @Test void aManagedSliceYieldsToAnIndependentJournalAdmissionWithoutLosingTheNextHistoricalStep() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             String original = f.retain(source);
@@ -38,7 +39,9 @@ final class RootedSlicedSelectionTest {
             assertEquals(ProcessingSelection.Kind.JOURNAL,
                     f.blue.advanced().auditNextProcessingSelection(ProcessingAvailability.of(true)).kind());
             var next = f.append(unrelated, "rcp2/unrelated", "tick", 30, "{}");
+            // when
             var journal = f.blue.advanced().drainJournalThrough(next, DrainBudget.unlimited());
+            // then
             assertEquals(EntryDisposition.APPLIED, journal.entry(next).disposition());
             assertTrue(journal.managedEpochApplications().isEmpty());
             assertEquals(1L, unrelated.snapshot().longAt("/counter"));
@@ -55,6 +58,7 @@ final class RootedSlicedSelectionTest {
     }
 
     @Test void aFailedHistoricalRootCannotBlockIndependentInputsOrSkipItsOwnPendingHistory() throws Exception {
+        // given
         try (var f = new RootedSdkFixture(ContractsExecutionPolicy.exactSharedGas(3_000L, "rooted-fairness"))) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             String original = f.retain(source);
@@ -72,7 +76,9 @@ final class RootedSlicedSelectionTest {
                     ContractsExecutionPolicy.releaseDefault()).entry(attach).disposition());
             var before = List.of(f.history(source), f.history(parent));
             var first = f.blue.advanced().auditNextProcessingSelection();
+            // when
             var failed = verifiedHistoricalStep(f, parent, first);
+            // then
             assertTrue(failed.managedEpochApplications().isEmpty());
             assertEquals("GAS_LIMIT_EXCEEDED", failed.managedEpochApplicationAttempts().get(0).attempt().processResult().status().name());
             assertEquals(before, List.of(f.history(source), f.history(parent)));
@@ -103,6 +109,7 @@ final class RootedSlicedSelectionTest {
     }
 
     @Test void historicalRoundsRotateBetweenOwnersWithoutReorderingEitherHistory() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             String original = f.retain(source);
@@ -118,6 +125,7 @@ final class RootedSlicedSelectionTest {
             var attachQ = f.append(q, "rcp2/other-parent", "attach", 30, "child: {blueId: " + original + "}");
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(p, attachP).entry(attachP).disposition());
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(q, attachQ).entry(attachQ).disposition());
+            // when
             for (long epoch = 1; epoch <= 3; epoch++) {
                 var owners = new java.util.HashSet<blue.coordination.api.DocumentId>();
                 for (int turn = 0; turn < 2; turn++) {
@@ -132,6 +140,7 @@ final class RootedSlicedSelectionTest {
                 CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 assertEquals(sourceHistory, f.history(source));
             }
+            // then
             for (var parent : List.of(p, q)) {
                 assertEquals(3L, parent.snapshot().longAt("/seen"));
                 for (int i = 0; i < 3; i++) assertEquals(i + 1L, parent.snapshot().longAt("/log/" + i));

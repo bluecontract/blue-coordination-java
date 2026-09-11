@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedJoinPrerequisiteViewTest {
     @Test void retainedIntermediateReturnPathRequiresItsEarlierInputBeforeTheJoinFreezes() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var a = f.start("A"); var b = f.start("B"); var x = f.start("X");
             f.attach(x, "b", b); f.settle(x);
@@ -32,7 +33,9 @@ final class RootedJoinPrerequisiteViewTest {
                             && row.targetDocumentId().value().equals(b.id().value())));
             var join = f.append(b, "attach", "edge: a\nsource: {blueId: " + f.authored.get(a.id()) + "}");
             var before = List.of(f.history(a), f.history(b), f.history(x));
+            // when
             var waiting = f.blue.processing().processNext(b);
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, waiting.entry(join).disposition());
             assertEquals(before, List.of(f.history(a), f.history(b), f.history(x)));
             assertTrue(f.blue.advanced().auditManagedCatchUpPlans(b.id()).isEmpty(), "No frozen source plan may be admitted ahead of the prerequisite");

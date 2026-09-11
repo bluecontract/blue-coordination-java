@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RootedFrozenHistoricalRetargetReproductionTest {
     @Test
     void selectedC0MustRejectWithoutReplacingAlreadyFrozenC1() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var b = f.start("historical-a.yaml", "rcp2/a", Map.of());
             var c = f.startYaml(RootedSdkFixture.resource("historical-a.yaml")
@@ -60,8 +61,10 @@ final class RootedFrozenHistoricalRetargetReproductionTest {
                     new blue.language.processor.closure.DocumentId(c.id().value()), 0L);
             var expectedRetry = ClosureProcessRetryInput.derived(captured, List.of(exactC0));
 
+            // when
             var result = f.blue.processing().processNext(parent).entry(entry);
 
+            // then
             assertEquals(heads, List.of(parent.snapshot().blueId(), b.snapshot().blueId(), c.snapshot().blueId()));
             assertEquals(histories, List.of(f.history(parent), f.history(b), f.history(c)));
             assertEquals(reserved, f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow());

@@ -16,13 +16,16 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual local retained publication, shared-gas rollback and response-loss recovery. */
 final class RootedLocalHistoryRecoveryTest {
     @Test void retainedCauseDoesNotRepeatItsOriginalOperationSelectors() throws Exception {
+        // given
         try (var scenario = new Scenario(100_000L, true)) {
             var heads = scenario.heads();
             var histories = completeHistories(scenario);
             var input = scenario.f.control.captureLocalHistory(scenario.root.id());
             var reference = RootedCalculationFixture.materializedReference(input);
             assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
+            // when
             var result = scenario.f.blue.processing().processNext(scenario.root);
+            // then
             assertTrue(result.quiescent());
             assertEquals(1, result.rootedRetainedResults().size());
             var actual = scenario.f.blue.advanced().closureExecution(result.rootedRetainedResults().get(0).closureId()).orElseThrow();
@@ -52,6 +55,7 @@ final class RootedLocalHistoryRecoveryTest {
     }
 
     @Test void liveOperationStillRejectsAnUnresolvedSelectorPath() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             String template;
             try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
@@ -68,8 +72,10 @@ final class RootedLocalHistoryRecoveryTest {
                     .requestYaml("edge: c\nsource: {blueId: " + source.snapshot().blueId() + "}")
                     .selectManagedEpoch(ManagedEpochSelector.exact(source.id(), 0L,
                             source.snapshot().blueId(), "/peers/not-c")).submit();
+            // when
             var failure = assertThrows(blue.coordination.api.CoordinationException.class,
                     () -> f.blue.processing().processNext(root));
+            // then
             var cause = assertInstanceOf(IllegalArgumentException.class, failure.getCause());
             assertTrue(cause.getMessage().contains("MANAGED_EPOCH_SELECTOR_PATH_MISMATCH"), cause.toString());
             assertTrue(cause.getMessage().contains("/peers/not-c"), cause.toString());
@@ -179,6 +185,7 @@ final class RootedLocalHistoryRecoveryTest {
     }
 
     @Test void failedLocalRetainedWorkDoesNotHideAnIndependentJournalInputAfterRestart() throws Exception {
+        // given
         long successfulGas;
         try (var calibration = new Scenario(100_000L)) {
             var reference = RootedCalculationFixture.materializedReference(
@@ -193,7 +200,9 @@ final class RootedLocalHistoryRecoveryTest {
             var reference = RootedCalculationFixture.materializedReference(input);
             var heads = scenario.heads();
             var histories = completeHistories(scenario);
+            // when
             var failed = f.blue.processing().processNext(scenario.root);
+            // then
             assertEquals(1, failed.rootedRetainedResults().size());
             var terminal = failed.rootedRetainedResults().get(0);
             assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, terminal.disposition());
@@ -272,6 +281,7 @@ final class RootedLocalHistoryRecoveryTest {
     }
 
     @Test void uncommittedLocalPublicationFailurePreservesSelectionsAcrossRestart() throws Exception {
+        // given
         try (var scenario = new Scenario(100_000L)) {
             var f = scenario.f;
             var independent = f.start("source.yaml", "rcp2/source", Map.of());
@@ -283,8 +293,10 @@ final class RootedLocalHistoryRecoveryTest {
             var independentHead = independent.snapshot().exact().json();
             var independentHistory = completeHistory(f, independent);
             f.control.failPublicationAt("BEFORE_SWAP");
+            // when
             assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(scenario.root));
             f.control.clearPublicationFailure();
+            // then
             for (boolean restart : List.of(false, true)) {
                 if (restart) CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 assertSameSelection(ordinary, f.blue.advanced().auditNextProcessingSelection());

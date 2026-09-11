@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real reciprocal history whose unchanged, nonmanaged candidate also has a provider identity. */
 final class RootedRetainedSourceWireTest {
     @Test void terminalReciprocalReceiptUsesItsExactFrozenSourceWireRepresentation() throws Exception {
+        // given
         try (var s = new Scenario()) {
             s.advanceTo(3L);
             var input = s.input();
@@ -37,7 +38,9 @@ final class RootedRetainedSourceWireTest {
             var consumerBefore = s.history(s.b);
             var resources = s.exactResources();
             var work = s.work();
+            // when
             var result = s.blue.processing().drainManagedEpochApplication(work.workIdentity());
+            // then
             assertEquals(1, result.managedEpochApplications().size(), result.diagnostic().toString());
             assertEquals(s.json(source.document()), s.json(cause.afterDocument()),
                     "One exact source must have one wire representation inside the frozen invocation");
@@ -104,10 +107,13 @@ final class RootedRetainedSourceWireTest {
     }
 
     @Test void olderHistoricalReceiptIsNotReplacedByTheSelectedTerminalSource() throws Exception {
+        // given
         try (var s = new Scenario()) {
+            // when
             var input = s.input();
             var cause = (ManagedRevisionCause) input.cause();
             var source = input.snapshot().managedDocument(new blue.language.processor.closure.DocumentId(s.a.id().value()));
+            // then
             assertEquals(0L, cause.toEpoch());
             assertEquals(3L, source.epoch());
             assertNotEquals(cause.afterBlueId(), source.blueId());

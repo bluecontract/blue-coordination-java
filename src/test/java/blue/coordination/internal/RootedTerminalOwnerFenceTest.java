@@ -21,11 +21,21 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real two-root history: related LIVE work cannot overtake an exact terminal cycle join. */
 final class RootedTerminalOwnerFenceTest {
     @Test void terminalJoinBlocksRelatedObserverLiveBeforeItChangesBorrowedSource() throws Exception {
-        assertEquals(run(false), run(true), "Sliced global execution preserves the complete root-local history/gas/event evidence");
+        // given
+        var rootLocal = run(false);
+        // when
+        var slicedGlobal = run(true);
+        // then
+        assertEquals(rootLocal, slicedGlobal, "Sliced global execution preserves the complete root-local history/gas/event evidence");
     }
 
     @Test void rootLocalTerminalJoinWithoutInterleavedObserverLiveCompletes() throws Exception {
-        run(false);
+        // given
+        boolean global = false;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> run(global);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     private List<Object> run(boolean global) throws Exception {

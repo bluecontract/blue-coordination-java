@@ -683,9 +683,14 @@ def publicBoundarySources = files(
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 245,
-        lines: 72_540L,
-        publicApiTypes: 86,
+        // Rooted baseline corrections add four internal selection/admission helpers
+        // and the read-only SourceHistoryPrerequisiteObservation API value.
+        // Exact measured delta: +5 sources, +617 lines, +1 public source type.
+        // See docs/rooted-baseline-release-fixes.md; these are source-shape guards,
+        // not changes to any protocol, closure, execution, or gas limit.
+        classes: 250,
+        lines: 73_157L,
+        publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
