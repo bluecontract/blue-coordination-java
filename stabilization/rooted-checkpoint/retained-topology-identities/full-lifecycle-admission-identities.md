@@ -7,7 +7,7 @@ This mixed evidence artifact is generated from real public Coordination admissio
 ## Frozen inputs
 
 - blueLanguageSpecification: `sha256:77b48506ff7b5ddbab26b98ce9e060e943cb3babf1e6f5511085bbb3c31c4144`
-- contractsRelease: `sha256:156b58c6a19ab94cd3d1759dbbd115963c6d345c69511113798824cb5c749ced`
+- contractsRelease: `sha256:d7e878bd320dd53837fc4298210b2a4d301fae02b9993dfa98ac652714c774eb`
 - contractsSpecification: `sha256:e91381c970859a6bafecdd99e46f5115ba033bf0534be84bbd5582531e9e347f`
 - cyclicFinalizer: `sha256:f8e41baf14343d05b065745c3d1c569dd15e3fbae09331757efd2f7ffbf6f52b`
 - cyclicProofVerifier: `sha256:0d1a9ab0ee17712521cccb8d988d838c5b7de949b1d168a1c204ac2538e71834`

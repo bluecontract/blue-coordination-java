@@ -1,15 +1,22 @@
-# Static admission keeps its selected source publication
+# Static admission keeps its frozen source cutoff
 
 ## Problem and exact example
 
 A source is admitted, then processes entry E and publishes epoch 1. A new
 `FROM_NOW` static parent embeds that source, either inline or by its authored
 BlueId. The admission frontier is E, and the admission retains the existing
-source's exact epoch-1 head without changing its session. Its pending historical
-application subsequently failed: `rootedViewBefore(E)` selected epoch 0, while
-the admitted parent correctly held epoch 1. The numbered terminal-source guard
-rejected these different source positions. A MyOS READY timeout was the later
-symptom, not grounds for extending a deadline.
+source's exact epoch-1 head as the frozen **end** of its catch-up interval,
+without changing the source session. Epoch 1 is not a replacement initial
+position: the authored source still contributes initialization, successors and
+their required reactions. Its pending historical application subsequently
+failed: `rootedViewBefore(E)` selected epoch 0 as the terminal source, although
+the admission had frozen epoch 1. The numbered terminal-source guard rejected
+these different end positions. A MyOS READY timeout was the later symptom,
+not grounds for extending a deadline.
+
+The original MyOS reproduction explicitly selected `FROM_NOW` through internal
+command tests. Ordinary MyOS public start selects `importFullHistory`; this
+example does not describe a new default policy or a shortcut around that history.
 
 The direct inline SDK reproducer fails on the original implementation with
 `Numbered terminal source differs from its frozen source publication`, selected
@@ -20,14 +27,17 @@ the corrected admission and catch-up path.
 ## Correction and authority
 
 Rooted `FROM_NOW` admission captures the actual retained `RootedDocumentView`
-for each existing selected source. Capture checks the admission input's exact
-epoch/BlueId, the frontier, and membership in that source's real committed
+at the frozen end of each existing selected source's catch-up interval. Capture
+checks the admission input's exact epoch/BlueId, the frontier, and membership
+in that source's real committed
 publication history. The immutable position references are retained with the
 new document's admission-owned history facts in the same atomic transaction.
 Initial catch-up planning, subsequent per-consumer planning, and rooted
-invocation capture use these positions only at that original admission
-boundary. Each use still verifies retained publication membership. Existing
-co-owned publication authority remains checked first.
+invocation capture use these terminal positions only at that original admission
+boundary. They do not skip the initialization or intermediate historical
+applications needed to reach that endpoint. Each use still verifies retained
+publication membership. Existing co-owned publication authority remains checked
+first.
 
 This implements the existing admission-selected anchor, consistent with
 RCP-CAUSE-01/02 and the FROM_NOW lower-exclusive activation entry in RCP-ID-01.
