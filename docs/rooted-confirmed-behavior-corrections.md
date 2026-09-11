@@ -55,7 +55,8 @@ evidence; B's old history and already-frozen deliveries retain their identities.
   The original
   `RetainedManagedEpochCatchUpIntegrationTest.detachReaddAndRetargetRetireOldOccurrenceGenerations`
   already expected C catch-up from epoch zero, active C generation3 after
-  B generation1 and its detached successor generation2, and completed histories
+  B generation1, detach/re-add B generation2, and another removal reserving
+  generation3, with completed histories
   for both sources. Commit `4de829b` changed it to the workaround under the old
   prohibition. Restore that user-path oracle; retain independent source and
   restart/authentication checks that remain valid.

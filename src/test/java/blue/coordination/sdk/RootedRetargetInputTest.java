@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Retarget effects must not rewrite the processor's original binding evidence. */
 final class RootedRetargetInputTest {
     @Test
-    void inactiveHistoricalRetargetRejectsWithoutRewritingTheReservedLineage() throws Exception {
+    void inactiveHistoricalRetargetCatchesUpWithoutRewritingTheInputReservation() throws Exception {
         // given
         try (var f = new RootedSdkFixture()) {
             var b = f.start("historical-a.yaml", "rcp2/a", Map.of());
@@ -25,7 +25,9 @@ final class RootedRetargetInputTest {
                     reference(b.snapshot().blueId())));
             applied(f, c, f.append(c, "rcp2/c", "tick", 200, "{}"));
             f.retain(c);
-            applied(f, parent, f.append(parent, "rcp2/b", "remove", 300, "{}"));
+            var removal = applied(f, parent, f.append(parent, "rcp2/b", "remove", 300, "{}"));
+            var reservedBinding = row(f.blue.advanced().closureExecution(removal.closures().get(0).closureId())
+                    .orElseThrow().occurrenceBindings(), parent);
             var reserved = f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow();
             assertFalse(reserved.active());
             assertEquals(2L, reserved.activationGeneration());
@@ -40,34 +42,45 @@ final class RootedRetargetInputTest {
             var result = f.blue.processing().processNext(parent).entry(retarget);
 
             // then
-            assertEquals(EntryDisposition.REJECTED, result.disposition(), result.diagnostic().toString());
-            assertEquals("MANAGED_OCCURRENCE_BINDING_MISSING", result.diagnostic().code());
+            assertEquals(EntryDisposition.APPLIED, result.disposition(), result.diagnostic().toString());
             assertTrue(result.stats().gas() > 0L);
-            assertEquals(0L, result.stats().committedTransitions());
-            assertTrue(result.publicEvents().isEmpty());
-            assertEquals(reserved, f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow());
-            var replayed = f.blue.processing().process(parent, retarget).entry(retarget);
-            assertEquals(result.disposition(), replayed.disposition());
-            assertEquals(result.stats(), replayed.stats());
-            assertEquals(result.diagnostic(), replayed.diagnostic());
-            assertEquals(heads, heads(parent, b, c));
-            assertEquals(histories, List.of(f.history(parent), f.history(b), f.history(c)));
+            assertEquals(heads.subList(1, 3), heads(b, c));
+            assertEquals(histories.subList(1, 3), List.of(f.history(b), f.history(c)));
             var closure = result.closures().get(0);
             var input = f.blue.advanced().closureInvocation(closure.closureId()).orElseThrow();
             var output = f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
             var before = row(input.snapshot().occurrences(), parent);
             var after = row(output.occurrenceBindings(), parent);
             assertEquals(b.id().value(), before.targetDocumentId().value());
-            assertEquals(before.bindingIdentity(), after.bindingIdentity());
+            assertEquals(reservedBinding.bindingIdentity(), before.bindingIdentity());
+            assertFalse(before.active());
             assertNull(before.pendingHistoricalEpoch());
-            assertTrue(output.rollbackToInput());
-            assertNull(output.commitCompanion());
-            assertTrue(output.checkpointWrites().isEmpty());
-            assertTrue(output.managedTransitionReceipts().isEmpty());
+            assertEquals(c.id().value(), after.targetDocumentId().value());
+            assertEquals(before.activationGeneration(), after.activationGeneration());
+            assertNotEquals(before.occurrenceIdentity(), after.occurrenceIdentity());
+            assertEquals(savedC0, after.expectedTargetBlueId());
+            assertEquals(Long.valueOf(0L), after.pendingHistoricalEpoch());
+            assertFalse(output.rollbackToInput());
+            assertNotNull(output.commitCompanion());
+            var caughtUp = f.blue.processing().processNext(parent);
+            assertEquals(1, caughtUp.managedEpochApplications().size());
+            assertTrue(caughtUp.quiescent());
+            assertEquals(1L, parent.snapshot().longAt("/seen"));
+            var live = f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow();
+            assertTrue(live.active());
+            assertEquals(c.id(), live.targetDocumentId());
+            assertEquals(after.activationGeneration(), live.activationGeneration());
+            var finalHeads = heads(parent, b, c);
+            var finalHistories = List.of(f.history(parent), f.history(b), f.history(c));
+            var replayed = f.blue.processing().process(parent, retarget).entry(retarget);
+            assertEquals(result.disposition(), replayed.disposition());
+            assertEquals(result.stats(), replayed.stats());
+            assertEquals(finalHeads, heads(parent, b, c));
+            assertEquals(finalHistories, List.of(f.history(parent), f.history(b), f.history(c)));
             CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
-            assertEquals(heads, heads(parent, b, c));
-            assertEquals(histories, List.of(f.history(parent), f.history(b), f.history(c)));
-            assertEquals(reserved, f.blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow());
+            assertEquals(finalHeads, heads(parent, b, c));
+            assertEquals(finalHistories, List.of(f.history(parent), f.history(b), f.history(c)));
+            assertTrue(f.blue.processing().processNext(parent).quiescent());
         }
     }
 

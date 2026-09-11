@@ -2103,9 +2103,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     occurrence.demand().sourcePath());
             ManagedOccurrenceBinding retained = rows.get(key);
             if (retained != null) {
-                // Read expansion cannot turn an original inactive reservation
-                // into another lineage. Keep that input so the processor can
-                // reject the attempted retarget under the reservation rule.
+                // A committed inactive reservation is immutable input, not a
+                // permanent restriction on the next target. Supply exact
+                // selection evidence; only PROCESS may replace it in output.
                 if (current.rootedEvidence() != null
                         && !retained.active()
                         && retained.pendingHistoricalEpoch() == null
@@ -2117,7 +2117,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                             .managedDocument(closureId(occurrence.targetDocumentId()));
                     long selectedEpoch = occurrence.admittedSourceEpoch();
                     if (target != null && target.initialized()
-                            && selectedEpoch >= 0L && selectedEpoch <= target.epoch()
+                            && selectedEpoch >= -1L && selectedEpoch <= target.epoch()
                             && (selectedEpoch < target.epoch()
                                     || target.blueId().equals(occurrence.demand().suppliedValueBlueId()))) {
                         ManagedOccurrenceEvidenceResolution exact = ManagedOccurrenceEvidenceResolution.derived(
@@ -2320,7 +2320,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ClosureInvocationInput expanded = ClosureEvidenceFactory.rootedReadExpansion(current.input(),
                     graphGeneration, new ArrayList<>(existing.values()), new ArrayList<>(rows.values()),
                     attachmentViews.values().stream().map(RootedDocumentView::retainedSnapshot).distinct().toList());
-            ClosureProcessRetryInput retry = retryResolutions.isEmpty() ? null
+            // Expanding the read set changes the authenticated base. A demand
+            // from the preceding attempt cannot authorize that new input;
+            // PROCESS must issue its own exact demand before it is resolved.
+            ClosureProcessRetryInput retry = retryResolutions.isEmpty()
+                    || !expanded.invocationIdentity().equals(current.input().invocationIdentity()) ? null
                     : ClosureProcessRetryInput.derived(expanded, new ArrayList<>(retryResolutions.values()));
             return new CohortInvocation(coordinationIds(members), current.directDeliveries(), expanded, retry,
                     captured, current.managedDraftPlan(), accumulated, current.publicationIdentityMembers(),
