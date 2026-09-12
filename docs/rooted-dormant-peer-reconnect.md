@@ -122,3 +122,20 @@ Parent-owned first selector (reuse the frozen candidate's exact dependencies):
 Do not update dependency pins, enable artifact-write mode, or raise budgets to
 make the diagnostic run. Archive a prefix failure as such; it is not evidence
 that the final reconnect oracle was reached.
+
+## Test observer correction after the initial draft
+
+The generic observer originally treated every `DrainResult.blocked()` as proof
+that the call performed no work. That is not the SDK contract:
+`DrainResult.stats()` reports aggregate work performed by the call, while
+`blocked()` describes required work still waiting. The public API reference
+also distinguishes drain-wide readiness from the results returned by that
+specific drain. A call can publish its last available prefix and then discover
+that its next step is blocked.
+
+The test-only successor therefore accumulates all returned call gas, including
+on a blocked result, and still inspects every actual result, receipt, source
+frontier and gas identity. It does not alter the final settlement requirement,
+the zero-work restart assertions, or explicit pure-wait controls elsewhere.
+This corrects the copied observer assumption; it is not a runtime change or a
+claim that the dormant reconnect has passed.

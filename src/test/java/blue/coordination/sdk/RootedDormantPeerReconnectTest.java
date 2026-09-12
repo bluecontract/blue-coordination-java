@@ -170,12 +170,9 @@ final class RootedDormantPeerReconnectTest {
         }
 
         void observe(DrainResult drain) {
-            if (drain.blocked()) {
-                assertEquals(0L, drain.stats().committedTransitions());
-                assertEquals(0L, drain.stats().gas());
-            } else {
-                aggregateCallGas = Math.addExact(aggregateCallGas, drain.stats().gas());
-            }
+            // Readiness describes remaining work; this call may have published
+            // a genuine prefix before discovering that the next step is blocked.
+            aggregateCallGas = Math.addExact(aggregateCallGas, drain.stats().gas());
             var source = f.blue.advanced().auditManagedEpoch(root("A").id(), sourceEpoch).orElseThrow();
             assertEquals(sourceReceipt, source.receiptIdentity());
             assertEquals(sourceBlueId, source.afterBlueId());
