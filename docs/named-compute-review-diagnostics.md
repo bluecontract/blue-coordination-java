@@ -29,6 +29,13 @@ declarations, reached through referenced parents, inherited containers, and
 partial local overlays of inherited containers. Existing successful workflows,
 escaped pointers, static rejection and changed-definition tests remain enabled.
 
+The inherited/partial-overlay fixtures place the library inline inside its
+referenced base type; the dedicated referenced-parent fixture retains a pure
+library reference. An earlier combined reference-plus-overlay fixture returned
+no child from the existing resolved read before the new capability was reached.
+That result exposed an unverified setup assumption, not a confirmed protocol
+defect or a reason to change expected Compute results.
+
 ## Recorded original result
 
 `upstream-review-named-01`: **74 tests, 4 failures**. Both root-pointer cases

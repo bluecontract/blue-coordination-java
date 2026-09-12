@@ -418,7 +418,7 @@ final class SdkNamedComputeDefinitionTest {
             definition = preparer.values().providerContentYaml("type: Coordination/Compute Definition\n"
                     + field + (form.equals("empty") ? ": {}\n" : ": {type: Dictionary}\n"));
             library = preparer.values().providerContentYaml("coffeeCode: {blueId: " + definition.blueId() + "}\n");
-            base = preparer.values().providerContentYaml("library: {blueId: " + library.blueId() + "}\n");
+            base = preparer.values().providerContentYaml("library:\n  coffeeCode: {blueId: " + definition.blueId() + "}\n");
         }
         List<ExactBlueValue> retained = List.of(definition, library, base);
         try (BlueCoordination blue = BlueCoordination.builder().exactNodeProvider(requested -> retained.stream()
