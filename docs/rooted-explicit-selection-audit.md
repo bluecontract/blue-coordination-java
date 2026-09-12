@@ -60,7 +60,7 @@ processing operation, gas rule or persistence format is added.
 
 ## Verification scope
 
-Authored here; no JVM/tests were run while preparing this patch:
+The following controls were added or strengthened:
 
 - `RootedExplicitSelectionAuditTest`: actual managed C1 versus unrelated global
   LIVE selection; repeated audits and restart preserve histories, selected view,
@@ -86,3 +86,23 @@ sources and 87 public API/SDK source types unchanged; 74,231 → 74,262 lines
 (+31). The two public additions are the SDK method and its existing internal
 engine seam; the runtime bridge is package-private. The shape guard records
 that exact delta, not additional implementation headroom.
+
+## First focused run and test-oracle correction
+
+The frozen `770ddbc4b8b23c1f913eeaf1fce0a96a28991c88` candidate completed
+22 tests: 21 passed, one failed, none skipped. The only failure was the new
+repeated-selection assertion in
+`RootedLocalHistoryRecoveryTest.retainedCauseDoesNotRepeatItsOriginalOperationSelectors`.
+It compared `ProcessingSelection` records by Java equality even though their
+`ManagedEpochApplicationWork` component has object equality. Root-local
+selection reconstructs that immutable work on every capture; object reuse is
+not part of the audit contract.
+
+The correction uses this class's existing `assertSameSelection` helper for
+both repeated root and global audits. It compares lane, local-root marker and
+the verified canonical work identity, which binds all work coordinates and
+any representation/successor cause. This changes no production behavior and
+retains every pre-existing state, history, gas, full-trace and reference-result
+assertion, including comparison of the audited work with actual execution.
+The failed run remains evidence for its original candidate; the corrected
+test requires a fresh run and is not claimed as passing here.

@@ -1,17 +1,62 @@
 # Named Compute upstream-review diagnostics
 
-Isolated upstream candidate and necessary follow-up. Branch `codex/diagnose-named-compute-review`
+## Current integrated status
+
+The integrated candidate at Coordination
+`770ddbc4b8b23c1f913eeaf1fce0a96a28991c88`, using staged Language
+`101bcadff3c2638c3e43454f5d4aef0fbc07eece`, passes all **88** cases in the
+two complete named-Compute owners: 60 SDK cases and 28 normalizer cases,
+zero failures/errors/skips. The same bridge passes 36 Contracts controls and
+the exact Language/BEX/Catalog exports. Configuration SHA-256:
+`da06f58b99ddaf6d331712d470dab7e48efce7be5b73952b1e2773b82e830158`;
+Coordination archive SHA-256:
+`494f244674e220c1a1cf350155d124e9082d81df4f9061623ac4f6a3544f7444`.
+These focused receipts do not claim full library or MyOS acceptance.
+
+The current successor also adds the separate
+[exact selected-root audit](rooted-explicit-selection-audit.md) needed for
+MyOS's pre-execution managed-work ownership. The first root-audit group is
+21/22 passing; its one new test-oracle correction compares canonical work
+identity instead of Java object equality. Neither that failure nor its
+test-only correction changes the named-Compute behavior verified above.
+
+A subsequent valid-list-replacement review found one necessary correction to
+the new Contracts provenance selector: `$replace` discards an old slot's
+ordinary fields but must retain its inherited type's definition contribution
+at a deeper selected path. The original isolated run passed three of four
+controls. The narrow fix now passes all 40 grouped Contracts cases, with zero
+failures/errors/skips, at `3474e82bb27f45716c5f8331bf1aab759be5f9ca`
+(11.697445 seconds); archive SHA-256:
+`64fca7779e52d8b8c8f2745f8cccdebe19b359923ac7251c231ca307feadf990`.
+The Language documents
+`docs/working-source-contributions.md`, `docs/source-list-contribution-review.md`
+and `docs/nested-value-review-diagnostics.md` distinguish provenance, existing
+list-resolution rules and Source/minimization identity. The final corrected
+Language must be exported and requalified with Coordination; existing bridge
+receipts keep their original source pins.
+
+The three upstream MyOS cases that were previously disabled remain mandatory
+explicit acceptance owners, not implied passes from these library probes.
+Published dependency locks and release metadata are not yet updated: ordinary
+Coordination PR CI remains blocked by RC9-only preparation authority and by
+the new Contracts API being absent from published Language RC25.
+
+## Original isolated candidate (historical)
+
+Branch `codex/diagnose-named-compute-review`
 starts at Coordination PR #18 head
 `b5f7767de95ad494b46667b7e91369c7ab3c6a41`, descending from its remote `next`
 base `0a047461bbc9e97a969ae1021bd86964eadd4c8c`. The original red run used
-test-only commit `3e00e71fc7acbda41563b6b7052ec6171590f2f6`. The follow-up below
-is not yet qualified. Dependency locks and release metadata remain unchanged.
+test-only commit `3e00e71fc7acbda41563b6b7052ec6171590f2f6`. The results below
+preserve that original diagnosis; the current focused status is recorded above.
+Dependency locks and release metadata remain unchanged.
 
 The original diagnostic used this PR's published dependencies unchanged: Language/Contracts
 `3.1.0-rc.25`, BEX `1.1.0-rc.6`, Catalog `3.0.0-rc.22`. Language PR #33 is not
 required for those diagnostics; PR #34 is deliberately excluded. The new
-follow-up requires the additive Contracts capability described below; stage
-that exact local Language/Contracts candidate before testing Coordination.
+follow-up requires the additive Contracts capability described below. Its
+focused integration uses the exact staged local Language/Contracts candidate,
+not an unverified published fallback.
 
 ## Bounded parent-owned run
 

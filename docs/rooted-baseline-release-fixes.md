@@ -7,15 +7,51 @@ serialization, worker recovery, or a replacement processing model.
 
 ## Current qualification candidate — 12 September
 
-The separately prepared [exact selected-root work audit](rooted-explicit-selection-audit.md)
-adds a necessary SDK observation seam for host pre-execution ownership. It does
-not alter the existing global fair selector or processing rules; its new and
-strengthened controls are pending qualification, not covered by older receipts.
+The integrated successor includes the earlier baseline corrections, the
+existing upstream named-Compute and nested-value identity changes, and their
+necessary reviewed follow-ups. It is **not yet fully qualified or merge-ready**.
+The latest completed staged bridge binds Language
+`101bcadff3c2638c3e43454f5d4aef0fbc07eece`, Coordination
+`770ddbc4b8b23c1f913eeaf1fce0a96a28991c88`, unchanged BEX `ab72af14` and
+Catalog `0b68744b`. Its exact configuration SHA-256 is
+`da06f58b99ddaf6d331712d470dab7e48efce7be5b73952b1e2773b82e830158`.
 
-The current candidate includes the corrections below and
+| Additional scope | Necessary correction and latest evidence |
+| --- | --- |
+| Language nested-value identity and minimization | Preserve explicit versus inherited Source contributions when inline children are replaced by exact references and when minimized values are reloaded. The integrated changes retain independent Source-identity and cold-reload controls; see Language `docs/nested-value-review-diagnostics.md`. |
+| [Named Compute](named-compute-review-diagnostics.md) | Correct root-pointer composition and distinguish exact declared maps from absent inherited defaults. The additive Contracts `WorkingDocument.sourceContributionsAt` supplies verified occurrence contributions; its presence classification also binds the Compute cache key. The staged bridge passes 36 Contracts controls and all 88 Coordination named-Compute/normalizer cases (60 + 28), with zero failures/errors/skips. Language/BEX/Catalog exports also pass. This is focused evidence, not full library qualification. |
+| [Exact selected-root work audit](rooted-explicit-selection-audit.md) | The global selector can choose LIVE work for A while explicit `processNext(B)` selects B's managed prerequisite. Add an exact-root audit so MyOS can acquire the correct invocation-owned work lease **before** execution. Do not change global fairness, ownership, cutoff or processing rules. The first six-class group completes 22 cases: 21 pass and one new assertion fails because it compares Java object equality rather than canonical work identity. Its test-only correction reuses the existing exact-selection helper; a fresh pass is still required. |
+| Language list-slot provenance follow-up | A valid `$pos`/`$replace` removes ordinary slot content but retains its inherited type. The original run passed three of four isolated controls; the fourth proved that the new provenance selector dropped a definition inherited from that retained type. The narrow private-selector correction now passes all 40 grouped Contracts cases, with zero failures/errors/skips, at `3474e82bb27f45716c5f8331bf1aab759be5f9ca` (11.697445 seconds). Language `docs/source-list-contribution-review.md` records the resolver-backed oracle and red/green evidence. This does not change list resolution, minimization, processing or public API signatures. |
+
+The named-Compute archive has SHA-256
+`494f244674e220c1a1cf350155d124e9082d81df4f9061623ac4f6a3544f7444`.
+The first root-audit archive has SHA-256
+`bf156ac2575e3f11d47b7d404896ecd2cd6724266938f09f170fcb2517dd71d8`;
+it remains a failed group, not a 22/22 pass. Existing full state, history,
+gas, trace and reference-result assertions are unchanged by its oracle fix.
+
+The list-selector archive has SHA-256
+`64fca7779e52d8b8c8f2745f8cccdebe19b359923ac7251c231ca307feadf990`.
+That focused Language correction requires a new source/artifact tuple; the
+completed bridge remains evidence only for its original pins. Final clean
+library gates, the complete resident MyOS product and independent HTTP gates,
+and actual enabled passes for all three previously disabled upstream cases
+remain required. Historical 1,196/62 inventories are comparison baselines, not
+assumed successor counts. No disabled case is counted as passing.
+
+Normal published-dependency CI is a separate landing requirement: the new
+Contracts API is not in published Language RC25, and Coordination's RC
+preparation/readiness still authorizes only already-published RC9. Publish the
+approved Language successor and align Coordination's actual published pins
+and authorized release metadata before claiming those PR/release gates pass.
+Development qualification does not bypass these checks or authorize a release.
+
+### Earlier terminal-acquisition candidate and evidence (historical)
+
+The earlier candidate includes the corrections below and
 [terminal-time causal peer acquisition](rooted-terminal-peer-acquisition.md).
-The older source pins and partial failures in the following historical section
-are retained for traceability; they are not the current candidate status.
+These older source pins and partial results are retained for traceability;
+they are not qualification of the integrated successor above.
 
 - Language adds one public evidence-construction operation,
   `ClosureEvidenceFactory.rootedWitnessSelection`, with three implementation

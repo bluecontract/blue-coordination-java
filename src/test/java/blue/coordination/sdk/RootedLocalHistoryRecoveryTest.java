@@ -25,8 +25,8 @@ final class RootedLocalHistoryRecoveryTest {
             assertEquals(scenario.root.id(), selection.rootedRetainedRoot().orElseThrow());
             var global = scenario.f.blue.advanced().auditNextProcessingSelection();
             for (int audit = 0; audit < 3; audit++) {
-                assertEquals(selection, scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root));
-                assertEquals(global, scenario.f.blue.advanced().auditNextProcessingSelection());
+                assertSameSelection(selection, scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root));
+                assertSameSelection(global, scenario.f.blue.advanced().auditNextProcessingSelection());
                 assertEquals(heads, scenario.heads());
                 assertEquals(histories, completeHistories(scenario));
             }
