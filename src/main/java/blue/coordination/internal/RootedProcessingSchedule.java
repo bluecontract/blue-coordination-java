@@ -30,6 +30,16 @@ final class RootedProcessingSchedule {
         return heads.isEmpty() ? null : heads.get(0);
     }
 
+    /** Retains a bounded Journal call's yield without executing or clearing a failed historical item. */
+    void yieldJournalToHistory(RootedCheckpointDriver.Head next) {
+        if (!historical(next.selection())) throw new IllegalArgumentException("A Journal yield requires retained work");
+        if (work(next.selection()).equals(isolated.get(next.root()))) return;
+        historicalTurn = true;
+        // This root can already have had its turn while another root's next LIVE
+        // input lies beyond the cutoff. Reopen only this eligible historical turn.
+        yielded.remove(next.root());
+    }
+
     /** Called only after actual execution, before readiness is widened to include further pending work. */
     void completed(DocumentId owner, RootedCheckpointDriver.Selection selected, ProcessingDrainReceipt result) {
         if (selected.live() != null) {

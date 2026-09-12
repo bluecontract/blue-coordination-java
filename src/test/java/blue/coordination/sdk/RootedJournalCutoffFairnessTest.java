@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.ProcessingSelection;
+import blue.coordination.internal.CoordinationTestControl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -17,9 +18,27 @@ final class RootedJournalCutoffFairnessTest {
             var scenario = firstHistoricalApplication(f, true);
             var sourcePrefix = f.history(scenario.source());
             var futurePrefix = f.history(scenario.futureRoot());
+            var parentPrefix = f.history(scenario.parent());
             assertEquals(ProcessingSelection.Kind.JOURNAL, f.blue.advanced().auditNextProcessingSelection().kind());
 
             // when
+            var yielded = f.blue.advanced().drainJournalThrough(scenario.attachment(), new DrainBudget(1, 1));
+            assertEquals(0L, yielded.stats().committedTransitions());
+            assertEquals(0L, yielded.stats().gas(), "A scheduling yield performs no metered processing");
+            assertFalse(yielded.quiescent());
+            assertTrue(yielded.paused());
+            assertTrue(yielded.managedEpochApplications().isEmpty(), "Journal must not execute the historical lane");
+            var selected = f.blue.advanced().auditNextProcessingSelection();
+            assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, selected.kind());
+            var work = selected.managedEpochApplicationWork().orElseThrow();
+            assertEquals(scenario.parent().id(), work.consumerDocumentId());
+            assertEquals(scenario.source().id(), work.sourceDocumentId());
+            assertEquals(2L, work.sourceEpoch());
+            assertEquals(parentPrefix, f.history(scenario.parent()), "Yield is not a historical application");
+            assertEquals(sourcePrefix, f.history(scenario.source()));
+            assertEquals(futurePrefix, f.history(scenario.futureRoot()));
+            CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(selected, f.blue.advanced().auditNextProcessingSelection(), "Retain the yielded lane across restart");
             var terminal = finishThrough(f, scenario);
 
             // then

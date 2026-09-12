@@ -51,7 +51,13 @@ final class RootedDrainCoordinator {
         RootedCheckpointDriver.Scan remaining = driver.scan(journal.entries(), cutoff);
         while (selected < budget.maxSelectedEntries() && committed < budget.maxCommittedProcessTransitions()) {
             var next = schedule.next(remaining, false, deferred);
-            if (next == null || !managedAllowed && next.selection().live() == null) break;
+            if (next == null) break;
+            if (!managedAllowed && next.selection().live() == null) {
+                // A later LIVE head may have selected this Journal turn before the
+                // cutoff was applied. Yield to the retained head inside this scope.
+                schedule.yieldJournalToHistory(next);
+                break;
+            }
             var result = execute.apply(next);
             selected = Math.addExact(selected, 1L);
             committed = Math.addExact(committed, result.committedProcessTransitions());
