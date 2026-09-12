@@ -7,6 +7,11 @@ serialization, worker recovery, or a replacement processing model.
 
 ## Current qualification candidate — 12 September
 
+The separately prepared [exact selected-root work audit](rooted-explicit-selection-audit.md)
+adds a necessary SDK observation seam for host pre-execution ownership. It does
+not alter the existing global fair selector or processing rules; its new and
+strengthened controls are pending qualification, not covered by older receipts.
+
 The current candidate includes the corrections below and
 [terminal-time causal peer acquisition](rooted-terminal-peer-acquisition.md).
 The older source pins and partial failures in the following historical section

@@ -89,6 +89,12 @@ final class RootedJoinSccEntrypointTest {
             assertEquals(selected.entryOwners(), same.entryOwners());
             assertEquals(selected.work().workIdentity(), same.work().workIdentity());
             assertEquals(selected.input().invocationIdentity(), same.input().invocationIdentity());
+            var publicSelection = f.blue.advanced().auditNextRootProcessingSelection(canonical);
+            assertEquals(blue.coordination.api.ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, publicSelection.kind());
+            assertEquals(selected.work(), publicSelection.managedEpochApplicationWork().orElseThrow());
+            assertTrue(publicSelection.rootedRetainedRoot().isEmpty(), "Joint publication is not local-only retained work");
+            assertEquals(publicSelection, f.blue.advanced().auditNextRootProcessingSelection(alternate));
+            assertEquals(blue.coordination.api.ProcessingSelection.none(), f.blue.advanced().auditNextRootProcessingSelection(c));
             assertEquals(before, state(f, roots), "Comparing entrypoint selections is read-only");
             var histories = roots.values().stream().map(f::history).toList();
             for (var root : roots.values()) for (var receipt : f.blue.advanced().auditManagedEpochs(root.id())) {

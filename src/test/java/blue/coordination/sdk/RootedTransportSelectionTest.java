@@ -115,6 +115,10 @@ final class RootedTransportSelectionTest {
             for (boolean restart : List.of(false, true)) {
                 if (restart) CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
                 assertEquals(ProcessingSelection.Kind.NONE, f.blue.advanced().auditNextProcessingSelection().kind());
+                assertEquals(ProcessingSelection.none(), f.blue.advanced().auditNextRootProcessingSelection(parent),
+                        "Blocked history has no runnable root step; NONE does not prove completeness");
+                assertFalse(f.blue.processing().processNext(parent).quiescent());
+                assertEquals(histories, List.of(historyEvidence(f, source), historyEvidence(f, parent)));
                 // when
                 var failure = assertThrows(CoordinationException.class,
                         () -> f.blue.advanced().drainJournalThrough(unmatched, DrainBudget.unlimited()));

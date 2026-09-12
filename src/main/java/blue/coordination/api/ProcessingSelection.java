@@ -30,7 +30,7 @@ public record ProcessingSelection(
         }
     }
 
-    /** Returns a quiescent selection. */
+    /** Returns no runnable selected lane; blocked work can also produce NONE, so this is not a completeness proof. */
     public static ProcessingSelection none() {
         return new ProcessingSelection(Kind.NONE, Optional.empty());
     }

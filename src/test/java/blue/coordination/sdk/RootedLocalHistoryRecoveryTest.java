@@ -20,6 +20,16 @@ final class RootedLocalHistoryRecoveryTest {
         try (var scenario = new Scenario(100_000L, true)) {
             var heads = scenario.heads();
             var histories = completeHistories(scenario);
+            var selection = scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root);
+            assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, selection.kind());
+            assertEquals(scenario.root.id(), selection.rootedRetainedRoot().orElseThrow());
+            var global = scenario.f.blue.advanced().auditNextProcessingSelection();
+            for (int audit = 0; audit < 3; audit++) {
+                assertEquals(selection, scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root));
+                assertEquals(global, scenario.f.blue.advanced().auditNextProcessingSelection());
+                assertEquals(heads, scenario.heads());
+                assertEquals(histories, completeHistories(scenario));
+            }
             var input = scenario.f.control.captureLocalHistory(scenario.root.id());
             var reference = RootedCalculationFixture.materializedReference(input);
             assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
@@ -28,6 +38,10 @@ final class RootedLocalHistoryRecoveryTest {
             // then
             assertTrue(result.quiescent());
             assertEquals(1, result.rootedRetainedResults().size());
+            assertEquals(selection.managedEpochApplicationWork().orElseThrow().workIdentity(),
+                    result.rootedRetainedApplications().get(0).work().workIdentity());
+            assertEquals(selection.rootedRetainedRoot().orElseThrow(),
+                    result.rootedRetainedApplications().get(0).rootDocumentId());
             var actual = scenario.f.blue.advanced().closureExecution(result.rootedRetainedResults().get(0).closureId()).orElseThrow();
             assertEquals(reference.status(), actual.status());
             assertEquals(reference.inputClosureIdentity(), actual.inputClosureIdentity());

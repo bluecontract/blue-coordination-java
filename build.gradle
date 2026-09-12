@@ -701,8 +701,10 @@ def currentProductionShapeLimits = [
         // Exact-cutoff Journal fairness adds 16 lines in two existing private sources.
         // Merged upstream named Compute plus exact-presence/root-path correction:
         // net +9 lines over the 74,222-line baseline; same source/type inventory.
+        // Explicit-root read-only selection adds 31 lines in three existing sources;
+        // no new source/public type. See docs/rooted-explicit-selection-audit.md.
         classes: 254,
-        lines: 74_231L,
+        lines: 74_262L,
         publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

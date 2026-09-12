@@ -226,6 +226,17 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Reads the exact next obligation for {@code processing().processNext(root)},
+     * independently of global fair-lane selection. Does not execute, reserve,
+     * or advance a scheduling turn. NONE means no runnable root obligation,
+     * including when the root is blocked; it is not a completeness proof.
+     * The host must serialize selection and execution against competing writes.
+     */
+    public ProcessingSelection auditNextRootProcessingSelection(DocumentHandle root) {
+        return runtime.auditNextRootProcessingSelection(Objects.requireNonNull(root, "root"));
+    }
+
+    /**
      * Reads the exact next fair bounded lane while considering whether the
      * host can immediately admit one ordinary journal entry.
      */

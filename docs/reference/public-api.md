@@ -548,7 +548,14 @@ Rc.5 adds these read-only retained-epoch diagnostics:
 - `auditNextProcessingSelection()` exposes the retained authoritative next fair
   lane, while `auditNextProcessingSelection(ProcessingAvailability)` can also
   account for an immediately admissible host journal entry; both return the
-  exact managed work identity when that lane is selected; and
+  exact managed work identity when that lane is selected;
+- `auditNextRootProcessingSelection(root)` instead reports the exact obligation
+  that `processing().processNext(root)` would select. An unrelated root's global
+  journal turn does not hide this root's managed work. Local retained work also
+  identifies its owning root. The audit neither reserves work nor changes global
+  fairness; the host must serialize audit, ownership acquisition and execution.
+  `NONE` means no runnable root obligation, not proof that a blocked root is
+  complete; and
 - `auditManagedDocumentReadiness(documentId)` reports committed versus READY
   heads, session status, waiting evidence, and active barriers.
 

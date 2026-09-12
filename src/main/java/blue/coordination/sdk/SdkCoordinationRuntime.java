@@ -680,6 +680,15 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return processNextRoot(root, null);
     }
 
+    synchronized blue.coordination.api.ProcessingSelection auditNextRootProcessingSelection(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return engine.auditNextRootProcessingSelection(root.id());
+    }
+
     synchronized DrainResult processNextRoot(DocumentHandle root, String expectedLocalWork) {
         ensureOpen();
         if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {

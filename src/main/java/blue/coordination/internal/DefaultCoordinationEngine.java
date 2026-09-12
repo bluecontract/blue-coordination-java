@@ -1222,6 +1222,17 @@ public final class DefaultCoordinationEngine
         return processNextRoot(root, null);
     }
 
+    /** Reads the selected root's runnable obligation without reserving work or changing global fairness. */
+    public synchronized ProcessingSelection auditNextRootProcessingSelection(DocumentId root) {
+        ensureOpen();
+        var next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+                .select(Objects.requireNonNull(root, "root"), journal.entries());
+        if (next.localHistorical() != null && next.historical() == null)
+            return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
+        if (next.historical() != null) return ProcessingSelection.managedEpochApplication(next.historical());
+        return next.live() != null ? ProcessingSelection.journal() : ProcessingSelection.none();
+    }
+
     /** Executes only the exact retained local work selected for this root, before any mutation. */
     public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork) {
         try {
