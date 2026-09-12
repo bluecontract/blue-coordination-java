@@ -15,9 +15,9 @@ final class RootedJoinScheduling {
     static RootedCheckpointDriver.Selection select(DocumentId root, RootedCheckpointDriver.Selection selected,
             List<RootedJoinEligibility.Fence> fences, InMemoryDocumentStore documents,
             Function<DocumentId, RootedCheckpointDriver.Selection> raw,
-            java.util.function.BiPredicate<DocumentId, blue.language.processor.ExternalOrderKey> completeThrough) {
-        if (selected.live() != null && RootedJoinPeerPrefixes.blocks(selected.live(), fences, documents, raw))
-            return blocked(selected);
+            java.util.function.BiPredicate<DocumentId, blue.language.processor.ExternalOrderKey> completeThrough,
+            java.util.function.BiFunction<RootedJoinEligibility.Fence, List<RootedLocalHistory.Step>,
+                    List<RootedLocalHistory.Step>> acquirePeers) {
         for (var fence : fences) {
             var terminal = fence.terminal();
             if (terminal == null && localTerminal(selected.localHistorical(), fence)) return blocked(selected);
@@ -47,7 +47,7 @@ final class RootedJoinScheduling {
                 } else if (next.localHistorical() != null && next.localHistorical().anchor().sourceOrderKey().compareTo(fence.boundary()) <= 0) {
                     if (matches(terminal.work(), next.localHistorical(), fence)) {
                         localTerminal = true;
-                        if (currentHeads(next.localHistorical(), fence.owners(), documents)) ready.add(next.localHistorical());
+                        ready.add(next.localHistorical());
                     } else prerequisite = true;
                 } else if (next.historical() != null && documents.catchUpBarrier(next.historical().barrierIdentity())
                         .orElseThrow().causeOrder().compareTo(fence.boundary()) <= 0) {
@@ -55,6 +55,8 @@ final class RootedJoinScheduling {
                 }
             }
             if (prerequisite) return blocked(selected);
+            ready = new ArrayList<>(acquirePeers.apply(fence, List.copyOf(ready)));
+            ready.removeIf(local -> !currentHeads(local, fence.owners(), documents));
             if (!ready.isEmpty()) {
                 ready.sort(java.util.Comparator.comparing(RootedLocalHistory.Step::sourceOrder)
                         .thenComparing(RootedLocalHistory.Step::root, EmbeddingBinding.DOCUMENT_ORDER));

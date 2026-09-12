@@ -25,11 +25,6 @@ final class RootedCheckpointDriver {
         return select(root, entries, RootedJoinEligibility.captureForRoot(documents, root));
     }
 
-    boolean blocksSuppliedLive(DocumentId root, ContractsClosureAdapter.FrozenBatch batch, List<TimelineEntry> entries) {
-        var joins = RootedJoinEligibility.captureForRoot(documents, root);
-        return RootedJoinPeerPrefixes.blocks(batch, joins, documents, peer -> baseSelection(peer, entries, joins));
-    }
-
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
     boolean completeBefore(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey cutoff) {
         if (RootedJoinPrerequisites.pendingBefore(root, documents.require(root).rootedViewBefore(cutoff),
@@ -45,7 +40,8 @@ final class RootedCheckpointDriver {
     private Selection select(DocumentId root, List<TimelineEntry> entries, List<RootedJoinEligibility.Fence> joins) {
         return RootedJoinScheduling.select(root, baseSelection(root, entries, joins), joins, documents,
                 selected -> baseSelection(selected, entries, joins),
-                (selected, boundary) -> completeThrough(selected, entries, boundary));
+                (selected, boundary) -> completeThrough(selected, entries, boundary),
+                adapter::captureTerminalPeers);
     }
 
     /** Positive completion evidence for a join, not permission to execute a later fenced input. */

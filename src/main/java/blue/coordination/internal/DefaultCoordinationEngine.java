@@ -1090,9 +1090,6 @@ public final class DefaultCoordinationEngine
             long started = System.nanoTime();
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
-            if (new RootedCheckpointDriver(documents, contractsClosureAdapter).blocksSuppliedLive(root, batch, journal.entries()))
-                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, false, false, 0L,
-                        System.nanoTime() - started);
             return rootedReadiness(root, executeRootBatch(batch, started), started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
@@ -1107,12 +1104,6 @@ public final class DefaultCoordinationEngine
             long committed = 0L;
             for (ContractsClosureAdapter.CohortInvocation invocation : batch.invocations()) {
                 var admission = contractsClosureAdapter.prepareAndPublish(batch, invocation);
-                if (admission.prerequisite() != null) {
-                    // A preflight probe is not an admitted semantic attempt. Its actual
-                    // original receiver remains ordinary selectable LIVE work.
-                    complete = false;
-                    continue;
-                }
                 ContractsClosureAdapter.CohortOutcome exact = admission.outcome();
                 complete &= exact.attempt().isComplete() || exact.rejectedBirth() != null;
                 attempts.add(new ContractsClosureDispatchAttempt(entry.blueId(), exact.publicationMembers(),

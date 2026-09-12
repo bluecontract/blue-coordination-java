@@ -4,6 +4,8 @@ import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.internal.CoordinationTestControl;
+import blue.coordination.internal.RootedTerminalPeerProbe;
+import blue.coordination.internal.RootedCalculationFixture;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +18,118 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RootedDiamondPeerSchedulingTest {
     private static final List<String> NAMES = List.of("A", "B", "D", "C");
     private static final String ORIGINAL_NAMESPACE = "witness-forwarding";
+
+    @Test
+    void acquiredTerminalLateGasFailureDoesNotPublishOrConsumePeerWork() throws Exception {
+        // given
+        try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
+            var run = new OriginalBoundaryRun(s, ContractsExecutionPolicy.releaseDefault(), "terminal-gas");
+            var probe = new RootedTerminalPeerProbe(s.f.blue.advanced().rawEngine());
+            var selected = terminal(s, run, probe);
+            var reference = RootedCalculationFixture.freshRootedReference(selected.input(), List.of());
+            assertTrue(reference.commits());
+            var limited = probe.withLimit(selected, reference.totalGas() - 1L);
+            var before = s.state();
+            var store = probe.publicationState();
+            // when
+            var failed = probe.publish(limited);
+            // then
+            assertEquals("GAS_LIMIT_EXCEEDED", failed.status().name());
+            assertNotNull(failed.rejectedCharge());
+            assertTrue(failed.totalGas() > 1L);
+            var trace = s.f.control.lastClosureProcessEvidence().orElseThrow();
+            assertEquals(failed.invocationIdentity(), trace.invocationIdentity());
+            assertFalse(trace.workTrace().isEmpty(), "This is a late finite-cap failure after real retained work");
+            assertEquals(before, s.state());
+            assertEquals(store, probe.publicationState());
+            var failedReference = RootedCalculationFixture.freshRootedReference(limited.input(), List.of());
+            assertEquals(failedReference.gasTraceIdentity(), failed.gasTraceIdentity());
+            assertEquals(failedReference.totalGas(), failed.totalGas());
+            assertEquals(failedReference.rejectedCharge().rejectedChargeIdentity(), failed.rejectedCharge().rejectedChargeIdentity());
+            var committed = probe.publish(selected);
+            assertEquals(reference.commitCompanion().companionIdentity(), committed.commitCompanion().companionIdentity());
+            assertEquals(reference.gasTraceIdentity(), committed.gasTraceIdentity());
+            assertEquals(List.of(0L, 1L, 1L, 2L), NAMES.stream().map(s::observed).toList());
+        }
+    }
+
+    @Test
+    void acquiredTerminalRetainsCausalFencesAcrossRollbackRetryAndRestart() throws Exception {
+        // given
+        try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
+            var run = new OriginalBoundaryRun(s, ContractsExecutionPolicy.releaseDefault(), "terminal-safety");
+            var probe = new RootedTerminalPeerProbe(s.f.blue.advanced().rawEngine());
+            var selected = terminal(s, run, probe);
+            assertEquals(List.of(0L, 1L, 1L, 2L), NAMES.stream().map(s::observed).toList());
+            assertEquals(selected.originalInput().snapshot().publicRootDocumentIds(), selected.input().snapshot().publicRootDocumentIds());
+            assertEquals(selected.originalInput().cause().causeIdentity(), selected.input().cause().causeIdentity());
+            var source = new blue.language.processor.closure.DocumentId(selected.frozenSource().value());
+            assertEquals(selected.originalInput().snapshot().managedDocument(source).blueId(),
+                    selected.input().snapshot().managedDocument(source).blueId());
+            assertEquals(s.sourceBlueId, selected.input().snapshot().managedDocument(source).blueId());
+            assertNotEquals(selected.originalInput().snapshot().closureIdentity(), selected.input().snapshot().closureIdentity());
+            var before = s.state();
+            var store = probe.publicationState();
+            long calls = probe.processCalls();
+            assertTrue(assertThrows(IllegalStateException.class, () -> probe.requireAlteredFence(selected, false))
+                    .getMessage().contains("same-cause prefix"));
+            assertTrue(assertThrows(IllegalStateException.class, () -> probe.requireAlteredFence(selected, true))
+                    .getMessage().contains("registered terminal cause"));
+            var owner = selected.originalInput().snapshot().publicRootDocumentIds().get(0);
+            assertThrows(IllegalArgumentException.class, () -> blue.language.processor.closure.ClosureEvidenceFactory
+                    .rootedWitnessSelection(selected.originalInput().snapshot(), Map.of(owner, selected.originalInput().snapshot())));
+            assertThrows(IllegalArgumentException.class, () -> blue.language.processor.closure.ClosureEvidenceFactory
+                    .rootedWitnessSelection(selected.originalInput().snapshot(), Map.of(source, selected.originalInput().snapshot())));
+            assertEquals(calls, probe.processCalls(), "Invalid cause/boundary must fail before PROCESS");
+            assertEquals(store, probe.publicationState());
+            s.f.control.failPublicationAt("BEFORE_SWAP");
+            // when
+            assertThrows(IllegalStateException.class, () -> probe.publish(selected));
+            // then
+            assertEquals(calls + 1L, probe.processCalls());
+            assertEquals(store, probe.publicationState(), "No owner, witness, history or plan may partially swap");
+            assertEquals(before, s.state());
+            s.f.control.clearPublicationFailure();
+            var actual = probe.publish(selected);
+            assertTrue(actual.commits());
+            var reference = RootedCalculationFixture.freshRootedReference(selected.input(), List.of());
+            assertEquals(reference.invocationIdentity(), actual.invocationIdentity());
+            assertEquals(reference.outputClosureIdentity(), actual.outputClosureIdentity());
+            assertEquals(reference.commitCompanion().companionIdentity(), actual.commitCompanion().companionIdentity());
+            assertEquals(reference.gasTraceIdentity(), actual.gasTraceIdentity());
+            assertEquals(reference.totalGas(), actual.totalGas());
+            assertEquals(List.of(0L, 1L, 1L, 2L), NAMES.stream().map(s::observed).toList(), "Do not replay a peer reaction at join");
+            long after = probe.processCalls();
+            assertEquals(actual.invocationIdentity(), probe.publish(selected).invocationIdentity());
+            assertEquals(after, probe.processCalls(), "Exact retained work replays without PROCESS");
+            boolean quiet = false;
+            for (int step = 0; step < 16; step++) {
+                var drain = run.call("after-terminal-" + step, () -> s.f.blue.processing().drain(new DrainBudget(1, 1)));
+                assertFalse(drain.blocked(), String.valueOf(drain.diagnostic()));
+                if (drain.quiescent()) { quiet = true; break; }
+            }
+            assertTrue(quiet);
+            var settled = s.state();
+            CoordinationTestControl.attach(s.f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(settled, s.state());
+            long restarted = probe.processCalls();
+            assertEquals(actual.invocationIdentity(), probe.publish(selected).invocationIdentity());
+            assertEquals(restarted, probe.processCalls());
+            assertEquals(settled, s.state());
+        }
+    }
+
+    private static RootedTerminalPeerProbe.Selection terminal(Scenario s, OriginalBoundaryRun run,
+            RootedTerminalPeerProbe probe) {
+        for (int step = 0; step < 160; step++) {
+            var selected = probe.next();
+            if (selected.isPresent()) return selected.orElseThrow();
+            var next = run.call("terminal-prefix-" + step, () -> s.f.blue.processing().drain(new DrainBudget(1, 1)));
+            assertFalse(next.blocked(), "Terminal acquisition prefix blocked at " + step + ": " + next.diagnostic());
+            assertFalse(next.quiescent(), "No changed immutable peer was selected before settlement");
+        }
+        throw new AssertionError("No genuine acquired terminal in the bounded public sequence");
+    }
 
     @Test
     void theSameExactDiamondRetainsItsHistoryAndGasAcrossPermittedSchedules() throws Exception {
@@ -69,6 +183,7 @@ final class RootedDiamondPeerSchedulingTest {
     void resolvedOriginalGasBoundaryMatchesAcrossCompletePhysicalSchedules() throws Exception {
         // given
         long gas = calibrateResolvedOriginalGas();
+        assertEquals(836L, gas, "Keep the independently measured 835/836/837 logical boundary");
         // when
         var comparisons = new ArrayList<org.junit.jupiter.api.function.Executable>();
         for (long delta : List.of(-1L, 0L, 1L)) comparisons.add(() -> {
@@ -94,6 +209,8 @@ final class RootedDiamondPeerSchedulingTest {
                     () -> assertEquals(prepared.stop(), early.stop()),
                     () -> assertEquals(prepared.documents(), early.documents()),
                     () -> assertEquals(prepared.original(), early.original()),
+                    () -> assertEquals(prepared.originalProcessorAttempts(), early.originalProcessorAttempts()),
+                    () -> assertEquals(prepared.originalRetries(), early.originalRetries()),
                     () -> assertEquals(prepared.originalDisposition(), early.originalDisposition()),
                     () -> assertEquals(prepared.terminals(), early.terminals()),
                     () -> assertEquals(prepared.observed(), early.observed()),
@@ -123,8 +240,9 @@ final class RootedDiamondPeerSchedulingTest {
             assertNotNull(d);
             assertEquals(s.sourceBlueId, a.blueId());
             assertEquals(s.sourceEpoch, a.epoch());
-            assertEquals(peer.blueId(), d.blueId());
-            assertEquals(peer.epoch(), d.epoch());
+            assertEquals(s.prefixBlueIds.get("D"), d.blueId(), "Original LIVE retains the historical D primary");
+            assertEquals(s.prefixEpochs.get("D").longValue(), d.epoch());
+            assertNotEquals(peer.blueId(), d.blueId(), "Already published peer work is acquired only at terminal entry");
             assertEquals(List.of(new blue.language.processor.closure.DocumentId(s.root("B").id().value())),
                     actual.rootedProjection().context().entryOwners());
             assertTrue(actual.totalGas() > 1L && actual.totalGas() < input.executionPolicy().sharedLimit());
@@ -154,6 +272,7 @@ final class RootedDiamondPeerSchedulingTest {
             // Do not admit an unresolved B original at the drain's default policy.
             assertNotEquals("BOUND", stop, "No real blocked or quiet endpoint within the diagnostic bound");
             var outcome = new OriginalBoundaryOutcome(run.entry.blueId(), stop, s.state(), run.original, run.originalDisposition,
+                    run.originalProcessorAttempts, run.originalRetries,
                     run.terminals(), run.chargedGas, NAMES.stream().map(s::observed).toList(),
                     NAMES.stream().map(s::eventCount).toList());
             System.out.println("DIAMOND_G_BOUNDARY_FINAL schedule=" + run.schedule + " limit="
@@ -174,6 +293,8 @@ final class RootedDiamondPeerSchedulingTest {
         final java.util.Set<String> prefixTerminals;
         OriginalBoundaryTerminal original;
         String originalDisposition;
+        long originalProcessorAttempts = -1L;
+        long originalRetries = -1L;
         long chargedGas;
         final List<Map<String, Object>> calls = new ArrayList<>();
         final List<OriginalBoundaryAttempt> attempts = new ArrayList<>();
@@ -206,14 +327,23 @@ final class RootedDiamondPeerSchedulingTest {
                                 new blue.language.processor.closure.DocumentId(s.root("B").id().value())))) continue;
                 var actual = s.f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
                 var terminal = terminal(closure.closureId(), input, actual);
+                assertEquals(closure.processorAttemptCount() - 1L, closure.automaticRetryCount());
+                assertTrue(closure.automaticRetryCount() > 0L,
+                        "This non-dormant original must reach actual resource expansion before its terminal result");
+                System.out.println("DIAMOND_ORIGINAL_ATTEMPTS schedule=" + schedule + " limit=" + policy.sharedGasLimit()
+                        + " processors=" + closure.processorAttemptCount() + " retries=" + closure.automaticRetryCount());
                 assertEquals(policy.sharedGasLimit(), terminal.limit());
                 assertEquals(policy.label(), terminal.label());
                 if (original == null) {
+                    originalProcessorAttempts = closure.processorAttemptCount();
+                    originalRetries = closure.automaticRetryCount();
                     original = terminal;
                     originalDisposition = closure.disposition().name();
                     RootedGasEvidence.write("diamond-boundary-" + schedule + "-" + policy.sharedGasLimit()
                             + "-B-original", input, actual);
                 } else {
+                    assertEquals(originalProcessorAttempts, closure.processorAttemptCount());
+                    assertEquals(originalRetries, closure.automaticRetryCount());
                     assertEquals(original, terminal, "An exact retry cannot replace the original B result");
                     assertEquals(originalDisposition, closure.disposition().name());
                 }
@@ -555,21 +685,27 @@ final class RootedDiamondPeerSchedulingTest {
                 assertEquals("5G1qitMzxCuQ3UpCuJyh2fZimmbdRNwsthMYJUWZBjVL", entry.blueId());
 
             if (reversedDirectCalls) {
-                // No independently retained C return exists yet. This call must discover
-                // the prospective prerequisite without publishing B's incomplete view.
-                s.requireUnchangedBlockedOriginal("B", entry, true);
-                s.requireUnchangedBlockedOriginal("B", entry, true);
+                // Parent-first LIVE is an ordinary charged operation, not a discarded
+                // successful preflight. Its replay does not rerun or recharge that work.
+                var early = s.f.blue.processing().process(s.root("B"), entry);
+                assertEquals(EntryDisposition.APPLIED, early.entry(entry).disposition());
+                assertTrue(early.stats().gas() > 0L);
+                s.observe(early);
+                var beforeReplay = s.state();
+                var replay = s.f.blue.processing().process(s.root("B"), entry);
+                assertEquals(0L, replay.stats().gas());
+                assertEquals(beforeReplay, s.state());
+                s.observe(replay);
                 CoordinationTestControl.attach(s.f.blue.advanced().rawEngine()).restartFromStores();
-                s.requireUnchangedBlockedOriginal("B", entry, true);
-
-                assertEquals(blue.coordination.api.ProcessingSelection.Kind.JOURNAL,
-                        s.f.blue.advanced().auditNextProcessingSelection().kind(),
-                        "The real original C lane must remain eligible after the blocked B call");
-                var directC = s.f.blue.processing().drain(new DrainBudget(1, 1));
+                var restartedReplay = s.f.blue.processing().process(s.root("B"), entry);
+                assertEquals(0L, restartedReplay.stats().gas());
+                assertEquals(beforeReplay, s.state());
+                s.observe(restartedReplay);
+                var directC = s.f.blue.processing().process(s.root("C"), entry);
                 assertEquals(EntryDisposition.APPLIED, directC.entry(entry).disposition());
                 assertEquals(List.of(s.root("C").id()), directC.entry(entry).closures().stream()
                         .flatMap(closure -> closure.changes().stream()).map(DocumentChange::documentId).distinct().toList(),
-                        "Ordinary drain must make the advertised C progress, not execute B or D inside the blocked call");
+                        "The explicit C call must not silently process an independent receiver");
                 s.observe(directC);
                 boolean terminalWait = false;
                 for (int step = 0; step < 32; step++) {
@@ -581,7 +717,6 @@ final class RootedDiamondPeerSchedulingTest {
                 assertTrue(terminalWait, "C did not reach its real frozen terminal prerequisite");
                 assertEquals(2L, s.observed("C"));
                 assertEquals(s.sourceEpoch, s.frozenPlan.requiredThroughSourceEpoch());
-                s.requireUnchangedBlockedOriginal("B", entry, false);
 
                 var directD = s.f.blue.processing().process(s.root("D"), entry);
                 assertEquals(EntryDisposition.APPLIED, directD.entry(entry).disposition());
@@ -646,6 +781,8 @@ final class RootedDiamondPeerSchedulingTest {
         final String timeline;
         final Map<String, DocumentHandle> roots = new LinkedHashMap<>();
         final Map<String, List<String>> prefixes = new LinkedHashMap<>();
+        final Map<String, String> prefixBlueIds = new LinkedHashMap<>();
+        final Map<String, Long> prefixEpochs = new LinkedHashMap<>();
         final Map<String, GasEvidence> retainedGas = new TreeMap<>();
         final long sourceEpoch;
         final String sourceReceipt;
@@ -679,7 +816,12 @@ final class RootedDiamondPeerSchedulingTest {
             if (emitTokens) assertEquals(11L, sourceEpoch);
             assertEquals(List.of(sourceEpoch, 2L, 2L, 0L), NAMES.stream().map(name ->
                     f.blue.advanced().auditDocument(root(name).id()).epoch()).toList());
-            for (String name : NAMES) prefixes.put(name, f.history(root(name)));
+            for (String name : NAMES) {
+                prefixes.put(name, f.history(root(name)));
+                var audit = f.blue.advanced().auditDocument(root(name).id());
+                prefixBlueIds.put(name, audit.blueId());
+                prefixEpochs.put(name, audit.epoch());
+            }
             var source = f.blue.advanced().auditManagedEpoch(root("A").id(), sourceEpoch).orElseThrow();
             sourceReceipt = source.receiptIdentity(); sourceBlueId = source.afterBlueId();
         }
@@ -698,39 +840,8 @@ final class RootedDiamondPeerSchedulingTest {
             fail("Unchanged prefix did not settle for " + name + " at " + time);
         }
 
-        void requireUnchangedBlockedOriginal(String name, EntryHandle entry, boolean requirePreflight) {
-            var before = state();
-            var control = CoordinationTestControl.attach(f.blue.advanced().rawEngine());
-            var metricsBefore = control.metricsSnapshot();
-            var blocked = f.blue.processing().process(root(name), entry);
-            var metricsAfter = control.metricsSnapshot();
-            if (requirePreflight) {
-                assertEquals(metricsBefore.counters().getOrDefault("contracts.rootedJoinPreflight.blocked", 0L) + 1L,
-                        metricsAfter.counters().getOrDefault("contracts.rootedJoinPreflight.blocked", 0L).longValue(),
-                        "Each pre-C call must discover and block its actual prospective join prerequisite");
-                assertTrue(metricsAfter.counters().getOrDefault("contracts.rootedJoinPreflight.calculations", 0L)
-                                > metricsBefore.counters().getOrDefault("contracts.rootedJoinPreflight.calculations", 0L),
-                        "Pre-C blocking must be backed by a real preflight calculation, including after restart");
-                assertTrue(metricsAfter.phaseNanos().getOrDefault("contracts.rootedJoinPreflight", 0L)
-                                > metricsBefore.phaseNanos().getOrDefault("contracts.rootedJoinPreflight", 0L),
-                        "Preflight physical time must increase independently of zero committed logical gas");
-            }
-            assertTrue(blocked.blocked(), "Prospective peer prerequisite was not reported: " + blocked.diagnostic());
-            assertEquals(0L, blocked.stats().committedTransitions());
-            assertEquals(0L, blocked.stats().gas());
-            assertEquals(before, state(), "A blocked original cannot publish heads, receipts, or plan progress");
-            blocked.find(entry).ifPresent(result -> {
-                assertNotEquals(EntryDisposition.APPLIED, result.disposition());
-                assertNotEquals(EntryDisposition.REJECTED, result.disposition());
-                assertNotEquals(EntryDisposition.NO_MATCH, result.disposition());
-                assertTrue(result.publicEvents().isEmpty());
-            });
-            assertTrue(blocked.managedEpochApplications().isEmpty());
-        }
-
         void observe(DrainResult drain) {
             // Readiness describes the next step, not whether this call completed work.
-            // Pure prerequisite waits are checked separately by requireUnchangedBlockedOriginal.
             aggregateCallGas = Math.addExact(aggregateCallGas, drain.stats().gas());
             var source = f.blue.advanced().auditManagedEpoch(root("A").id(), sourceEpoch).orElseThrow();
             assertEquals(sourceReceipt, source.receiptIdentity());
@@ -837,7 +948,10 @@ final class RootedDiamondPeerSchedulingTest {
     }
 
     private record DocumentState(long epoch, String blueId, List<String> receipts,
-            List<Long> processingGas, List<String> planSnapshots) { }
+            List<Long> processingGas, List<String> planSnapshots) {
+        @Override public String toString() { return "DocumentState[epoch=" + epoch + ", blueId=" + blueId
+                + ", receipts=" + receipts.size() + ", plans=" + planSnapshots.size() + "]"; }
+    }
     private record GasEvidence(String outputClosureIdentity, long totalGas, String gasTraceIdentity) { }
     private record OriginalBoundaryCharge(long sequence, String namespace, String counter, long quantity,
             long weight, long subtotal, String document, String scope, Long activationGeneration,
@@ -845,11 +959,19 @@ final class RootedDiamondPeerSchedulingTest {
     private record OriginalBoundaryTerminal(String publication, String invocation, String inputClosure,
             String causeKind, String cause, String policy, long limit, String label, String status,
             boolean commits, boolean rollback, String outputClosure, long gas, String trace,
-            List<OriginalBoundaryCharge> charges, String rejected, List<String> owned, String companion) { }
+            List<OriginalBoundaryCharge> charges, String rejected, List<String> owned, String companion) {
+        @Override public String toString() { return "Terminal[invocation=" + invocation + ", input=" + inputClosure
+                + ", status=" + status + ", gas=" + gas + ", trace=" + trace + ", rejected=" + rejected + "]"; }
+    }
     private record OriginalBoundaryOutcome(String entry, String stop, Map<String, DocumentState> documents,
             OriginalBoundaryTerminal original, String originalDisposition,
+            long originalProcessorAttempts, long originalRetries,
             Map<String, OriginalBoundaryTerminal> terminals, long chargedGas,
-            List<Long> observed, List<Long> events) { }
+            List<Long> observed, List<Long> events) {
+        @Override public String toString() { return "Outcome[stop=" + stop + ", documents=" + documents
+                + ", original=" + original + ", terminalCount=" + terminals.size() + ", gas=" + chargedGas
+                + ", observed=" + observed + ", events=" + events + "]"; }
+    }
     private record OriginalBoundaryAttempt(int call, String stage, String lane, String work, String publication,
             String applicationReceipt, boolean published, boolean replayed, String replayEvidence, String status,
             boolean commits, boolean rollback, String invocation, String inputClosure, String outputClosure,

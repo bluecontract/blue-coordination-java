@@ -99,7 +99,7 @@ final class RootedLocalHistory {
                                 && barrier.causeOrder().compareTo(boundary) <= 0).isPresent());
     }
 
-    private static Step capture(DocumentId root, ContractsClosureAdapter.RootedCapturedState state,
+    static Step capture(DocumentId root, ContractsClosureAdapter.RootedCapturedState state,
             ManagedOccurrenceBinding target, TimelineEntry anchor, InMemoryDocumentStore documents,
             WholeObjectStore objects, ExecutionPolicy policy, ClosureEnvironment environment) {
         var source = ContractsClosureAdapter.coordinationId(target.targetDocumentId());

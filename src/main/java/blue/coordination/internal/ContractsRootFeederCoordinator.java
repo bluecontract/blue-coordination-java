@@ -84,10 +84,6 @@ final class ContractsRootFeederCoordinator {
                 continue;
             }
             var admission = executor.execute(frozen, invocation);
-            if (admission.prerequisite() != null) {
-                window.releaseUnexecuted(ticket);
-                continue;
-            }
             ContractsClosureAdapter.CohortOutcome outcome = admission.outcome();
             window.record(ticket, outcome);
             progress.add(new CohortProgress(ticket, outcome));
