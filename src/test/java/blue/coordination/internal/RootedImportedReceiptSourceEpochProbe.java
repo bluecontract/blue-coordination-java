@@ -45,8 +45,15 @@ public final class RootedImportedReceiptSourceEpochProbe {
                 .filter(row -> row.occurrenceIdentity().equals(work.targetOccurrenceIdentity())).findFirst().orElseThrow();
         assertFalse(pending.active(), "The numbered carrier must not consume or activate its future representation tail");
         assertEquals(Long.valueOf(8L), pending.pendingHistoricalEpoch());
-        assertEquals(new ManagedRepresentationCursor(cause.sourceRevisionReceiptIdentity(), cause.sourceRevisionReceiptIdentity(),
-                successor.targetPositionIdentity(), null), pending.pendingRepresentationCursor());
+        // The chain is anchored by the durable Coordination receipt. Its
+        // Contracts transition identity is separately checked above; the two
+        // identity namespaces must not be substituted for each other.
+        assertEquals(anchor.receiptIdentity(), successor.transition().anchorReceiptIdentity());
+        var expectedCursor = new ManagedRepresentationCursor(anchor.receiptIdentity(), anchor.receiptIdentity(),
+                successor.targetPositionIdentity(), null);
+        assertNotNull(pending.pendingRepresentationCursor());
+        assertEquals(expectedCursor.identityValue(), pending.pendingRepresentationCursor().identityValue(),
+                "The numbered carrier must retain its exact frozen representation cursor");
 
         var execution = engine.contractsClosureAdapter().lastExecutionEvidence().orElseThrow();
         assertEquals(input.invocationIdentity(), execution.invocationIdentity());

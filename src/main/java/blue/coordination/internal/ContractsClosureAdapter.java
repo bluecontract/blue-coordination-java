@@ -603,6 +603,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return managedEpochApplicationExecutor.execute(work, excludedConsumers);
     }
 
+    /** Publishes one actual local terminal and its exact registered application in the existing atomic transaction. */
+    synchronized ManagedApplicationOutcome executeRootedJoinApplication(ManagedEpochApplicationWork work,
+            Set<DocumentId> excludedConsumers, RootedLocalHistory.Step local) {
+        ensureOpen();
+        return managedEpochApplicationExecutor.execute(work, excludedConsumers, local);
+    }
+
     /** Runs retained managed work through the ordinary typed-demand loop. */
     AutomaticOccurrenceResolutionCoordinator.RunResult<
             CohortInvocation, ContractsClosurePublicationReceipt>

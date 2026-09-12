@@ -132,6 +132,12 @@ final class ManagedEpochApplicationExecutor {
     ContractsClosureAdapter.ManagedApplicationOutcome execute(
             ManagedEpochApplicationWork work,
             Set<DocumentId> excludedConsumers) {
+        return execute(work, excludedConsumers, null);
+    }
+
+    /** A real local terminal input may perform the same independently registered application at an exact join. */
+    ContractsClosureAdapter.ManagedApplicationOutcome execute(
+            ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers, RootedLocalHistory.Step localJoin) {
         ManagedEpochApplicationWork selected = Objects.requireNonNull(
                 work, "work");
         Optional<ManagedEpochApplicationReceipt> prior =
@@ -166,8 +172,8 @@ final class ManagedEpochApplicationExecutor {
         boolean attemptMarkClosed = false;
         try {
             ManagedEpochInvocationCapturer.Capture initialCapture =
-                    invocationCapturer.capture(
-                            selected, excludedConsumers);
+                    localJoin == null ? invocationCapturer.capture(selected, excludedConsumers)
+                            : invocationCapturer.captureRootedJoin(selected, excludedConsumers, localJoin);
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     ContractsClosureAdapter.CohortInvocation,
                     ContractsClosurePublicationReceipt> automatic = host
@@ -208,6 +214,10 @@ final class ManagedEpochApplicationExecutor {
                             initialCapture.sourceTransitionReceipt(),
                             automatic.invocation());
             ClosureProcessResult result = attempt.processResult();
+            if (localJoin != null && (result.rootedProjection() == null
+                    || !result.rootedProjection().owns(ContractsClosureAdapter.closureId(selected.consumerDocumentId())))) {
+                throw ContractsClosureAdapter.stale("Local terminal did not acquire its registered consumer");
+            }
             RootedTerminalEvidence terminal = RootedTerminalEvidence.captureHistorical(capture.invocation(), result, selected);
             ContractsClosurePublicationReceipt receipt = new ContractsClosurePublicationReceipt(
                     terminal == null ? selected.workIdentity() : capture.invocation().rootedEvidence().terminalKey(),

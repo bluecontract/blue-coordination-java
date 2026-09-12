@@ -25,7 +25,41 @@ final class RootedCheckpointDriver {
         return select(root, entries, RootedJoinEligibility.captureForRoot(documents, root));
     }
 
+    /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
+    boolean completeBefore(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey cutoff) {
+        if (RootedJoinPrerequisites.pendingBefore(root, documents.require(root).rootedViewBefore(cutoff),
+                cutoff, documents) != null) return false;
+        var next = baseSelection(root, entries, List.of());
+        if (next.blocked()) return false;
+        ExternalOrderKey origin = next.live() != null ? next.live().entry().sourceOrderKey()
+                : next.historical() != null ? documents.catchUpBarrier(next.historical().barrierIdentity()).orElseThrow().causeOrder()
+                : next.localHistorical() != null ? next.localHistorical().anchor().sourceOrderKey() : null;
+        return origin == null || origin.compareTo(cutoff) >= 0;
+    }
+
     private Selection select(DocumentId root, List<TimelineEntry> entries, List<RootedJoinEligibility.Fence> joins) {
+        return RootedJoinScheduling.select(root, baseSelection(root, entries, joins), joins, documents,
+                selected -> baseSelection(selected, entries, joins),
+                (selected, boundary) -> completeThrough(selected, entries, boundary));
+    }
+
+    /** Positive completion evidence for a join, not permission to execute a later fenced input. */
+    private boolean completeThrough(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey boundary) {
+        var view = documents.require(root).rootedView();
+        var local = adapter.nextRootLocalHistory(root, entries);
+        if (local.pending() && (view.logicalBoundary() == null || view.logicalBoundary().compareTo(boundary) <= 0)) return false;
+        var owners = view.snapshot().components().stream().filter(component -> component.orderedMemberDocumentIds()
+                .contains(ContractsClosureAdapter.closureId(root))).findFirst().orElseThrow().orderedMemberDocumentIds();
+        for (var owner : owners) for (var plan : documents.catchUpPlans(ContractsClosureAdapter.coordinationId(owner))) {
+            if (plan.status() != ManagedCatchUpStatus.COMPLETE && plan.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED
+                    && documents.catchUpBarrier(plan.barrierIdentity()).orElseThrow().causeOrder().compareTo(boundary) <= 0) return false;
+        }
+        var next = baseSelection(root, entries, List.of());
+        return !next.blocked() && next.historical() == null && next.localHistorical() == null
+                && (next.live() == null || next.live().entry().sourceOrderKey().compareTo(boundary) > 0);
+    }
+
+    private Selection baseSelection(DocumentId root, List<TimelineEntry> entries, List<RootedJoinEligibility.Fence> joins) {
         DocumentSession session = documents.require(root);
         RootedDocumentView view = java.util.Objects.requireNonNull(session.rootedView(), "Root has no rooted profile view");
         view.requireOwnerHead(root, session.currentRepresentation().blueId());
@@ -53,7 +87,7 @@ final class RootedCheckpointDriver {
                 return new Selection(null, work.get(), excluded, false);
             }
         }
-        if (live.isPresent() && RootedJoinEligibility.blocks(joins, owners, live.get().entry().sourceOrderKey())) {
+        if (live.isPresent() && RootedJoinEligibility.blocks(joins, owners, live.get())) {
             return new Selection(null, null, excluded, true);
         }
         return new Selection(live.orElse(null), null, excluded, false);

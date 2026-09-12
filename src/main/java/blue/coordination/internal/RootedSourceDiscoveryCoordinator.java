@@ -204,8 +204,10 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.ADMISSION, compiled, null,
                     window.identity(), null, window.evidence());
         }
-        var next = new RootedCheckpointDriver(documents, adapter).select(candidate.source(), journal.entries());
+        var driver = new RootedCheckpointDriver(documents, adapter);
+        var next = driver.select(candidate.source(), journal.entries());
         if (next.blocked()) {
+            if (driver.completeBefore(candidate.source(), journal.entries(), candidate.cutoff())) return null;
             String reason = RootedJoinPrerequisites.pendingBefore(candidate.source(),
                     source.rootedViewBefore(candidate.cutoff()), candidate.cutoff(), documents);
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
@@ -214,7 +216,7 @@ final class RootedSourceDiscoveryCoordinator {
         ExternalOrderKey origin;
         SourceHistoryPrerequisite.Kind kind;
         if (next.live() != null) { origin = next.live().entry().sourceOrderKey(); kind = SourceHistoryPrerequisite.Kind.LIVE; }
-        else if (next.localHistorical() != null) {
+        else if (next.localHistorical() != null && next.historical() == null) {
             origin = next.localHistorical().anchor().sourceOrderKey(); kind = SourceHistoryPrerequisite.Kind.ROOTED_RETAINED;
         } else if (next.historical() != null) {
             origin = documents.catchUpBarrier(next.historical().barrierIdentity()).orElseThrow().causeOrder();
@@ -286,7 +288,7 @@ final class RootedSourceDiscoveryCoordinator {
         String work = admission != null ? admission.invocation().invocationIdentity()
                 : step == null ? candidate.demand().demandIdentity()
                 : step.live() != null ? step.live().invocations().get(0).executionInvocationIdentity()
-                : step.localHistorical() != null ? step.localHistorical().work().workIdentity() : step.historical().workIdentity();
+                : step.historical() != null ? step.historical().workIdentity() : step.localHistorical().work().workIdentity();
         String entry = step != null && step.live() != null ? step.live().entry().blueId() : null;
         String root = candidate.invocation().rootedEvidence().context().canonicalRootDocumentId().value();
         var fields = new ArrayList<String>(List.of(root, candidate.invocation().input().invocationIdentity(),
