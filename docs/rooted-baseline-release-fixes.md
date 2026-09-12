@@ -5,6 +5,56 @@ It starts at Coordination `next` commit `c0a689de8d0ccd89de94bf6316618c7760a68e2
 It does **not** contain the external-state POC, PostgreSQL adapters, runtime
 serialization, worker recovery, or a replacement processing model.
 
+## Current qualification candidate — 12 September
+
+The current candidate includes the corrections below and
+[terminal-time causal peer acquisition](rooted-terminal-peer-acquisition.md).
+The older source pins and partial failures in the following historical section
+are retained for traceability; they are not the current candidate status.
+
+- Language adds one public evidence-construction operation,
+  `ClosureEvidenceFactory.rootedWitnessSelection`, with three implementation
+  files, plus the generated package's current release binding. It selects
+  authenticated immutable peer witnesses for a fresh terminal operation;
+  it does not change an entered invocation or turn a witness into a publisher.
+- Coordination implements the corresponding terminal acquisition/selection
+  algorithm. Relative to the previously sealed `1d558` runtime, that change
+  touches eight production Java files and the release binding. It adds no
+  Coordination public API. It preserves PROCESS, logical gas, historical
+  endpoints, publication ownership and exact-input retry rules. This is an
+  internal algorithm correction and a Language API addition, not merely a
+  one-condition patch. Unsupported changed witness inventories remain blocked.
+- This does not erase the separate CTO-confirmed **normative correction**:
+  detach B and later attach C at the same path is legal. The earlier rejection
+  rule in both implementation and specification was withdrawn.
+- BEX and Catalog have no new source corrections in this candidate. Their
+  development exports must still bind the exact selected Language artifacts.
+
+On the sealed Language `05bb6f31` / Coordination `0f5333c8` runtime tuple,
+the diamond/dormant controls pass **8/8**, including identical complete original
+result JSON across schedules at 835/836/837 gas. The original MyOS fourteen-input
+ring and exact document-snapshot comparison after restart pass **1/1** on MyOS
+`09c24ac5`, in 801.994 seconds, with 271 replayed commands. Business expectations,
+histories and the existing host heap/readiness limits are unchanged. The full
+library gates and the final MyOS **1,196 product plus 62 HTTP** cases remain
+required; these focused receipts do not establish baseline merge readiness.
+
+Current qualification-only successors maintain strict source/API inventories,
+generated documentation and artifact identities. Their scope and gate order are
+recorded in [full-gate preparation](rooted-terminal-peer-qualification.md).
+No failed or filtered gate is relabeled as a full pass. MyOS's separate H2
+eager-text and bounded restart-evidence fixes do not change library semantics.
+
+One Coordination instance serving several registered roots was already present
+in baseline `c0a689de`: a resource demand holds the requesting root's lane while
+independent roots can progress. `RootedSourcePrerequisiteTest` already exercises
+A waiting, B progressing, then A resuming. This means interleaving calls, not
+parallel PROCESS execution inside one synchronized runtime. The earlier
+`observeSourceHistoryPrerequisite` API addition below improves observation of
+that existing lifecycle; it does not introduce multi-root ownership.
+
+## Historical intermediate qualification
+
 **12 September correction:** the user confirms that the lost cyclic reaction
 is a bug and reports CTO confirmation that detach-B/later-attach-C at the same
 path must succeed. The earlier inactive-retarget prohibition is defective in
@@ -14,9 +64,9 @@ both specification and implementation. Its rejection-only repair below is
 Earlier exact-source reports remain historical evidence, not qualification for
 these corrected semantics.
 
-The follow-up is isolated from the previous qualified artifacts:
+The initial follow-up was isolated from the previous qualified artifacts:
 
-- Language: `codex/legal-detached-retarget-language`, current source commit
+- Language: `codex/legal-detached-retarget-language`, then-current source commit
   `3491c515362bda55b72c8cc0e3558ad760ea9f86`, following the sealed
   `5a103afb369b710e3bf2b1158362220607604a07` candidate based on `34e9aa2f`;
   **94/94 focused tests pass** on the runtime/specification slice `1354663`
@@ -116,6 +166,7 @@ not establish a pass for this newly assembled candidate.
 | [Exact-input eligibility memo](rooted-eligibility-cache.md) | The 54 negative BEX operations terminate correctly, but fresh MyOS replay exceeds the existing 120-second restart deadline. CPU samples show repeated delivery classification and body resolution. | Physical optimization: reuse only a complete successful comparison mask for identical exact representations and ordered deliveries. Failures remain uncached; canonical selection, PROCESS, logical gas and publication checks remain unchanged. The later combined host/library candidate passes all 54 operations and restart under the unchanged deadline; this is not an isolated memo-only speedup measurement or a mandatory semantic repair. |
 | [Managed drain gas reporting](rooted-managed-drain-gas-reporting.md) | A registered managed application exposes correct positive gas in its exact typed result, but aggregate SDK drain gas omits that execution; MyOS command summaries inherit the incorrect total. | Correct the SDK-owned this-call summary from actual completed, non-replayed attempts in its three exclusive execution lanes; do not add a MyOS-only workaround or charge result/receipt projections twice. Retained gas, trace, receipts, tariff and limits are unchanged. Retrieving an already-published result adds zero new gas; fresh PROCESS during MyOS reconstruction still counts fully. Structural counters/order/opened-document metrics keep their existing scope. The isolated four-test owner and adjacent eight mapping controls pass; full gates and runtime port remain pending. |
 | [Owned-revision drain budget](rooted-managed-drain-gas-reporting.md#separate-owned-revision-count-correction) | Actual three-node joint results retain 3 owned PROCESS transition receipts, and the chain retains 4, while the managed drain branch reports 1. This undercounts the existing between-invocation transition budget. | Reuse the external/root-local path's `RootedResultScope.processTransitionCount`, with the same published/non-replayed guard. Count actual owned transition receipts, including same-epoch representation changes when they have such receipts, not owners, applications or gas. A host-only correction cannot repair the engine's own budget decision. The three exact regressions change from red in unified-cycle-04 to pass in unified-cycle-05, with original business/gas/trace oracles unchanged. The full05 batch is 4/5 because the separate diamond join remains blocked. |
+| [Terminal causal peer acquisition](rooted-terminal-peer-acquisition.md) | After required local work, B23 still carries immutable D5 while independently completed D23 carries B5; A17/C21 agree. Exact owner/CAS checks correctly reject the stale joint view. Earlier original-stage peer selection also produced different complete failure traces at the same 835-gas limit. | Keep original LIVE selection historical. At a fresh registered terminal, authenticate same-cause peer prefixes and select immutable witness primaries through the new Language factory, preserving calculating owners and old full source proofs. Do not replace a retry input or rerun/charge completed peer work. Unsupported inventory changes remain blocked. The eight diamond/dormant controls and MyOS's original ring/restart now pass; full gates remain required. |
 
 ## Necessity review for the post-d038 additions
 
