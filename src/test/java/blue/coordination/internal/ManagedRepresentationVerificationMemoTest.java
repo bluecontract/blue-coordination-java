@@ -21,9 +21,11 @@ final class ManagedRepresentationVerificationMemoTest {
         try (var f = new Scenario()) {
             var before = f.state();
             var first = f.chain();
-            // when: a different short-lived history reader uses the same store.
+            // when
+            // A different short-lived history reader uses the same store.
             var repeated = f.chain();
-            // then: object reuse proves the expensive constructor did not run again.
+            // then
+            // Object reuse proves the expensive constructor did not run again.
             assertEquals(2, first.transitions().size());
             for (int i = 0; i < first.transitions().size(); i++) {
                 assertSame(first.transitions().get(i), repeated.transitions().get(i));
@@ -55,11 +57,13 @@ final class ManagedRepresentationVerificationMemoTest {
                     tail.targetPositionIdentity(), null);
             var history = new ManagedRepresentationHistory(f.engine.documents());
             assertNull(history.atCaptured(f.parent.id(), 0, cursor).nextRevisionReceiptIdentity());
-            // when: real parent reaction to the child's tick publishes its first numbered successor.
+            // when
+            // Real parent reaction to the child's tick publishes its first numbered successor.
             var entry = f.append(300, "tick");
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(f.parent).entry(entry).disposition());
             assertEquals(1, f.parent.snapshot().epoch());
-            // then: pure proofs may hit, but the current next-receipt/anchor guard still runs.
+            // then
+            // Pure proofs may hit, but the current next-receipt/anchor guard still runs.
             assertNotNull(f.chain().nextRevisionReceiptIdentity());
             assertSame(tail.transitions().get(0), f.chain().transitions().get(0));
             assertTrue(assertThrows(IllegalArgumentException.class,
@@ -75,12 +79,14 @@ final class ManagedRepresentationVerificationMemoTest {
             var memo = new ManagedRepresentationVerificationMemo();
             var cached = prove(memo, publication, p);
             assertSame(cached, prove(memo, publication, p));
+            // when
             // A value-equal durable record is not the same retained publication object.
             var copy = new ContractsClosurePublicationReceipt(publication.publicationIdentity(), publication.documentIds(),
                     publication.attempt(), publication.automaticRetryCount(), publication.managedSurfaceEvidence(),
                     publication.rejectedDraftPlan(), publication.rootedTerminalEvidence());
             assertEquals(publication, copy);
             var differentPublication = prove(memo, copy, p);
+            // then
             assertNotSame(cached, differentPublication);
             assertEquals(cached.positionIdentity(), differentPublication.positionIdentity());
             for (boolean anchor : List.of(false, true)) {
@@ -130,9 +136,11 @@ final class ManagedRepresentationVerificationMemoTest {
             var publication = f.publication(p);
             var bounded = new ManagedRepresentationVerificationMemo(1, 4096);
             var first = prove(bounded, publication, p);
+            // when
             prove(bounded, publication, p.documentId(), p.epoch(), WRONG, p.predecessorPositionIdentity(),
                     p.originalInput(), p.originalResult(), p.transitionReceipt().transitionReceiptIdentity());
             var evicted = prove(bounded, publication, p);
+            // then
             assertNotSame(first, evicted);
             assertEquals(first.positionIdentity(), evicted.positionIdentity());
             for (var disabledOrOversized : List.of(new ManagedRepresentationVerificationMemo(0, 4096),
@@ -162,7 +170,9 @@ final class ManagedRepresentationVerificationMemoTest {
             try {
                 var missing = new LinkedHashMap<>(originals);
                 missing.remove(publication.publicationIdentity());
+                // when
                 mapField.set(state, Map.copyOf(missing));
+                // then
                 assertTrue(assertThrows(IllegalArgumentException.class, f::chain).getMessage().contains("Original representation commit"));
                 var unowned = new ContractsClosurePublicationReceipt(publication.publicationIdentity(), publication.documentIds(),
                         publication.attempt(), publication.automaticRetryCount(), publication.managedSurfaceEvidence(), null, null);
@@ -214,10 +224,12 @@ final class ManagedRepresentationVerificationMemoTest {
             var last = f.chain().transitions().get(1);
             var row = result.managedTransitionReceipts().stream().filter(r -> r.documentId().equals(last.documentId())).findFirst().orElseThrow();
             var before = f.state();
+            // when
             var one = f.engine.documents().proveRepresentation(staged, last.documentId(), 0,
                     last.anchorReceiptIdentity(), last.positionIdentity(), row.transitionReceiptIdentity());
             var two = f.engine.documents().proveRepresentation(staged, last.documentId(), 0,
                     last.anchorReceiptIdentity(), last.positionIdentity(), row.transitionReceiptIdentity());
+            // then
             assertNotSame(one, two);
             assertEquals(one.positionIdentity(), two.positionIdentity());
             assertTrue(f.engine.documents().closurePublicationReceipt(key).isEmpty());
