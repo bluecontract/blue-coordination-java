@@ -17,3 +17,26 @@ D02's failed archive remains unchanged. This is a diagnostic, not yet a
 normative scheduling change or baseline acceptance. Run only after pinning and
 exporting the exact reviewed Language context-fix candidate; do not use an
 unrecorded mutable dependency or relabel old D02 output.
+
+## Exact Language binding
+
+The metadata-only follow-up to diagnostic source
+`23c0256c677f2d1d48589e8baf45c634f36e891b` selects clean Language
+`430ee3936af1e7d73bc82032484e31c83851cec3`, tree
+`121d82a3efc98ba86be38565d14d3639e4beedc4`, DEVELOPMENT version
+`3.1.0-dev.430ee3936af1e7d73bc82032484e31c83851cec3`.
+Its generated Contracts release is
+`sha256:14a9653062c2b4d456c54313db55d22fe92573bd5bcf4f3e87b50400918116f1`.
+Only the active `contractsRelease` property and its matching exact
+`SdkCoreSeamsTest` literal change. Contracts specification, fixture package,
+gas, finalizer/verifier identities and every existing test assertion remain
+unchanged; no Coordination runtime or diagnostic behavior changes.
+
+Language's staged 383-file Contracts package changes only its release manifest
+(eight implementation hashes and derived release identity); all other 382
+files are byte-identical. Its 578/578 Contracts test pass belongs to the prior
+runtime/test source `64f368c0`, before this metadata rebind, not to a downstream
+Coordination run. The new Language/BEX/Catalog exports and exact manifest inputs
+must be verified before executing this diagnostic. No test or export has run
+as part of this Coordination binding change. D03 settlement, original MyOS
+acceptance and complete library qualification remain pending.
