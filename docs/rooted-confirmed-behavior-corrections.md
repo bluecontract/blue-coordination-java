@@ -14,10 +14,11 @@ required reaction. Adding an eventless A step before the attachment must not
 make that reaction disappear. Expected final counters remain **A0/B1/C1**;
 the original long ring's **A4/B2/C3** expectation remains unchanged.
 
-Both the candidate and unchanged upstream RC9 produce the wrong nonterminal
-result. The remaining engineering problem is preserving/executing B's original
-obligation through ownership expansion. It is not a request for permission to
-discard that obligation. A correct fix must also retain exact input identities,
+The earlier candidate and unchanged upstream RC9 both reproduced the wrong
+nonterminal result. The isolated corrected candidate now passes the original
+three-node case and complete SDK ring; general multi-receiver joining remains
+unresolved as recorded below. It is not a request for permission to discard a
+receiver's obligation. A correct fix must also retain exact input identities,
 ordered effects, logical gas, atomic ownership/publication and retry behavior.
 Making immutable historical witnesses mutable, resetting gas, changing the
 business oracle or bypassing publication fences is not an acceptable repair.
@@ -79,8 +80,17 @@ B's occurrence identity for C.
 
 The legal detached-retarget runtime/specification correction is implemented on
 separate candidate branches. Language's focused proof/PROCESS controls pass
-94/94. The sealed Language candidate is
-`5a103afb369b710e3bf2b1158362220607604a07`. Supported release-fixture
+94/94. The sealed Language candidate used by SDK03 is
+`5a103afb369b710e3bf2b1158362220607604a07`; the current source is
+`3491c515362bda55b72c8cc0e3558ad760ea9f86`, which corrects one stale test
+identity literal and adds its explanatory document, with no runtime change.
+The earlier clean run passed 2,799 root tests but failed one of 182 conformance
+tests on that stale identity. The `3491c515` incremental build passes **778/778**
+newly executed tests (5 conformance, 570 Contracts, 173 Language core,
+20 examples, 3 model, 7 Java). Its immutable Language/BEX/Catalog exports now
+pass; final clean/quality qualification and the complete Coordination/MyOS
+tuple remain pending. See the [release registry](rooted-baseline-release-fixes.md)
+for both preserved report archives. Supported release-fixture
 regeneration changes derived identities, not
 the existing executable fixtures' outcomes, gas amounts or ordering. Generated
 documentation and its prerequisite conformance checks also pass with the
@@ -97,14 +107,26 @@ has SHA-256
 Exclusion-free full Language and Coordination gates, the full SDK suite and
 the restored MyOS acceptance tuple remain pending. The focused invocation
 omitted the cyclic identity-inventory task; zero skipped test cases does not
-qualify that task. The
-cyclic correction has separately demonstrated the real all-owner publication,
-exact-reference result/gas and resident restart for the five-input case under
-an explicitly arranged valid schedule. Automatic scheduling, both root-start
-orders, multi-interior cycles and the original complete ring still require
-verification. The latest unified cyclic gate is pending; no result from that
-run is claimed here. A local publication proof is not a substitute for those
-tests.
+qualify that task.
+
+The latest isolated cyclic gate, `unified-cycle-05`, completes **4/5** tests.
+Three automatic controls pass: terminal and nonterminal three-node forwarding,
+and the four-node chain. The complete fourteen-input SDK ring also passes
+with exact authored/input identities, gas/receipt checks and resident restart
+(396.525 seconds): reconnect reaches **A4/B2/C3**, then the final input reaches
+**A4/B2/C4**. The existing owned PROCESS transition-count contract is now checked
+against the actual new retained receipts, including same-epoch transitions.
+
+The remaining diamond `A→B→C`, `A→D→C`, `C→A` produces both required receiving
+reactions (**B1/D1/C2**) but is blocked at terminal publication: B's frozen peer
+D differs from current D, and D's frozen peer B differs from current B. The
+CAS guards correctly prevent promoting either stale captured owner. Resolving
+that exact causal-view/scheduling gap is still required; no witness is made
+mutable and neither reaction nor fence is removed. The original packaged MyOS
+ring/restart and complete coherent library/application acceptance also remain
+pending. Archive `legal-detached-retarget-evidence.fKnxrU/unified-cycle-05.tar.gz`
+has SHA-256
+`c127cc4789e07859fc4423c1e9d2cba9691d11b0f425665e70cdd5d09ae8302a`.
 
 The former candidate and its evidence remain preserved. No new behavioral
 decision from the user or CTO is needed to classify either reproduced failure

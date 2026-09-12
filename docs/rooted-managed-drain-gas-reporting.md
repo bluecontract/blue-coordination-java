@@ -114,13 +114,30 @@ receipt identities, publication ownership, and atomicity remain unchanged.
 A MyOS-only summary correction would not fix the engine's own between-invocation
 budget decision, so this belongs in Coordination.
 
-The exact four existing automatic scenarios now provide the regression without
-manufacturing results or weakening their business/gas/trace checks. The fixed
-engine has **no completed passing rerun yet**. `unified-cycle-04` as a whole was **12/17**:
+The exact four existing automatic scenarios provide the regression without
+manufacturing results or weakening their business/gas/trace checks.
+`unified-cycle-04` as a whole was **12/17**:
 the three accounting failures above and separate diamond/full-ring failures
 remain recorded, not converted into a passing receipt. Its archive is
 `legal-detached-retarget-evidence.fKnxrU/unified-cycle-04.tar.gz`, SHA-256
 `7cca5d4f35ed3fed9b4b0585c2f7581f1af45f58a494a6c684e79cbffe4df0ac`.
+
+The fixed engine's `unified-cycle-05` rerun is **4/5**, not a complete pass.
+All three former accounting failures pass with the new receipt-derived count
+checks and their original business/gas/trace/restart assertions. The automatic
+owner totals **3/4**, 235.206 seconds including its still-blocked diamond case.
+The complete fourteen-input SDK ring/chord/duplicate/detach/reconnect owner
+also passes, including restart, in 396.525 seconds: the reconnect reaches
+**A4/B2/C3**, then the final input reaches **A4/B2/C4**. This does not yet
+qualify the separate original packaged MyOS HTTP/restart owner.
+
+The remaining diamond has both receiving reactions but cannot publish its
+terminal join while each receiver's frozen peer differs from the independently
+advanced peer. Its owner fences remain intact; no oracle or CAS guard is
+weakened. This is a separate unresolved scheduling/causal-view case, not a
+remaining transition-count mismatch. Source and reports are archived in
+`legal-detached-retarget-evidence.fKnxrU/unified-cycle-05.tar.gz`, SHA-256
+`c127cc4789e07859fc4423c1e9d2cba9691d11b0f425665e70cdd5d09ae8302a`.
 
 Implementation and tests remain in the isolated
 `rooted-import-forwarding-reproduction` worktree. Recording this note in the
