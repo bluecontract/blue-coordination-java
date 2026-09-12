@@ -39,6 +39,17 @@ Here replay means retrieval of an already-published result. Fresh-process MyOS
 reconstruction that actually executes PROCESS again is not such a retrieval:
 its newly executed attempts still report their complete deterministic gas.
 
+The separate same-cause peer-scheduling candidate introduces a host
+prepublication admission probe, documented in `rooted-diamond-peer-scheduling.md`.
+Only a successful closed rooted calculation proving an outstanding original
+receiving publication can return that typed prerequisite instead of admitting
+an attempt. Such a speculative probe has no semantic receipt or logical gas
+charge; its physical PROCESS work remains in diagnostic counters and timers.
+When admitted, the prepared result is reused and counted normally. This is not
+deduplication of genuine failed attempts, not a replay, and not a conversion of
+a completed failure into a zero-gas resource demand. The original gas mapper
+and all four failed/replay/mixed-lane controls below remain unchanged.
+
 The gas correction changes no execution, publication, retry, readiness,
 selection, gas-limit, receipt, or public API shape. It leaves other aggregate
 fields unchanged; the separate revision-count correction below addresses the

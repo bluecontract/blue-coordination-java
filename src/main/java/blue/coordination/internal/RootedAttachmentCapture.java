@@ -35,6 +35,12 @@ final class RootedAttachmentCapture {
 
     static Map<DocumentId, RootedDocumentView> select(ContractsClosureAdapter.CohortInvocation current,
             ManagedOccurrenceResolver.Resolution resolution, InMemoryDocumentStore documents) {
+        return select(current, resolution, documents, Map.of());
+    }
+
+    static Map<DocumentId, RootedDocumentView> select(ContractsClosureAdapter.CohortInvocation current,
+            ManagedOccurrenceResolver.Resolution resolution, InMemoryDocumentStore documents,
+            Map<DocumentId, RootedDocumentView> peerPrefixes) {
         if (current.rootedEvidence() == null) return Map.of();
         ExternalOrderKey boundary = current.rootedEvidence().historicalOrigin() == null
                 ? logicalBoundary(current.input(), documents.catchUpPlansSnapshot())
@@ -49,7 +55,8 @@ final class RootedAttachmentCapture {
             while (!pending.isEmpty()) {
                 DocumentId id = pending.removeFirst();
                 if (!visited.add(id)) continue;
-                var exact = view.snapshot().managedDocument(ContractsClosureAdapter.closureId(id));
+                var selectedView = peerPrefixes.getOrDefault(id, view);
+                var exact = selectedView.snapshot().managedDocument(ContractsClosureAdapter.closureId(id));
                 if (exact == null) throw new ProjectionUnavailableException("Retained attachment view has incomplete forward evidence");
                 var existing = current.input().snapshot().managedDocument(exact.documentId());
                 RootedDocumentView prior = selected.get(id);
@@ -65,8 +72,8 @@ final class RootedAttachmentCapture {
                             + " current=" + (existing == null ? "absent" : existing.blueId())
                             + " prior=" + prior.snapshot().managedDocument(exact.documentId()).blueId());
                 }
-                if (existing == null) selected.putIfAbsent(id, view);
-                view.snapshot().occurrences().stream().filter(row -> row.sourceDocumentId().equals(exact.documentId()))
+                if (existing == null) selected.putIfAbsent(id, selectedView);
+                selectedView.snapshot().occurrences().stream().filter(row -> row.sourceDocumentId().equals(exact.documentId()))
                         .forEach(row -> pending.addLast(ContractsClosureAdapter.coordinationId(row.targetDocumentId())));
             }
         }

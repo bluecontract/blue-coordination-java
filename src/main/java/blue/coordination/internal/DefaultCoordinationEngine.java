@@ -1090,6 +1090,9 @@ public final class DefaultCoordinationEngine
             long started = System.nanoTime();
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
+            if (new RootedCheckpointDriver(documents, contractsClosureAdapter).blocksSuppliedLive(root, batch, journal.entries()))
+                return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null, false, false, 0L,
+                        System.nanoTime() - started);
             return rootedReadiness(root, executeRootBatch(batch, started), started);
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
@@ -1103,7 +1106,14 @@ public final class DefaultCoordinationEngine
             boolean complete = true;
             long committed = 0L;
             for (ContractsClosureAdapter.CohortInvocation invocation : batch.invocations()) {
-                ContractsClosureAdapter.CohortOutcome exact = contractsClosureAdapter.executeAndPublish(batch, invocation);
+                var admission = contractsClosureAdapter.prepareAndPublish(batch, invocation);
+                if (admission.prerequisite() != null) {
+                    // A preflight probe is not an admitted semantic attempt. Its actual
+                    // original receiver remains ordinary selectable LIVE work.
+                    complete = false;
+                    continue;
+                }
+                ContractsClosureAdapter.CohortOutcome exact = admission.outcome();
                 complete &= exact.attempt().isComplete() || exact.rejectedBirth() != null;
                 attempts.add(new ContractsClosureDispatchAttempt(entry.blueId(), exact.publicationMembers(),
                         exact.attempt(), exact.published(), exact.publicationIdentity(), exact.replayed(),
@@ -1126,7 +1136,8 @@ public final class DefaultCoordinationEngine
                 }
             }
             return new ProcessingDrainReceipt(complete ? List.of(entry) : List.of(),
-                    Map.of(entry.blueId(), outcomes), Map.of(entry.blueId(), attempts),
+                    outcomes.isEmpty() && !complete ? Map.of() : Map.of(entry.blueId(), outcomes),
+                    attempts.isEmpty() && !complete ? Map.of() : Map.of(entry.blueId(), attempts),
                     complete ? entry.sourceOrderKey() : null, complete, false, committed,
                     System.nanoTime() - started);
     }
@@ -2203,8 +2214,8 @@ public final class DefaultCoordinationEngine
                 contractsClosureAdapter,
                 new ContractsRootFeederWindow(
                         contractsRecoveryState.feederWindow),
-                contractsClosureAdapter::executeAndPublish,
-                this::eligibleThroughCatchUpFrontier);
+                this::eligibleThroughCatchUpFrontier,
+                contractsClosureAdapter::prepareAndPublish);
     }
 
     private boolean eligibleThroughCatchUpFrontier(

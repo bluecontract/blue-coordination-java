@@ -16,6 +16,8 @@ final class RootedJoinScheduling {
             List<RootedJoinEligibility.Fence> fences, InMemoryDocumentStore documents,
             Function<DocumentId, RootedCheckpointDriver.Selection> raw,
             java.util.function.BiPredicate<DocumentId, blue.language.processor.ExternalOrderKey> completeThrough) {
+        if (selected.live() != null && RootedJoinPeerPrefixes.blocks(selected.live(), fences, documents, raw))
+            return blocked(selected);
         for (var fence : fences) {
             var terminal = fence.terminal();
             if (terminal == null && localTerminal(selected.localHistorical(), fence)) return blocked(selected);
@@ -85,7 +87,7 @@ final class RootedJoinScheduling {
                 && revision.toEpoch() == local.invocation().input().snapshot().managedDocument(revision.childDocumentId()).epoch();
     }
 
-    private static boolean matches(ManagedEpochApplicationWork registered, RootedLocalHistory.Step local,
+    static boolean matches(ManagedEpochApplicationWork registered, RootedLocalHistory.Step local,
             RootedJoinEligibility.Fence fence) {
         if (local == null || !local.anchor().sourceOrderKey().equals(fence.boundary())) return false;
         var work = local.work();

@@ -568,7 +568,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         FrozenBatch frozen = Objects.requireNonNull(batch, "batch");
         List<CohortOutcome> outcomes = new ArrayList<>();
         for (CohortInvocation invocation : frozen.invocations()) {
-            outcomes.add(executeAndPublish(frozen, invocation));
+            var admission = prepareAndPublish(frozen, invocation);
+            if (admission.outcome() != null) outcomes.add(admission.outcome());
         }
         return List.copyOf(outcomes);
     }
@@ -627,8 +628,24 @@ final class ContractsClosureAdapter implements AutoCloseable {
         feederDecisions = Objects.requireNonNull(state, "state");
     }
 
-    /** Executes and independently publishes exactly one frozen cohort lane. */
+    /** Convenience for callers requiring an admitted lane, never the normal waiting path. */
     synchronized CohortOutcome executeAndPublish(
+            FrozenBatch batch, CohortInvocation cohort) {
+        var admission = prepareAndPublish(batch, cohort);
+        if (admission.outcome() == null) throw new IllegalStateException(
+                "Cohort is not admitted: original receiving publication is pending for "
+                        + admission.prerequisite().consumer());
+        return admission.outcome();
+    }
+
+    /**
+     * Prepares a frozen cohort before admitting a semantic processing attempt.
+     * A successful noncommitting calculation can reveal a same-cause receiving
+     * prerequisite. That typed wait has no attempt/receipt; physical calculation
+     * metrics remain recorded. Otherwise the prepared result is used exactly once
+     * below, including ordinary completed failures and their original logical gas.
+     */
+    synchronized CohortAdmission prepareAndPublish(
             FrozenBatch batch,
             CohortInvocation cohort) {
         ensureOpen();
@@ -639,7 +656,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     "Cohort invocation does not belong to the frozen batch");
         }
         var rejectedBirth = feederDecisions.rejectedBirth(selected);
-        if (rejectedBirth != null) return rejectedBirth.outcome(true);
+        if (rejectedBirth != null) return CohortAdmission.admitted(rejectedBirth.outcome(true));
         Optional<ContractsClosurePublicationReceipt> prior =
                 publicationReceipt(frozen, selected);
         if (prior.isPresent()) {
@@ -647,9 +664,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (receipt.commits()) {
                 reconcilePublication(frozen, selected);
             }
-            return outcome(receipt, true, selected.members());
+            return CohortAdmission.admitted(outcome(receipt, true, selected.members()));
         }
         requireRouteSelectionCurrent(frozen, selected);
+        long preparationStarted = System.nanoTime();
         AutomaticOccurrenceResolutionCoordinator.RunResult<
                 CohortInvocation,
                 ContractsClosurePublicationReceipt> automatic =
@@ -670,9 +688,32 @@ final class ContractsClosureAdapter implements AutoCloseable {
             if (replay.commits()) {
                 reconcilePublication(frozen, selected);
             }
-            return outcome(replay, true, selected.members());
+            return CohortAdmission.admitted(outcome(replay, true, selected.members()));
         }
         ClosureAttemptResult attempt = automatic.attempt();
+        RootedTerminalEvidence terminal = null;
+        if (executed.rootedEvidence() != null && executed.input().cause() instanceof ExternalEventCause) {
+            try {
+                runtime.metrics().increment("contracts.rootedJoinPreflight.calculations");
+                if (attempt.isComplete() && attempt.processResult().commits()
+                        && (executed.managedDraftPlan() == null || !executed.managedDraftPlan()
+                                .missingExpectedOccurrence(attempt.processResult()))) {
+                    // Closed-result validation precedes topology inspection. No result
+                    // from an invalid or rolling-back calculation can create this wait.
+                    terminal = RootedTerminalEvidence.capture(executed, attempt.processResult());
+                    var prerequisite = RootedJoinPeerPrefixes.pendingReceivingCause(frozen, selected, executed,
+                            attempt.processResult(), documents,
+                            receiver -> nextRootLiveInput(receiver, timelineHistory.get()));
+                    if (prerequisite != null) {
+                        requirePublishableResult(executed, attempt.processResult());
+                        runtime.metrics().increment("contracts.rootedJoinPreflight.blocked");
+                        return new CohortAdmission(null, prerequisite);
+                    }
+                }
+            } finally {
+                runtime.metrics().addNanos("contracts.rootedJoinPreflight", System.nanoTime() - preparationStarted);
+            }
+        }
         long validationStarted = System.nanoTime();
         String identity;
         ContractsClosurePublicationReceipt receipt;
@@ -690,13 +731,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 if (rejected != null) {
                     var retained = feederDecisions.rejectBirth(rejected, documents);
                     publicationFailureInjector.accept(PublicationFailurePoint.AFTER_STORE_COMMIT_BEFORE_ROUTE_PUBLISH);
-                    return retained.outcome(false);
+                    return CohortAdmission.admitted(retained.outcome(false));
                 }
-                return new CohortOutcome(
+                return CohortAdmission.admitted(new CohortOutcome(
                         selected.members(), executed.members(), attempt,
                         false, identity, false, automatic.expansionCount(),
                         ManagedSurfacePublicationEvidence.empty(),
-                        automatic.unresolvedDemands());
+                        automatic.unresolvedDemands()));
             }
             if (!isDurablyTerminalStatus(
                     attempt.processResult().status())) {
@@ -715,7 +756,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     && executed.managedDraftPlan().missingExpectedOccurrence(attempt.processResult())
                     ? executed.managedDraftPlan() : null;
             if (rejected != null) requireCommitFences(executed, attempt.processResult());
-            RootedTerminalEvidence terminal = RootedTerminalEvidence.capture(executed, attempt.processResult());
+            if (terminal == null) terminal = RootedTerminalEvidence.capture(executed, attempt.processResult());
             receipt = new ContractsClosurePublicationReceipt(
                     identity,
                     terminal == null ? RootedResultScope.members(attempt.processResult())
@@ -744,7 +785,18 @@ final class ContractsClosureAdapter implements AutoCloseable {
             runtime.metrics().increment("deliveryReceiptsCommitted");
             runtime.metrics().increment("temporal.externalProcessCalls");
         }
-        return outcome(retainedReceipt, false, selected.members());
+        return CohortAdmission.admitted(outcome(retainedReceipt, false, selected.members()));
+    }
+
+    /** Exactly one admitted outcome or nonterminal preflight prerequisite. */
+    record CohortAdmission(CohortOutcome outcome, RootedJoinPeerPrefixes.ReceivingPublication prerequisite) {
+        CohortAdmission {
+            if ((outcome == null) == (prerequisite == null))
+                throw new IllegalArgumentException("Admission requires exactly one outcome or prerequisite");
+        }
+        static CohortAdmission admitted(CohortOutcome outcome) {
+            return new CohortAdmission(Objects.requireNonNull(outcome, "outcome"), null);
+        }
     }
 
     /** Exact implementation evidence from the latest completed execution. */
@@ -1999,8 +2051,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
             }
         }
 
+        var peerPrefixes = RootedJoinPeerPrefixes.select(current, selected, documents,
+                peer -> nextRootLocalHistory(peer, timelineHistory.get()),
+                (fence, local) -> new ManagedEpochInvocationCapturer(this, runtime, objects, documents, profile, environment)
+                        .captureRootedJoin(fence.terminal().work(), fence.terminal().excludedConsumers(), local));
         Map<DocumentId, RootedDocumentView> attachmentViews = RootedAttachmentCapture.select(
-                current, selected, documents);
+                current, selected, documents, peerPrefixes);
         selected = RootedAttachmentCapture.classifyAtBoundary(current, selected, attachmentViews, documents);
         Set<DocumentId> existingMembers;
         if (current.rootedEvidence() == null) {

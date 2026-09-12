@@ -13,14 +13,14 @@ import java.util.function.Predicate;
 final class ContractsRootFeederCoordinator {
     private final ContractsClosureAdapter adapter;
     private final ContractsRootFeederWindow window;
-    private final CohortExecutor executor;
+    private final AdmissionExecutor executor;
     private final Predicate<ContractsClosureAdapter.CohortInvocation>
             eligibility;
 
     ContractsRootFeederCoordinator(
             ContractsClosureAdapter adapter,
             ContractsRootFeederWindow window) {
-        this(adapter, window, adapter::executeAndPublish, ignored -> true);
+        this(adapter, window, ignored -> true, adapter::prepareAndPublish);
     }
 
     ContractsRootFeederCoordinator(
@@ -35,6 +35,15 @@ final class ContractsRootFeederCoordinator {
             ContractsRootFeederWindow window,
             CohortExecutor executor,
             Predicate<ContractsClosureAdapter.CohortInvocation> eligibility) {
+        this(adapter, window, eligibility, (batch, invocation) ->
+                ContractsClosureAdapter.CohortAdmission.admitted(executor.execute(batch, invocation)));
+    }
+
+    ContractsRootFeederCoordinator(
+            ContractsClosureAdapter adapter,
+            ContractsRootFeederWindow window,
+            Predicate<ContractsClosureAdapter.CohortInvocation> eligibility,
+            AdmissionExecutor executor) {
         this.adapter = Objects.requireNonNull(adapter, "adapter");
         this.window = Objects.requireNonNull(window, "window");
         this.executor = Objects.requireNonNull(executor, "executor");
@@ -74,8 +83,12 @@ final class ContractsRootFeederCoordinator {
                 window.releaseUnexecuted(ticket);
                 continue;
             }
-            ContractsClosureAdapter.CohortOutcome outcome =
-                    executor.execute(frozen, invocation);
+            var admission = executor.execute(frozen, invocation);
+            if (admission.prerequisite() != null) {
+                window.releaseUnexecuted(ticket);
+                continue;
+            }
+            ContractsClosureAdapter.CohortOutcome outcome = admission.outcome();
             window.record(ticket, outcome);
             progress.add(new CohortProgress(ticket, outcome));
         }
@@ -93,6 +106,13 @@ final class ContractsRootFeederCoordinator {
     @FunctionalInterface
     interface CohortExecutor {
         ContractsClosureAdapter.CohortOutcome execute(
+                ContractsClosureAdapter.FrozenBatch batch,
+                ContractsClosureAdapter.CohortInvocation invocation);
+    }
+
+    @FunctionalInterface
+    interface AdmissionExecutor {
+        ContractsClosureAdapter.CohortAdmission execute(
                 ContractsClosureAdapter.FrozenBatch batch,
                 ContractsClosureAdapter.CohortInvocation invocation);
     }

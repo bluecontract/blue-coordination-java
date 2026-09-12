@@ -36,9 +36,9 @@ public final class RootedDiamondAcquisitionProbe {
     }
 
     /**
-     * Resolves the real demand once to discover its exact source proof, then asks
-     * the existing Language factory to add the separately published peer view to
-     * the ORIGINAL input. The ordinary expanded D2 input is never rewritten.
+     * Resolves the real demand through production peer selection, then independently
+     * reconstructs that expansion with the existing Language factory from the
+     * ORIGINAL input. The historical D2 remains inside A's complete source proof.
      */
     public Calculation publishExpandedOriginal(DocumentId driver, DocumentId peer,
             DocumentId consumer, DocumentId source, String entryBlueId, String originalIdentity) {
@@ -106,7 +106,9 @@ public final class RootedDiamondAcquisitionProbe {
                 || resolved.invocation().retryInput() != null || resolved.invocation().managedDraftPlan() != null)
             throw new IllegalArgumentException("Expected the real completed A-source read expansion, without a retry or birth");
         var baseline = resolved.invocation();
-        exact(historicalPeer, baseline.input().snapshot().managedDocument(selectedPeer.documentId()));
+        // The production expansion now selects this independently proved peer.
+        // The explicit construction below remains a same-input reference check.
+        exact(selectedPeer, baseline.input().snapshot().managedDocument(selectedPeer.documentId()));
         exact(frozenSource, baseline.input().snapshot().managedDocument(frozenSource.documentId()));
         if (!unchanged.equals(safety.publicationState())) throw new IllegalStateException("Diagnostic PROCESS published state");
 
