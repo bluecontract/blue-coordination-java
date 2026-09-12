@@ -57,6 +57,7 @@ final class InMemoryDocumentStore {
             "temporal.unrelatedDocumentReads";
 
     private final EngineMetrics metrics;
+    private ManagedRepresentationVerificationMemo representationVerifications = new ManagedRepresentationVerificationMemo();
     private StoreState state;
 
     InMemoryDocumentStore() {
@@ -321,6 +322,39 @@ final class InMemoryDocumentStore {
         return Optional.ofNullable(state.closurePublicationReceipts().get(
                 Objects.requireNonNull(
                         publicationIdentity, "publicationIdentity")));
+    }
+
+    /** Reuses only immutable constructor work; callers still authenticate every current history fence. */
+    blue.language.processor.closure.ManagedRepresentationTransition proveRepresentation(
+            ContractsClosurePublicationReceipt publication, blue.language.processor.closure.DocumentId document,
+            long epoch, String anchor, String predecessor, String receipt) {
+        var input = publication.managedSurfaceEvidence().originalInvocation();
+        var result = publication.attempt().processResult();
+        var request = new ManagedRepresentationVerificationMemo.Request(
+                publication, document, epoch, anchor, predecessor, input, result, receipt);
+        boolean durable;
+        ManagedRepresentationVerificationMemo memo;
+        synchronized (this) {
+            memo = representationVerifications;
+            durable = state.closurePublicationReceipts().get(publication.publicationIdentity()) == publication;
+            var found = durable ? memo.find(request) : null;
+            if (found != null) return found;
+        }
+        // The expensive pure proof never holds the store monitor. Concurrent cold proofs are benign.
+        var proved = request.prove();
+        synchronized (this) {
+            // Never retain a proposal that was staged on entry, even if it committed during proof.
+            if (durable && memo == representationVerifications
+                    && state.closurePublicationReceipts().get(publication.publicationIdentity()) == publication)
+                return memo.retain(request, proved);
+        }
+        return proved;
+    }
+
+    synchronized void clearRepresentationVerifications() {
+        representationVerifications.clear();
+        // Opaque memo identity also invalidates any cold construction that began before this clear.
+        representationVerifications = new ManagedRepresentationVerificationMemo();
     }
 
     /** Checks retained local-provider promises before accepting another exact entry. */

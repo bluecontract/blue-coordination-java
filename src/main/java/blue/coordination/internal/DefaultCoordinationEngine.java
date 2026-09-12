@@ -1479,6 +1479,7 @@ public final class DefaultCoordinationEngine
 
     synchronized void restartFromStores() {
         ensureOpen();
+        documents.clearRepresentationVerifications();
         clearFailureInjection();
         routeIndex.clear();
         documents.sessions().stream()
@@ -2196,6 +2197,7 @@ public final class DefaultCoordinationEngine
             return;
         }
         closed = true;
+        documents.clearRepresentationVerifications();
         try {
             if (contractsClosureAdapter != null) {
                 try {

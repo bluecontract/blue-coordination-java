@@ -205,11 +205,10 @@ final class ManagedRepresentationHistory {
                     || publication.managedSurfaceEvidence().originalInvocation() == null) {
                 throw new IllegalArgumentException("Original representation classification input is unavailable");
             }
-            ManagedRepresentationTransition proved = new ManagedRepresentationTransition(
+            ManagedRepresentationTransition proved = documents.proveRepresentation(publication,
                     ContractsClosureAdapter.closureId(documentId), epoch,
                     anchor.receiptIdentity(), predecessorPosition,
-                    publication.managedSurfaceEvidence().originalInvocation(),
-                    publication.attempt().processResult(), row.transitionReceiptIdentity());
+                    row.transitionReceiptIdentity());
             if (proved.rootedCheckpointReferenceProofIdentity().isPresent()) {
                 RootedTerminalEvidence rooted = publication.rootedTerminalEvidence();
                 if (rooted == null) throw new IllegalArgumentException("Original rooted representation authority is unavailable");
