@@ -18,7 +18,7 @@ import java.util.Map;
  */
 final class ComputeProgramNormalizer {
     private static final String NORMALIZATION_VERSION =
-            "compute-program-v11|exact-definition-identity|canonical-bex-source"
+            "compute-program-v12|exact-definition-identity|canonical-bex-source"
                     + "|strict-statements|exact-field-presence";
 
     private final BexProcessingMetrics metrics;
@@ -84,6 +84,10 @@ final class ComputeProgramNormalizer {
     }
 
     FrozenNode definitionSource(FrozenNode definitionNode, boolean resolvedDefinition) {
+        return definitionSource(definitionNode, resolvedDefinition, 0);
+    }
+
+    FrozenNode definitionSource(FrozenNode definitionNode, boolean resolvedDefinition, int declaredMaps) {
         if (definitionNode == null) {
             throw new IllegalArgumentException(
                     "definitionNode must not be null");
@@ -95,8 +99,8 @@ final class ComputeProgramNormalizer {
         }
         Node input = frozenInput(definitionNode, "constants", "functions");
         if (resolvedDefinition) {
-            omitInheritedEmptyMap(input, definitionNode, "constants");
-            omitInheritedEmptyMap(input, definitionNode, "functions");
+            if ((declaredMaps & 1) == 0) omitInheritedEmptyMap(input, definitionNode, "constants");
+            if ((declaredMaps & 2) == 0) omitInheritedEmptyMap(input, definitionNode, "functions");
         }
         return FrozenNode.fromResolvedNode(definitionSource(input));
     }

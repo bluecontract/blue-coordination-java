@@ -699,8 +699,10 @@ def currentProductionShapeLimits = [
         // See docs/rooted-terminal-peer-qualification.md for the exact ledger.
         // No public API, retained-source, protocol, closure, or gas limit changes.
         // Exact-cutoff Journal fairness adds 16 lines in two existing private sources.
+        // Merged upstream named Compute plus exact-presence/root-path correction:
+        // net +9 lines over the 74,222-line baseline; same source/type inventory.
         classes: 254,
-        lines: 74_222L,
+        lines: 74_231L,
         publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

@@ -124,6 +124,8 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
             final FrozenNode resolvedDefinitionNode = definitionResolver.resolve(rawStepNode,
                     context,
                     metrics);
+            final String definitionPointer = definitionResolver.definitionPointer(rawStepNode, context);
+            final int declaredMaps = definitionResolver.declaredMaps(definitionPointer, context);
             if (metrics != null) {
                 metrics.addComputeDefinitionResolveNanos(System.nanoTime() - resolveStart);
             }
@@ -133,14 +135,14 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
                     rawStepNode,
                     resolvedDefinitionNode,
                     effectiveEntry,
-                    normalizer.normalizationVersion());
+                    normalizer.normalizationVersion() + "|declared-maps=" + declaredMaps);
             ComputeProgramPlanCache.Lookup lookup = planCache.lookup(planKey,
                     new ComputeProgramPlanCache.PlanFactory() {
                         @Override
                         public ComputeProgramPlan create() {
                             return buildPlan(exactRawStepNode,
                                     resolvedDefinitionNode,
-                                    effectiveEntry, context);
+                                    effectiveEntry, context, definitionPointer, declaredMaps);
                         }
                     });
             ComputeProgramPlan computePlan = lookup.plan();
@@ -289,8 +291,8 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
 
     private ComputeProgramPlan buildPlan(FrozenNode rawStepNode,
                                          FrozenNode rawDefinitionNode,
-                                         String effectiveEntry, StepExecutionContext context) {
-        String definitionPointer = definitionResolver.definitionPointer(rawStepNode, context);
+                                         String effectiveEntry, StepExecutionContext context,
+                                         String definitionPointer, int declaredMaps) {
         FrozenNode programNode = normalizer.program(rawStepNode);
         FrozenNode definitionNode = rawDefinitionNode != null
                 ? normalizer.definition(rawDefinitionNode)
@@ -298,7 +300,7 @@ public final class ComputeStepExecutor implements WorkflowStepExecutor<Compute>,
         FrozenNode definitionSourceNode =
                 rawDefinitionNode != null
                         ? normalizer.definitionSource(
-                                rawDefinitionNode, definitionPointer != null)
+                                rawDefinitionNode, definitionPointer != null, declaredMaps)
                         : null;
         String normalizedEntry = FrozenNodeUtil.textProperty(programNode, "entry");
         // The key is built from the authored effective entry. Retain the

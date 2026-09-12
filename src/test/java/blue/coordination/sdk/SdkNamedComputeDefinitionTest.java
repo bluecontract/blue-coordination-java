@@ -407,6 +407,45 @@ final class SdkNamedComputeDefinitionTest {
                         Arguments.of(field, form, true), Arguments.of(field, form, false))));
     }
 
+    @ParameterizedTest
+    @MethodSource("definitionContributionPaths")
+    void exactDefinitionMapMeaningSurvivesInheritedAndReferencedContainers(
+            String field, String form, String location) {
+        ExactBlueValue definition;
+        ExactBlueValue library;
+        ExactBlueValue base;
+        try (BlueCoordination preparer = BlueCoordination.inMemory()) {
+            definition = preparer.values().providerContentYaml("type: Coordination/Compute Definition\n"
+                    + field + (form.equals("empty") ? ": {}\n" : ": {type: Dictionary}\n"));
+            library = preparer.values().providerContentYaml("coffeeCode: {blueId: " + definition.blueId() + "}\n");
+            base = preparer.values().providerContentYaml("library: {blueId: " + library.blueId() + "}\n");
+        }
+        List<ExactBlueValue> retained = List.of(definition, library, base);
+        try (BlueCoordination blue = BlueCoordination.builder().exactNodeProvider(requested -> retained.stream()
+                .filter(value -> value.blueId().equals(requested)).map(ExactBlueValue::json).findFirst()).build()) {
+            String topology = switch (location) {
+                case "referenced-parent" -> "library: {blueId: " + library.blueId() + "}\n";
+                case "inherited" -> "type: {blueId: " + base.blueId() + "}\n";
+                case "partial-overlay" -> "type: {blueId: " + base.blueId()
+                        + "}\nlibrary:\n  local: separate overlay\n";
+                default -> throw new IllegalArgumentException(location);
+            };
+            String source = topology + initialization(INLINE_STEP + "  definition: /library/coffeeCode\n");
+            if (form.equals("declaration")) {
+                CoordinationException failure = assertThrows(CoordinationException.class, () -> admit(blue, source));
+                assertTrue(failure.getMessage().contains(field), failure.getMessage());
+            } else {
+                assertCoffeeEvent(blue, admit(blue, source).snapshot().publicEvents());
+            }
+        }
+    }
+
+    private static Stream<Arguments> definitionContributionPaths() {
+        return Stream.of("constants", "functions").flatMap(field -> Stream.of("empty", "declaration")
+                .flatMap(form -> Stream.of("referenced-parent", "inherited", "partial-overlay")
+                        .map(location -> Arguments.of(field, form, location))));
+    }
+
     private static Stream<Arguments> invalidStaticTypes() {
         return Stream.of("type", "nestedType", "itemType", "valueType").flatMap(field -> Stream.of(
                 Arguments.of(field, "name: Invalid Coffee Event\npayload:\n  $add: [1, 2]\n"),

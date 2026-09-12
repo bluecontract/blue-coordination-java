@@ -5,6 +5,7 @@ import blue.bex.compile.BexCompilerRuntimeAccess;
 import blue.bex.result.BexMetricsRecorder;
 import blue.language.model.Node;
 import blue.language.processor.SelectedExecutableBody;
+import blue.language.processor.util.PointerUtils;
 import blue.language.snapshot.FrozenNode;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -72,18 +73,17 @@ final class ComputeStaticTypeValidation {
         // authored shape (and must not hide a forbidden static expression).
         node.blueId(null);
         int before = opened.size();
-        node.type(type(node.getType(), access, opened, pointer + "/type"));
-        node.itemType(type(node.getItemType(), access, opened, pointer + "/itemType"));
-        node.keyType(type(node.getKeyType(), access, opened, pointer + "/keyType"));
-        node.valueType(type(node.getValueType(), access, opened, pointer + "/valueType"));
+        node.type(type(node.getType(), access, opened, PointerUtils.appendPointer(pointer, "type")));
+        node.itemType(type(node.getItemType(), access, opened, PointerUtils.appendPointer(pointer, "itemType")));
+        node.keyType(type(node.getKeyType(), access, opened, PointerUtils.appendPointer(pointer, "keyType")));
+        node.valueType(type(node.getValueType(), access, opened, PointerUtils.appendPointer(pointer, "valueType")));
         boolean changed = opened.size() != before;
-        changed |= fields(node.getContracts(), access, opened, pointer + "/contracts");
+        changed |= fields(node.getContracts(), access, opened, PointerUtils.appendPointer(pointer, "contracts"));
         if (node.getProperties() != null) for (Map.Entry<String, Node> entry : node.getProperties().entrySet()) {
-            changed |= fields(entry.getValue(), access, opened,
-                    pointer + "/" + entry.getKey().replace("~", "~0").replace("/", "~1"));
+            changed |= fields(entry.getValue(), access, opened, PointerUtils.appendPointer(pointer, entry.getKey()));
         }
         if (node.getItems() != null) for (int i = 0; i < node.getItems().size(); i++) {
-            changed |= fields(node.getItems().get(i), access, opened, pointer + "/" + i);
+            changed |= fields(node.getItems().get(i), access, opened, PointerUtils.appendPointer(pointer, String.valueOf(i)));
         }
         return changed;
     }
