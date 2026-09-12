@@ -77,14 +77,18 @@ final class RootedDiamondPeerSchedulingTest {
             var early = runOriginalBoundary(true, policy);
             System.out.println("DIAMOND_G_BOUNDARY_COMPARE G=" + gas + " delta=" + delta
                     + " prepared=" + prepared + " early=" + early);
+            if (prepared.chargedGas() != early.chargedGas()) System.out.println(
+                    "DIAMOND_G_BOUNDARY_UNRESOLVED_AGGREGATE delta=" + delta + " prepared="
+                            + prepared.chargedGas() + " early=" + early.chargedGas()
+                            + " REVIEW_REQUIRED: inspect the per-call attempt ledgers; no generic retry waiver");
             assertNotNull(prepared.original(), "C/D preparation must expose B's actual terminal result");
             assertEquals(delta >= 0L ? "APPLIED" : "GAS_LIMIT_EXCEEDED", prepared.originalDisposition());
             assertEquals(delta >= 0L, prepared.original().commits(), "Actual admitted original at G" + delta);
             assertEquals(delta >= 0L ? "SUCCESS" : "GAS_LIMIT_EXCEEDED", prepared.original().status());
             if (delta >= 0L) assertEquals(gas, prepared.original().gas());
             else assertNotNull(prepared.original().rejected());
-            // Genuine repeated completed attempts may add aggregate call charges.
-            // Compare retained logical evidence, not physical attempt-count symmetry.
+            // A genuine retry is charged, but a schedule-dependent extra retry still
+            // requires explicit review; this diagnostic never waives the difference.
             assertAll("Same fixed policy: retained histories, dispositions, logical charges and owned results",
                     () -> assertEquals(prepared.entry(), early.entry()),
                     () -> assertEquals(prepared.stop(), early.stop()),
@@ -93,7 +97,9 @@ final class RootedDiamondPeerSchedulingTest {
                     () -> assertEquals(prepared.originalDisposition(), early.originalDisposition()),
                     () -> assertEquals(prepared.terminals(), early.terminals()),
                     () -> assertEquals(prepared.observed(), early.observed()),
-                    () -> assertEquals(prepared.events(), early.events()));
+                    () -> assertEquals(prepared.events(), early.events()),
+                    () -> assertEquals(prepared.chargedGas(), early.chargedGas(),
+                            "UNRESOLVED_AGGREGATE: attribute every difference using the attempt ledger before qualification"));
         });
         // then
         assertAll("Actual admitted B-original G-1/G/G+1; no gas-1 rerun", comparisons);
@@ -140,8 +146,7 @@ final class RootedDiamondPeerSchedulingTest {
             if (run.original != null) {
                 stop = "BOUND";
                 for (int step = 0; step < 160; step++) {
-                    var next = s.f.blue.processing().drain(new DrainBudget(1, 1));
-                    run.observe("drain-" + step, next);
+                    var next = run.call("drain-" + step, () -> s.f.blue.processing().drain(new DrainBudget(1, 1)));
                     if (next.quiescent()) { stop = "QUIESCENT"; break; }
                     if (next.blocked()) { stop = "BLOCKED"; break; }
                 }
@@ -170,6 +175,8 @@ final class RootedDiamondPeerSchedulingTest {
         OriginalBoundaryTerminal original;
         String originalDisposition;
         long chargedGas;
+        final List<Map<String, Object>> calls = new ArrayList<>();
+        final List<OriginalBoundaryAttempt> attempts = new ArrayList<>();
 
         OriginalBoundaryRun(Scenario s, ContractsExecutionPolicy policy, String schedule) {
             this.s = s; this.policy = policy; this.schedule = schedule;
@@ -178,20 +185,20 @@ final class RootedDiamondPeerSchedulingTest {
         }
 
         void prefix(String name) {
-            var first = s.f.blue.processing().process(s.root(name), entry);
-            observe(name + "-original", first);
+            var first = call(name + "-original", () -> s.f.blue.processing().process(s.root(name), entry));
             if (first.blocked() || first.find(entry).map(value -> !value.applied()).orElse(false)) return;
             for (int step = 0; step < 32; step++) {
-                var next = s.f.blue.processing().processNext(s.root(name));
-                observe(name + "-prefix-" + step, next);
+                var next = call(name + "-prefix-" + step, () -> s.f.blue.processing().processNext(s.root(name)));
                 if (next.blocked() || next.quiescent()) return;
             }
             fail("No real prefix endpoint for " + name + " in " + schedule);
         }
 
         void processB(String stage) throws java.io.IOException {
-            var next = s.f.blue.advanced().process(s.root("B"), entry, policy);
-            observe(stage, next);
+            boolean hadOriginal = original != null;
+            var next = call(stage, () -> s.f.blue.advanced().process(s.root("B"), entry, policy));
+            if (hadOriginal) assertEquals(0L, next.stats().gas(),
+                    "A retained B original or a zero-work wait cannot incur any additional call gas");
             for (var result : next.entries()) for (var closure : result.closures()) {
                 var input = s.f.blue.advanced().closureInvocation(closure.closureId()).orElse(null);
                 if (input == null || !(input.cause() instanceof blue.language.processor.closure.ExternalEventCause)
@@ -214,7 +221,73 @@ final class RootedDiamondPeerSchedulingTest {
             requireRetainedOriginal();
         }
 
-        void observe(String stage, DrainResult drain) {
+        DrainResult call(String stage, java.util.function.Supplier<DrainResult> operation) {
+            var before = retained();
+            var drain = operation.get(); // Exactly one ordinary public SDK call, never a diagnostic re-execution.
+            observe(stage, drain, before);
+            return drain;
+        }
+
+        void observe(String stage, DrainResult drain,
+                Map<String, blue.coordination.internal.RootedCalculationFixture.RetainedTerminal> before) {
+            var after = retained();
+            var rows = new ArrayList<OriginalBoundaryAttempt>();
+            var issues = new ArrayList<String>();
+            int call = calls.size();
+            for (var value : drain.entries()) for (var closure : value.closures())
+                retainedAttempt(rows, call, stage, "EXTERNAL", value.entry().blueId(), closure, before, after);
+            for (var value : drain.rootedRetainedApplications())
+                retainedAttempt(rows, call, stage, "ROOT_LOCAL", value.work().workIdentity(), value.result(), before, after);
+            for (var value : drain.managedEpochApplicationAttempts()) {
+                if (!value.attempt().isComplete()) continue;
+                var result = value.attempt().processResult();
+                var matches = after.values().stream().filter(terminal ->
+                        terminal.result().invocationIdentity().equals(result.invocationIdentity())
+                                && terminal.result().outputClosureIdentity().equals(result.outputClosureIdentity())
+                                && terminal.result().gasTraceIdentity().equals(result.gasTraceIdentity())).toList();
+                if (value.published() && matches.size() != 1) issues.add("Published managed attempt lacks one exact retained terminal");
+                String publication = value.published() && matches.size() == 1 ? matches.get(0).identity() : null;
+                if (value.replayed()) {
+                    if (!value.published() || publication == null || !before.containsKey(publication))
+                        issues.add("Managed replay lacks durable evidence before this call");
+                } else if (publication != null && before.containsKey(publication))
+                    issues.add("A prior successful managed publication was reported as a fresh execution");
+                rows.add(new OriginalBoundaryAttempt(call, stage, "REGISTERED_MANAGED", value.work().workIdentity(),
+                        publication, value.receipt().map(ManagedEpochApplicationReceipt::applicationReceiptIdentity).orElse(null),
+                        value.published(), value.replayed(), "SDK_REPLAY_FLAG", result.status().name(), result.commits(),
+                        result.rollbackToInput(), result.invocationIdentity(), result.inputClosureIdentity(),
+                        result.outputClosureIdentity(), result.totalGas(), result.gasTraceIdentity(),
+                        result.rejectedCharge() == null ? null : result.rejectedCharge().rejectedChargeIdentity(),
+                        result.gasTrace().stream().map(Object::toString).toList(),
+                        result.rejectedCharge() == null ? null : result.rejectedCharge().toString(),
+                        value.replayed() ? 0L : result.totalGas()));
+            }
+            long expectedCharge = 0L;
+            var laneOccurrences = new java.util.HashMap<String, String>();
+            for (var row : rows) {
+                String key = row.publication() == null ? row.work() + ":" + row.invocation() : row.publication();
+                String priorLane = laneOccurrences.putIfAbsent(key, row.lane());
+                if (priorLane != null && (!priorLane.equals(row.lane()) || row.publication() != null))
+                    issues.add("Duplicate completed publication/occurrence in call lanes: " + key);
+                // Unpublished managed failures remain individual charged attempts,
+                // even if a call ever returns several with the same exact identity.
+                expectedCharge = Math.addExact(expectedCharge, row.expectedCharge());
+                if (row.replayed()) assertEquals(0L, row.expectedCharge());
+            }
+            attempts.addAll(rows);
+            var evidence = new LinkedHashMap<String, Object>();
+            evidence.put("call", call); evidence.put("stage", stage);
+            evidence.put("blocked", drain.blocked()); evidence.put("quiescent", drain.quiescent());
+            evidence.put("reportedGas", drain.stats().gas()); evidence.put("expectedCharge", expectedCharge);
+            evidence.put("completedAttempts", rows.size());
+            evidence.put("issues", issues);
+            calls.add(evidence);
+            writeLedger(); // Persist the discrepant call before an assertion can stop this schedule.
+            rows.forEach(row -> System.out.println("DIAMOND_G_BOUNDARY_ATTEMPT schedule=" + schedule
+                    + " limit=" + policy.sharedGasLimit() + " evidence=" + row));
+            assertTrue(issues.isEmpty(), issues.toString());
+            assertEquals(expectedCharge, drain.stats().gas(),
+                    "Each call must charge exactly its complete fresh lane occurrences; retained replays add zero");
             chargedGas = Math.addExact(chargedGas, drain.stats().gas());
             requireRetainedOriginal();
             var source = s.f.blue.advanced().auditManagedEpoch(s.root("A").id(), s.sourceEpoch).orElseThrow();
@@ -229,6 +302,42 @@ final class RootedDiamondPeerSchedulingTest {
                             + ":" + value.work().workIdentity() + ":" + value.result().closureId()).toList()
                     + " managed=" + drain.managedEpochApplicationAttempts().stream().map(value -> value.work().workIdentity()
                             + ":published=" + value.published() + ":replayed=" + value.replayed()).toList());
+        }
+
+        void retainedAttempt(List<OriginalBoundaryAttempt> rows, int call, String stage, String lane, String work,
+                ClosureResult closure, Map<String, blue.coordination.internal.RootedCalculationFixture.RetainedTerminal> before,
+                Map<String, blue.coordination.internal.RootedCalculationFixture.RetainedTerminal> after) {
+            var retained = after.get(closure.closureId());
+            if (retained == null) {
+                assertFalse(closure.resourceDemands().isEmpty(), "A complete external/local result requires exact terminal evidence");
+                return;
+            }
+            var result = retained.result();
+            boolean replay = before.containsKey(retained.identity());
+            if (replay) assertEquals(terminal(retained.identity(), before.get(retained.identity()).input(),
+                            before.get(retained.identity()).result()), terminal(retained.identity(), retained.input(), result));
+            assertEquals(result.totalGas(), closure.stats().gas(), "Retained result projection preserves its original gas");
+            rows.add(new OriginalBoundaryAttempt(call, stage, lane, work, retained.identity(), null,
+                    closure.applied(), replay, replay ? "DURABLE_BEFORE_CALL" : "NEW_DURABLE_TERMINAL",
+                    result.status().name(), result.commits(), result.rollbackToInput(), result.invocationIdentity(),
+                    result.inputClosureIdentity(), result.outputClosureIdentity(), result.totalGas(), result.gasTraceIdentity(),
+                    result.rejectedCharge() == null ? null : result.rejectedCharge().rejectedChargeIdentity(),
+                    terminal(retained.identity(), retained.input(), result).charges().stream().map(Object::toString).toList(),
+                    result.rejectedCharge() == null ? null : terminal(retained.identity(), retained.input(), result).rejected(),
+                    replay ? 0L : result.totalGas()));
+        }
+
+        void writeLedger() {
+            var record = new LinkedHashMap<String, Object>();
+            record.put("schedule", schedule); record.put("limit", policy.sharedGasLimit());
+            record.put("calls", calls); record.put("completeAttempts", attempts);
+            var file = java.nio.file.Path.of("build", "rooted-evidence", "gas",
+                    "diamond-boundary-" + schedule + "-" + policy.sharedGasLimit() + "-attempts.json");
+            try {
+                java.nio.file.Files.createDirectories(file.getParent());
+                java.nio.file.Files.writeString(file,
+                        blue.language.codec.jackson.UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(record));
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
         }
 
         void requireRetainedOriginal() {
@@ -741,6 +850,11 @@ final class RootedDiamondPeerSchedulingTest {
             OriginalBoundaryTerminal original, String originalDisposition,
             Map<String, OriginalBoundaryTerminal> terminals, long chargedGas,
             List<Long> observed, List<Long> events) { }
+    private record OriginalBoundaryAttempt(int call, String stage, String lane, String work, String publication,
+            String applicationReceipt, boolean published, boolean replayed, String replayEvidence, String status,
+            boolean commits, boolean rollback, String invocation, String inputClosure, String outputClosure,
+            long retainedGas, String trace, String rejectedIdentity, List<String> charges, String rejectedDetail,
+            long expectedCharge) { }
     private record TightGasFailure(String publicationIdentity, String inputInvocationIdentity,
             String capturedClosureIdentity, String causeIdentity, String policyIdentity, String resultInputClosureIdentity,
             String outputClosureIdentity, String status, long gas, String traceIdentity, String rejectedChargeIdentity) { }

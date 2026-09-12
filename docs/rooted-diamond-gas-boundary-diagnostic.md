@@ -1,6 +1,8 @@
 # Actual admitted diamond gas boundary (diagnostic)
 
-This test-only branch starts from `7c1fbde7d27bd1901eee8c6eae02ee1359423d50`.
+The initial test-only diagnostic starts from `7c1fbde7d27bd1901eee8c6eae02ee1359423d50`.
+This separate ledger successor starts from frozen
+`b18d994bc18501b3050aaa034e67406d434e89b2` and preserves its runtime bytes.
 It changes no runtime, policy, tariff, scheduling or receipt rule. No test or
 build has run here; this is authored diagnostic coverage, not qualification.
 
@@ -21,10 +23,11 @@ Intermediate wait timing is recorded, not assumed equal. If no B terminal is
 available, the diagnostic stops at the observed wait rather than letting a
 default-budget drain admit that original. A terminal B result is never retried
 under a larger policy. Every actual call's reported gas is summed; retained
-evidence is not used to deduplicate genuine failed charges. Aggregate call gas
-is recorded rather than required equal: repeated genuine completed attempts
-may add charges without changing the retained logical result. Exact retained
-gas traces and results remain part of the schedule-equivalence assertions.
+evidence is not used to deduplicate genuine failed charges. An aggregate call
+gas difference is explicitly reported as `UNRESOLVED_AGGREGATE` and fails this
+diagnostic pending review. A retry may be legitimately chargeable, but that
+does not establish that a schedule-dependent extra retry was necessary. Exact
+retained gas traces and results remain part of the semantic comparisons.
 
 The comparisons retain complete accepted gas entries and rejected-charge
 identity/details; original input, cause, policy, status and output identity;
@@ -37,6 +40,34 @@ The maintained `RootedGasEvidence` writer also extracts lossless B-original
 charge records to `build/rooted-evidence/gas/diamond-boundary-*.json`, with
 distinct calibration/schedule/budget names. Console evidence records actual
 call dispositions and the complete final terminal inventory.
+
+## Actual attempt ledger
+
+Every ordinary SDK processing call snapshots the durable terminal inventory
+before and after execution. Its ledger records each completed external,
+root-local or registered managed attempt, including unpublished managed
+failures: stage/lane, work and available publication/application identities,
+status, commit/rollback, input/output, gas, full accepted charges, trace and
+rejected-charge identities/details. Each call's reported gas must equal its
+independently reconstructed fresh-attempt charges. A later call for B's already
+retained original must report zero new gas, while the individual result keeps
+its original charge.
+
+The SDK exposes a replay flag for registered managed attempts, recorded as
+`SDK_REPLAY_FLAG`. External/root-local `ClosureResult` does not expose that
+flag: those rows explicitly label the evidence `DURABLE_BEFORE_CALL` or
+`NEW_DURABLE_TERMINAL`, rather than inventing an observed engine flag. A
+previously durable terminal must contribute zero; mismapped replay charges
+fail the call-total assertion. Managed failures use the actual SDK result even
+when no terminal was retained and do not infer an unavailable policy. A
+managed success is counted only in its managed lane, not a second time through
+its new durable terminal. Repeated unpublished failures are never deduplicated.
+
+Machine-readable ledgers are saved after every call to
+`build/rooted-evidence/gas/diamond-boundary-<schedule>-<limit>-attempts.json`.
+They preserve discrepancies before the call-total assertion; console output
+also prints each completed attempt. No raw-engine call replaces the public
+processing path, and the ledger performs no additional PROCESS invocation.
 
 ## Continuation policy is separate and explicit
 
