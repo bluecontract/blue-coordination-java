@@ -77,7 +77,36 @@ B's occurrence identity for C.
 
 ## Status
 
-Registry and proposed scope corrected; runtime/specification changes are not
-yet implemented by this note. The frozen candidate is preserved, not silently
-declared compatible. No new behavioral decision from the user or CTO is needed
-to classify either reproduced failure as a bug.
+The legal detached-retarget runtime/specification correction is implemented on
+separate candidate branches. Language's focused proof/PROCESS controls pass
+94/94. The sealed Language candidate is
+`5a103afb369b710e3bf2b1158362220607604a07`. Supported release-fixture
+regeneration changes derived identities, not
+the existing executable fixtures' outcomes, gas amounts or ordering. Generated
+documentation and its prerequisite conformance checks also pass with the
+explicit Python 3.13 tool runtime. This is not yet the final clean library or
+MyOS acceptance gate.
+
+Coordination's legal-retarget adapter at
+`661423fab0b836c380e5fa207e111e8b02e1c6c2` passes the immutable focused SDK03
+gate against that exact Language candidate: **48/48 tests**, zero failures,
+errors or skips (33 resolver tests and 15 SDK/seam tests, not the full suite).
+Archive `legal-detached-retarget-evidence.fKnxrU/legal-retarget-sdk-03.tar.gz`
+has SHA-256
+`5c87b670bcad5b7866c67367d78b5779d117b1811f390e7b744604159db799a4`.
+Exclusion-free full Language and Coordination gates, the full SDK suite and
+the restored MyOS acceptance tuple remain pending. The focused invocation
+omitted the cyclic identity-inventory task; zero skipped test cases does not
+qualify that task. The
+cyclic correction has separately demonstrated the real all-owner publication,
+exact-reference result/gas and resident restart for the five-input case under
+an explicitly arranged valid schedule. Automatic scheduling, both root-start
+orders, multi-interior cycles and the original complete ring still require
+verification. The latest unified cyclic gate is pending; no result from that
+run is claimed here. A local publication proof is not a substitute for those
+tests.
+
+The former candidate and its evidence remain preserved. No new behavioral
+decision from the user or CTO is needed to classify either reproduced failure
+as a bug. Library merge/release remains conditional on the complete coherent
+baseline acceptance, including the original MyOS assertions.

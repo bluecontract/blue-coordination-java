@@ -14,6 +14,49 @@ both specification and implementation. Its rejection-only repair below is
 Earlier exact-source reports remain historical evidence, not qualification for
 these corrected semantics.
 
+The follow-up is isolated from the previous qualified artifacts:
+
+- Language: `codex/legal-detached-retarget-language`, sealed source commit
+  `5a103afb369b710e3bf2b1158362220607604a07`, based on `34e9aa2f`;
+  **94/94 focused tests pass** on the runtime/specification slice `1354663`
+  for the corrected rule and
+  exact-input/receipt/rollback controls. The revised Contracts specification is
+  `sha256:5cc29e91cd8d4aa4d3dca98214da5ceb49b2daa82554ac561260bd98ce5063b8`.
+  Supported generated package rebinding, documentation and immutable development
+  export are complete. Exclusion-free clean/quality qualification remains pending.
+- Coordination: `codex/legal-detached-retarget-coordination`, tested source
+  `661423fab0b836c380e5fa207e111e8b02e1c6c2`;
+  removes rejection-only source capture, keeps the original B row and binds
+  each retry demand to its actual expanded input. Automatic foreign discovery
+  preserves old-B preference when the supplied value belongs to B. The focused
+  immutable SDK03 gate passes **48/48** against the exact sealed Language above;
+  full Coordination/SDK and MyOS acceptance remain pending.
+- MyOS: `codex/legal-detached-retarget-myos`, commit `2522fa3`;
+  restores the original direct C attachment test, not a runtime workaround.
+- Cyclic-join reproduction work remains separate. Diagnostic scheduling
+  experiments are **not** release candidates or approved changes to join fences.
+
+No final full-library or MyOS acceptance is claimed for these follow-ups yet.
+
+The focused Language archive is
+`legal-detached-retarget-evidence.fKnxrU/language-focused-03.tar.gz`, SHA-256
+`5edb19b42f5e970259be11ee89b15d053cdc6f2c99bc8a23eb1b4431c80d9b7e`.
+The immutable SDK03 archive is
+`legal-detached-retarget-evidence.fKnxrU/legal-retarget-sdk-03.tar.gz`, SHA-256
+`5c87b670bcad5b7866c67367d78b5779d117b1811f390e7b744604159db799a4`.
+Its 48 tests comprise 33 resolver controls and 15 SDK/seam cases across six
+classes, with zero failures, errors or skipped cases. The focused invocation
+omitted `verifyCyclicTopologyIdentityEvidence`; this is not a full inventory
+or library qualification claim.
+Existing fixture regeneration preserves all business outcomes and gas quantities;
+identity rebinding alone is not a test of the new legal attachment. The new Java
+regressions supply that behavioral coverage. The cyclic diagnostic has reached
+the required A0/B1/C1 computation, real all-owner publication and resident restart
+under an explicitly arranged valid schedule, with unchanged publication checks
+and exact fresh-reference result/gas equality. The latest unified automatic
+gate remains pending, as do complete root-order/multi-interior and original
+full-ring qualification. That local proof is not a replacement for those gates.
+
 `A → B` below means that A embeds B. Each row identifies an observed problem,
 its correction, and a small example; the linked notes retain the detailed
 reproduction and the original focused evidence. Those historical receipts do
@@ -38,6 +81,7 @@ not establish a pass for this newly assembled candidate.
 | [Borrowed-cycle activation position](rooted-borrowed-cycle-readiness.md) | Agreement observes Order attaching Payment0. If Order first publishes its own Order/Payment cycle, the later Agreement calculation classifies Payment0 against the physical Payment1 head and creates an impossible pending interval 0-to-0; Agreement stops at committed 2 / READY 1. | Candidate correction: classify only a new path against its authenticated numbered logical activation position. Existing reservations/cursors, genuinely older selections and distinct same-epoch representations stay historical. No READY override, source-head publication or gas policy change. All six controls, including negatives/gas boundaries, now pass in the combined SDK gate; original HTTP qualification remains required. |
 | [Terminal-successor planning context](rooted-ring-chord-successor-reproduction.md) | A → B → C → A; A adds another saved-authored C occurrence. Import reaches C7, but the planner omits its required same-epoch representation successor, which execution correctly rejects. | Use the same exact staged/committed consumer view in planning and capture. Bind the staged view to the actual result, original boundary, derived owners and receipt-backed head epochs. Preserve the exact terminal target, proof checks and CAS guards. Both SDK methods and selected adjacent/restart controls pass; original MyOS qualification remains required. |
 | [Exact-input eligibility memo](rooted-eligibility-cache.md) | The 54 negative BEX operations terminate correctly, but fresh MyOS replay exceeds the existing 120-second restart deadline. CPU samples show repeated delivery classification and body resolution. | Physical optimization: reuse only a complete successful comparison mask for identical exact representations and ordered deliveries. Failures remain uncached; canonical selection, PROCESS, logical gas and publication checks remain unchanged. The later combined host/library candidate passes all 54 operations and restart under the unchanged deadline; this is not an isolated memo-only speedup measurement or a mandatory semantic repair. |
+| [Managed drain gas reporting](rooted-managed-drain-gas-reporting.md) | A registered managed application exposes correct positive gas in its exact typed result, but aggregate SDK drain gas omits that execution; MyOS command summaries inherit the incorrect total. | Correct the SDK-owned this-call summary from actual completed, non-replayed attempts in its three exclusive execution lanes; do not add a MyOS-only workaround or charge result/receipt projections twice. Retained gas, trace, receipts, tariff and limits are unchanged. Retrieving an already-published result adds zero new gas; fresh PROCESS during MyOS reconstruction still counts fully. Structural aggregate metrics keep their existing scope. The isolated four-test owner passes 4/4; adjacent eight mapping controls, full gates and runtime port remain pending. |
 
 ## Necessity review for the post-d038 additions
 
