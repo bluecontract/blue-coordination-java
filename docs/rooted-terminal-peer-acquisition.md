@@ -1,6 +1,6 @@
 # Terminal-time causal peer acquisition (candidate)
 
-This candidate starts at Coordination `9f71dff6efeece23938ee5dec4a74839cad5107a` in an isolated worktree. It requires Language's new `ClosureEvidenceFactory.rootedWitnessSelection` API, implemented at `00b745fea8b83eca4a2cfc7558048cf3ecff600d`. No build, test, export, or acceptance result is claimed here.
+This correction starts at Coordination `9f71dff6efeece23938ee5dec4a74839cad5107a` in an isolated worktree. It requires Language's new `ClosureEvidenceFactory.rootedWitnessSelection` API, implemented at `00b745fea8b83eca4a2cfc7558048cf3ecff600d` and bound by the frozen `05bb6f31` development export. Focused qualification is recorded below; complete library and MyOS gates remain required.
 
 ## Problem and concrete evidence
 
@@ -8,7 +8,7 @@ The original-stage peer selection/preflight is insufficient. In the archived 835
 
 The dormant reconnect independently demonstrates the ownership problem. Its real B-local C-to-D token sees D5 as an immutable witness outside the live calculating reach. D's own operation receives the token exactly once and publishes D23. At the final join, B23 still contains D5 while D23 contains B5. A17 and C21 agree in both authentic views. Neither missing reactions nor a need to rerun D's work explains this conflict. The original head/CAS guards correctly prevent publication of the stale peer.
 
-## Proposed solution
+## Implemented correction
 
 Keep original LIVE input selection historical and ordinary, irrespective of independently published same-cause peer work. Remove peer frontloading, original-stage receiver ordering, and the post-success preflight. A completed original attempt, including a gas failure, follows the ordinary retained result and gas path.
 
@@ -26,7 +26,7 @@ RCP OWN03 requires the exact causal view and publication fence before a proved l
 
 Rejected alternatives are blanket source-first scheduling, changing D5 inside A17's historical proof, replaying old tokens after join, changing source epochs, loosening CAS, discarding successful preflight gas, and broadening `rootedReadExpansion` to replace original primaries. The existing read-expansion contract remains unchanged. There is no new Coordination public API, durable record format, tariff, or cache.
 
-## Prepared verification, not executed
+## Verification and remaining boundary
 
 The dormant regression and all business count/history/token/restart oracles remain unchanged. The absent-source diamond retains both physical schedules, reversed content-derived ordering, effect-free control, and exact 835/836/837 ledger comparisons. The ledger now asserts and compares actual processor-attempt/automatic-retry counts. Original LIVE calibration explicitly requires historical D, not the already completed peer primary. Former preflight-only assertions are replaced by charged ordinary original publication and zero-charge exact replay before/after restart.
 
@@ -40,4 +40,18 @@ Parent-owned first gate, after binding the exact new immutable Language artifact
   --tests blue.coordination.sdk.RootedDiamondPeerSchedulingTest
 ```
 
-Then run the adjacent automatic/witness/SCC-entrypoint/publication safety controls and `RootedDuplicateOccurrenceHistoryReproductionTest.savedOriginalDuplicateOccurrenceKeepsItsFrozenRepresentationHistory`, followed by the full library shape/architecture/conformance gates and unchanged original MyOS acceptance. Preserve the parent runner's exact `blueDependencyMode`, `blueContractsVersion`, `blueContractsRepository`, and `blueContractsManifestSha256`; do not use an old runtime artifact, source composite, capability override, or invented release identity. No merge-ready or performance claim is implied by this draft.
+The exact parent-owned gate on test-only successor `a26c713f` passes **8/8**,
+zero failures/errors/skips, in 802.519 seconds. Its production tree is identical
+to exported `0f5333c8`. Both schedules have byte-identical complete original
+result JSON at 835, 836 and 837 gas, including the failure at 835. Dormant
+reconnect, final histories, rollback, actual attempt/retry ledgers and restart
+also pass. The complete evidence archive is
+`legal-detached-retarget-evidence.fKnxrU/terminal-peer-focus-02-complete.tar.gz`,
+SHA-256 `367d17c48ff531c23fdf980c77bc5355f793e0aa2faba77c7ec50b097def4c8b`.
+
+The original MyOS fourteen-input ring plus exact post-restart snapshot comparison
+independently passes on MyOS `09c24ac5` and the frozen `05bb/0f533` tuple, in
+801.994 seconds. Its existing host and readiness limits remain unchanged.
+This is one complete acceptance scenario, not the full product/HTTP campaign.
+
+The next full `releaseCheck` includes the adjacent automatic/witness/SCC-entrypoint/publication safety controls and `RootedDuplicateOccurrenceHistoryReproductionTest.savedOriginalDuplicateOccurrenceKeepsItsFrozenRepresentationHistory`; separate filtered reruns would duplicate that work. Preserve the parent runner's exact `blueDependencyMode`, `blueContractsVersion`, `blueContractsRepository`, and `blueContractsManifestSha256`; do not use an old runtime artifact, source composite, capability override, or invented release identity. Full library qualification and unchanged complete MyOS acceptance on the final frozen tuple remain required before merge. No general topology-convergence or performance claim follows from these focused results.

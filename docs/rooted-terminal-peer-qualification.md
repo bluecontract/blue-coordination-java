@@ -57,3 +57,37 @@ All steps must preserve the exact Language, BEX, and Repository manifest/version
 `releaseCheck` includes the complete `test`, `integrationTest`, `consumerTest`, and `scenarioTest` suites, the source/API/artifact/documentation/conformance gates, exact test-execution-scope checks, and the maintained extracted-source smoke. Each root suite task runs once in that graph. The original fourteen-input SDK ring is already in `test`; a separate adjacent campaign would repeat it unnecessarily. The extracted-source smoke intentionally runs its existing seven filtered owners in a separate checkout; that list does not include the fourteen-input ring.
 
 A complete `test` run records the 20 original topology contributors while they execute. `verifyCyclicTopologyIdentityEvidence` then combines their fragments and compares all 32 scenarios and repeat counts without rerunning those contributors. Its comparison is a finalizer and must not be excluded. A filtered run cannot satisfy full execution scope. A preceding full unfiltered test may be reused by `releaseCheck` only when all Gradle inputs and outputs still match; `clean`, Java-version changes, changed source/dependency bytes or fork settings, and `--rerun-tasks` prevent that assumption.
+
+## Executed preparation and reviewed artifact refresh
+
+The parent-owned five-task preflight on clean `9233c252` passes in 29.881 seconds:
+production shape, test architecture, conformance coverage, public API and SDK API.
+Archive `legal-detached-retarget-evidence.fKnxrU/coordination-qualification-preflight-01-complete.tar.gz`,
+SHA-256 `56662572e5803a69ad754ac7789bc4615eff4258c933a662f912ad02ed17bd91`.
+
+The maintained standalone topology exporter then passes in 93.576 seconds on
+the same source and exact Language `05bb` bundle. Its single JUnit method runs
+the 20 maintained contributors and records all 32 required scenarios. The
+full-suite finalizer is deliberately not claimed: it is skipped for this
+filtered generation and must pass in the complete gate.
+
+Independent before/after review compares all 33,797 scalar leaves, object keys
+and array positions. Only three active input pins and the seven P6 scenario
+identity chains change; the other 25 scenarios remain byte-for-value equal.
+All business results, states, events, order, counts, statuses and numeric gas
+values remain identical. All 60 old/new changed work records independently
+rehash from their invocation and unchanged work operands. Admission publication
+and gas-trace identities depend on that invocation/work chain. The artifact
+does not expose individual raw charge rows, so this is not an independent
+reconstruction of the entire per-counter ledger. Markdown's 32 JSON blocks
+match the corresponding scenario objects; other prose changes only the three
+input pins. Historical profile labels and limitations remain unchanged.
+
+Complete before/after evidence:
+`legal-detached-retarget-evidence.fKnxrU/coordination-topology-generation-01-complete.tar.gz`,
+SHA-256 `391b9996f10eb80ac87af1a55bbf7deb6aabea9dfc5d8e9dd6376c5d926f05a3`.
+Independent review: `coordination-topology-generation-01-review.md`, SHA-256
+`a10ea00a35ed253b2a1dfc97fcd6e90b261120e49a360c4387689865d8cd1bc0`.
+These two justified generated files and documentation are committed together;
+no production, test or API bytes change in this artifact-refresh successor.
+Final frozen-source release gates and full MyOS acceptance are still pending.
