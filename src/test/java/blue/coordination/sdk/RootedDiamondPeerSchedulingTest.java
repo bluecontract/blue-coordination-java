@@ -65,6 +65,238 @@ final class RootedDiamondPeerSchedulingTest {
                 "Compare final durable outcomes and every charged attempt, not intermediate failure versus wait");
     }
 
+    @Test
+    void resolvedOriginalGasBoundaryMatchesAcrossCompletePhysicalSchedules() throws Exception {
+        // given
+        long gas = calibrateResolvedOriginalGas();
+        // when
+        var comparisons = new ArrayList<org.junit.jupiter.api.function.Executable>();
+        for (long delta : List.of(-1L, 0L, 1L)) comparisons.add(() -> {
+            var policy = ContractsExecutionPolicy.exactSharedGas(Math.addExact(gas, delta), "diamond-original-boundary");
+            var prepared = runOriginalBoundary(false, policy);
+            var early = runOriginalBoundary(true, policy);
+            System.out.println("DIAMOND_G_BOUNDARY_COMPARE G=" + gas + " delta=" + delta
+                    + " prepared=" + prepared + " early=" + early);
+            assertNotNull(prepared.original(), "C/D preparation must expose B's actual terminal result");
+            assertEquals(delta >= 0L ? "APPLIED" : "GAS_LIMIT_EXCEEDED", prepared.originalDisposition());
+            assertEquals(delta >= 0L, prepared.original().commits(), "Actual admitted original at G" + delta);
+            assertEquals(delta >= 0L ? "SUCCESS" : "GAS_LIMIT_EXCEEDED", prepared.original().status());
+            if (delta >= 0L) assertEquals(gas, prepared.original().gas());
+            else assertNotNull(prepared.original().rejected());
+            // Genuine repeated completed attempts may add aggregate call charges.
+            // Compare retained logical evidence, not physical attempt-count symmetry.
+            assertAll("Same fixed policy: retained histories, dispositions, logical charges and owned results",
+                    () -> assertEquals(prepared.entry(), early.entry()),
+                    () -> assertEquals(prepared.stop(), early.stop()),
+                    () -> assertEquals(prepared.documents(), early.documents()),
+                    () -> assertEquals(prepared.original(), early.original()),
+                    () -> assertEquals(prepared.originalDisposition(), early.originalDisposition()),
+                    () -> assertEquals(prepared.terminals(), early.terminals()),
+                    () -> assertEquals(prepared.observed(), early.observed()),
+                    () -> assertEquals(prepared.events(), early.events()));
+        });
+        // then
+        assertAll("Actual admitted B-original G-1/G/G+1; no gas-1 rerun", comparisons);
+    }
+
+    private static long calibrateResolvedOriginalGas() throws Exception {
+        try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
+            var run = new OriginalBoundaryRun(s, ContractsExecutionPolicy.releaseDefault(), "calibration");
+            run.prefix("C");
+            run.prefix("D");
+            var peer = s.f.blue.advanced().auditDocument(s.root("D").id());
+            run.processB("after-real-C-D-prefixes");
+            assertNotNull(run.original, "Calibration must retain the actual admitted B original");
+            assertEquals("APPLIED", run.originalDisposition);
+            assertTrue(run.original.commits(), run.original.toString());
+            var input = s.f.blue.advanced().closureInvocation(run.original.publication()).orElseThrow();
+            var actual = s.f.blue.advanced().closureExecution(run.original.publication()).orElseThrow();
+            var a = input.snapshot().managedDocument(new blue.language.processor.closure.DocumentId(s.root("A").id().value()));
+            var d = input.snapshot().managedDocument(new blue.language.processor.closure.DocumentId(s.root("D").id().value()));
+            assertNotNull(a, "A must be present in the actual fully resolved invocation, not a raw missing-demand capture");
+            assertNotNull(d);
+            assertEquals(s.sourceBlueId, a.blueId());
+            assertEquals(s.sourceEpoch, a.epoch());
+            assertEquals(peer.blueId(), d.blueId());
+            assertEquals(peer.epoch(), d.epoch());
+            assertEquals(List.of(new blue.language.processor.closure.DocumentId(s.root("B").id().value())),
+                    actual.rootedProjection().context().entryOwners());
+            assertTrue(actual.totalGas() > 1L && actual.totalGas() < input.executionPolicy().sharedLimit());
+            System.out.println("DIAMOND_G_BOUNDARY_CALIBRATION terminal=" + run.original);
+            return actual.totalGas();
+        }
+    }
+
+    private static OriginalBoundaryOutcome runOriginalBoundary(boolean early, ContractsExecutionPolicy policy) throws Exception {
+        try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
+            var run = new OriginalBoundaryRun(s, policy, early ? "B-before-C" : "C-D-before-B");
+            if (early) run.processB("before-C");
+            run.prefix("C");
+            run.prefix("D");
+            // The same explicit policy is used even if the first B call returned a
+            // genuine terminal failure. A retained replay adds no new call gas.
+            run.processB("after-C-D");
+            String stop = "BLOCKED_WITHOUT_B_TERMINAL";
+            if (run.original != null) {
+                stop = "BOUND";
+                for (int step = 0; step < 160; step++) {
+                    var next = s.f.blue.processing().drain(new DrainBudget(1, 1));
+                    run.observe("drain-" + step, next);
+                    if (next.quiescent()) { stop = "QUIESCENT"; break; }
+                    if (next.blocked()) { stop = "BLOCKED"; break; }
+                }
+            }
+            // Do not admit an unresolved B original at the drain's default policy.
+            assertNotEquals("BOUND", stop, "No real blocked or quiet endpoint within the diagnostic bound");
+            var outcome = new OriginalBoundaryOutcome(run.entry.blueId(), stop, s.state(), run.original, run.originalDisposition,
+                    run.terminals(), run.chargedGas, NAMES.stream().map(s::observed).toList(),
+                    NAMES.stream().map(s::eventCount).toList());
+            System.out.println("DIAMOND_G_BOUNDARY_FINAL schedule=" + run.schedule + " limit="
+                    + policy.sharedGasLimit() + " outcome=" + outcome);
+            CoordinationTestControl.attach(s.f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(outcome.documents(), s.state());
+            assertEquals(outcome.terminals(), run.terminals());
+            run.requireRetainedOriginal();
+            return outcome;
+        }
+    }
+
+    private static final class OriginalBoundaryRun {
+        final Scenario s;
+        final ContractsExecutionPolicy policy;
+        final String schedule;
+        final EntryHandle entry;
+        final java.util.Set<String> prefixTerminals;
+        OriginalBoundaryTerminal original;
+        String originalDisposition;
+        long chargedGas;
+
+        OriginalBoundaryRun(Scenario s, ContractsExecutionPolicy policy, String schedule) {
+            this.s = s; this.policy = policy; this.schedule = schedule;
+            prefixTerminals = retained().keySet();
+            entry = s.f.append(s.root("C"), s.timeline, "attach", 300, attachment("a", s.root("A")), true);
+        }
+
+        void prefix(String name) {
+            var first = s.f.blue.processing().process(s.root(name), entry);
+            observe(name + "-original", first);
+            if (first.blocked() || first.find(entry).map(value -> !value.applied()).orElse(false)) return;
+            for (int step = 0; step < 32; step++) {
+                var next = s.f.blue.processing().processNext(s.root(name));
+                observe(name + "-prefix-" + step, next);
+                if (next.blocked() || next.quiescent()) return;
+            }
+            fail("No real prefix endpoint for " + name + " in " + schedule);
+        }
+
+        void processB(String stage) throws java.io.IOException {
+            var next = s.f.blue.advanced().process(s.root("B"), entry, policy);
+            observe(stage, next);
+            for (var result : next.entries()) for (var closure : result.closures()) {
+                var input = s.f.blue.advanced().closureInvocation(closure.closureId()).orElse(null);
+                if (input == null || !(input.cause() instanceof blue.language.processor.closure.ExternalEventCause)
+                        || !input.snapshot().publicRootDocumentIds().equals(List.of(
+                                new blue.language.processor.closure.DocumentId(s.root("B").id().value())))) continue;
+                var actual = s.f.blue.advanced().closureExecution(closure.closureId()).orElseThrow();
+                var terminal = terminal(closure.closureId(), input, actual);
+                assertEquals(policy.sharedGasLimit(), terminal.limit());
+                assertEquals(policy.label(), terminal.label());
+                if (original == null) {
+                    original = terminal;
+                    originalDisposition = closure.disposition().name();
+                    RootedGasEvidence.write("diamond-boundary-" + schedule + "-" + policy.sharedGasLimit()
+                            + "-B-original", input, actual);
+                } else {
+                    assertEquals(original, terminal, "An exact retry cannot replace the original B result");
+                    assertEquals(originalDisposition, closure.disposition().name());
+                }
+            }
+            requireRetainedOriginal();
+        }
+
+        void observe(String stage, DrainResult drain) {
+            chargedGas = Math.addExact(chargedGas, drain.stats().gas());
+            requireRetainedOriginal();
+            var source = s.f.blue.advanced().auditManagedEpoch(s.root("A").id(), s.sourceEpoch).orElseThrow();
+            assertEquals(s.sourceReceipt, source.receiptIdentity());
+            assertEquals(s.sourceBlueId, source.afterBlueId());
+            System.out.println("DIAMOND_G_BOUNDARY_CALL schedule=" + schedule + " limit=" + policy.sharedGasLimit()
+                    + " stage=" + stage + " blocked=" + drain.blocked() + " quiet=" + drain.quiescent()
+                    + " gas=" + drain.stats().gas() + " committed=" + drain.stats().committedTransitions()
+                    + " entries=" + drain.entries().stream().map(value -> value.disposition() + ":"
+                            + value.closures().stream().map(closure -> closure.closureId() + ":" + closure.disposition()).toList()).toList()
+                    + " retained=" + drain.rootedRetainedApplications().stream().map(value -> value.rootDocumentId()
+                            + ":" + value.work().workIdentity() + ":" + value.result().closureId()).toList()
+                    + " managed=" + drain.managedEpochApplicationAttempts().stream().map(value -> value.work().workIdentity()
+                            + ":published=" + value.published() + ":replayed=" + value.replayed()).toList());
+        }
+
+        void requireRetainedOriginal() {
+            if (original != null) assertEquals(original, terminal(original.publication(),
+                    s.f.blue.advanced().closureInvocation(original.publication()).orElseThrow(),
+                    s.f.blue.advanced().closureExecution(original.publication()).orElseThrow()));
+        }
+
+        Map<String, blue.coordination.internal.RootedCalculationFixture.RetainedTerminal> retained() {
+            var found = new TreeMap<String, blue.coordination.internal.RootedCalculationFixture.RetainedTerminal>();
+            // This maintained fixture enumerates the store-wide terminal inventory.
+            for (var value : s.f.control.retainedTerminals(s.root("B").id()))
+                found.put(value.identity(), value);
+            return Map.copyOf(found);
+        }
+
+        Map<String, OriginalBoundaryTerminal> terminals() {
+            var results = new TreeMap<String, OriginalBoundaryTerminal>();
+            retained().forEach((identity, value) -> {
+                if (prefixTerminals.contains(identity)) return;
+                var evidence = terminal(identity, value.input(), value.result());
+                boolean bLive = value.input().cause() instanceof blue.language.processor.closure.ExternalEventCause
+                        && value.input().snapshot().publicRootDocumentIds().equals(List.of(
+                                new blue.language.processor.closure.DocumentId(s.root("B").id().value())));
+                if (bLive) {
+                    assertNotNull(original, "No hidden default-policy B original may be admitted by continuation");
+                    assertEquals(original, evidence, "Every new B LIVE terminal must retain the exact explicit original policy/result");
+                } else {
+                    // Local histories and the joined terminal use the configured
+                    // adapter policy, not the old B LIVE call's explicit limit.
+                    assertEquals(ContractsExecutionPolicy.releaseDefault().sharedGasLimit(), evidence.limit());
+                    assertEquals(ContractsExecutionPolicy.releaseDefault().label(), evidence.label());
+                }
+                results.put(identity, evidence);
+            });
+            return Map.copyOf(results);
+        }
+    }
+
+    private static OriginalBoundaryTerminal terminal(String publication,
+            blue.language.processor.closure.ClosureInvocationInput input,
+            blue.language.processor.closure.ClosureProcessResult result) {
+        assertEquals(input.invocationIdentity(), result.invocationIdentity());
+        assertEquals(input.snapshot().closureIdentity(), result.inputClosureIdentity());
+        var charges = result.gasTrace().stream().map(value -> new OriginalBoundaryCharge(value.sequence(),
+                value.namespace().name(), value.counter(), value.quantity(), value.weight(), value.subtotal(),
+                value.documentId() == null ? null : value.documentId().value(), value.scopePath(),
+                value.activationGeneration(), value.componentGeneration(), value.contractKey(), value.logicalPath(),
+                value.workOccurrenceId(), value.reason())).toList();
+        var rejected = result.rejectedCharge();
+        String rejection = rejected == null ? null : rejected.rejectedChargeIdentity() + ":" + rejected.namespace()
+                + ":" + rejected.counter() + ":" + rejected.quantity() + ":" + rejected.weight() + ":"
+                + rejected.subtotal() + ":remaining=" + rejected.remainingBeforeCharge()
+                + ":cap=" + rejected.applicableCap().kind() + ":owner=" + rejected.owner().kind()
+                + ":work=" + rejected.owner().workOccurrenceIdentity() + ":finalization=" + rejected.owner().finalizationOrdinal();
+        var projection = result.rootedProjection();
+        var owned = projection == null ? List.<String>of() : result.resultingDocuments().stream()
+                .filter(value -> projection.owns(value.documentId())).map(value -> value.documentId().value() + ":"
+                        + value.beforeBlueId() + "->" + value.afterBlueId() + ":epoch=" + value.epoch()
+                        + ":generation=" + value.componentGeneration()).toList();
+        return new OriginalBoundaryTerminal(publication, input.invocationIdentity(), input.snapshot().closureIdentity(),
+                input.cause().getClass().getSimpleName(), input.cause().causeIdentity(), input.executionPolicy().identity(),
+                input.executionPolicy().sharedLimit(), input.executionPolicy().label(), result.status().name(),
+                result.commits(), result.rollbackToInput(), result.outputClosureIdentity(), result.totalGas(),
+                result.gasTraceIdentity(), charges, rejection, owned,
+                result.commitCompanion() == null ? null : result.commitCompanion().companionIdentity());
+    }
+
     private static TightGasOutcome runTightGas(boolean early, ContractsExecutionPolicy policy) throws Exception {
         try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
             var entry = s.f.append(s.root("C"), s.timeline, "attach", 300, attachment("a", s.root("A")), true);
@@ -498,6 +730,17 @@ final class RootedDiamondPeerSchedulingTest {
     private record DocumentState(long epoch, String blueId, List<String> receipts,
             List<Long> processingGas, List<String> planSnapshots) { }
     private record GasEvidence(String outputClosureIdentity, long totalGas, String gasTraceIdentity) { }
+    private record OriginalBoundaryCharge(long sequence, String namespace, String counter, long quantity,
+            long weight, long subtotal, String document, String scope, Long activationGeneration,
+            Long componentGeneration, String contract, String logicalPath, String work, String reason) { }
+    private record OriginalBoundaryTerminal(String publication, String invocation, String inputClosure,
+            String causeKind, String cause, String policy, long limit, String label, String status,
+            boolean commits, boolean rollback, String outputClosure, long gas, String trace,
+            List<OriginalBoundaryCharge> charges, String rejected, List<String> owned, String companion) { }
+    private record OriginalBoundaryOutcome(String entry, String stop, Map<String, DocumentState> documents,
+            OriginalBoundaryTerminal original, String originalDisposition,
+            Map<String, OriginalBoundaryTerminal> terminals, long chargedGas,
+            List<Long> observed, List<Long> events) { }
     private record TightGasFailure(String publicationIdentity, String inputInvocationIdentity,
             String capturedClosureIdentity, String causeIdentity, String policyIdentity, String resultInputClosureIdentity,
             String outputClosureIdentity, String status, long gas, String traceIdentity, String rejectedChargeIdentity) { }
