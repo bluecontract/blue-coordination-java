@@ -17,98 +17,128 @@ import static org.junit.jupiter.api.Assertions.*;
 final class RootedAutomaticJoinSchedulingTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
-    @Test void nonterminalForwardingUsesOriginalReceiverBeforeJointPublication() throws Exception { run(true); }
+    @Test void nonterminalForwardingUsesOriginalReceiverBeforeJointPublication() throws Exception {
+        // given
+        try (var f = new RootedSdkFixture()) {
+            // when
+            var verification = run(f, true, Shape.THREE_NODE);
+            // then
+            verification.run();
+        }
+    }
 
-    @Test void terminalForwardingStillDeliversExactlyOneReaction() throws Exception { run(false); }
+    @Test void terminalForwardingStillDeliversExactlyOneReaction() throws Exception {
+        // given
+        try (var f = new RootedSdkFixture()) {
+            // when
+            var verification = run(f, false, Shape.THREE_NODE);
+            // then
+            verification.run();
+        }
+    }
 
-    @Test void descendantTokenDoesNotBubbleThroughADirectMemberChannel() throws Exception { run(true, Shape.CHAIN); }
+    @Test void descendantTokenDoesNotBubbleThroughADirectMemberChannel() throws Exception {
+        // given
+        try (var f = new RootedSdkFixture()) {
+            // when
+            var verification = run(f, true, Shape.CHAIN);
+            // then
+            verification.run();
+        }
+    }
 
-    @Test void bothInteriorReceiversMustFinishTheirOriginalReactions() throws Exception { run(true, Shape.DIAMOND); }
+    @Test void bothInteriorReceiversMustFinishTheirOriginalReactions() throws Exception {
+        // given
+        try (var f = new RootedSdkFixture()) {
+            // when
+            var verification = run(f, true, Shape.DIAMOND);
+            // then
+            verification.run();
+        }
+    }
 
     private enum Shape { THREE_NODE, CHAIN, DIAMOND }
 
-    private void run(boolean nonterminal) throws Exception { run(nonterminal, Shape.THREE_NODE); }
-
-    private void run(boolean nonterminal, Shape shape) throws Exception {
+    private Runnable run(RootedSdkFixture f, boolean nonterminal, Shape shape) throws Exception {
         boolean multiple = shape != Shape.THREE_NODE;
-        try (var f = new RootedSdkFixture()) {
-            var roots = new LinkedHashMap<String, DocumentHandle>();
-            var originals = new ArrayList<ExactValue>();
-            String template = RootedSdkFixture.resource("node-graph.template.json");
-            for (String name : multiple ? List.of("A", "B", "D", "C") : List.of("A", "B", "C")) {
-                String authored = template.replace("<NODE>", name).replace("<NAMESPACE>", "witness-forwarding")
-                        .replace("<TIMELINE>", TIMELINE);
-                var exact = f.blue.values().yaml(authored); originals.add(exact.unwrap());
-                f.exact.put(exact.blueId(), exact.json()); roots.put(name, f.startYaml(authored, TIMELINE));
+        var roots = new LinkedHashMap<String, DocumentHandle>();
+        var originals = new ArrayList<ExactValue>();
+        String template = RootedSdkFixture.resource("node-graph.template.json");
+        for (String name : multiple ? List.of("A", "B", "D", "C") : List.of("A", "B", "C")) {
+            String authored = template.replace("<NODE>", name).replace("<NAMESPACE>", "witness-forwarding")
+                    .replace("<TIMELINE>", TIMELINE);
+            var exact = f.blue.values().yaml(authored); originals.add(exact.unwrap());
+            f.exact.put(exact.blueId(), exact.json()); roots.put(name, f.startYaml(authored, TIMELINE));
+        }
+        var a = roots.get("A"); var b = roots.get("B"); var c = roots.get("C");
+        var entries = new ArrayList<String>();
+        if (multiple) {
+            prefix(f, roots, roots.get("D"), "attach", 100, attachment("c", c), entries);
+            prefix(f, roots, b, "attach", 125, shape == Shape.CHAIN
+                    ? attachment("d", roots.get("D")) : attachment("c", c), entries);
+        } else prefix(f, roots, b, "attach", 100, attachment("c", c), entries);
+        prefix(f, roots, a, "attach", 150, attachment("b", b), entries);
+        if (shape == Shape.DIAMOND) prefix(f, roots, a, "attach", 175, attachment("d", roots.get("D")), entries);
+        prefix(f, roots, a, "emit", 200, "to: C\nnext: B", entries);
+        if (multiple) prefix(f, roots, a, "emit", 210, "to: C\nnext: D", entries);
+        if (nonterminal) prefix(f, roots, a, "touch", 250, "{}", entries);
+        var beforeHistories = roots.values().stream().map(f::history).toList();
+        var entry = f.append(c, TIMELINE, "attach", 300, attachment("a", a), true); entries.add(entry.blueId());
+        if (nonterminal && !multiple) assertEquals(List.of("qCiBGwwixGUbYPrcGyAVapBmXZWxvpeDU9yjKmVjC6f",
+                "8UeTdMdjMkzjwSVwprqZijmD6r1Wr6mPEc1cDfG8YuS", "WH5QBGYkM7iMEuFVsPKJpnXNo1dk5BpArcTNoANQ8Da",
+                "ABgTJyzKMFhC5XAynikZFkuiWq5EStphvb18k5cgYa2N", "HgWUG5gsFmWCS84v3C7KE995QVACy6P5oNM8J4h8fTE5"), entries);
+        var originalB = f.control.capture(b.id(), entry.blueId(), null);
+        var originalD = multiple ? f.control.capture(roots.get("D").id(), entry.blueId(), null) : null;
+        assertEquals(EntryDisposition.APPLIED,
+                measured(f, roots, () -> f.blue.processing().process(c, entry)).entry(entry).disposition());
+        boolean stopped = false;
+        for (int step = 0; step < 32; step++) {
+            var before = state(f, roots);
+            var next = measured(f, roots, () -> f.blue.processing().processNext(c));
+            if (next.blocked()) {
+                var after = state(f, roots);
+                assertEquals(before.subList(0, roots.size() - 1), after.subList(0, roots.size() - 1), "C's own last prefix step cannot execute an independent receiver");
+                if (next.stats().committedTransitions() == 0L) assertEquals(before, after);
+                else assertEquals(1L, next.stats().committedTransitions(), "Readiness can report the next prerequisite after one real prefix commit");
+                var blocked = measured(f, roots, () -> f.blue.processing().processNext(c));
+                assertTrue(blocked.blocked());
+                assertEquals(0L, blocked.stats().committedTransitions()); assertEquals(0L, blocked.stats().gas());
+                assertEquals(after, state(f, roots), "The zero-progress blocked C call must change no head, history or plan");
+                stopped = true; break;
             }
-            var a = roots.get("A"); var b = roots.get("B"); var c = roots.get("C");
-            var entries = new ArrayList<String>();
-            if (multiple) {
-                prefix(f, roots, roots.get("D"), "attach", 100, attachment("c", c), entries);
-                prefix(f, roots, b, "attach", 125, shape == Shape.CHAIN
-                        ? attachment("d", roots.get("D")) : attachment("c", c), entries);
-            } else prefix(f, roots, b, "attach", 100, attachment("c", c), entries);
-            prefix(f, roots, a, "attach", 150, attachment("b", b), entries);
-            if (shape == Shape.DIAMOND) prefix(f, roots, a, "attach", 175, attachment("d", roots.get("D")), entries);
-            prefix(f, roots, a, "emit", 200, "to: C\nnext: B", entries);
-            if (multiple) prefix(f, roots, a, "emit", 210, "to: C\nnext: D", entries);
-            if (nonterminal) prefix(f, roots, a, "touch", 250, "{}", entries);
-            var beforeHistories = roots.values().stream().map(f::history).toList();
-            var entry = f.append(c, TIMELINE, "attach", 300, attachment("a", a), true); entries.add(entry.blueId());
-            if (nonterminal && !multiple) assertEquals(List.of("qCiBGwwixGUbYPrcGyAVapBmXZWxvpeDU9yjKmVjC6f",
-                    "8UeTdMdjMkzjwSVwprqZijmD6r1Wr6mPEc1cDfG8YuS", "WH5QBGYkM7iMEuFVsPKJpnXNo1dk5BpArcTNoANQ8Da",
-                    "ABgTJyzKMFhC5XAynikZFkuiWq5EStphvb18k5cgYa2N", "HgWUG5gsFmWCS84v3C7KE995QVACy6P5oNM8J4h8fTE5"), entries);
-            var originalB = f.control.capture(b.id(), entry.blueId(), null);
-            var originalD = multiple ? f.control.capture(roots.get("D").id(), entry.blueId(), null) : null;
-            assertEquals(EntryDisposition.APPLIED,
-                    measured(f, roots, () -> f.blue.processing().process(c, entry)).entry(entry).disposition());
-            boolean stopped = false;
-            for (int step = 0; step < 32; step++) {
-                var before = state(f, roots);
-                var next = measured(f, roots, () -> f.blue.processing().processNext(c));
-                if (next.blocked()) {
-                    var after = state(f, roots);
-                    assertEquals(before.subList(0, roots.size() - 1), after.subList(0, roots.size() - 1), "C's own last prefix step cannot execute an independent receiver");
-                    if (next.stats().committedTransitions() == 0L) assertEquals(before, after);
-                    else assertEquals(1L, next.stats().committedTransitions(), "Readiness can report the next prerequisite after one real prefix commit");
-                    var blocked = measured(f, roots, () -> f.blue.processing().processNext(c));
-                    assertTrue(blocked.blocked());
-                    assertEquals(0L, blocked.stats().committedTransitions()); assertEquals(0L, blocked.stats().gas());
-                    assertEquals(after, state(f, roots), "The zero-progress blocked C call must change no head, history or plan");
-                    stopped = true; break;
-                }
-                assertFalse(next.quiescent(), "The source terminal must preserve the unexecuted receiving-root obligation");
+            assertFalse(next.quiescent(), "The source terminal must preserve the unexecuted receiving-root obligation");
+        }
+        assertTrue(stopped);
+        assertEquals(originalB.invocationIdentity(), f.control.capture(b.id(), entry.blueId(), null).invocationIdentity());
+        if (multiple) {
+            assertEquals(originalD.invocationIdentity(), f.control.capture(roots.get("D").id(), entry.blueId(), null).invocationIdentity());
+            assertEquals(0L, observed(f, roots.get("D")));
+        }
+        assertEquals(0L, observed(f, b));
+        assertEquals(multiple ? 2L : nonterminal ? 1L : 0L, observed(f, c));
+        var pending = f.blue.advanced().auditManagedCatchUpPlans(c.id()).stream()
+                .filter(plan -> plan.status() == ManagedCatchUpStatus.RUNNING).findFirst().orElseThrow();
+        assertEquals(pending.requiredThroughSourceEpoch(), pending.nextSourceEpoch());
+        var checked = new LinkedHashSet<String>();
+        boolean done = false;
+        for (int step = 0; step < 128; step++) {
+            var selected = f.blue.advanced().auditNextProcessingSelection();
+            System.out.println("AUTOMATIC_JOIN shape=" + shape + " nonterminal=" + nonterminal + " step=" + step + " selected=" + selected
+                    + " observed=" + roots.values().stream().map(root -> observed(f, root)).toList());
+            var next = measured(f, roots, () -> f.blue.processing().drain(new DrainBudget(1, 1)));
+            verify(f, roots, originals, checked);
+            if (next.blocked() && shape == Shape.DIAMOND) {
+                var beforeDiagnostic = state(f, roots);
+                new blue.coordination.internal.RootedJoinPrerequisiteProbe(f.blue.advanced().rawEngine())
+                        .describe(roots.values().stream().map(DocumentHandle::id).toList())
+                        .forEach(line -> System.out.println("DIAMOND_JOIN " + line));
+                assertEquals(beforeDiagnostic, state(f, roots), "Diagnostic inspection must preserve every publication and plan");
             }
-            assertTrue(stopped);
-            assertEquals(originalB.invocationIdentity(), f.control.capture(b.id(), entry.blueId(), null).invocationIdentity());
-            if (multiple) {
-                assertEquals(originalD.invocationIdentity(), f.control.capture(roots.get("D").id(), entry.blueId(), null).invocationIdentity());
-                assertEquals(0L, observed(f, roots.get("D")));
-            }
-            assertEquals(0L, observed(f, b));
-            assertEquals(multiple ? 2L : nonterminal ? 1L : 0L, observed(f, c));
-            var pending = f.blue.advanced().auditManagedCatchUpPlans(c.id()).stream()
-                    .filter(plan -> plan.status() == ManagedCatchUpStatus.RUNNING).findFirst().orElseThrow();
-            assertEquals(pending.requiredThroughSourceEpoch(), pending.nextSourceEpoch());
-            var checked = new LinkedHashSet<String>();
-            boolean done = false;
-            for (int step = 0; step < 128; step++) {
-                var selected = f.blue.advanced().auditNextProcessingSelection();
-                System.out.println("AUTOMATIC_JOIN shape=" + shape + " nonterminal=" + nonterminal + " step=" + step + " selected=" + selected
-                        + " observed=" + roots.values().stream().map(root -> observed(f, root)).toList());
-                var next = measured(f, roots, () -> f.blue.processing().drain(new DrainBudget(1, 1)));
-                verify(f, roots, originals, checked);
-                if (next.blocked() && shape == Shape.DIAMOND) {
-                    var beforeDiagnostic = state(f, roots);
-                    new blue.coordination.internal.RootedJoinPrerequisiteProbe(f.blue.advanced().rawEngine())
-                            .describe(roots.values().stream().map(DocumentHandle::id).toList())
-                            .forEach(line -> System.out.println("DIAMOND_JOIN " + line));
-                    assertEquals(beforeDiagnostic, state(f, roots), "Diagnostic inspection must preserve every publication and plan");
-                }
-                assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
-                if (next.quiescent()) { done = true; break; }
-            }
-            assertTrue(done, "The canonical selector must settle the same-cause prefix and joint application");
+            assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
+            if (next.quiescent()) { done = true; break; }
+        }
+        assertTrue(done, "The canonical selector must settle the same-cause prefix and joint application");
+        return () -> {
             assertEquals(1L, tokens(f, a, "C", "B")); assertEquals(1L, tokens(f, c, "B", "stop"));
             if (multiple) {
                 assertEquals(1L, tokens(f, a, "C", "D")); assertEquals(1L, tokens(f, c, "D", "stop"));
@@ -133,7 +163,7 @@ final class RootedAutomaticJoinSchedulingTest {
             assertEquals(settled, state(f, roots));
             assertTrue(measured(f, roots, () -> f.blue.processing().drain(new DrainBudget(1, 1))).quiescent());
             assertEquals(settled, state(f, roots));
-        }
+        };
     }
 
     private static void prefix(RootedSdkFixture f, Map<String, DocumentHandle> roots, DocumentHandle root,

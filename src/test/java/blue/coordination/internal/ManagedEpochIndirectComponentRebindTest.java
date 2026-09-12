@@ -148,6 +148,7 @@ final class ManagedEpochIndirectComponentRebindTest {
 
     @Test
     void verifiedSourceCapsuleSharesProofWithoutExposingMutableMembers() {
+        // given
         try (Scenario scenario = prepared(true)) {
             DefaultCoordinationEngine engine = scenario.engine();
             InMemoryDocumentStore documents = engine.documents();
@@ -172,6 +173,7 @@ final class ManagedEpochIndirectComponentRebindTest {
 
             // Construction owns the supplied nodes; returning the capsule does
             // not expose that owned graph through either member extraction.
+            // when
             suppliedMembers.get(0).properties("callerMutation", new Node().value(true));
             List<Node> extracted = evidence.afterCyclicProof().declaredPlaceholderSet();
             List<Node> secondExtraction = evidence.afterCyclicProof().declaredPlaceholderSet();
@@ -181,6 +183,7 @@ final class ManagedEpochIndirectComponentRebindTest {
             assertFalse(extracted.get(0).getProperties().isEmpty());
             extracted.get(0).getProperties().values().iterator().next()
                     .value("attempted nested mutation");
+            // then
             assertEquals(originalMembers, evidence.afterCyclicProof().declaredPlaceholderSet()
                     .stream().map(NodeWireForm::get).toList());
             assertEquals(originalMembers, secondExtraction.stream().map(NodeWireForm::get).toList());

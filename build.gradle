@@ -694,8 +694,12 @@ def currentProductionShapeLimits = [
         // staged terminal-source context alignment adds 70 lines.
         // No public type or protocol limit changes.
         // See docs/rooted-eligibility-cache.md for its independent controls.
-        classes: 251,
-        lines: 73_475L,
+        // Qualification inventory from ef3965b to a26c713: three reviewed
+        // private helpers add 322 lines; 17 existing sources add net 409.
+        // See docs/rooted-terminal-peer-qualification.md for the exact ledger.
+        // No public API, retained-source, protocol, closure, or gas limit changes.
+        classes: 254,
+        lines: 74_206L,
         publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

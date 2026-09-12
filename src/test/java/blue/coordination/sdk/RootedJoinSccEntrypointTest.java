@@ -18,6 +18,7 @@ final class RootedJoinSccEntrypointTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
     @Test void eitherOriginalOwnerSelectsTheSameJointTerminalButAcquiredConsumerStillWaits() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var roots = new LinkedHashMap<String, DocumentHandle>();
             var resources = new ArrayList<ExactValue>();
@@ -101,7 +102,9 @@ final class RootedJoinSccEntrypointTest {
                     .entryOwners().stream().map(id -> id.value()).collect(java.util.stream.Collectors.toSet()));
             assertEquals(roots.values().stream().map(root -> root.id().value()).collect(java.util.stream.Collectors.toSet()),
                     reference.rootedProjection().ownedDocumentIds().stream().map(id -> id.value()).collect(java.util.stream.Collectors.toSet()));
+            // when
             var published = f.blue.processing().processNext(alternate);
+            // then
             assertFalse(published.blocked(), String.valueOf(published.diagnostic()));
             var actual = published.managedEpochApplicationAttempts().get(0);
             assertTrue(actual.published()); assertFalse(actual.replayed());

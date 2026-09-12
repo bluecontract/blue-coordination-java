@@ -15,6 +15,7 @@ final class RootedDiamondAcquisitionDiagnosticTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
     @Test void completedPeerPrefixCanBeAddedWithoutReplacingItsHistoricalWitness() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var roots = new LinkedHashMap<String, DocumentHandle>();
             String template = RootedSdkFixture.resource("node-graph.template.json");
@@ -65,6 +66,7 @@ final class RootedDiamondAcquisitionDiagnosticTest {
             assertEquals(List.of(11L, 2L, 14L, 12L), roots.values().stream().map(root -> f.blue.advanced().auditDocument(root.id()).epoch()).toList());
             assertEquals(List.of(0L, 0L, 1L, 2L), roots.values().stream().map(root -> observed(f, root)).toList());
             assertEquals(originalB.invocationIdentity(), f.control.capture(b.id(), entry.blueId(), null).invocationIdentity());
+            // when
             var first = probe.publishExpandedOriginal(b.id(), d.id(), c.id(), a.id(), entry.blueId(), originalB.invocationIdentity());
             verify(first);
             boolean joined = false;
@@ -81,6 +83,7 @@ final class RootedDiamondAcquisitionDiagnosticTest {
                 assertEquals(plan.snapshotIdentity(), f.blue.advanced().auditManagedCatchUpPlans(c.id()).stream()
                         .filter(value -> value.planIdentity().equals(plan.planIdentity())).findFirst().orElseThrow().snapshotIdentity());
             }
+            // then
             assertTrue(joined, "The original terminal must settle without executing a later source frontier");
             assertEquals(List.of(0L, 1L, 1L, 2L), roots.values().stream().map(root -> observed(f, root)).toList());
             // A's original LIVE has not been independently executed. The maintained

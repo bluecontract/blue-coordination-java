@@ -21,9 +21,10 @@ final class RootedDormantPeerReconnectTest {
         // given
         // A real earlier C-to-A attachment was separately detached before
         // the acyclic diamond prefix; no row or snapshot is fabricated.
+        String namespace = ORIGINAL_NAMESPACE;
         // when
         // Normal public scheduling processes the original reconnect.
-        var completed = run(ORIGINAL_NAMESPACE);
+        var completed = run(namespace);
         // then
         // run requires every original reaction, frozen history, exact gas
         // receipt, and quiescent restart; BLOCKED is not an accepted outcome.

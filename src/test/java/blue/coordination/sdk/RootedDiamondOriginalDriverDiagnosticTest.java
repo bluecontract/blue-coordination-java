@@ -13,6 +13,7 @@ final class RootedDiamondOriginalDriverDiagnosticTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
     @Test void originalAInputBeforeIndependentSiblingPublication() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var roots = new LinkedHashMap<String, DocumentHandle>();
             var template = RootedSdkFixture.resource("node-graph.template.json");
@@ -59,9 +60,11 @@ final class RootedDiamondOriginalDriverDiagnosticTest {
             assertEquals(11L, plan.nextSourceEpoch()); assertEquals(11L, plan.requiredThroughSourceEpoch());
             var before = registered.publicationState();
             var histories = roots.values().stream().map(f::history).toList();
+            // when
             var probe = new RootedDiamondDriverProbe(f.blue.advanced().rawEngine()).inspect(a.id(), entry.blueId());
             probe.lines().forEach(line -> System.out.println("DIAMOND_A_DRIVER " + line));
             System.out.println("DIAMOND_A_DRIVER frozenPlan=" + plan.snapshotIdentity() + " next=11 through=11");
+            // then
             assertEquals(originalA.invocationIdentity(), probe.originalInput().invocationIdentity());
             assertEquals(roots.values().stream().map(root -> root.id().value()).collect(java.util.stream.Collectors.toSet()), probe.activeReach());
             assertTrue(probe.publicationUnchanged()); assertEquals(before, registered.publicationState());
