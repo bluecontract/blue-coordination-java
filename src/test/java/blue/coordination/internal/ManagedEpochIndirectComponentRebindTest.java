@@ -23,6 +23,7 @@ import blue.language.api.NodeProviderOutcome;
 import blue.language.identity.BlueIds;
 import blue.language.model.Node;
 import blue.language.model.NodePathEditor;
+import blue.language.model.NodeWireForm;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ManagedDocumentSnapshot;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
@@ -39,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -145,6 +147,56 @@ final class ManagedEpochIndirectComponentRebindTest {
     }
 
     @Test
+    void verifiedSourceCapsuleSharesProofWithoutExposingMutableMembers() {
+        try (Scenario scenario = prepared(true)) {
+            DefaultCoordinationEngine engine = scenario.engine();
+            InMemoryDocumentStore documents = engine.documents();
+            ManagedEpochApplicationWork work = scenario.work();
+            var retained = documents.managedEpochEvidence(
+                    work.sourceDocumentId(), work.sourceEpoch());
+            CyclicSetProof providerProof = engine.objects()
+                    .cyclicSetProofFor(retained.receipt().afterBlueId())
+                    .proof().orElseThrow();
+            List<Node> suppliedMembers = providerProof.declaredPlaceholderSet();
+            CyclicSetProof capsule = CyclicSetProof.fromDeclaredPlaceholderSet(suppliedMembers);
+            List<Object> originalMembers = capsule.declaredPlaceholderSet().stream()
+                    .map(NodeWireForm::get).toList();
+            var evidence = new ManagedEpochSourceEvidenceVerifier.VerifiedSourceEvidence(
+                    retained.receipt(), retained.transitionReceipt(), capsule);
+            assertSame(capsule, evidence.afterCyclicProof());
+            assertSame(evidence.afterCyclicProof(), evidence.afterCyclicProof());
+
+            DurableImage before = DurableImage.capture(scenario);
+            var capturer = invocationCapturer(engine.contractsClosureAdapter());
+            ClosureInvocationInput originalInput = capturer.capture(work, Set.of()).invocation().input();
+
+            // Construction owns the supplied nodes; returning the capsule does
+            // not expose that owned graph through either member extraction.
+            suppliedMembers.get(0).properties("callerMutation", new Node().value(true));
+            List<Node> extracted = evidence.afterCyclicProof().declaredPlaceholderSet();
+            List<Node> secondExtraction = evidence.afterCyclicProof().declaredPlaceholderSet();
+            assertNotSame(extracted.get(0), secondExtraction.get(0));
+            assertThrows(UnsupportedOperationException.class,
+                    () -> extracted.add(new Node()));
+            assertFalse(extracted.get(0).getProperties().isEmpty());
+            extracted.get(0).getProperties().values().iterator().next()
+                    .value("attempted nested mutation");
+            assertEquals(originalMembers, evidence.afterCyclicProof().declaredPlaceholderSet()
+                    .stream().map(NodeWireForm::get).toList());
+            assertEquals(originalMembers, secondExtraction.stream().map(NodeWireForm::get).toList());
+            assertTrue(retained.receipt().afterDocument().sameExactValue(
+                    ExactValue.fromVerifiedProviderEvidence(retained.receipt().afterBlueId(),
+                            retained.receipt().afterDocument().copyNode(), evidence.afterCyclicProof())));
+
+            ClosureInvocationInput recaptured = capturer.capture(work, Set.of()).invocation().input();
+            assertEquals(originalInput.invocationIdentity(), recaptured.invocationIdentity());
+            assertEquals(originalInput.cause().causeIdentity(), recaptured.cause().causeIdentity());
+            assertEquals(originalInput.snapshot().closureIdentity(), recaptured.snapshot().closureIdentity());
+            assertEquals(before, DurableImage.capture(scenario));
+        }
+    }
+
+    @Test
     void missingRetainedCyclicSourceProofWaitsWithoutAdvancingCursor() {
         // given
         ManagedCatchUpStatus expected =
@@ -244,6 +296,11 @@ final class ManagedEpochIndirectComponentRebindTest {
 
             ManagedOccurrenceCatchUpPlan planBefore = documents.catchUpPlan(
                     work.planIdentity()).orElseThrow();
+            var verifier = new ManagedEpochSourceEvidenceVerifier(engine.objects(), documents);
+            var retainedEvidence = documents.managedEpochEvidence(work.sourceDocumentId(), work.sourceEpoch());
+            var acquired = verifier.verify(work, retainedEvidence, planBefore);
+            assertNotNull(acquired.afterCyclicProof());
+            assertSame(acquired.afterCyclicProof(), acquired.afterCyclicProof());
             DocumentSession consumerBefore = documents.require(
                     work.consumerDocumentId());
             long consumerEpochBefore = consumerBefore.epoch();
@@ -264,6 +321,13 @@ final class ManagedEpochIndirectComponentRebindTest {
 
             applyProofFault(engine.objects(), cyclicAfterBlueId, fault);
             try {
+                // Sharing a previously acquired immutable capsule must not
+                // memoize a later provider outcome, even in the same verifier.
+                ManagedEpochEvidenceException reacquired = assertThrows(
+                        ManagedEpochEvidenceException.class,
+                        () -> verifier.verify(work, retainedEvidence, planBefore));
+                assertEquals(expectedPlanStatus, reacquired.planStatus());
+                assertEquals(expectedCode, reacquired.code());
                 ManagedEpochEvidenceException direct = assertThrows(
                         ManagedEpochEvidenceException.class,
                         () -> engine.contractsClosureAdapter()
