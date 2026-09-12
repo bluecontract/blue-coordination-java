@@ -109,8 +109,9 @@ final class RootedHistoricalWitnessForwardingTest {
                     + " before=" + roots.entrySet().stream().map(row -> List.of(row.getKey(), compactState(f, row.getValue()))).toList());
             System.out.println("WITNESS_FORWARDING_B_BEFORE_JOIN " + diagnostic(() -> f.control.rootSelectionDescription(b.id())));
             execute(f, roots.get(firstRoot), cToA, roots, originals, checked, true);
-            // Do not resubmit a consumed input after a legitimate SCC join. Ask each actual root for its next obligation.
-            for (var root : roots.values()) settle(f, root, roots, originals, checked, true);
+            // A root-local prerequisite cannot execute another root implicitly. The maintained
+            // global selector settles those original obligations without resubmitting the input.
+            settleGlobally(f, roots, originals, checked);
             roots.forEach((name, root) -> {
                 var history = f.history(root); var prefix = prefixes.get(name);
                 assertTrue(history.size() >= prefix.size());
@@ -122,7 +123,11 @@ final class RootedHistoricalWitnessForwardingTest {
                     + " tokens=" + roots.entrySet().stream().map(row -> List.of(row.getKey(), eventEvidence(f, row.getValue()))).toList()
                     + " next=" + f.blue.advanced().auditNextProcessingSelection());
             System.out.println("WITNESS_FORWARDING_B_AFTER_JOIN " + diagnostic(() -> f.control.rootSelectionDescription(b.id())));
-            assertToken(f, a, "C", "B"); assertToken(f, c, "B", "stop");
+            assertToken(f, a, "C", "B");
+            // With terminal A5, B's original rooted calculation emits C's token while
+            // acquiring the ring. Ownership does not make C a public Root. With A6,
+            // C emits earlier in its own rooted calculation before B receives it.
+            assertToken(f, c, "B", "stop", laterSourceStep ? c : b);
             assertTrue(tokens(f, b).isEmpty(), "B's authored next=stop reaction emits no token");
             assertEquals(List.of(0L, 1L, 1L), counts(roots),
                     "Historical B is not an excuse to drop the real B receiver's one required reaction");
@@ -162,12 +167,28 @@ final class RootedHistoricalWitnessForwardingTest {
                 assertEquals(before, after, "Failed publication must not mutate any independently published head/history");
                 throw failure;
             }
-            assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
             verifyCalculations(f, root, roots, originals, checked, closing);
+            if (closing && next.blocked()) {
+                if (next.stats().committedTransitions() == 0L) assertEquals(before, headsAndHistory(f, roots));
+                return;
+            }
+            assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
             if (next.quiescent()) { assertReady(f, root); return; }
         }
         fail("Four-input witness cycle did not settle within64 selections: " + root.id()
                 + " local=" + f.control.localHistoryDescription(root.id()));
+    }
+
+    private static void settleGlobally(RootedSdkFixture f, Map<String, DocumentHandle> roots,
+            List<ExactValue> originals, Set<String> checked) {
+        for (int step = 0; step < 128; step++) {
+            System.out.println("WITNESS_FORWARDING_GLOBAL step=" + step + " selected=" + f.blue.advanced().auditNextProcessingSelection());
+            var next = f.blue.processing().drain(new DrainBudget(1, 1));
+            verifyCalculations(f, roots.values().iterator().next(), roots, originals, checked, true);
+            assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
+            if (next.quiescent()) return;
+        }
+        fail("Global original-cause prerequisites did not settle within128 selections");
     }
 
     private static void verifyCalculations(RootedSdkFixture f, DocumentHandle root,
@@ -217,7 +238,7 @@ final class RootedHistoricalWitnessForwardingTest {
             if (!closing) assertEquals(Set.of(new DocumentId(root.id().value())), ownerIds);
             else {
                 assertTrue(ownerIds.containsAll(entryOwners), "Original entry ownership cannot shrink within a step");
-                assertTrue(ownerIds.equals(Set.of(new DocumentId(root.id().value()))) || ownerIds.equals(allIds),
+                assertTrue(ownerIds.equals(entryOwners) || ownerIds.equals(allIds),
                         "The only possible live SCCs in this three-edge graph are a singleton or the complete ring");
             }
         }
@@ -245,9 +266,48 @@ final class RootedHistoricalWitnessForwardingTest {
     }
 
     private static void assertToken(RootedSdkFixture f, DocumentHandle source, String to, String next) {
+        assertToken(f, source, to, next, source);
+    }
+
+    private static void assertToken(RootedSdkFixture f, DocumentHandle source, String to, String next,
+            DocumentHandle publicRoot) {
         var tokens = tokens(f, source); assertEquals(1, tokens.size(), source.id().toString());
-        var token = tokens.get(0); assertEquals(source.id(), token.sourceDocumentId()); assertTrue(token.publicAtSource());
+        var token = tokens.get(0); assertEquals(source.id(), token.sourceDocumentId());
         assertEquals(to, token.exactEvent().scalarAt("/to")); assertEquals(next, token.exactEvent().scalarAt("/next"));
+        var receipt = f.blue.advanced().auditManagedEpochs(source.id()).stream()
+                .filter(row -> row.emittedEvents().stream().anyMatch(event ->
+                        event.eventOccurrenceIdentity().equals(token.eventOccurrenceIdentity())))
+                .findFirst().orElseThrow();
+        var producer = f.control.retainedTerminals(source.id()).stream()
+                .filter(terminal -> terminal.result().managedTransitionReceipts().stream().anyMatch(row ->
+                        row.transitionReceiptIdentity().equals(receipt.contractsTransitionReceiptIdentity())))
+                .findFirst().orElseThrow();
+        var input = producer.input(); var result = producer.result();
+        var transition = result.managedTransitionReceipts().stream().filter(row ->
+                row.transitionReceiptIdentity().equals(receipt.contractsTransitionReceiptIdentity())).findFirst().orElseThrow();
+        var emitted = transition.emittedRootEvents().stream().filter(event ->
+                event.occurrenceIdentity().equals(token.eventOccurrenceIdentity())).findFirst().orElseThrow();
+        var sourceId = new DocumentId(source.id().value());
+        var expectedPublicRoots = Set.of(new DocumentId(publicRoot.id().value()));
+        assertEquals(input.invocationIdentity(), result.invocationIdentity());
+        assertEquals(input.invocationIdentity(), transition.sourceInvocationIdentity());
+        assertEquals(receipt.commitCompanionIdentity(), result.commitCompanion().companionIdentity());
+        assertEquals(receipt.originalCauseIdentity(), transition.originalCauseIdentity());
+        assertEquals(expectedPublicRoots, Set.copyOf(input.snapshot().publicRootDocumentIds()));
+        assertEquals(expectedPublicRoots, Set.copyOf(result.rootedProjection().context().entryOwners()));
+        assertTrue(result.rootedProjection().owns(sourceId), "The source receipt must belong to an actual published owner");
+        assertEquals(source.id().equals(publicRoot.id()), token.publicAtSource());
+        assertEquals(input.snapshot().managedDocument(sourceId).publicRoot(), token.publicAtSource());
+        assertEquals(emitted.publicAtSource(), token.publicAtSource());
+        assertEquals(emitted.ordinal(), token.ordinal());
+        assertEquals(emitted.occurrenceOrdinal(), token.eventOccurrenceOrdinal());
+        assertEquals(emitted.eventBlueId(), token.eventBlueId());
+        assertEquals(result.managedTransitionReceipts().stream().flatMap(row -> row.emittedRootEvents().stream())
+                        .sorted(java.util.Comparator.comparingLong(blue.language.processor.closure.ManagedRootEventOccurrence::occurrenceOrdinal))
+                        .filter(blue.language.processor.closure.ManagedRootEventOccurrence::publicAtSource)
+                        .map(blue.language.processor.closure.ManagedRootEventOccurrence::occurrenceIdentity).toList(),
+                result.publicEvents().stream().map(event -> event.eventOccurrenceIdentity()).toList(),
+                "Public events are exactly the ordered public subset, not every owned source emission");
     }
 
     private static List<List<Object>> eventEvidence(RootedSdkFixture f, DocumentHandle source) {

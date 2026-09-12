@@ -57,7 +57,24 @@ public final class RootedJoinPrefixProbe {
         return new Observation(invocation.input(), result, rejection == null, detail + " guard=" + rejection);
     }
 
+    /** Selects the actual registered consumer work and executes the genuine local input through its ordinary publisher. */
+    public Publication publish(DocumentId root) {
+        var adapter = engine.contractsClosureAdapter();
+        var local = Objects.requireNonNull(adapter.nextRootLocalHistory(root, engine.auditTimelineEntries()).step());
+        var excluded = engine.documents().sessions().stream().map(DocumentSession::documentId)
+                .filter(id -> !id.equals(local.work().consumerDocumentId()))
+                .collect(java.util.stream.Collectors.toSet());
+        var registered = engine.documents().nextCatchUpWorkExcluding(excluded).orElseThrow();
+        var outcome = adapter.executeRootedJoinApplication(registered, excluded, local);
+        return new Publication(outcome.attempt().processResult(), outcome.receipt().orElseThrow(),
+                outcome.published(), outcome.replayed());
+    }
+
     /** Complete genuine calculation plus the unchanged guard's outcome, not new publication authority. */
     public record Observation(ClosureInvocationInput input, ClosureProcessResult result,
             boolean ownersCurrent, String detail) { }
+
+    /** Evidence from the actual atomic registered-work publisher. */
+    public record Publication(ClosureProcessResult result, blue.coordination.api.ManagedEpochApplicationReceipt application,
+            boolean published, boolean replayed) { }
 }

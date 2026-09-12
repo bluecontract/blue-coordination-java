@@ -3,6 +3,7 @@ package blue.coordination.sdk;
 import blue.coordination.api.ExactValue;
 import blue.coordination.internal.RootedCalculationFixture;
 import blue.coordination.internal.RootedJoinPrefixProbe;
+import blue.coordination.internal.RootedJoinPublicationSafetyProbe;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ManagedRepresentationCause;
 import blue.language.processor.closure.ManagedRevisionCause;
@@ -18,6 +19,14 @@ final class RootedJoinPrefixInterleavingTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
     @Test void originalLivePrefixMustAcquireExactOwnersBeforeTheTerminalJoin() throws Exception {
+        run(false);
+    }
+
+    @Test void actualLocalTerminalAtomicallySettlesItsRegisteredSourceApplication() throws Exception {
+        run(true);
+    }
+
+    private void run(boolean publishTerminal) throws Exception {
         // given: exactly the existing five-input nonterminal forwarding example
         try (var f = new RootedSdkFixture()) {
             var roots = new LinkedHashMap<String, DocumentHandle>();
@@ -43,19 +52,20 @@ final class RootedJoinPrefixInterleavingTest {
                     "8UeTdMdjMkzjwSVwprqZijmD6r1Wr6mPEc1cDfG8YuS", "WH5QBGYkM7iMEuFVsPKJpnXNo1dk5BpArcTNoANQ8Da",
                     "ABgTJyzKMFhC5XAynikZFkuiWq5EStphvb18k5cgYa2N", "HgWUG5gsFmWCS84v3C7KE995QVACy6P5oNM8J4h8fTE5"), entries);
             var originalB = f.control.capture(b.id(), entry.blueId(), null);
+            var registered = new RootedJoinPublicationSafetyProbe(f.blue.advanced().rawEngine());
             apply(f, c, entry);
             for (int step = 0; step < 16; step++) {
-                var next = f.control.registeredOwnedHistory(c.id());
-                var input = f.control.captureRegisteredOwnedHistory(c.id());
+                var next = registered.registered(c.id());
+                var input = registered.registeredInput(c.id());
                 printPosition(f, c, input, next.workIdentity());
                 if (terminalPosition(input)) break;
                 assertTrue(next.sourceEpoch() <= 6L);
-                assertFalse(f.blue.processing().processNext(c).blocked());
+                assertEquals(1L, f.blue.processing().processNext(c).stats().committedTransitions());
             }
-            var terminalC = f.control.registeredOwnedHistory(c.id());
+            var terminalC = registered.registered(c.id());
             assertEquals(6L, terminalC.sourceEpoch());
             assertEquals(a.id().value(), terminalC.sourceDocumentId().value());
-            var cInput = f.control.captureRegisteredOwnedHistory(c.id());
+            var cInput = registered.registeredInput(c.id());
             assertTrue(terminalPosition(cInput));
             var cCause = assertInstanceOf(ManagedRevisionCause.class, cInput.cause());
             assertEquals(5L, cCause.fromEpoch()); assertEquals(6L, cCause.toEpoch());
@@ -125,7 +135,33 @@ final class RootedJoinPrefixInterleavingTest {
             assertEquals(reference.totalGas(), probe.result().totalGas());
             assertEquals(1L, committedObserved(f, b), "The original nonterminal forwarding work must reach primary B");
             assertTrue(probe.ownersCurrent(), probe.detail());
-            // Deliberately do not publish the terminal: registered-plan reconciliation is a separate missing proof.
+            if (publishTerminal) {
+                var publication = new RootedJoinPrefixProbe(f.blue.advanced().rawEngine()).publish(b.id());
+                assertTrue(publication.published()); assertFalse(publication.replayed());
+                assertEquals(probe.result().invocationIdentity(), publication.result().invocationIdentity());
+                assertEquals(probe.result().outputClosureIdentity(), publication.result().outputClosureIdentity());
+                assertEquals(probe.result().publicEventsIdentity(), publication.result().publicEventsIdentity());
+                assertEquals(probe.result().managedTransitionReceiptsIdentity(), publication.result().managedTransitionReceiptsIdentity());
+                assertEquals(probe.result().checkpointWritesIdentity(), publication.result().checkpointWritesIdentity());
+                assertEquals(probe.result().commitCompanion().companionIdentity(), publication.result().commitCompanion().companionIdentity());
+                assertEquals(probe.result().gasTraceIdentity(), publication.result().gasTraceIdentity());
+                assertEquals(probe.result().totalGas(), publication.result().totalGas());
+                assertEquals(terminalC.workIdentity(), publication.application().workIdentity());
+                assertEquals(terminalC.sourceReceiptIdentity(), publication.application().sourceReceiptIdentity());
+                assertEquals(c.id(), publication.application().consumerDocumentId());
+                assertEquals(7L, publication.application().resultingSourceCursor());
+                assertEquals(List.of(0L, 1L, 1L), roots.values().stream().map(root -> committedObserved(f, root)).toList());
+                for (var root : roots.values()) {
+                    assertTrue(f.blue.advanced().auditManagedCatchUpPlans(root.id()).stream()
+                            .allMatch(plan -> plan.status() == blue.coordination.api.ManagedCatchUpStatus.COMPLETE));
+                    assertTrue(f.blue.advanced().auditManagedDocumentReadiness(root.id()).orElseThrow().ready());
+                    assertTrue(f.blue.processing().processNext(root).quiescent());
+                }
+                var settled = state(f, new ArrayList<>(roots.values()));
+                blue.coordination.internal.CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+                assertEquals(settled, state(f, new ArrayList<>(roots.values())));
+                for (var root : roots.values()) assertTrue(f.blue.processing().processNext(root).quiescent());
+            }
         }
     }
 

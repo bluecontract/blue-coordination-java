@@ -335,6 +335,55 @@ final class ManagedEpochInvocationCapturer {
                 work, sourceReceipt, sourceTransition, invocation);
     }
 
+    /** Keeps an actual receiving root's input while authenticating the registered terminal application it performs. */
+    Capture captureRootedJoin(ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers,
+            RootedLocalHistory.Step local) {
+        // This still verifies canonical due order, the original plan, source receipt/proof,
+        // occurrence position and independent consumer head through the ordinary capturer.
+        Capture registered = capture(work, excludedConsumers);
+        var actual = local.invocation();
+        var state = local.capturedState();
+        local.requireCurrentInput(documents);
+        var selected = local.work();
+        var barrier = documents.catchUpBarrier(work.barrierIdentity()).orElseThrow();
+        var originalCause = RootedTerminalEvidence.originalLocalCause(state.view(), documents);
+        var target = actual.input().snapshot().occurrences().stream()
+                .filter(row -> row.occurrenceIdentity().equals(work.targetOccurrenceIdentity())).findFirst().orElseThrow();
+        var registeredTarget = registered.invocation().input().snapshot().occurrences().stream()
+                .filter(row -> row.occurrenceIdentity().equals(work.targetOccurrenceIdentity())).findFirst().orElseThrow();
+        boolean terminal = actual.input().cause() instanceof ManagedRepresentationCause representation
+                ? representation.terminalPositionReached()
+                : actual.input().cause() instanceof ManagedRevisionCause revision
+                    && revision.successorRepresentationCause().isEmpty()
+                    && revision.toEpoch() == actual.input().snapshot().managedDocument(revision.childDocumentId()).epoch();
+        if (!terminal || originalCause == null || !barrier.causedByIdentity().equals(originalCause.causeIdentity())
+                || actual.rootedEvidence() == null || actual.rootedEvidence().historicalOrigin() != state.view()
+                || !Objects.equals(actual.rootedEvidence().historicalWork(), selected)
+                || !barrier.causeOrder().equals(local.anchor().sourceOrderKey())
+                || !barrier.causeOrder().equals(actual.rootedEvidence().historicalOrigin().logicalBoundary())
+                || !registered.invocation().input().cause().causeIdentity().equals(actual.input().cause().causeIdentity())
+                || !work.sourceReceiptIdentity().equals(selected.sourceReceiptIdentity())
+                || !work.sourceDocumentId().equals(selected.sourceDocumentId()) || work.sourceEpoch() != selected.sourceEpoch()
+                || !work.consumerDocumentId().equals(selected.consumerDocumentId())
+                || !work.targetOccurrenceIdentity().equals(selected.targetOccurrenceIdentity())
+                || !work.targetPath().equals(selected.targetPath()) || work.activationGeneration() != selected.activationGeneration()
+                || work.expectedConsumerCommittedEpoch() != selected.expectedConsumerCommittedEpoch()
+                || !work.expectedConsumerCommittedBlueId().equals(selected.expectedConsumerCommittedBlueId())
+                || work.expectedGraphGeneration() != selected.expectedGraphGeneration()
+                || !ManagedOccurrenceInventory.sameRows(List.of(target), List.of(registeredTarget))) {
+            throw ContractsClosureAdapter.stale("Local join does not perform the exact registered terminal application");
+        }
+        var source = actual.input().snapshot().managedDocument(ContractsClosureAdapter.closureId(work.sourceDocumentId()));
+        var original = registered.invocation().input().snapshot().managedDocument(source.documentId());
+        if (source.epoch() != original.epoch() || !source.blueId().equals(original.blueId())
+                || source.componentGeneration() != original.componentGeneration()
+                || source.initialized() != original.initialized() || source.terminated() != original.terminated()
+                || !blue.language.model.NodeWireForm.get(source.document()).equals(blue.language.model.NodeWireForm.get(original.document()))) {
+            throw ContractsClosureAdapter.stale("Local join changed the registered application's frozen source");
+        }
+        return new Capture(work, registered.sourceReceipt(), registered.sourceTransitionReceipt(), actual);
+    }
+
     /**
      * Builds an invocation-only representation that keeps already retained
      * exact descendants behind their verified provider identities.

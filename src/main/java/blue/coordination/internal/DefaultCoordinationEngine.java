@@ -1231,7 +1231,8 @@ public final class DefaultCoordinationEngine
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
             }
-            var anchor = documents.sessions().stream().map(DocumentSession::documentId)
+            var anchor = next.localHistorical() != null ? next.localHistorical().root()
+                    : documents.sessions().stream().map(DocumentSession::documentId)
                     .filter(id -> !next.excludedConsumers().contains(id))
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
@@ -1250,7 +1251,7 @@ public final class DefaultCoordinationEngine
 
     private ProcessingDrainReceipt executeRootSelection(RootedCheckpointDriver.Selection next, long started) {
         if (next.live() != null) return executeRootBatch(next.live(), started);
-        if (next.localHistorical() != null) {
+        if (next.localHistorical() != null && next.historical() == null) {
             var step = next.localHistorical();
             var batch = contractsClosureAdapter.localHistoryBatch(step);
             var completed = executeRootBatch(batch, started);
@@ -1265,9 +1266,12 @@ public final class DefaultCoordinationEngine
         }
         if (next.historical() != null) {
             try {
-                var outcome = contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers());
+                var outcome = next.localHistorical() == null
+                        ? contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers())
+                        : contractsClosureAdapter.executeRootedJoinApplication(next.historical(), next.excludedConsumers(), next.localHistorical());
                 return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
-                        outcome.published(), false, outcome.published() && !outcome.replayed() ? 1L : 0L,
+                        outcome.published(), false, outcome.published() && !outcome.replayed()
+                                ? RootedResultScope.processTransitionCount(outcome.attempt().processResult()) : 0L,
                         System.nanoTime() - started, outcome.receipt().stream().toList(),
                         List.of(managedApplicationAttempt(outcome)), List.of());
             } catch (ManagedEpochEvidenceException failure) {
@@ -1789,7 +1793,8 @@ public final class DefaultCoordinationEngine
                     || contractsJournalCoordinator.hasCompletableRootedTransport(scan)
                     ? ProcessingSelection.journal() : ProcessingSelection.none();
             var next = selected.selection();
-            if (next.localHistorical() != null) return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
+            if (next.localHistorical() != null && next.historical() == null)
+                return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
             return next.historical() == null ? ProcessingSelection.journal()
                     : ProcessingSelection.managedEpochApplication(next.historical());
         }

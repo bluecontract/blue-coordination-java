@@ -185,12 +185,49 @@ final class RootedLocalHistory {
         var rooted = RootedInvocationEvidence.retainedLocal(state, input, documents, target, position, work);
         var members = state.documents().keySet().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList();
         var owners = state.snapshot().publicRootDocumentIds().stream().map(ContractsClosureAdapter::coordinationId).toList();
-        var invocation = new ContractsClosureAdapter.CohortInvocation(members, List.of(), input, null,
-                state.documents(), null, null, owners, owners, state.anchor()).withRootedEvidence(rooted);
-        return new Step(root, target, work, order, anchor, invocation);
+        var base = new ContractsClosureAdapter.CohortInvocation(members, List.of(), input, null,
+                state.documents(), null, null, owners, owners, state.anchor());
+        return new Step(root, target, work, order, anchor, base, state, rooted);
     }
 
     record Selection(boolean pending, Step step) { }
-    record Step(DocumentId root, ManagedOccurrenceBinding target, ManagedEpochApplicationWork work,
-            ExternalOrderKey sourceOrder, TimelineEntry anchor, ContractsClosureAdapter.CohortInvocation invocation) { }
+
+    /** Closed pair of the original verified capture and its Language-bound execution input. */
+    static final class Step {
+        private final DocumentId root;
+        private final ManagedOccurrenceBinding target;
+        private final ManagedEpochApplicationWork work;
+        private final ExternalOrderKey sourceOrder;
+        private final TimelineEntry anchor;
+        private final ContractsClosureAdapter.CohortInvocation invocation;
+        private final ContractsClosureAdapter.RootedCapturedState capturedState;
+        private final blue.language.processor.closure.ClosureInvocationInput originalInput;
+
+        private Step(DocumentId root, ManagedOccurrenceBinding target, ManagedEpochApplicationWork work,
+                ExternalOrderKey sourceOrder, TimelineEntry anchor, ContractsClosureAdapter.CohortInvocation base,
+                ContractsClosureAdapter.RootedCapturedState capturedState, RootedInvocationEvidence rooted) {
+            this.root = root; this.target = target; this.work = work; this.sourceOrder = sourceOrder; this.anchor = anchor;
+            this.capturedState = capturedState;
+            this.originalInput = base.input();
+            if (rooted.historicalOrigin() != capturedState.view() || rooted.historicalWork() != work
+                    || !rooted.baseInvocationIdentity().equals(originalInput.invocationIdentity())) {
+                throw new IllegalArgumentException("Local step must bind its original verified capture");
+            }
+            // Language adds witness roles to a new snapshot here. Do not ask the bound
+            // snapshot to be the same Java object as the pre-binding capture it proves.
+            this.invocation = base.withRootedEvidence(rooted);
+        }
+
+        void requireCurrentInput(InMemoryDocumentStore documents) {
+            capturedState.requireRetainedInput(originalInput, documents);
+        }
+
+        DocumentId root() { return root; }
+        ManagedOccurrenceBinding target() { return target; }
+        ManagedEpochApplicationWork work() { return work; }
+        ExternalOrderKey sourceOrder() { return sourceOrder; }
+        TimelineEntry anchor() { return anchor; }
+        ContractsClosureAdapter.CohortInvocation invocation() { return invocation; }
+        ContractsClosureAdapter.RootedCapturedState capturedState() { return capturedState; }
+    }
 }

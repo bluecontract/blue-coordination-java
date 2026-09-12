@@ -63,7 +63,25 @@ final class RootedJoinEligibility {
                 if (affected.isEmpty()) continue;
                 if (!interestedOwners.isEmpty() && java.util.Collections.disjoint(affected, interestedOwners)) continue;
                 ExternalOrderKey boundary = boundary(documents, view, owners, row);
-                fences.add(new Fence(boundary, affected));
+                var receivers = new LinkedHashSet<>(affected);
+                view.snapshot().components().stream().filter(component -> component.orderedMemberDocumentIds().contains(row.targetDocumentId()))
+                        .findFirst().orElseThrow().orderedMemberDocumentIds().stream().map(ContractsClosureAdapter::coordinationId)
+                        .forEach(receivers::remove);
+                String cause;
+                var consumer = ContractsClosureAdapter.coordinationId(row.sourceDocumentId());
+                if (owners.contains(consumer)) {
+                    var plan = matchingPlans(documents, consumer, row).stream().filter(value ->
+                            value.nextSourceEpoch() == row.pendingHistoricalEpoch() + 1L).findFirst().orElseThrow();
+                    cause = documents.catchUpBarrier(plan.barrierIdentity()).orElseThrow().causedByIdentity();
+                } else {
+                    cause = null;
+                    var original = RootedTerminalEvidence.originalLocalCause(view, documents);
+                    if (original != null) {
+                        if (!original.sourceOrder().equals(boundary)) throw ContractsClosureAdapter.stale("Local join changed its original cause boundary");
+                        cause = original.causeIdentity();
+                    }
+                }
+                fences.add(new Fence(boundary, affected, receivers, cause, row, terminal(documents, row, receivers, boundary, cause)));
             }
         }
         return List.copyOf(fences);
@@ -109,6 +127,53 @@ final class RootedJoinEligibility {
         return barrier.causeOrder();
     }
 
+    private static List<blue.coordination.api.ManagedOccurrenceCatchUpPlan> matchingPlans(InMemoryDocumentStore documents,
+            DocumentId consumer, ManagedOccurrenceBinding row) {
+        return documents.catchUpPlans(consumer).stream().filter(plan ->
+                plan.targetOccurrenceIdentity().equals(row.occurrenceIdentity())
+                        && plan.activationGeneration() == row.activationGeneration()
+                        && plan.targetPath().equals(row.sourcePath())
+                        && plan.sourceDocumentId().value().equals(row.targetDocumentId().value())
+                        && plan.status() != ManagedCatchUpStatus.COMPLETE
+                        && plan.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED).toList();
+    }
+
+    /** A local row is not a registered plan: use the independently published consumer's real canonical work. */
+    private static Terminal terminal(InMemoryDocumentStore documents, ManagedOccurrenceBinding row,
+            Set<DocumentId> receivers, ExternalOrderKey boundary, String originalCause) {
+        if (originalCause == null) return null;
+        var consumer = ContractsClosureAdapter.coordinationId(row.sourceDocumentId());
+        var plans = matchingPlans(documents, consumer, row).stream().filter(plan ->
+                plan.status() == ManagedCatchUpStatus.RUNNING).toList();
+        if (plans.size() != 1) return null;
+        var plan = plans.get(0);
+        var barrier = documents.catchUpBarrier(plan.barrierIdentity()).orElseThrow();
+        if (!barrier.causeOrder().equals(boundary) || !barrier.causedByIdentity().equals(originalCause)
+                || !barrier.consumerDocumentId().equals(consumer)
+                || !barrier.planIdentities().contains(plan.planIdentity())) return null;
+        var view = documents.require(consumer).rootedView();
+        var owners = view.snapshot().components().stream().filter(component -> component.orderedMemberDocumentIds()
+                .contains(row.sourceDocumentId())).findFirst().orElseThrow().orderedMemberDocumentIds().stream()
+                .map(ContractsClosureAdapter::coordinationId).collect(java.util.stream.Collectors.toSet());
+        if (view.snapshot().occurrences().stream().noneMatch(current -> current.occurrenceIdentity().equals(row.occurrenceIdentity())
+                && current.activationGeneration() == row.activationGeneration() && current.sourceDocumentId().equals(row.sourceDocumentId())
+                && current.targetDocumentId().equals(row.targetDocumentId()) && current.sourcePath().equals(row.sourcePath())
+                && !current.active() && current.pendingHistoricalEpoch() != null
+                && current.pendingHistoricalEpoch() + 1L == plan.nextSourceEpoch())) return null;
+        var pending = documents.catchUpPlansSnapshot().pendingWorkForPlan(plan.planIdentity());
+        if (!pending.found()) return null;
+        var work = pending.work();
+        if (work.sourceEpoch() != plan.requiredThroughSourceEpoch() || work.successorRepresentationCause().isPresent()
+                || work.isRepresentationApplication() && !work.representationCause().orElseThrow().terminalPositionReached()) return null;
+        var excluded = documents.sessions().stream().map(DocumentSession::documentId).filter(id -> !owners.contains(id))
+                .collect(java.util.stream.Collectors.toSet());
+        if (documents.nextCatchUpWorkExcluding(excluded).filter(next -> next.workIdentity().equals(work.workIdentity())).isEmpty()) return null;
+        var interior = new LinkedHashSet<>(receivers);
+        interior.removeAll(owners);
+        if (interior.isEmpty()) return null;
+        return new Terminal(work, interior, excluded);
+    }
+
     /** Only vertices on a start-to-goal path participate; reachable side branches are not protected. */
     private static Set<DocumentId> paths(Map<DocumentId, Set<DocumentId>> graph, Set<DocumentId> starts, Set<DocumentId> goals) {
         var reachable = reachable(graph, starts);
@@ -131,11 +196,32 @@ final class RootedJoinEligibility {
     }
 
     static boolean blocks(List<Fence> fences, Set<DocumentId> owners, ExternalOrderKey order) {
-        return fences.stream().anyMatch(fence -> order.compareTo(fence.boundary()) > 0
+        return fences.stream().anyMatch(fence -> order.compareTo(fence.boundary()) >= 0
                 && !java.util.Collections.disjoint(owners, fence.owners()));
     }
 
-    record Fence(ExternalOrderKey boundary, Set<DocumentId> owners) {
-        Fence { java.util.Objects.requireNonNull(boundary); owners = Set.copyOf(owners); }
+    /** Same order alone is not authority: require the exact original external cause and receiving path. */
+    static boolean blocks(List<Fence> fences, Set<DocumentId> owners, ContractsClosureAdapter.FrozenBatch batch) {
+        return fences.stream().anyMatch(fence -> batch.entry().sourceOrderKey().compareTo(fence.boundary()) >= 0
+                && !java.util.Collections.disjoint(owners, fence.owners()) && !sameCauseReceiver(fence, owners, batch));
+    }
+
+    static boolean sameCauseReceiver(Fence fence, Set<DocumentId> owners, ContractsClosureAdapter.FrozenBatch batch) {
+        return fence.causeIdentity() != null && fence.receivers().containsAll(owners)
+                && batch.entry().sourceOrderKey().equals(fence.boundary()) && !batch.invocations().isEmpty()
+                && batch.invocations().stream().allMatch(invocation -> invocation.rootedEvidence() != null
+                    && invocation.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause
+                    && cause.causeIdentity().equals(fence.causeIdentity())
+                    && cause.sourceOrder().equals(fence.boundary()) && cause.eventBlueId().equals(batch.entry().blueId()));
+    }
+
+    record Terminal(blue.coordination.api.ManagedEpochApplicationWork work,
+            Set<DocumentId> interiorOwners, Set<DocumentId> excludedConsumers) {
+        Terminal { interiorOwners = Set.copyOf(interiorOwners); excludedConsumers = Set.copyOf(excludedConsumers); }
+    }
+
+    record Fence(ExternalOrderKey boundary, Set<DocumentId> owners, Set<DocumentId> receivers, String causeIdentity,
+            ManagedOccurrenceBinding occurrence, Terminal terminal) {
+        Fence { java.util.Objects.requireNonNull(boundary); owners = Set.copyOf(owners); receivers = Set.copyOf(receivers); }
     }
 }
