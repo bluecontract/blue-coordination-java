@@ -5,7 +5,78 @@ It starts at Coordination `next` commit `c0a689de8d0ccd89de94bf6316618c7760a68e2
 It does **not** contain the external-state POC, PostgreSQL adapters, runtime
 serialization, worker recovery, or a replacement processing model.
 
-## Current qualification candidate — 12 September
+## Delivery scope and qualification records
+
+For the consolidated delivery, compare with remote `next` at
+`0a047461bbc9e97a969ae1021bd86964eadd4c8c`; the commit above records the
+original investigation base, not a second active patch set. Language's
+corresponding comparison base is
+`806536457fd2ff284159fe65439973aa0f02ca4f`.
+The included upstream named-Compute and nested-value commits are preserved;
+their reviewed follow-ups are described below. The separate inherited-contract
+identity proposal is not included.
+
+The complete additive integration surface is:
+
+| Layer | Addition | Required boundary |
+| --- | --- | --- |
+| Language/Contracts | `ClosureEvidenceFactory.rootedWitnessSelection` | Select authenticated witnesses for a fresh state; never mutate an entered invocation or grant independent publication. |
+| Language core | Source-aware `MinimizedOverlayBuilder.build(FrozenNode, Node, CanonicalTypeIdentityLookup)` | Supply the exact preprocessed Source belonging to the resolution. Preserve the existing overload and explicit versus inherited type identity without a second whole-document hash or full-Source fallback. |
+| Language/Contracts | `WorkingDocument.sourceContributionsAt(String)` | Read immutable exact current-occurrence contributions through verified reference/type ancestors. No synthetic Source or own-type-default injection. The list-slot correction retains inherited type constraints after valid replacement without retaining discarded ordinary content. |
+| Coordination SDK | `observeSourceHistoryPrerequisite(...)` | Read-only original-request-bound `PENDING`, `SATISFIED` or `STALE`; not authorization to execute stale work. |
+| Coordination SDK | `auditNextRootProcessingSelection(DocumentHandle)` | Audit the same explicit-root selection that execution uses, without changing global fairness or reserving work. `NONE` means no runnable step, not completeness. The host serializes audit, durable ownership acquisition and execution. |
+
+For example, global fairness may select LIVE work for A while explicit
+`processNext(B)` selects B's import of C1. The exact-root audit lets the host
+acquire that import's invocation-owned lease before execution; it does not
+weaken the existing missing-lease rejection. The
+[named-Compute record](named-compute-review-diagnostics.md) explains why exact
+field presence, not a fully resolved map alone, is required. Language's
+`docs/source-list-contribution-review.md` gives the valid
+`$pos`/`$replace` example and independent resolver oracle.
+
+Two included physical optimizations are indexed separately from semantic
+corrections: [immutable proof-container reuse](rooted-immutable-proof-container.md)
+and [bounded representation verification memoization](rooted-representation-verification-memo.md),
+alongside [eligibility memoization](rooted-eligibility-cache.md). These preserve
+authority/current-head checks, logical gas and cold results. Combined test
+success is not a measurement of their isolated speedup.
+
+Qualification results are immutable external receipts bound to source commits,
+artifact hashes and actual test inventories. They are recorded after a source
+freeze; adding the final receipt does not require another source commit.
+The snapshots below preserve what was actually executed, not a claim that a
+newer commit or a published release was tested:
+
+- Language `e6cb7c3fe0de5bc9f3b5a48147f01144bb9eb1fa` completed a fresh,
+  unfiltered clean build: **3,798 cases; 3,797 passes, one style-test failure,
+  zero errors/skips**. The sole failure identifies two pre-state assertions
+  before `// then` in
+  `SelectedScopeContentBlueIdFailFirstTest.shouldVerifySelectedChildUsesItsExactDirectIdentityInsteadOfEmptyNodeIdentity`.
+  The proposed test-only correction captures the same pre-initialization values
+  and asserts them in Then; it preserves all identity/lifecycle oracles.
+  Build archive SHA-256:
+  `5f80cdfd3a16e8b562d65293da83c83518b0297bd9fdc74b0f569c351ca30dd7`.
+- The sealed Language `e6cb7c3` / Coordination `54a5709` staged bridge passes
+  **40 Contracts controls and 110 Coordination cases**, including all 22
+  exact-root/adjacent selection controls. The original Coordination wrapper
+  failed afterwards on Ruby 2.6's unsupported `filter_map`; its original
+  evidence remains unchanged. The separately verified archived Gradle/XML
+  result has no failed/error/skipped cases. Supplemental receipt SHA-256:
+  `d3bc703ab52b975ac0ac7a16bb2adcdda322f55ff52179ecef9b96dd409e8e29`.
+- MyOS `5ab93cd866d8987fdc5618563a1a6d2b1624232f`, on that exact sealed
+  tuple, passes **189 focused cases: 184 host, two typed-identity and three
+  named-Compute cases**. This includes actual execution of the three formerly
+  disabled upstream cases. It is not the full product/HTTP acceptance gate.
+  The host evidence archive has SHA-256
+  `8f6b7be0caebba1e2b5120fc629bbafdf2e17709d008da00f7c7255208ee2456`;
+  `myos-focused-5ab93cd866d8-recovery-02/result.json` binds all three phases.
+
+Complete final library and MyOS gates, their exact final inventories, and the
+published-dependency CI/release prerequisites remain separate requirements.
+Neither the focused successes nor the older snapshots authorize merge/release.
+
+## Earlier integrated review checkpoint — 12 September (historical)
 
 The integrated successor includes the earlier baseline corrections, the
 existing upstream named-Compute and nested-value identity changes, and their
@@ -209,6 +280,8 @@ not establish a pass for this newly assembled candidate.
 | [Managed drain gas reporting](rooted-managed-drain-gas-reporting.md) | A registered managed application exposes correct positive gas in its exact typed result, but aggregate SDK drain gas omits that execution; MyOS command summaries inherit the incorrect total. | Correct the SDK-owned this-call summary from actual completed, non-replayed attempts in its three exclusive execution lanes; do not add a MyOS-only workaround or charge result/receipt projections twice. Retained gas, trace, receipts, tariff and limits are unchanged. Retrieving an already-published result adds zero new gas; fresh PROCESS during MyOS reconstruction still counts fully. Structural counters/order/opened-document metrics keep their existing scope. The isolated four-test owner and adjacent eight mapping controls pass; full gates and runtime port remain pending. |
 | [Owned-revision drain budget](rooted-managed-drain-gas-reporting.md#separate-owned-revision-count-correction) | Actual three-node joint results retain 3 owned PROCESS transition receipts, and the chain retains 4, while the managed drain branch reports 1. This undercounts the existing between-invocation transition budget. | Reuse the external/root-local path's `RootedResultScope.processTransitionCount`, with the same published/non-replayed guard. Count actual owned transition receipts, including same-epoch representation changes when they have such receipts, not owners, applications or gas. A host-only correction cannot repair the engine's own budget decision. The three exact regressions change from red in unified-cycle-04 to pass in unified-cycle-05, with original business/gas/trace oracles unchanged. The full05 batch is 4/5 because the separate diamond join remains blocked. |
 | [Terminal causal peer acquisition](rooted-terminal-peer-acquisition.md) | After required local work, B23 still carries immutable D5 while independently completed D23 carries B5; A17/C21 agree. Exact owner/CAS checks correctly reject the stale joint view. Earlier original-stage peer selection also produced different complete failure traces at the same 835-gas limit. | Keep original LIVE selection historical. At a fresh registered terminal, authenticate same-cause peer prefixes and select immutable witness primaries through the new Language factory, preserving calculating owners and old full source proofs. Do not replace a retry input or rerun/charge completed peer work. Unsupported inventory changes remain blocked. The eight diamond/dormant controls and MyOS's original ring/restart now pass; full gates remain required. |
+| [Bounded LIVE candidate construction](rooted-live-selection-cutoff.md) | Retained source work at order T already outranks LIVE at T or later, but selection still constructs and authenticates those losing LIVE candidates during every scan. | Pass the earliest retained source order as an exclusive bound before LIVE capture. Earlier candidates still undergo ordinary validation; the comparator and equal-order retained priority are unchanged. This is a physical optimization in `RootedCheckpointDriver.baseSelection` / `ContractsClosureAdapter.nextRootLiveInput`, not a new cutoff policy or proof of an isolated speedup. |
+| Separate immutable witness contexts (Language) | A selected immutable A11 proof references D2, while another authenticated primary supplies D14. Treating both witness lineages as one calculating graph rewrites A11 to D14 and fails its exact-identity check. | `ManagedDocumentGraph` carries the authenticated witness state and includes an immutable edge in calculation only when its target matches that selected exact context. `ClosureExecutionSession` uses the kernel's actual finalization graph/generations for component gas frames. Preserve original proof rows and full-live ownership promotion; do not substitute source heads, change tariffs or weaken exact checks. This is a graph/finalization algorithm correction, distinct from the later fresh-witness-selection API. Language `docs/rooted-immutable-witness-context.md` records the example, invariants, rejection controls and generated binding. |
 
 ## Necessity review for the post-d038 additions
 

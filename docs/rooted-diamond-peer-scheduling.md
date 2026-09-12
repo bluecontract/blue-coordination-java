@@ -1,5 +1,16 @@
 # Same-cause diamond peer prefixes (candidate)
 
+**Historical, superseded implementation proposal.** The original-LIVE peer
+frontloading, receiver ordering and post-success preflight described below are
+not the delivered algorithm. They were removed by the
+[terminal-time causal peer acquisition correction](rooted-terminal-peer-acquisition.md)
+because tight-budget complete result/trace identity depended on preparation
+order. Original LIVE attempts now retain their ordinary historical inputs and
+logical gas. The current `RootedJoinScheduling` waits for actual earlier/same-cause
+receiver obligations at a registered terminal; `RootedTerminalPeerAcquisition`
+then authenticates witnesses for that fresh terminal input. Preserve the old
+red receipts below as diagnosis, not accepted free speculative PROCESS work.
+
 This isolated Coordination branch starts from
 `20e81185a56a9fb910c9d4c14ff8411d7886bbfe`, with Language `430ee393`.
 It does not change the frozen exported candidates, public API, specification,
