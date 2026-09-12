@@ -87,9 +87,30 @@ receipt, gas limit or finalization rule changes. The retained diagnostic log is
 This successor is on a separate diagnostic branch combining the exact
 `4a14144` tight-gas test with the reviewed durable transition memo `ed225e2` and
 LIVE cutoff commits `8388354`/`1d558bd`. The old `cf97d6d` and `4a14144` checkouts
-remain frozen. The caller correction and combined source have not been tested;
-the same-policy tight-gas comparison, focused reruns and downstream MyOS
-qualification remain pending. A no-demand reconnect whose dormant
+remain frozen.
+
+The combined `ad4a241` diagnostic completed **1/2** in **2 minutes 23 seconds**.
+The same-policy gas-1 comparison passed in **48.137 seconds**: both complete
+schedules reached the same **BLOCKED** endpoint with identical durable histories,
+retained B failure, logical trace and rejected charge. B accepted no charge
+before its first rejected charge; each schedule's aggregate actual call gas was
+**13,743**. This one low-budget control is not a full gas-boundary proof or a
+successful diamond completion.
+
+The high-budget comparison passed the corrected initial-admission preflight,
+then failed a test helper that assumed every blocked result had zero completed
+work. The SDK's `DrainResult.stats()` describes work performed by the call,
+whereas `blocked()` describes remaining unavailable work. In the engine,
+`rootedReadiness` preserves completed attempts, receipts and transition counts
+when the next selected step is blocked. The helper now always adds returned gas;
+explicit pure-wait checks still require zero commits/gas and unchanged durable
+state. No runtime, gas mapping, final receipt equality or trace assertion changes.
+The red archive is `diamond-combined-diagnostic-01.tar.gz`, SHA-256
+`dc57e1eb41b3d70cbc1b535810245a4e2c398bc40859e7c1bd3edda6ae8523d5`,
+under `legal-detached-retarget-evidence.fKnxrU`.
+
+The corrected high-budget comparison, broader gas boundaries and downstream
+MyOS qualification remain pending. A no-demand reconnect whose dormant
 capture has already frozen D2 is a separate unresolved continuation case:
 the prepublication wait can prevent premature publication, but this candidate
 does not replace that existing primary or claim reconnect convergence. The next

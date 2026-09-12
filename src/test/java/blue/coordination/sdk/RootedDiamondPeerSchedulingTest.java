@@ -388,12 +388,9 @@ final class RootedDiamondPeerSchedulingTest {
         }
 
         void observe(DrainResult drain) {
-            if (drain.blocked()) {
-                assertEquals(0L, drain.stats().committedTransitions());
-                assertEquals(0L, drain.stats().gas());
-            } else {
-                aggregateCallGas = Math.addExact(aggregateCallGas, drain.stats().gas());
-            }
+            // Readiness describes the next step, not whether this call completed work.
+            // Pure prerequisite waits are checked separately by requireUnchangedBlockedOriginal.
+            aggregateCallGas = Math.addExact(aggregateCallGas, drain.stats().gas());
             var source = f.blue.advanced().auditManagedEpoch(root("A").id(), sourceEpoch).orElseThrow();
             assertEquals(sourceReceipt, source.receiptIdentity());
             assertEquals(sourceBlueId, source.afterBlueId());
