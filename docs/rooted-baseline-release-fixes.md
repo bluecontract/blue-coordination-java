@@ -7,6 +7,26 @@ serialization, worker recovery, or a replacement processing model.
 
 ## Delivery scope and qualification records
 
+The complete native Java 17 breadth run on Coordination `905ad89e` and
+Language `e28ce805` found three failures among 1,182 primary cases, with no
+errors/skips. Both demonstrated causes are obsolete diagnostic drivers, not
+new production or protocol defects:
+
+- [Diamond diagnostic](rooted-diamond-diagnostic-terminal-migration.md): keep
+  historical D2 in the original LIVE input; acquire completed D14 only at the
+  eligible fresh terminal, through ordinary selection. Preserve the complete
+  fresh-reference, history, event, gas and publication checks.
+- [Saved-original ring driver](rooted-saved-original-ring-driver.md): after
+  C attaches A in A → B → C, use the ordinary public driver to execute B's
+  required original work. Pre-anchor A readiness does not authorize a C-only
+  call to execute B. Preserve the explicit wait/restart and business oracles.
+
+These corrections change tests/helpers and documentation only. The original
+failed run remains failed and archived; successor qualification is recorded
+separately. The affected pre-MyOS group includes both complete changed owners
+and the unchanged original-SCC entrypoint control (seven cases). Final native
+and full application qualification remain separate gates.
+
 For the consolidated delivery, compare with remote `next` at
 `0a047461bbc9e97a969ae1021bd86964eadd4c8c`; the commit above records the
 original investigation base, not a second active patch set. Language's

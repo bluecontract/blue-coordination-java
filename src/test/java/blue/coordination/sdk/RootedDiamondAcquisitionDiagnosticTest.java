@@ -10,7 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** D-before-B is one explicit diagnostic schedule, not yet a production scheduling rule. */
+/** D-before-B preserves historical LIVE operands; exact peer acquisition occurs only at a fresh terminal. */
 final class RootedDiamondAcquisitionDiagnosticTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
@@ -37,7 +37,7 @@ final class RootedDiamondAcquisitionDiagnosticTest {
             assertEquals(java.util.Set.of(b.id().value(), c.id().value()), originalB.snapshot().managedDocuments().stream()
                     .map(value -> value.documentId().value()).collect(java.util.stream.Collectors.toSet()));
             var safety = new RootedJoinPublicationSafetyProbe(f.blue.advanced().rawEngine());
-            var probe = new RootedDiamondAcquisitionProbe(f.blue.advanced().rawEngine());
+            var probe = new RootedDiamondAcquisitionProbe(f.blue);
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(c, entry).entry(entry).disposition());
             boolean cAtTerminal = false;
             for (int i = 0; i < 32; i++) {
@@ -66,15 +66,51 @@ final class RootedDiamondAcquisitionDiagnosticTest {
             assertEquals(List.of(11L, 2L, 14L, 12L), roots.values().stream().map(root -> f.blue.advanced().auditDocument(root.id()).epoch()).toList());
             assertEquals(List.of(0L, 0L, 1L, 2L), roots.values().stream().map(root -> observed(f, root)).toList());
             assertEquals(originalB.invocationIdentity(), f.control.capture(b.id(), entry.blueId(), null).invocationIdentity());
+            var evidence = probe.capture(b.id(), d.id(), c.id(), a.id(), entry.blueId(), originalB.invocationIdentity());
+            assertEquals(11L, evidence.frozenSource().epoch());
+            assertEquals(2L, evidence.historicalPeer().epoch());
+            assertEquals(14L, evidence.peer().epoch());
             // when
-            var first = probe.publishExpandedOriginal(b.id(), d.id(), c.id(), a.id(), entry.blueId(), originalB.invocationIdentity());
+            var beforeOriginal = probe.publications();
+            var originalResult = f.blue.processing().processNext(b);
+            assertEquals(EntryDisposition.APPLIED, originalResult.entry(entry).disposition());
+            var originalCalculations = probe.observe(originalResult, beforeOriginal, evidence.boundary());
+            assertEquals(1, originalCalculations.size());
+            var first = originalCalculations.get(0);
             verify(first);
+            probe.requireHistoricalOriginal(evidence, first);
+            var beforeInvalidReplacement = safety.publicationState();
+            assertThrows(IllegalArgumentException.class, () -> probe.frontloadFrozenOriginal(evidence, first.input()));
+            assertEquals(beforeInvalidReplacement, safety.publicationState(), "An entered D2 operand cannot be replaced with D14");
             boolean joined = false;
+            boolean acquired = false;
             for (int i = 0; i < 64; i++) {
-                var next = probe.publishNext(b.id(), c.id()); verify(next);
-                System.out.println("DIAMOND_ACQUISITION step=" + i + " cause=" + next.input().cause().getClass().getSimpleName()
-                        + " gas=" + next.actual().totalGas() + " owners=" + next.actual().rootedProjection().ownedDocumentIds()
-                        + " observed=" + roots.values().stream().map(root -> observed(f, root)).toList());
+                // Fixed point-call preference, not a new scheduler. A blocked B may require
+                // A's original; eventual joint owners do not bypass the actual root selector.
+                var selectedRoot = List.of(b, a, d, c).stream().filter(root -> f.blue.advanced()
+                        .auditNextRootProcessingSelection(root).kind() != blue.coordination.api.ProcessingSelection.Kind.NONE)
+                        .findFirst().orElseThrow(() -> new AssertionError("No runnable root before the original join completed"));
+                var selected = f.blue.advanced().auditNextRootProcessingSelection(selectedRoot);
+                var before = probe.publications();
+                var result = f.blue.processing().processNext(selectedRoot);
+                var calculations = probe.observe(result, before, evidence.boundary());
+                assertEquals(1, calculations.size(), "Each selected root must execute one actual operation");
+                for (var next : calculations) {
+                    verify(next);
+                    if (selected.managedEpochApplicationWork().isPresent()) {
+                        assertNotNull(next.work());
+                        assertEquals(selected.managedEpochApplicationWork().orElseThrow().workIdentity(), next.work().workIdentity());
+                    } else assertNull(next.work());
+                    if (probe.isAcquiredTerminal(evidence, next)) {
+                        assertFalse(acquired, "The registered terminal must publish once");
+                        probe.requireAcquiredTerminal(evidence, next);
+                        acquired = true;
+                    }
+                    System.out.println("DIAMOND_ACQUISITION step=" + i + " root=" + selectedRoot.id()
+                            + " cause=" + next.input().cause().getClass().getSimpleName()
+                            + " gas=" + next.actual().totalGas() + " owners=" + next.actual().rootedProjection().ownedDocumentIds()
+                            + " observed=" + roots.values().stream().map(root -> observed(f, root)).toList());
+                }
                 if (f.blue.advanced().auditManagedCatchUpPlans(c.id()).stream().allMatch(value -> value.status() == ManagedCatchUpStatus.COMPLETE)) {
                     joined = true; break;
                 }
@@ -85,9 +121,10 @@ final class RootedDiamondAcquisitionDiagnosticTest {
             }
             // then
             assertTrue(joined, "The original terminal must settle without executing a later source frontier");
+            assertTrue(acquired, "The actual fresh registered terminal must select D14 while retaining A11's D2 proof");
             assertEquals(List.of(0L, 1L, 1L, 2L), roots.values().stream().map(root -> observed(f, root)).toList());
-            // A's original LIVE has not been independently executed. The maintained
-            // public selector must settle/reconcile it without repeating C.attach.
+            // Required originals were selected normally before the joint terminal.
+            // Complete transport reconciliation without repeating C.attach.
             boolean quiet = false;
             for (int i = 0; i < 32; i++) {
                 var result = f.blue.processing().drain(new DrainBudget(1, 1));
