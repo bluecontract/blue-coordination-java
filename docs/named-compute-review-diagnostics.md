@@ -118,7 +118,8 @@ payloads; raw overlay offsets are not semantic indices.
 
 Seven new Contracts tests cover already-expanded reference provenance, partial
 inherited containers, working read-your-writes and closure of the preview,
-effective inherited/replaced/appended list slots, nested item/value-type contributions,
+effective inherited/replaced/appended list slots, nested item-type contributions,
+dictionary value-type validation versus explicit member inheritance,
 and managed evidence reads.
 This capability is additive public API, not an undocumented internal cast. No
 BEX language, event ordering, gas schedule, storage, or closure rule changes.
