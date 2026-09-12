@@ -93,6 +93,11 @@ final class RootedJournalCutoffFairnessTest {
             var tick = f.append(a, "rcp2/a", "tick", 100 + n, "{}");
             var processed = f.blue.processing().process(a, tick);
             assertEquals(EntryDisposition.APPLIED, processed.entry(tick).disposition());
+            var receipt = f.blue.advanced().auditManagedEpoch(a.id(), n).orElseThrow();
+            assertEquals((long) n, ((Number) receipt.afterDocument().scalarAt("/counter")).longValue());
+            assertEquals(1, receipt.emittedEvents().size());
+            assertEquals("RCP2/Tick", receipt.emittedEvents().get(0).exactEvent().scalarAt("/kind"));
+            assertEquals(a.id(), receipt.emittedEvents().get(0).sourceDocumentId());
             f.retain(a);
         }
         var attach = f.append(b, "rcp2/b", "attach", 200, "child:\n  blueId: " + a0);
@@ -110,7 +115,13 @@ final class RootedJournalCutoffFairnessTest {
         assertEquals(1L, work.sourceEpoch());
         var first = f.blue.processing().drainManagedEpochApplication(work.workIdentity());
         assertFalse(first.blocked(), first.diagnostic().toString());
-        assertEquals(1L, b.snapshot().longAt("/seen"));
+        assertEquals(1, first.managedEpochApplications().size());
+        // The public snapshot intentionally stays at the previous READY view until
+        // the full import completes. Inspect the actual committed prefix, as the
+        // maintained RootedSlicedSelectionTest does for its first historical step.
+        assertEquals(1L, committed(f, b, "/seen"));
+        assertEquals(1L, committed(f, b, "/log/0"));
+        assertEquals(0L, b.snapshot().longAt("/seen"));
         assertEquals(2L, a.snapshot().longAt("/counter"));
         assertEquals(0L, c.snapshot().longAt("/counter"));
         return new Scenario(a, b, c, attach, future);
@@ -133,7 +144,8 @@ final class RootedJournalCutoffFairnessTest {
             }
             observed.add(selected.kind() + " committed=" + result.stats().committedTransitions()
                     + " quiescent=" + result.quiescent() + " paused=" + result.paused()
-                    + " seen=" + scenario.parent().snapshot().longAt("/seen"));
+                    + " committedSeen=" + committed(f, scenario.parent(), "/seen")
+                    + " readySeen=" + scenario.parent().snapshot().longAt("/seen"));
             assertFalse(result.blocked(), observed.toString());
             assertEquals(0L, scenario.futureRoot().snapshot().longAt("/counter"), observed.toString());
             for (var entry : result.entries()) {
@@ -145,6 +157,10 @@ final class RootedJournalCutoffFairnessTest {
         }
         fail("Authorized history must settle without consuming the unrelated future input: " + observed);
         throw new AssertionError("unreachable");
+    }
+
+    private static long committed(RootedSdkFixture f, DocumentHandle root, String path) {
+        return ((Number) f.blue.advanced().auditDocument(root.id()).current().copyNode().get(path)).longValue();
     }
 
     private record Scenario(DocumentHandle source, DocumentHandle parent, DocumentHandle futureRoot,

@@ -1,8 +1,18 @@
 # Bounded Journal continuation versus a future LIVE input
 
-Status: isolated regression candidate; not yet executed. Base: Coordination
+Status: isolated regression candidate; corrected setup awaits execution. Base: Coordination
 `9d6d8c36dba2993943391e74bf6d1222d2ddd40c`. No production change accompanies
 this test. The frozen baseline remains unchanged.
+
+The first isolated run (`journal-cutoff-red-01`) passed the terminal NO_MATCH
+control; both history cases stopped in setup because they inspected B's public
+READY-only snapshot while its import was still pending. That snapshot correctly
+still showed 0; it did not establish the committed prefix was wrong, and this
+run did not reach the suspected fairness boundary. Setup now inspects the
+committed prefix through `auditDocument`, following the existing
+`RootedSlicedSelectionTest`, and separately requires the READY snapshot to remain
+at 0. It also verifies the source receipts contain the real RCP2/Tick events and
+counter transitions. Final READY state and ordered log assertions are unchanged.
 
 ## Scenario and required behavior
 
