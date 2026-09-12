@@ -49,7 +49,11 @@ final class RootedJoinPeerPrefixes {
             if (!independentPeer) continue;
             var session = documents.find(consumer).orElse(null);
             if (session == null || session.rootedView() == null) continue;
-            var published = RootedTerminalEvidence.originalLocalCause(session.rootedView(), documents);
+            var view = session.rootedView();
+            // Initial admission has no rooted LIVE publication to authenticate.
+            // A rooted result still requires the complete retained-cause proof.
+            var published = view.result().rootedProjection() == null ? null
+                    : RootedTerminalEvidence.originalLocalCause(view, documents);
             if (published != null && published.causeIdentity().equals(cause.causeIdentity())
                     && published.sourceOrder().equals(cause.sourceOrder())) continue;
             var next = nextLive.apply(consumer).orElse(null);

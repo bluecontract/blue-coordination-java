@@ -647,7 +647,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /**
      * Prepares a frozen cohort before admitting a semantic processing attempt.
-     * A successful noncommitting calculation can reveal a same-cause receiving
+     * A tentative, unpublished committing result can reveal a same-cause receiving
      * prerequisite. That typed wait has no attempt/receipt; physical calculation
      * metrics remain recorded. Otherwise the prepared result is used exactly once
      * below, including ordinary completed failures and their original logical gas.

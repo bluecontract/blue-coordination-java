@@ -66,8 +66,30 @@ adjacent control for charged genuine failures, all execution lanes and replay.
 The old acquisition probe now requires the production expansion to select the
 proved peer, before its independent same-input reconstruction.
 
-No tests or builds have run for this candidate. Parent-owned focused gates and
-downstream MyOS qualification are pending. A no-demand reconnect whose dormant
+The parent-owned `cf97d6d` diagnostic completed **14/15**, with one failure and
+no errors or skips, in **6 minutes 46 seconds**. The new diamond owner was
+**2/3**: reversed content-derived peer order passed in **64.970 seconds**, the
+same-exact-schedule comparison failed in **74.848 seconds**, and the effect-free
+diamond passed in **53.921 seconds**. The comparison's first canonical run did
+settle, but its first B-before-C call then failed before the second schedule
+completed; this is not evidence of full same-schedule history/gas equality.
+
+The exact failure was a null rooted projection in the initial C admission.
+The new preflight caller incorrectly passed that admission to
+`RootedTerminalEvidence.originalLocalCause`, which requires an actual rooted
+publication. The narrow successor treats an absent rooted projection as no
+original LIVE publication and continues the real receiving-prerequisite check.
+When a rooted projection exists, the unchanged complete retained-cause
+authentication remains mandatory. No evidence is fabricated and no source
+receipt, gas limit or finalization rule changes. The retained diagnostic log is
+`legal-detached-retarget-evidence.fKnxrU/diamond-peer-diagnostic-01.log`.
+
+This successor is on a separate diagnostic branch combining the exact
+`4a14144` tight-gas test with the reviewed durable transition memo `ed225e2` and
+LIVE cutoff commits `8388354`/`1d558bd`. The old `cf97d6d` and `4a14144` checkouts
+remain frozen. The caller correction and combined source have not been tested;
+the same-policy tight-gas comparison, focused reruns and downstream MyOS
+qualification remain pending. A no-demand reconnect whose dormant
 capture has already frozen D2 is a separate unresolved continuation case:
 the prepublication wait can prevent premature publication, but this candidate
 does not replace that existing primary or claim reconnect convergence. The next
