@@ -14,7 +14,7 @@ import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Public scheduling only: no substituted input, acquisition probe, or joint-publication control. */
+/** Public scheduling regressions and explicit terminal-acquisition safety probes. */
 final class RootedDiamondPeerSchedulingTest {
     private static final List<String> NAMES = List.of("A", "B", "D", "C");
     private static final String ORIGINAL_NAMESPACE = "witness-forwarding";
@@ -37,7 +37,8 @@ final class RootedDiamondPeerSchedulingTest {
             assertEquals("GAS_LIMIT_EXCEEDED", failed.status().name());
             assertNotNull(failed.rejectedCharge());
             assertTrue(failed.totalGas() > 1L);
-            var trace = s.f.control.lastClosureProcessEvidence().orElseThrow();
+            var trace = CoordinationTestControl.attach(s.f.blue.advanced().rawEngine())
+                    .lastClosureProcessEvidence().orElseThrow();
             assertEquals(failed.invocationIdentity(), trace.invocationIdentity());
             assertFalse(trace.workTrace().isEmpty(), "This is a late finite-cap failure after real retained work");
             assertEquals(before, s.state());
