@@ -2,6 +2,7 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
+import blue.coordination.api.ContractsExecutionPolicy;
 import blue.coordination.internal.CoordinationTestControl;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,6 +49,158 @@ final class RootedDiamondPeerSchedulingTest {
         var outcome = run(ORIGINAL_NAMESPACE, false, emitTokens);
         // then
         assertTrue(outcome.aggregateCallGas() > 0L);
+    }
+
+    @Test
+    void oneGasOriginalFailureIsComparedAfterBothRealSchedulesFinish() throws Exception {
+        // given
+        var policy = ContractsExecutionPolicy.exactSharedGas(1L, "diamond-preflight-tight");
+        // when
+        var early = runTightGas(true, policy);
+        var late = runTightGas(false, policy);
+        // then
+        System.out.println("DIAMOND_TIGHT_GAS_COMPARE early=" + early + " late=" + late);
+        assertNotNull(early.failure(), "The early gas-1 original must retain its actual terminal failure");
+        assertEquals(early, late,
+                "Compare final durable outcomes and every charged attempt, not intermediate failure versus wait");
+    }
+
+    private static TightGasOutcome runTightGas(boolean early, ContractsExecutionPolicy policy) throws Exception {
+        try (var s = new Scenario(ORIGINAL_NAMESPACE, true)) {
+            var entry = s.f.append(s.root("C"), s.timeline, "attach", 300, attachment("a", s.root("A")), true);
+            var run = new TightGasRun(s, entry, policy, early ? "early" : "late");
+            if (early) run.processB("before-C");
+            run.prefix("C");
+            if (!early) run.processB("after-C-before-D");
+            run.prefix("D");
+            if (!early) run.processB("after-D");
+
+            String stop = "BLOCKED_WITHOUT_B_TERMINAL";
+            if (run.failure != null) {
+                // The retained B terminal must be replayed/skipped, not retried with
+                // the drain's default budget. Audit it after every actual call.
+                stop = "BOUND";
+                for (int step = 0; step < 160; step++) {
+                    var next = s.f.blue.processing().drain(new DrainBudget(1, 1));
+                    run.observe("drain-" + step, next);
+                    if (next.quiescent()) { stop = "QUIESCENT"; break; }
+                    if (next.blocked()) { stop = "BLOCKED"; break; }
+                }
+            }
+            // Without a retained failure, default drain could admit B at a different
+            // policy. A still-blocked real prefix is an observed diagnostic endpoint.
+            var state = s.state();
+            var plans = new LinkedHashMap<String, List<String>>();
+            for (String name : NAMES) {
+                var history = s.f.history(s.root(name));
+                var prefix = s.prefixes.get(name);
+                assertEquals(prefix, history.subList(0, prefix.size()));
+                plans.put(name, s.plans(name).stream().map(plan -> plan.planIdentity() + ":" + plan.status()
+                        + ":" + plan.nextSourceEpoch() + ":" + plan.requiredThroughSourceEpoch()).toList());
+            }
+            var outcome = new TightGasOutcome(entry.blueId(), stop, state, Map.copyOf(plans), run.failure,
+                    run.chargedGas, NAMES.stream().map(s::observed).toList(), NAMES.stream().map(s::eventCount).toList());
+            System.out.println("DIAMOND_TIGHT_GAS_FINAL schedule=" + run.schedule + " outcome=" + outcome);
+            assertNotEquals("BOUND", stop, "Diagnostic did not reach a real quiet or blocked endpoint");
+            CoordinationTestControl.attach(s.f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(state, s.state());
+            run.requireRetainedFailure();
+            return outcome;
+        }
+    }
+
+    private static final class TightGasRun {
+        final Scenario s;
+        final EntryHandle entry;
+        final ContractsExecutionPolicy policy;
+        final String schedule;
+        long chargedGas;
+        TightGasFailure failure;
+
+        TightGasRun(Scenario s, EntryHandle entry, ContractsExecutionPolicy policy, String schedule) {
+            this.s = s; this.entry = entry; this.policy = policy; this.schedule = schedule;
+        }
+
+        void processB(String stage) {
+            var before = s.state();
+            var result = s.f.blue.advanced().process(s.root("B"), entry, policy);
+            observe(stage, result);
+            assertEquals(before, s.state(), "B's gas-1 failure or prerequisite wait cannot publish document state");
+            result.find(entry).ifPresent(terminal -> assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED,
+                    terminal.disposition(), stage + " " + terminal.diagnostic()));
+        }
+
+        void prefix(String name) {
+            var first = s.f.blue.processing().process(s.root(name), entry);
+            observe(name + "-original", first);
+            if (first.blocked() || first.find(entry).map(result -> !result.applied()).orElse(false)) return;
+            for (int step = 0; step < 32; step++) {
+                var next = s.f.blue.processing().processNext(s.root(name));
+                observe(name + "-prefix-" + step, next);
+                if (next.blocked() || next.quiescent()) return;
+            }
+            System.out.println("DIAMOND_TIGHT_GAS_PREFIX_BOUND schedule=" + schedule + " root=" + name);
+        }
+
+        void observe(String stage, DrainResult drain) {
+            // SDK aggregate gas counts genuine completed failures too, and excludes
+            // retained replays. Never deduplicate actual charges by invocation ID.
+            chargedGas = Math.addExact(chargedGas, drain.stats().gas());
+            for (var terminal : drain.entries()) for (var closure : terminal.closures()) {
+                var input = s.f.blue.advanced().closureInvocation(closure.closureId()).orElse(null);
+                if (input == null || !(input.cause() instanceof blue.language.processor.closure.ExternalEventCause)
+                        || !terminal.entry().blueId().equals(entry.blueId())
+                        || !input.snapshot().publicRootDocumentIds().equals(List.of(
+                                new blue.language.processor.closure.DocumentId(s.root("B").id().value())))) continue;
+                var retained = readFailure(closure.closureId());
+                if (failure == null) failure = retained;
+                else assertEquals(failure, retained, "A later call replaced B's actual failed original terminal");
+                assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, closure.disposition());
+                assertTrue(closure.changes().isEmpty());
+                assertTrue(closure.publicEvents().isEmpty());
+            }
+            requireRetainedFailure();
+            var source = s.f.blue.advanced().auditManagedEpoch(s.root("A").id(), s.sourceEpoch).orElseThrow();
+            assertEquals(s.sourceReceipt, source.receiptIdentity());
+            assertEquals(s.sourceBlueId, source.afterBlueId());
+            System.out.println("DIAMOND_TIGHT_GAS schedule=" + schedule + " stage=" + stage
+                    + " blocked=" + drain.blocked() + " quiet=" + drain.quiescent() + " paused=" + drain.paused()
+                    + " gas=" + drain.stats().gas() + " chargedGas=" + chargedGas
+                    + " diagnostic=" + drain.diagnostic() + " entries=" + drain.entries().stream().map(value ->
+                            value.entry().blueId() + ":" + value.disposition() + ":" + value.closures().stream()
+                                    .map(closure -> closure.closureId() + ":" + closure.disposition()).toList()).toList()
+                    + " retained=" + drain.rootedRetainedResults().stream().map(value ->
+                            value.closureId() + ":" + value.disposition()).toList()
+                    + " applications=" + drain.managedEpochApplicationAttempts().stream().map(value ->
+                            value.work().workIdentity() + ":published=" + value.published()).toList()
+                    + " epochs=" + NAMES.stream().map(name -> s.f.blue.advanced().auditDocument(s.root(name).id()).epoch()).toList()
+                    + " observed=" + NAMES.stream().map(s::observed).toList() + " Bfailure=" + failure);
+        }
+
+        void requireRetainedFailure() {
+            if (failure != null) assertEquals(failure, readFailure(failure.publicationIdentity()),
+                    "B's exact gas-1 terminal must survive later publications, replay and restart");
+        }
+
+        TightGasFailure readFailure(String publicationIdentity) {
+            var input = s.f.blue.advanced().closureInvocation(publicationIdentity).orElseThrow();
+            var actual = s.f.blue.advanced().closureExecution(publicationIdentity).orElseThrow();
+            assertEquals(policy.sharedGasLimit(), input.executionPolicy().sharedLimit());
+            assertEquals(policy.label(), input.executionPolicy().label());
+            assertEquals(input.invocationIdentity(), actual.invocationIdentity());
+            assertFalse(actual.commits(), "A failed B original must not be replaced by a successful default-budget original");
+            assertTrue(actual.rollbackToInput());
+            assertEquals("GAS_LIMIT_EXCEEDED", actual.status().name());
+            assertNotNull(actual.rejectedCharge());
+            assertNull(actual.commitCompanion());
+            assertNull(actual.rootedProjection());
+            assertTrue(actual.checkpointWrites().isEmpty());
+            assertTrue(actual.publicEvents().isEmpty());
+            return new TightGasFailure(publicationIdentity, input.invocationIdentity(), input.snapshot().closureIdentity(),
+                    input.cause().causeIdentity(), input.executionPolicy().identity(), actual.inputClosureIdentity(),
+                    actual.outputClosureIdentity(), actual.status().name(), actual.totalGas(), actual.gasTraceIdentity(),
+                    actual.rejectedCharge().rejectedChargeIdentity());
+        }
     }
 
     private static Outcome run(String namespace, boolean reversedDirectCalls) throws Exception {
@@ -348,6 +501,12 @@ final class RootedDiamondPeerSchedulingTest {
     private record DocumentState(long epoch, String blueId, List<String> receipts,
             List<Long> processingGas, List<String> planSnapshots) { }
     private record GasEvidence(String outputClosureIdentity, long totalGas, String gasTraceIdentity) { }
+    private record TightGasFailure(String publicationIdentity, String inputInvocationIdentity,
+            String capturedClosureIdentity, String causeIdentity, String policyIdentity, String resultInputClosureIdentity,
+            String outputClosureIdentity, String status, long gas, String traceIdentity, String rejectedChargeIdentity) { }
+    private record TightGasOutcome(String entryBlueId, String stop, Map<String, DocumentState> documents,
+            Map<String, List<String>> plans, TightGasFailure failure, long chargedGas,
+            List<Long> observed, List<Long> eventCounts) { }
     private record Outcome(String entryBlueId, Map<String, String> documentIds,
             Map<String, DocumentState> documents, Map<String, GasEvidence> gas, long aggregateCallGas) { }
 }
