@@ -39,9 +39,11 @@ Here replay means retrieval of an already-published result. Fresh-process MyOS
 reconstruction that actually executes PROCESS again is not such a retrieval:
 its newly executed attempts still report their complete deterministic gas.
 
-No execution, publication, retry, readiness, selection, gas-limit, receipt, or
-public API shape changes. Other aggregate fields retain their existing mapping;
-this correction does not claim new structural metrics for managed attempts.
+The gas correction changes no execution, publication, retry, readiness,
+selection, gas-limit, receipt, or public API shape. It leaves other aggregate
+fields unchanged; the separate revision-count correction below addresses the
+already documented transition budget. Structural counters, opened-document
+counts and step-order mapping retain their existing scope.
 
 ## Focused controls and qualification boundary
 
@@ -73,8 +75,52 @@ remains unchanged, SHA-256
 Raw source and reports are preserved in
 `legal-detached-retarget-evidence.fKnxrU/unified-cycle-01.tar.gz`, SHA-256
 `b5a67e06dab21e6eaa6dc4f29ed78be7f0875ab165a6c4742909af622ea92bec`.
-The eight adjacent SDK mapping controls, complete library gates and final
-MyOS acceptance remain pending.
+The eight adjacent SDK mapping controls subsequently passed in
+`unified-cycle-04`: `SdkDrainResultMapperTest` (4), `SdkEdgeResultTest` (2), and
+`ManagedEpochSdkSurfaceTest` (2). Complete library gates and final MyOS acceptance
+remain pending.
+
+## Separate owned-revision count correction
+
+The same call-level review found a different engine accounting error. The
+registered managed branch in `DefaultCoordinationEngine.executeRootSelection`
+reported one committed transition for any newly published application. The
+public rooted drain contract instead counts every newly committed owned
+PROCESS transition receipt; an atomic invocation can exceed the remaining budget, but
+the next invocation must wait. The existing external/root-local path already
+implements that rule through `RootedResultScope.processTransitionCount`.
+
+"Owned revision" here does not mean only an increment of the Coordination
+epoch. `ManagedDocumentTransitionReceipt` deliberately has no Coordination
+epoch; Language emits it for an exact state change or Root events. The released
+helper therefore also counts an owned same-epoch representation change with
+such a receipt. The maintained `RootedCheckpointRepresentationSafetyTest`
+explicitly retains an owned parent transition while its epoch stays zero.
+Unowned dependency receipts and old/replayed publications remain excluded;
+unchanged-state, eventless bookkeeping has no such receipt. The new regression
+uses exactly this ownership filter, not an epoch-advancement test.
+
+In `unified-cycle-04`, `RootedAutomaticJoinSchedulingTest` compared each call
+with the new retained terminal publication identities and their actual owned
+`managedTransitionReceipts`. The terminal and nonterminal three-node cases
+each proved **3 actual revisions versus 1 reported**; the four-node chain
+proved **4 versus 1**. This counts actual processor-issued revision receipts,
+not acquired owners, previous prefix publications, or replayed results.
+
+The narrow correction reuses `RootedResultScope.processTransitionCount` in the
+managed branch, retaining its existing `published && !replayed` guard. Failed,
+suspended and recovered publications add zero. Gas, PROCESS results, event and
+receipt identities, publication ownership, and atomicity remain unchanged.
+A MyOS-only summary correction would not fix the engine's own between-invocation
+budget decision, so this belongs in Coordination.
+
+The exact four existing automatic scenarios now provide the regression without
+manufacturing results or weakening their business/gas/trace checks. The fixed
+engine has **no completed passing rerun yet**. `unified-cycle-04` as a whole was **12/17**:
+the three accounting failures above and separate diamond/full-ring failures
+remain recorded, not converted into a passing receipt. Its archive is
+`legal-detached-retarget-evidence.fKnxrU/unified-cycle-04.tar.gz`, SHA-256
+`7cca5d4f35ed3fed9b4b0585c2f7581f1af45f58a494a6c684e79cbffe4df0ac`.
 
 Implementation and tests remain in the isolated
 `rooted-import-forwarding-reproduction` worktree. Recording this note in the
