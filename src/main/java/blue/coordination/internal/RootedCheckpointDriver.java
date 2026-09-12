@@ -81,7 +81,11 @@ final class RootedCheckpointDriver {
         if (historyOutstanding && work.isEmpty()) return new Selection(null, null, excluded, true);
         var local = adapter.nextRootLocalHistory(root, entries);
         if (local.pending() && local.step() == null) return new Selection(null, null, excluded, true, null);
-        var live = adapter.nextRootLiveInput(root, entries);
+        ExternalOrderKey retainedOrder = work.map(this::order).orElse(null);
+        if (local.step() != null && (retainedOrder == null || local.step().sourceOrder().compareTo(retainedOrder) < 0)) {
+            retainedOrder = local.step().sourceOrder();
+        }
+        var live = adapter.nextRootLiveInput(root, entries, retainedOrder);
         if (local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
                 && (live.isEmpty() || local.step().sourceOrder().compareTo(live.get().entry().sourceOrderKey()) <= 0)) {
             return new Selection(null, null, excluded, false, local.step());

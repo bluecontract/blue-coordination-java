@@ -378,12 +378,19 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /** Selects the first still-new exact LIVE input in this root's committed view. */
     synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries) {
+        return nextRootLiveInput(root, entries, null);
+    }
+
+    /** Retained work wins equal-order ties, so only an earlier LIVE input can displace it. */
+    synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries,
+            ExternalOrderKey strictlyBefore) {
         ensureOpen();
         if (!profile.rootedCheckpoint()) throw new IllegalStateException("Rooted selection requires its exact profile");
         // This synchronized decision cannot publish between candidate entries.
         // Capture its exact view once; the next decision captures fresh fences.
         RootedCapturedState state = null;
         for (TimelineEntry entry : entries.stream().sorted(Comparator.comparing(TimelineEntry::sourceOrderKey)).toList()) {
+            if (strictlyBefore != null && entry.sourceOrderKey().compareTo(strictlyBefore) >= 0) break;
             if (state == null) state = captureRootedState(root);
             CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true, state);
             if (invocation == null) continue;
