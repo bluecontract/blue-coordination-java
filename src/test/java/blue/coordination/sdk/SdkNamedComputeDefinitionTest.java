@@ -94,8 +94,13 @@ final class SdkNamedComputeDefinitionTest {
 
     private static DocumentHandle admit(
             BlueCoordination blue, String source) {
+        return admit(blue, "coffee", source);
+    }
+
+    private static DocumentHandle admit(
+            BlueCoordination blue, String id, String source) {
         return blue.documents().admit(ManagedDocument.yaml(
-                        DocumentId.of("coffee"), source)
+                        DocumentId.of(id), source)
                 .publicRoot()
                 .fromNow());
     }
@@ -147,6 +152,51 @@ final class SdkNamedComputeDefinitionTest {
 
             // then
             assertCoffeeEvent(blue, document.snapshot().publicEvents());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("redundantDefinitionMaps")
+    void shouldTreatARedundantAuthoredDefinitionMapAsTheInheritedDefinition(String field, String form) {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String inherited = "type: Coordination/Compute Definition\n";
+            String authored = inherited + field + (form.equals("empty") ? ": {}\n" : ": {type: Dictionary}\n");
+            String step = INLINE_STEP + "  definition: coffeeCode\n";
+            assertEquals(blue.values().yaml(inherited).blueId(), blue.values().yaml(authored).blueId());
+            assertCoffeeEvent(blue, admit(blue, "inherited", initialization(inherited, step))
+                    .snapshot().publicEvents());
+
+            // when
+            DocumentHandle document = admit(blue, "authored", initialization(authored, step));
+
+            // then
+            assertCoffeeEvent(blue, document.snapshot().publicEvents());
+        }
+    }
+
+    private static Stream<Arguments> redundantDefinitionMaps() {
+        return Stream.of("constants", "functions").flatMap(field -> Stream.of("empty", "declaration")
+                .map(form -> Arguments.of(field, form)));
+    }
+
+    @Test
+    void shouldValidateStaticTypesThroughTheDocumentRootDefinition() {
+        // given
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String base = blue.values().yaml("name: Coffee Event").blueId();
+            String eventType = blue.values().yaml("type: {blueId: " + base + "}\n").blueId();
+            String event = eventWithStaticType("type", eventType);
+            String source = definitionWithEvent(event).replace("type: Coordination/Compute Definition\n", "")
+                    + initialization(namedStep(blue, DefinitionSelector.NAMED)
+                            .replace("definition: coffeeCode", "definition: /"));
+
+            // when
+            DocumentHandle document = admit(blue, source);
+
+            // then
+            assertEquals(List.of(blue.values().yaml(event)), document.snapshot().publicEvents().stream()
+                    .map(PublicEvent::exact).toList());
         }
     }
 

@@ -28,7 +28,8 @@ the new 3.x API before the first stable 3.0.0 release.
 - Fix Compute definitions selected by name or document pointer during
   initialization and operation execution. Exclude inherited empty definition
   declarations from BEX input and validate static types through the selected
-  definition's working-document paths.
+  definition's working-document paths, including a definition at the document
+  root.
 
 ## 3.0.0-rc.6 - historical representation candidate
 

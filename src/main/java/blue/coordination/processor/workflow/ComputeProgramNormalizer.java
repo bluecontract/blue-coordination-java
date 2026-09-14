@@ -111,7 +111,9 @@ final class ComputeProgramNormalizer {
         // Resolution adds optional Dictionary declarations even when the
         // definition supplies no entries. Only an unchanged inherited empty
         // declaration is absent executable input; malformed authored values
-        // and containers must still reach the ordinary compiler checks.
+        // and containers must still reach the ordinary compiler checks. An
+        // authored declaration equal to the inherited one has the same exact
+        // (canonical) identity as its absence, so it is the same definition.
         Node contents = field.toNode().name(null).description(null).type((Node) null);
         if (NodeUtil.isEmpty(contents)) {
             input.getProperties().remove(key);
