@@ -1,6 +1,9 @@
 package blue.coordination.processor.bex;
 
 import blue.language.model.Node;
+import blue.language.processor.BlueContracts;
+import blue.language.processor.ExactEventIdentityEvidence;
+import blue.language.runtime.BlueLanguage;
 import blue.language.snapshot.FrozenNode;
 
 import org.junit.jupiter.api.Test;
@@ -8,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProcessingEventIdentityEvidenceTest {
@@ -71,6 +75,9 @@ class ProcessingEventIdentityEvidenceTest {
         FrozenNode processingEvent =
                 event("original");
 
+        evidence.observe(processingEvent, processingEvent.blueId(),
+                ProcessingEventIdentityObserver.Boundary.WORKFLOW);
+
         // when
         evidence.observe(
                 processingEvent,
@@ -83,6 +90,46 @@ class ProcessingEventIdentityEvidenceTest {
         // then
         assertTrue(snapshot.observed());
         assertFalse(snapshot.stable());
+    }
+
+    @Test
+    void shouldAcceptVerifiedIdentityDifferentFromTheCursorRepresentationHash() {
+        // given
+        ProcessingEventIdentityEvidence evidence = new ProcessingEventIdentityEvidence();
+        Node original = new Node().type(new Node().name("Inline original event type"))
+                .properties("values", new Node().items(java.util.Arrays.asList(
+                        new Node().value("first"), new Node().value("second"))));
+        try (BlueLanguage language = BlueLanguage.builder().build();
+             BlueContracts contracts = BlueContracts.builder(language.processing()).build()) {
+            String admittedBlueId = contracts.runtimeAccess().languageRuntime()
+                    .calculateSourceDocumentBlueId(original.clone());
+            ExactEventIdentityEvidence admitted = ExactEventIdentityEvidence.verify(
+                    contracts.runtimeAccess(), original, admittedBlueId, null);
+            FrozenNode cursor = admitted.frozenEvent();
+            assertNotEquals(admittedBlueId, cursor.blueId());
+
+            // when
+            evidence.observe(cursor, admitted.eventBlueId(), ProcessingEventIdentityObserver.Boundary.WORKFLOW);
+            evidence.observe(cursor, admitted.eventBlueId(), ProcessingEventIdentityObserver.Boundary.BEX_BINDING);
+
+            // then
+            assertTrue(evidence.snapshot().stable());
+            assertEquals(admittedBlueId, evidence.snapshot().admittedBlueId());
+        }
+    }
+
+    @Test
+    void shouldRejectChangedContentEvenWhenTheExposedIdentityIsUnchanged() {
+        // given
+        ProcessingEventIdentityEvidence evidence = new ProcessingEventIdentityEvidence();
+        FrozenNode original = event("original");
+
+        // when
+        evidence.observe(original, original.blueId(), ProcessingEventIdentityObserver.Boundary.WORKFLOW);
+        evidence.observe(event("changed"), original.blueId(), ProcessingEventIdentityObserver.Boundary.BEX_BINDING);
+
+        // then
+        assertFalse(evidence.snapshot().stable());
     }
 
     @Test

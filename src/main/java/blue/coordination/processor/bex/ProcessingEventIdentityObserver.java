@@ -11,6 +11,10 @@ import blue.language.snapshot.FrozenNode;
  * exposed BlueId is the identity that the Coordination boundary supplies to
  * the corresponding consumer. Production execution installs no observer by
  * default and therefore performs no diagnostic snapshot or identity work.</p>
+ *
+ * <p>The exposed identity is the admission-proved original identity when
+ * Contracts retained that capability. A frozen representation's own hash may
+ * differ; observers must not replace the exposed identity by re-hashing it.</p>
  */
 public interface ProcessingEventIdentityObserver {
 
