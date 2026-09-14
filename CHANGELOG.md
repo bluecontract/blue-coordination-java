@@ -30,6 +30,8 @@ the new 3.x API before the first stable 3.0.0 release.
   declarations from BEX input and validate static types through the selected
   definition's working-document paths, including a definition at the document
   root.
+- Bind RC preparation and staging readiness to the RC10 declaration after RC9
+  publication, retaining the complete capability inventory and release tier.
 
 ## 3.0.0-rc.6 - historical representation candidate
 
