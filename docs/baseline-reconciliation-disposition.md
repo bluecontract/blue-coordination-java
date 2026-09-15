@@ -66,9 +66,11 @@ Current baseline-first inputs (16 September 2026) are bound to sealed Language
 The complete Language/BEX/Catalog artifact closure and all seven owning-artifact
 identities match the reviewed profile; only four profile values and two exact
 test literals change. The pinned specifications, gas schedule, RC10 defaults and
-runtime source remain unchanged. The 123-case focused gate and regeneration of
-32 topology records, followed by native/consumer and application qualification,
-remain pending; historical generation02 outputs are not new-tuple evidence.
+runtime source remain unchanged. All 123 focused cases passed; the 32 regenerated
+topology records were reviewed as consistent identity-only substitutions. Exact
+parameter attribution is supplied by a same-run HTML/XML audit supplement; its
+original display-name-parser failure remains preserved. Native/consumer and
+application qualification remain pending.
 
 | Problem / example | Pinned upstream solution | Disposition | Remaining delta | Regression evidence retained |
 | --- | --- | --- | --- | --- |
