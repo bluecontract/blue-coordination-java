@@ -14,11 +14,11 @@ Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
 | Modules | RC9 release lane |
 | --- | --- |
-| `blue.language:*` | Maven Central `3.1.0-rc.25` |
+| `blue.language:*` | Maven Central `3.1.0-rc.26` |
 | `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.6` |
 | `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.22` |
 
-Coordination directly owns the complete Language rc.25 graph, retains the
+Coordination directly owns the complete Language rc.26 graph, retains the
 Repository and BEX transitive exclusions in its published POM, and locks the
 exact graph in `gradle/published-artifact.lockfile`.
 
@@ -37,7 +37,7 @@ required:
 ```bash
 ./gradlew --no-daemon verifyActiveDependencyLane dependencyPreflight \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.25 \
+  -PblueContractsVersion=3.1.0-rc.26 \
   -PblueContractsRepository=/absolute/path/to/contracts-maven-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```

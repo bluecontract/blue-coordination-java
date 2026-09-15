@@ -21,11 +21,10 @@ identity or content.
 
 ## Upstream dependency
 
-This source change requires the companion Contracts accessor; it is absent
-from the currently pinned Language `3.1.0-rc.25` release. Select an immutable
-upstream candidate or the release containing that accessor using the existing
-[dependency lanes](build-and-test.md) before merging this companion. The
-published dependency pins have not been replaced with a mutable local path.
+This source change requires the companion Contracts accessor, first published
+in Language `3.1.0-rc.26`. The published dependency pins and both exact
+dependency lockfiles select that release through the existing
+[dependency lanes](build-and-test.md); no mutable local path is used.
 
 The initial diagnosis compiled all Coordination production sources against
 sealed copies of the modified Language/Contracts JARs, published BEX

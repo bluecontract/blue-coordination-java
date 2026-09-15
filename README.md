@@ -19,7 +19,7 @@ dependencies {
 ```
 
 `3.0.0-rc.7` is the bounded external-pilot candidate. Its required published
-dependency tuple is Language `3.1.0-rc.25`, BEX `1.1.0-rc.7`, and Repository
+dependency tuple is Language `3.1.0-rc.26`, BEX `1.1.0-rc.7`, and Repository
 `3.0.0-rc.22` from Maven Central. Coordination is compiled with `--release 17`.
 It is not a stable or production
 release. Version 3 is a breaking API reset; the removed 2.x planning,
@@ -183,7 +183,7 @@ lowercase `// given`, `// when`, `// then` sequence, enforced by
 
 `dependencyPreflight` resolves the exact conflict-free Blue graph from Maven
 Central. The build and published POM retain the Repository and BEX transitive
-exclusions and directly own the complete Language rc.25 graph. Local
+exclusions and directly own the complete Language rc.26 graph. Local
 composites and Maven Local are rejected.
 
 The public rc.7 release lane uses the published-artifact mode by default. An
@@ -195,7 +195,7 @@ manifest identity explicitly:
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17 \
   -PblueDependencyMode=immutable-staged-contracts \
-  -PblueContractsVersion=3.1.0-rc.25 \
+  -PblueContractsVersion=3.1.0-rc.26 \
   -PblueContractsRepository=/absolute/path/to/invocation-owned/contracts-repository \
   -PblueContractsManifestSha256=sha256:<64-lowercase-hex>
 ```

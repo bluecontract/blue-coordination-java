@@ -7,7 +7,7 @@ not compete as different starting points.
 
 `3.0.0-rc.7` is the current bounded-pilot release candidate. It remains
 non-production and consumes the complete published Blue Language
-`3.1.0-rc.25` graph.
+`3.1.0-rc.26` graph.
 
 ## Start here
 
