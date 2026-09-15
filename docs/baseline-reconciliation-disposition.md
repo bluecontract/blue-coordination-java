@@ -61,6 +61,15 @@ published defaults or manually rewriting semantic outcomes.
 
 ## Disposition
 
+Current baseline-first inputs (16 September 2026) are bound to sealed Language
+`9204d7fe7064245565c7c609527967aaa968209b` in `baseline-without-c03-01`.
+The complete Language/BEX/Catalog artifact closure and all seven owning-artifact
+identities match the reviewed profile; only four profile values and two exact
+test literals change. The pinned specifications, gas schedule, RC10 defaults and
+runtime source remain unchanged. The 123-case focused gate and regeneration of
+32 topology records, followed by native/consumer and application qualification,
+remain pending; historical generation02 outputs are not new-tuple evidence.
+
 | Problem / example | Pinned upstream solution | Disposition | Remaining delta | Regression evidence retained |
 | --- | --- | --- | --- | --- |
 | Named Compute must execute a sibling, pointer or exact definition. | Merged implementation and shared helpers are present. | Already solved | Keep the upstream resolver, plan and static-type design. | Existing `SdkNamedComputeDefinitionTest` and `ComputeProgramNormalizerTest`. |
