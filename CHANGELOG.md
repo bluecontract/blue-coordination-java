@@ -5,6 +5,10 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Preserve the Contracts-admitted original processing-event BlueId in hosted
+  BEX and workflow identity observations, including inline Source types and
+  expanded annotations. Requires the Contracts original-event identity
+  capability described in `docs/development/processing-event-identity.md`.
 - Restrict RC dispatch to `next` and push the verified release commit before
   deployment; publish only its tag afterward so later merges cannot block
   recording the published release.

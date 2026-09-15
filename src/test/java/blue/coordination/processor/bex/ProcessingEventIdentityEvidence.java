@@ -12,6 +12,7 @@ import java.util.Objects;
 public final class ProcessingEventIdentityEvidence
         implements ProcessingEventIdentityObserver {
     private String admittedBlueId;
+    private FrozenNode admittedEvent;
     private boolean stable = true;
     private long workflowObservations;
     private long bexBindingObservations;
@@ -27,15 +28,11 @@ public final class ProcessingEventIdentityEvidence
                 exposedBlueId, "exposedBlueId");
         Boundary exactBoundary = Objects.requireNonNull(
                 boundary, "boundary");
-        String snapshotBlueId = requireBlueId(
-                exactEvent.blueId(), "processingEvent.blueId");
-
-        if (!snapshotBlueId.equals(exactExposedBlueId)) {
-            stable = false;
-        }
         if (admittedBlueId == null) {
-            admittedBlueId = snapshotBlueId;
-        } else if (!admittedBlueId.equals(snapshotBlueId)) {
+            admittedBlueId = exactExposedBlueId;
+            admittedEvent = exactEvent;
+        } else if (!admittedBlueId.equals(exactExposedBlueId)
+                || !admittedEvent.sameResolvedStructure(exactEvent)) {
             stable = false;
         }
 

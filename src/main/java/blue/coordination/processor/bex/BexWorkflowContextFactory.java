@@ -103,9 +103,11 @@ public final class BexWorkflowContextFactory {
                         && processorContext.hasProcessEvent()
                         ? processorContext.frozenProcessEvent()
                         : null;
-        BexValue processingEvent = processingEventSnapshot != null
-                ? BexValues.frozen(processingEventSnapshot)
-                : BexValues.undefined();
+        BexValue processingEvent = processingEventBinding(
+                processingEventSnapshot,
+                processingEventRequired
+                        ? processorContext.exactProcessEventIdentityEvidence()
+                        : null);
         if (processingEventIdentityObserver != null
                 && processingEventSnapshot != null) {
             processingEventIdentityObserver.observe(
@@ -126,6 +128,18 @@ public final class BexWorkflowContextFactory {
                 .gasLedgerHost(context.bexGasLedgerHost())
                 .gasLimit(gasLimit)
                 .build();
+    }
+
+    static BexValue processingEventBinding(FrozenNode original, ExactEventIdentityEvidence evidence) {
+        if (original == null) {
+            return BexValues.undefined();
+        }
+        // Source admission may retain a resolved cursor whose representation
+        // hash differs from the verified original input identity. Carry that
+        // identity through BEX instead of asking the cursor to reconstruct it.
+        return evidence != null
+                ? BexValues.exact(original, original, evidence.eventBlueId())
+                : BexValues.frozen(original);
     }
 
     static BexValue handlerEventBinding(FrozenNode handler, ExactEventIdentityEvidence occurrence) {

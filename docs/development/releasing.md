@@ -15,12 +15,12 @@ The release consumes only Maven Central artifacts:
 
 | Component | Version |
 | --- | --- |
-| Language | `3.1.0-rc.25` |
+| Language | `3.1.0-rc.26` |
 | BEX core/contracts | `1.1.0-rc.6` |
 | Repository | `3.0.0-rc.22` |
 | Coordination | `3.0.0-rc.10` |
 
-Coordination directly owns the complete Language rc.25 graph. BEX and
+Coordination directly owns the complete Language rc.26 graph. BEX and
 Repository Language transitive edges remain excluded, and the generated POM
 publishes the same exclusions.
 

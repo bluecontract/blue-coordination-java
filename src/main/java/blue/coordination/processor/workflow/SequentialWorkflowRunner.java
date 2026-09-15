@@ -11,6 +11,7 @@ import blue.language.processor.ExecutionEvidenceUnavailableException;
 import blue.language.processor.GasChargeContext;
 import blue.language.processor.GasLimitExceededException;
 import blue.language.processor.ProcessorExecutionContext;
+import blue.language.processor.ExactEventIdentityEvidence;
 import blue.language.processor.SelectedExecutableBody;
 import blue.language.processor.WorkingDocument;
 import blue.language.model.Node;
@@ -282,9 +283,11 @@ public final class SequentialWorkflowRunner implements AutoCloseable {
         }
         FrozenNode processingEvent =
                 context.frozenProcessEvent();
+        ExactEventIdentityEvidence evidence =
+                context.exactProcessEventIdentityEvidence();
         processingEventIdentityObserver.observe(
                 processingEvent,
-                processingEvent.blueId(),
+                evidence != null ? evidence.eventBlueId() : processingEvent.blueId(),
                 ProcessingEventIdentityObserver.Boundary
                         .WORKFLOW);
     }
