@@ -13,6 +13,64 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real stopped requester authority is independent of physical source-selection freshness. */
 final class RootedSourcePrerequisiteObservationTest {
+    @Test void sourcePrerequisiteLiveAndRequesterRetryKeepDistinctProcessingEvents() throws Exception {
+        // given
+        String parentYaml = recordingProcessingEvents(RootedSdkFixture.resource("parent.yaml"));
+        String sourceYaml = recordingProcessingEvents(RootedSdkFixture.resource("source.yaml"));
+        try (var s = new Scenario(null, parentYaml, sourceYaml)) {
+            var original = s.selection();
+            var parentBefore = s.parentState();
+            assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, original.kind());
+            assertEquals(List.of(), processingEvents(s.f, s.parent), "The stopped requester must not publish its effects");
+
+            // when
+            assertTrue(s.f.blue.advanced().processSourceHistoryPrerequisite(original)
+                    .admission().orElseThrow().published());
+            var source = s.f.blue.documents().require(original.sourceDocumentId());
+            assertEquals(List.of(), processingEvents(s.f, source), "Separate source admission is not requester PROCESS");
+            var live = s.selection();
+            assertEquals(SourceHistoryPrerequisite.Kind.LIVE, live.kind());
+            assertEquals(s.source15.blueId(), live.entryBlueId());
+            assertTrue(s.f.blue.advanced().processSourceHistoryPrerequisite(live)
+                    .processing().orElseThrow().committedProcessTransitions() > 0L);
+            assertEquals(parentBefore, s.parentState(), "Source prerequisite execution must not retry the requester");
+            var sourceHead = source.snapshot().blueId();
+            var sourceHistory = s.f.history(source);
+            assertEquals(SATISFIED, s.observe(original).status());
+            var retried = s.retryParent();
+            assertEquals(EntryDisposition.APPLIED, retried.disposition(), retried.diagnostic().toString());
+            int retainedAttempts = 0;
+            boolean settled = false;
+            for (int step = 0; step < 8; step++) {
+                var next = s.f.blue.processing().processNext(s.parent);
+                assertFalse(next.blocked(), String.valueOf(next.diagnostic()));
+                retainedAttempts += next.managedEpochApplicationAttempts().size() + next.rootedRetainedApplications().size();
+                assertEquals(sourceHead, source.snapshot().blueId());
+                assertEquals(sourceHistory, s.f.history(source));
+                if (next.quiescent()) { settled = true; break; }
+            }
+
+            // then
+            assertTrue(settled, "The original attachment and its retained source interval must finish within eight selections");
+            assertTrue(retainedAttempts > 0, "The no-event assertion must execute real retained history, not an unused handler");
+            assertEquals(List.of(s.source15.blueId()), processingEvents(s.f, source),
+                    "An independently owned LIVE prerequisite sees its own original Timeline Entry");
+            assertEquals(List.of(s.attachment.blueId(), "no-external-processing-event"), processingEvents(s.f, s.parent),
+                    "The retry keeps its requester event; the imported Tick must not revive either historical external event");
+            assertEquals(5L, s.parent.snapshot().longAt("/seen"));
+            assertEquals(5L, s.parent.snapshot().longAt("/log/0"));
+            assertEquals(1, s.parent.snapshot().valueAt("/log").copyNode().getItems().size());
+            assertEquals(STALE, s.observe(original).status());
+            var parentAfter = s.parentState();
+            CoordinationTestControl.attach(s.f.blue.advanced().rawEngine()).restartFromStores();
+            assertTrue(s.f.blue.processing().processNext(s.parent).quiescent());
+            assertEquals(parentAfter, s.parentState());
+            assertEquals(sourceHead, source.snapshot().blueId());
+            assertEquals(sourceHistory, s.f.history(source));
+            assertEquals(List.of(s.attachment.blueId(), "no-external-processing-event"), processingEvents(s.f, s.parent));
+        }
+    }
+
     @Test void independentlyAdmittedAndAdvancedSourceSatisfiesWithoutRetryingParent() throws Exception {
         // given
         try (var s = new Scenario(null)) {
@@ -177,6 +235,36 @@ final class RootedSourcePrerequisiteObservationTest {
                 p.journalRevision(), p.routeGeneration(), p.sourceSurfaceIdentity(), p.diagnostic());
     }
 
+    private static String recordingProcessingEvents(String yaml) {
+        String record = """
+                - $if:
+                    cond:
+                      $exists:
+                        $processingEvent: /
+                    then:
+                    - $appendChange:
+                        op: add
+                        path: /processingEvents/-
+                        val:
+                          $nodeBlueId:
+                            $processingEvent: /
+                    else:
+                    - $appendChange:
+                        op: add
+                        path: /processingEvents/-
+                        val: no-external-processing-event
+                """;
+        assertTrue(yaml.contains("      - $return: true\n"));
+        return yaml.replace("contracts:\n", "processingEvents: []\ncontracts:\n")
+                .replace("      - $return: true\n", record.indent(6) + "      - $return: true\n");
+    }
+
+    private static List<String> processingEvents(RootedSdkFixture f, DocumentHandle document) {
+        return f.blue.advanced().auditDocument(document.id()).current().copyNode()
+                .getNode("/processingEvents").getItems().stream()
+                .map(item -> (String) item.getValue()).toList();
+    }
+
     private static final class Scenario implements AutoCloseable {
         final RootedSdkFixture f = new RootedSdkFixture();
         final DocumentHandle parent;
@@ -185,10 +273,13 @@ final class RootedSourcePrerequisiteObservationTest {
         final ContractsExecutionPolicy policy;
 
         Scenario(ContractsExecutionPolicy policy) throws Exception {
+            this(policy, RootedSdkFixture.resource("parent.yaml"), RootedSdkFixture.resource("source.yaml"));
+        }
+
+        Scenario(ContractsExecutionPolicy policy, String parentYaml, String sourceYaml) throws Exception {
             this.policy = policy;
-            String parentYaml = RootedSdkFixture.resource("parent.yaml");
             parent = f.startYaml(parentYaml, "rcp2/parent");
-            var authored = f.blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
+            var authored = f.blue.values().yaml(sourceYaml);
             f.exact.put(authored.blueId(), authored.json());
             f.timelines.put("rcp2/source", f.blue.timelines().register("rcp2/source", "alice"));
             source15 = f.appendReference(authored.blueId(), "rcp2/source", "setCounter", 15, "counterValue: 5", false);

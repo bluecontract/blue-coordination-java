@@ -144,6 +144,43 @@ original LIVE witnesses, and acquire peers only for a fresh terminal. Their full
 result/history/BlueId/event/gas checks and shared finite call bounds remain. Those
 test/helper adaptations do not grant a new processing policy.
 
+## Merged processing-event continuity reconciliation coverage
+
+This section records new reconciliation coverage, not a frozen qualification.
+Merged Language PR37 retains the original external processing-event evidence
+through internal steps and resource retries. The retained source-prerequisite
+and witness corrections must preserve that scope: independent source LIVE work
+owns its own external entry, whereas imported managed history has no current
+external processing event. The existing Language continuity tests and Coordination
+prerequisite/witness tests cover those responsibilities separately, but did not
+directly assert their composed BEX-visible behavior.
+
+`RootedSourcePrerequisiteObservationTest.sourcePrerequisiteLiveAndRequesterRetryKeepDistinctProcessingEvents`
+adds one ordinary test using the existing SDK fixture and test-local recording
+steps. It runs actual source ADMISSION and LIVE prerequisites, retries the
+unchanged requester, and applies real retained history. Assertions distinguish
+the source and requester entry BlueIds, require absent `$processingEvent` during
+the imported Tick reaction, retain the normal business effects, preserve the
+source head/history, and check settled restart. It adds no production/API change,
+does not replace the fresh-terminal diamond witness controls, and is unqualified
+until the candidate's targeted and final gates execute it.
+
+An adjacent adapter concern remains unproven outside this Timeline ingress:
+the BEX processing-event binding reads the frozen event's BlueId rather than
+the explicit `exactProcessEventIdentityEvidence` capability. PR37's raw inline-typed
+Source fixture cannot cross the public exact Timeline boundary in that shape.
+`SdkCoordinationRuntime.appendEvent` calls `DefaultCoordinationEngine.appendTimelineEntry`,
+which always reconstructs `ExactValue.verified(Node)` and calculates its strict
+`FrozenNode.fromNode` identity before journal admission. Language's strict
+`NodeToBlueIdInput.validateBlueIdInput` rejects non-reference reserved type
+positions; the frozen digester's fallback reaches that same strict projection.
+`values().yaml` first supplies the canonical processing snapshot, while
+`providerContentYaml` independently uses the strict direct calculator. Thus raw
+inline types are canonicalized or rejected, not admitted as that PR37 Source/body
+identity mismatch. This is an enforced ingress limit, not an assumption about
+usual callers or proof about every direct processor-hosting surface. No adapter
+or broader semantic contract is changed here.
+
 ## Historical qualification versus this candidate
 
 The frozen consolidated review records d220 on Java 17 and 21 with 1,182 primary
