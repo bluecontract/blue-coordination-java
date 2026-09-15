@@ -7,15 +7,21 @@ import blue.language.model.Node;
 import blue.language.model.Nodes;
 import blue.language.snapshot.FrozenNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -261,6 +267,104 @@ class ComputeProgramNormalizerTest {
                                     definition,
                                     null)));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"constants", "functions"})
+    void shouldOmitUnchangedInheritedEmptyDefinitionDeclarations(String field) {
+        // given
+        Node inherited = new Node().type(new Node().name("Dictionary"));
+        FrozenNode definition = resolvedDefinition(field, inherited, inherited.clone());
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+
+        // when
+        FrozenNode source = normalizer.definitionSource(definition, true);
+
+        // then
+        assertNull(source.property(field));
+        assertNotNull(normalizer.definitionSource(definition).property(field));
+        assertNotNull(definition.property(field));
+        assertSame(definition, normalizer.definition(definition));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"constants", "functions"})
+    void shouldPreserveExplicitEmptyDefinitionMaps(String field) {
+        // given
+        Node inherited = new Node().type(new Node().name("Dictionary"));
+        FrozenNode definition = resolvedDefinition(field, inherited,
+                inherited.clone().properties(Collections.emptyMap()));
+
+        // when
+        FrozenNode source = new ComputeProgramNormalizer().definitionSource(definition, true);
+
+        // then
+        assertNotNull(source.property(field));
+        assertEquals(Collections.emptyMap(), source.property(field).getProperties());
+        try (BexEngine engine = BexEngine.builder().build()) {
+            engine.compile(BexProgramSource.withDefinition(
+                    FrozenNode.fromNode(new Node().properties("expr", new Node().value(true))),
+                    source, null));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedDefinitionMaps")
+    void shouldPreserveMalformedResolvedDefinitionMapsForCompilerRejection(
+            String field, Node inherited, Node authored) {
+        // given
+        FrozenNode definition = resolvedDefinition(field, inherited, authored);
+
+        // when
+        FrozenNode source = new ComputeProgramNormalizer().definitionSource(definition, true);
+
+        // then
+        assertNotNull(source.property(field));
+        try (BexEngine engine = BexEngine.builder().build()) {
+            assertThrows(BexException.class, () -> engine.compile(BexProgramSource.withDefinition(
+                    FrozenNode.fromNode(new Node().properties("expr", new Node().value(true))),
+                    source, null)));
+        }
+    }
+
+    @Test
+    void shouldRetainPopulatedInheritedDefinitionMaps() {
+        // given
+        Node fields = new Node()
+                .properties("constants", new Node().properties("message", new Node().value("coffee")))
+                .properties("functions", new Node().properties("run",
+                        new Node().properties("expr", new Node().value("coffee"))));
+        FrozenNode definition = FrozenNode.fromResolvedNode(fields.clone().type(fields));
+
+        // when
+        FrozenNode source = new ComputeProgramNormalizer().definitionSource(definition, true);
+
+        // then
+        assertEquals("coffee", source.property("constants").property("message").getValue());
+        assertEquals("coffee", source.property("functions").property("run").property("expr").getValue());
+    }
+
+    private static Stream<Arguments> malformedDefinitionMaps() {
+        return Stream.of("constants", "functions").flatMap(field -> {
+            Node declaration = new Node().type(new Node().name("Dictionary"));
+            Node scalar = new Node().value("wrong-kind");
+            Node list = new Node().items(List.of());
+            return Stream.of(
+                    Arguments.of(field, declaration, scalar),
+                    Arguments.of(field, scalar, scalar.clone()),
+                    Arguments.of(field, declaration, list),
+                    Arguments.of(field, list, list.clone()),
+                    Arguments.of(field, declaration, declaration.clone().description("Authored declaration")),
+                    Arguments.of(field, null, declaration));
+        });
+    }
+
+    private static FrozenNode resolvedDefinition(String field, Node inherited, Node authored) {
+        Node definition = new Node().properties(field, authored);
+        if (inherited != null) {
+            definition.type(new Node().properties(field, inherited));
+        }
+        return FrozenNode.fromResolvedNode(definition);
     }
 
     private static FrozenNode normalizeStatement(Node statement) {
