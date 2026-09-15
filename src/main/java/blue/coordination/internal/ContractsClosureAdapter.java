@@ -403,6 +403,55 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 profile.executionPolicy(), environment);
     }
 
+    /** Captures a fresh terminal only after every receiving root has completed its real prefix. */
+    synchronized List<RootedLocalHistory.Step> captureTerminalPeers(RootedJoinEligibility.Fence fence,
+            List<RootedLocalHistory.Step> terminals) {
+        var capturer = new ManagedEpochInvocationCapturer(this, runtime, objects, documents, profile, environment);
+        java.util.function.Consumer<RootedLocalHistory.Step> verify = local -> capturer.captureRootedJoin(
+                fence.terminal().work(), fence.terminal().excludedConsumers(), local);
+        var result = new ArrayList<RootedLocalHistory.Step>();
+        for (var original : terminals) {
+            var acquisition = RootedTerminalPeerAcquisition.select(original, terminals, fence, documents, verify);
+            if (acquisition.isEmpty()) continue; // Fixed-inventory evidence cannot yet admit this terminal.
+            var peers = acquisition.orElseThrow();
+            if (peers.isEmpty()) {
+                result.add(original);
+                continue;
+            }
+            var state = captureTerminalWitnesses(original, peers);
+            var fresh = RootedLocalHistory.capture(original.root(), state, original.target(), original.anchor(),
+                    documents, objects, original.invocation().input().executionPolicy(), environment);
+            if (fresh == null || !fresh.work().workIdentity().equals(original.work().workIdentity())
+                    || !fresh.invocation().input().cause().causeIdentity().equals(original.invocation().input().cause().causeIdentity()))
+                throw stale("Terminal peer selection changed the original retained application");
+            verify.accept(fresh);
+            result.add(fresh);
+        }
+        return List.copyOf(result);
+    }
+
+    private RootedCapturedState captureTerminalWitnesses(RootedLocalHistory.Step original,
+            Map<DocumentId, RootedLocalHistory.Step> peers) {
+        original.requireCurrentInput(documents);
+        var proofs = new LinkedHashMap<blue.language.processor.closure.DocumentId, AffectedClosureSnapshot>();
+        var captured = new TreeMap<DocumentId, CapturedDocument>(EmbeddingBinding.DOCUMENT_ORDER);
+        captured.putAll(original.capturedState().documents());
+        peers.forEach((member, peer) -> {
+            peer.requireCurrentInput(documents);
+            proofs.put(closureId(member), peer.capturedState().view().retainedSnapshot());
+            captured.put(member, Objects.requireNonNull(peer.capturedState().documents().get(member)));
+        });
+        // This is a NEW retained operation, not an expansion/retry of an entered input.
+        // Language preserves every calculating primary and the complete frozen source
+        // proofs while independently verifying the selected immutable peer positions.
+        var snapshot = ClosureEvidenceFactory.rootedWitnessSelection(original.invocation().input().snapshot(), proofs);
+        var localRoutes = new OperationRouteIndex(runtime.metrics(), documents::require,
+                id -> captured.containsKey(id) ? captured.get(id).head().blueId() : null);
+        captured.forEach((id, value) -> localRoutes.replace(id, value.layout().routingSurface(), value.activeSubscriptions()));
+        return new RootedCapturedState(snapshot, Map.copyOf(captured), localRoutes,
+                original.capturedState().view(), original.capturedState().anchor(), original.capturedState(), peers);
+    }
+
     /** Registers exact SDK host evidence before the entry can be drained. */
     synchronized boolean registerManagedDraftPlan(
             String entryBlueId,
@@ -601,6 +650,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers) {
         ensureOpen();
         return managedEpochApplicationExecutor.execute(work, excludedConsumers);
+    }
+
+    /** Publishes one actual local terminal and its exact registered application in the existing atomic transaction. */
+    synchronized ManagedApplicationOutcome executeRootedJoinApplication(ManagedEpochApplicationWork work,
+            Set<DocumentId> excludedConsumers, RootedLocalHistory.Step local) {
+        ensureOpen();
+        return managedEpochApplicationExecutor.execute(work, excludedConsumers, local);
     }
 
     /** Runs retained managed work through the ordinary typed-demand loop. */
@@ -1623,14 +1679,24 @@ final class ContractsClosureAdapter implements AutoCloseable {
         private final OperationRouteIndex routes;
         private final RootedDocumentView view;
         private final DocumentId anchor;
+        private final RootedCapturedState originalCapture;
+        private final Map<DocumentId, RootedLocalHistory.Step> peerPrefixes;
 
         private RootedCapturedState(AffectedClosureSnapshot snapshot, Map<DocumentId, CapturedDocument> documents,
                 OperationRouteIndex routes, RootedDocumentView view, DocumentId anchor) {
+            this(snapshot, documents, routes, view, anchor, null, Map.of());
+        }
+
+        private RootedCapturedState(AffectedClosureSnapshot snapshot, Map<DocumentId, CapturedDocument> documents,
+                OperationRouteIndex routes, RootedDocumentView view, DocumentId anchor,
+                RootedCapturedState originalCapture, Map<DocumentId, RootedLocalHistory.Step> peerPrefixes) {
             this.snapshot = snapshot;
             this.documents = documents;
             this.routes = routes;
             this.view = view;
             this.anchor = anchor;
+            this.originalCapture = originalCapture;
+            this.peerPrefixes = Map.copyOf(peerPrefixes);
         }
 
         AffectedClosureSnapshot snapshot() { return snapshot; }
@@ -1647,6 +1713,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         void requireCurrentView(InMemoryDocumentStore store) {
+            if (originalCapture != null) originalCapture.requireCurrentView(store);
+            peerPrefixes.forEach((id, peer) -> {
+                peer.requireCurrentInput(store);
+                var session = store.require(id);
+                var proof = peer.capturedState().view();
+                if (session.rootedView() != proof)
+                    throw stale("Selected terminal peer publication changed before entry");
+                proof.requirePublishedHead(id, session.epoch(), session.currentRepresentation().blueId());
+            });
             DocumentSession root = store.require(anchor);
             if (root.rootedView() != view) {
                 throw new IllegalArgumentException("Local history must retain the exact captured root and its frozen frontier");
@@ -1787,6 +1862,13 @@ final class ContractsClosureAdapter implements AutoCloseable {
     private ContractsManagedEpochSelectionPlan managedEpochSelectionPlan(
             FrozenBatch batch,
             CohortInvocation invocation) {
+        // Local retained work shares the attachment's chronological anchor, not
+        // its operation. Its receipt-bound historical cause must not resolve
+        // the original LIVE operation's prospective selector paths again.
+        if (invocation.rootedEvidence() != null
+                && invocation.rootedEvidence().historicalWork() != null) {
+            return null;
+        }
         ContractsManagedEpochSelectionPlan plan =
                 managedEpochSelectionPlans.get(batch.entry().blueId());
         return plan != null && invocation.memberSet().contains(
@@ -1986,7 +2068,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
         }
 
         Map<DocumentId, RootedDocumentView> attachmentViews = RootedAttachmentCapture.select(
-                current, selected.existingTargets(), documents);
+                current, selected, documents);
+        selected = RootedAttachmentCapture.classifyAtBoundary(current, selected, attachmentViews, documents);
         Set<DocumentId> existingMembers;
         if (current.rootedEvidence() == null) {
             existingMembers = forwardExistingMembers(current.existingMemberSet(), selected.existingTargets(),
@@ -2095,6 +2178,33 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     occurrence.demand().sourcePath());
             ManagedOccurrenceBinding retained = rows.get(key);
             if (retained != null) {
+                // A committed inactive reservation is immutable input, not a
+                // permanent restriction on the next target. Supply exact
+                // selection evidence; only PROCESS may replace it in output.
+                if (current.rootedEvidence() != null
+                        && !retained.active()
+                        && retained.pendingHistoricalEpoch() == null
+                        && !retained.targetDocumentId().value().equals(occurrence.targetDocumentId().value())
+                        && current.input().snapshot().occurrences().stream().anyMatch(row ->
+                                row.occurrenceIdentity().equals(retained.occurrenceIdentity())
+                                        && row.bindingIdentity().equals(retained.bindingIdentity()))) {
+                    ManagedDocumentSnapshot target = current.input().snapshot()
+                            .managedDocument(closureId(occurrence.targetDocumentId()));
+                    long selectedEpoch = occurrence.admittedSourceEpoch();
+                    if (target != null && target.initialized()
+                            && selectedEpoch >= -1L && selectedEpoch <= target.epoch()
+                            && (selectedEpoch < target.epoch()
+                                    || target.blueId().equals(occurrence.demand().suppliedValueBlueId()))) {
+                        ManagedOccurrenceEvidenceResolution exact = ManagedOccurrenceEvidenceResolution.derived(
+                                occurrence.demand(), target.documentId(), selectedEpoch);
+                        ManagedOccurrenceEvidenceResolution previous = retryResolutions.putIfAbsent(
+                                occurrence.demand().demandIdentity(), exact);
+                        if (previous != null && !previous.resolutionIdentity().equals(exact.resolutionIdentity())) {
+                            throw new IllegalStateException("Automatic retry changed an exact managed-occurrence resolution " + key);
+                        }
+                    }
+                    continue;
+                }
                 // A committed reservation is immutable input. Select its old
                 // source inside the processor retry, never by rewriting the read expansion.
                 boolean reservedHistory = !retained.active() && retained.pendingHistoricalEpoch() == null
@@ -2285,7 +2395,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
             ClosureInvocationInput expanded = ClosureEvidenceFactory.rootedReadExpansion(current.input(),
                     graphGeneration, new ArrayList<>(existing.values()), new ArrayList<>(rows.values()),
                     attachmentViews.values().stream().map(RootedDocumentView::retainedSnapshot).distinct().toList());
-            ClosureProcessRetryInput retry = retryResolutions.isEmpty() ? null
+            // Expanding the read set changes the authenticated base. A demand
+            // from the preceding attempt cannot authorize that new input;
+            // PROCESS must issue its own exact demand before it is resolved.
+            ClosureProcessRetryInput retry = retryResolutions.isEmpty()
+                    || !expanded.invocationIdentity().equals(current.input().invocationIdentity()) ? null
                     : ClosureProcessRetryInput.derived(expanded, new ArrayList<>(retryResolutions.values()));
             return new CohortInvocation(coordinationIds(members), current.directDeliveries(), expanded, retry,
                     captured, current.managedDraftPlan(), accumulated, current.publicationIdentityMembers(),
@@ -3146,9 +3260,9 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 committedEpochReceipts.put(
                         entry.getKey(), epochReceipt);
             }
-            if (result.rootedProjection() != null) {
-                transaction.stageRootedView(new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, batch.entry().sourceOrderKey()));
-            }
+            RootedDocumentView resultingRootedView = result.rootedProjection() == null ? null
+                    : new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, batch.entry().sourceOrderKey());
+            if (resultingRootedView != null) transaction.stageRootedView(resultingRootedView);
             objects.retainVerifiedClosureComponentEvidence(result);
             CatchUpPlanStore beforeCatchUpPlans =
                     documents.catchUpPlansSnapshot();
@@ -3181,7 +3295,8 @@ final class ContractsClosureAdapter implements AutoCloseable {
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
-                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts,
+                                    resultingRootedView),
                             blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());

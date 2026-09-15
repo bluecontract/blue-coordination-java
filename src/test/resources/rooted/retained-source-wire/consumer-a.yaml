@@ -1,0 +1,219 @@
+name: Lab 12 consumer A
+phase: candidate
+candidate:
+  name: Lab 12 source B
+  phase: authored
+  peer: {}
+  contracts:
+    lifecycleChannel:
+      type:
+        blueId: 2ukJitzzDKQWHJ5EVUtn3t4FXieGmNA1NdwFSqG8qcfo
+      order: 0
+    onProcessingInitiated:
+      type: Coordination/Sequential Workflow
+      channel: lifecycleChannel
+      order: 0
+      event:
+        type:
+          blueId: Gck5z8qnbcUvJNkawzKPghj14dJBw8GxkC9mh6cL5e5C
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: initialized
+            - $return: true
+    embedded:
+      type: Process Embedded
+      collectionPaths:
+        - /peer
+    ownerChannel:
+      type: Coordination/Timeline Channel
+      timeline:
+        type: MyOS/MyOS Timeline
+        timelineId: labs/retained-managed-epoch/cycle/alice
+      actor:
+        type: MyOS/Principal Actor
+        accountId: alice
+    advance:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: advanced
+            - $return: true
+    connectA:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request:
+        a: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: add
+                path: /peer/a
+                val:
+                  $binding: event/message/request/a
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: connected
+            - $return: true
+    detachA:
+      type: Coordination/Sequential Workflow Operation
+      channel: ownerChannel
+      request: {}
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: remove
+                path: /peer/a
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: detached
+            - $return: true
+    finiteFromA:
+      type: Embedded Node Channel
+      sourcePath: /peer/a
+      event:
+        type: Coordination/Event
+        kind: Lab/Cycle Finite X
+    relayFinite:
+      type: Coordination/Sequential Workflow
+      channel: finiteFromA
+      event:
+        type: Coordination/Event
+        kind: Lab/Cycle Finite X
+      steps:
+        - type: Coordination/Compute
+          do:
+            - $appendChange:
+                op: replace
+                path: /phase
+                val: relayed
+            - $appendEvent:
+                type: Coordination/Event
+                kind: Lab/Cycle Finite Y
+            - $return: true
+    loopFromA:
+      type: Embedded Node Channel
+      sourcePath: /peer/a
+      event:
+        type: Coordination/Event
+        kind: Lab/Cycle Loop
+    relayLoop:
+      type: Coordination/Sequential Workflow
+      channel: loopFromA
+      event:
+        type: Coordination/Event
+        kind: Lab/Cycle Loop
+      steps:
+        - type: Coordination/Trigger Event
+          event:
+            type: Coordination/Event
+            kind: Lab/Cycle Loop
+contracts:
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: labs/retained-managed-epoch/cycle/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  attachCandidate:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      embeddedContract: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /embeddedCandidates
+              val:
+                selected:
+                  $binding: event/message/request/embeddedContract
+          - $appendChange:
+              op: add
+              path: /contracts/embedded
+              val:
+                type: Process Embedded
+                collectionPaths:
+                  - /embeddedCandidates
+          - $appendChange:
+              op: replace
+              path: /phase
+              val: attached
+          - $return: true
+  startFinite:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /phase
+              val: started
+          - $appendEvent:
+              type: Coordination/Event
+              kind: Lab/Cycle Finite X
+          - $return: true
+  finiteFromB:
+    type: Embedded Node Channel
+    sourcePath: /embeddedCandidates/selected
+    event:
+      type: Coordination/Event
+      kind: Lab/Cycle Finite Y
+  finishFinite:
+    type: Coordination/Sequential Workflow
+    channel: finiteFromB
+    event:
+      type: Coordination/Event
+      kind: Lab/Cycle Finite Y
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /phase
+              val: done
+          - $return: true
+  startLoop:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request: {}
+    steps:
+      - type: Coordination/Trigger Event
+        event:
+          type: Coordination/Event
+          kind: Lab/Cycle Loop
+  loopFromB:
+    type: Embedded Node Channel
+    sourcePath: /embeddedCandidates/selected
+    event:
+      type: Coordination/Event
+      kind: Lab/Cycle Loop
+  repeatLoop:
+    type: Coordination/Sequential Workflow
+    channel: loopFromB
+    event:
+      type: Coordination/Event
+      kind: Lab/Cycle Loop
+    steps:
+      - type: Coordination/Trigger Event
+        event:
+          type: Coordination/Event
+          kind: Lab/Cycle Loop

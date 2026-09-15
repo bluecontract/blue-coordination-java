@@ -51,6 +51,21 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Observes one previously emitted prerequisite without executing its source or retrying its parent.
+     * The original root, invocation, demand, source, authored identity and cutoff are immutable authority;
+     * physical selection fields may refresh. PENDING includes explicit WAIT, SATISFIED requires current
+     * verified source completeness, and missing or terminal requesting authority is STALE.
+     * An empty {@link #sourceHistoryPrerequisites(DocumentHandle)} list alone proves no satisfaction.
+     * @param expected original descriptor whose frozen logical authority is being observed
+     * @return typed observation with a fresh exact descriptor only when pending
+     * @throws IllegalArgumentException if retained correlation has different frozen logical operands
+     */
+    public blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.observeSourceHistoryPrerequisite(Objects.requireNonNull(expected, "expected"));
+    }
+
+    /**
      * Executes one selected source prerequisite without retrying its waiting parent.
      * @param expected exact descriptor from sourceHistoryPrerequisites
      * @return actual source result and its independent publication/meter evidence
@@ -208,6 +223,17 @@ public final class AdvancedCoordination {
      */
     public ProcessingSelection auditNextProcessingSelection() {
         return runtime.engine().auditNextProcessingSelection();
+    }
+
+    /**
+     * Reads the exact next obligation for {@code processing().processNext(root)},
+     * independently of global fair-lane selection. Does not execute, reserve,
+     * or advance a scheduling turn. NONE means no runnable root obligation,
+     * including when the root is blocked; it is not a completeness proof.
+     * The host must serialize selection and execution against competing writes.
+     */
+    public ProcessingSelection auditNextRootProcessingSelection(DocumentHandle root) {
+        return runtime.auditNextRootProcessingSelection(Objects.requireNonNull(root, "root"));
     }
 
     /**

@@ -41,6 +41,17 @@ final class ComputeDefinitionResolver {
         return text != null && !text.trim().isEmpty() ? resolvePointer(text.trim(), context) : null;
     }
 
+    /** Presence in exact selected contributions, not equality with effective type defaults. */
+    int declaredMaps(String pointer, StepExecutionContext context) {
+        if (pointer == null) return 0;
+        int present = 0;
+        for (FrozenNode source : context.workingDocument().sourceContributionsAt(pointer)) {
+            if (FrozenNodeUtil.property(source, "constants") != null) present |= 1;
+            if (FrozenNodeUtil.property(source, "functions") != null) present |= 2;
+        }
+        return present;
+    }
+
     FrozenNode resolve(FrozenNode stepNode,
                        StepExecutionContext context,
                        BexProcessingMetrics invocationMetrics) {

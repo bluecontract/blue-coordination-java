@@ -683,9 +683,14 @@ def publicBoundarySources = files(
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        classes: 245,
-        lines: 72_540L,
-        publicApiTypes: 86,
+        // Reconciled rooted corrections plus exact-provider Compute presence.
+        // Measured on the pinned RC10 base; omit optional frozen proof sharing,
+        // cross-call representation memo and early LIVE candidate bound.
+        // See docs/baseline-reconciliation-disposition.md. These inventory
+        // limits do not change any protocol, closure or logical-gas bound.
+        classes: 253,
+        lines: 74_084L,
+        publicApiTypes: 87,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [

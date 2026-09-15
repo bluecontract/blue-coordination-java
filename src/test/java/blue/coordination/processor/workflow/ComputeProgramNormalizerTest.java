@@ -289,6 +289,23 @@ class ComputeProgramNormalizerTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"constants", "functions"})
+    void exactPresencePreventsDiscardingADeclarationEqualToTheInheritedDefault(String field) {
+        Node inherited = new Node().type(new Node().name("Dictionary"));
+        FrozenNode definition = resolvedDefinition(field, inherited, inherited.clone());
+        ComputeProgramNormalizer normalizer = new ComputeProgramNormalizer();
+        int mask = field.equals("constants") ? 1 : 2;
+        FrozenNode preserved = normalizer.definitionSource(definition, true, mask);
+        assertNotNull(preserved.property(field));
+        assertNull(normalizer.definitionSource(definition, true, 0).property(field));
+        try (BexEngine engine = BexEngine.builder().build()) {
+            assertThrows(BexException.class, () -> engine.compile(BexProgramSource.withDefinition(
+                    FrozenNode.fromNode(new Node().properties("expr", new Node().value(true))),
+                    preserved, null)));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"constants", "functions"})
     void shouldPreserveExplicitEmptyDefinitionMaps(String field) {
         // given
         Node inherited = new Node().type(new Node().name("Dictionary"));

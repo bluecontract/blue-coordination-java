@@ -1,0 +1,90 @@
+name: Payment Instruction
+documentId: tutorial-payment
+state: created
+captureAllowed: false
+contracts:
+  embedded:
+    type: Process Embedded
+    paths:
+      - /order
+  aliceChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: tutorial/business/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  attachOrder:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request:
+      order: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /order
+              val:
+                $binding: event/message/request/order
+          - $return: true
+  authorize:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $if:
+              cond: {$eq: [{$document: /state}, created]}
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /state
+                    val: authorized
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: Tutorial/Payment Authorized
+          - $return: true
+  capture:
+    type: Coordination/Sequential Workflow Operation
+    channel: aliceChannel
+    request: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $if:
+              cond:
+                $and:
+                  - $document: /captureAllowed
+                  - $eq: [{$document: /state}, authorized]
+              then:
+                - $appendChange:
+                    op: replace
+                    path: /state
+                    val: captured
+                - $appendEvent:
+                    type: Coordination/Event
+                    kind: Tutorial/Payment Captured
+          - $return: true
+  fromOrderConfirmed:
+    type: Embedded Node Channel
+    sourcePath: /order
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Confirmed
+  allowCapture:
+    type: Coordination/Sequential Workflow
+    channel: fromOrderConfirmed
+    event:
+      type: Coordination/Event
+      kind: Tutorial/Order Confirmed
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /captureAllowed
+              val: true
+          - $return: true

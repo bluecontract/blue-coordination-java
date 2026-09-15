@@ -1143,12 +1143,23 @@ final class SdkDrainResultMapper {
         entries.forEach(entry -> measurements.add(entry.stats()));
         local.forEach(step -> measurements.add(step.stats()));
         for (ProcessingStats stats : measurements) {
-            gas = Math.addExact(gas, stats.gas());
             opened = Math.addExact(opened, stats.documentsOpened());
             order.addAll(stats.documentStepOrder());
             stats.counters().forEach((name, value) -> counters.merge(
                     name, value, Math::addExact));
         }
+        // The engine assigns each executed occurrence to exactly one lane.
+        // Retained result projections keep their original gas on replay, so
+        // aggregate call gas comes from non-replayed attempts, not those views
+        // or the additional application receipt describing the same execution.
+        for (var attempts : receipt.contractsAttemptsByEntry().values()) {
+            for (var attempt : attempts)
+                gas = Math.addExact(gas, chargedGas(attempt.attempt(), attempt.replayed()));
+        }
+        for (var retained : receipt.rootedRetainedAttempts())
+            gas = Math.addExact(gas, chargedGas(retained.attempt().attempt(), retained.attempt().replayed()));
+        for (var attempt : receipt.managedEpochApplicationAttempts())
+            gas = Math.addExact(gas, chargedGas(attempt.attempt(), attempt.replayed()));
         return new ProcessingStats(
                 gas,
                 receipt.committedProcessTransitions(),
@@ -1156,6 +1167,10 @@ final class SdkDrainResultMapper {
                 receipt.elapsedNanos(),
                 order,
                 counters);
+    }
+
+    private static long chargedGas(ClosureAttemptResult attempt, boolean replayed) {
+        return !replayed && attempt.isComplete() ? attempt.processResult().totalGas() : 0L;
     }
 
     private record TargetOutcome(

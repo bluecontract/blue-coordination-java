@@ -1,16 +1,102 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsExecutionPolicy;
+import blue.coordination.api.ProcessingAvailability;
+import blue.coordination.api.ProcessingSelection;
 import blue.coordination.internal.CoordinationTestControl;
 import blue.coordination.internal.RootedCalculationFixture;
+import blue.language.processor.closure.ClosureProcessResult;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Actual local retained publication, shared-gas rollback and response-loss recovery. */
 final class RootedLocalHistoryRecoveryTest {
+    @Test void retainedCauseDoesNotRepeatItsOriginalOperationSelectors() throws Exception {
+        // given
+        try (var scenario = new Scenario(100_000L, true)) {
+            var heads = scenario.heads();
+            var histories = completeHistories(scenario);
+            var selection = scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root);
+            assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, selection.kind());
+            assertEquals(scenario.root.id(), selection.rootedRetainedRoot().orElseThrow());
+            var global = scenario.f.blue.advanced().auditNextProcessingSelection();
+            for (int audit = 0; audit < 3; audit++) {
+                assertSameSelection(selection, scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root));
+                assertSameSelection(global, scenario.f.blue.advanced().auditNextProcessingSelection());
+                assertEquals(heads, scenario.heads());
+                assertEquals(histories, completeHistories(scenario));
+            }
+            var input = scenario.f.control.captureLocalHistory(scenario.root.id());
+            var reference = RootedCalculationFixture.materializedReference(input);
+            assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
+            // when
+            var result = scenario.f.blue.processing().processNext(scenario.root);
+            // then
+            assertTrue(result.quiescent());
+            assertEquals(1, result.rootedRetainedResults().size());
+            assertEquals(selection.managedEpochApplicationWork().orElseThrow().workIdentity(),
+                    result.rootedRetainedApplications().get(0).work().workIdentity());
+            assertEquals(selection.rootedRetainedRoot().orElseThrow(),
+                    result.rootedRetainedApplications().get(0).rootDocumentId());
+            var actual = scenario.f.blue.advanced().closureExecution(result.rootedRetainedResults().get(0).closureId()).orElseThrow();
+            assertEquals(reference.status(), actual.status());
+            assertEquals(reference.inputClosureIdentity(), actual.inputClosureIdentity());
+            assertEquals(reference.outputClosureIdentity(), actual.outputClosureIdentity());
+            assertEquals(reference.commitCompanion().companionIdentity(), actual.commitCompanion().companionIdentity());
+            assertEquals(reference.publicEventsIdentity(), actual.publicEventsIdentity());
+            assertEquals(reference.checkpointWritesIdentity(), actual.checkpointWritesIdentity());
+            assertEquals(reference.managedTransitionReceiptsIdentity(), actual.managedTransitionReceiptsIdentity());
+            assertEquals(reference.totalGas(), actual.totalGas());
+            assertEquals(reference.gasTraceIdentity(), actual.gasTraceIdentity());
+            assertEquals(fullTrace(reference), fullTrace(actual));
+            assertEquals(1L, result.stats().committedTransitions());
+            assertEquals(heads.subList(1, 3), scenario.heads().subList(1, 3));
+            assertEquals(histories.subList(1, 3), completeHistories(scenario).subList(1, 3));
+            assertEquals(25, scenario.localConsumerTouches());
+            var afterHeads = scenario.heads();
+            var afterHistories = completeHistories(scenario);
+            CoordinationTestControl.attach(scenario.f.blue.advanced().rawEngine()).restartFromStores();
+            var replay = scenario.f.blue.processing().processNext(scenario.root);
+            assertTrue(replay.quiescent());
+            assertEquals(0L, replay.stats().committedTransitions());
+            assertEquals(afterHeads, scenario.heads());
+            assertEquals(afterHistories, completeHistories(scenario));
+        }
+    }
+
+    @Test void liveOperationStillRejectsAnUnresolvedSelectorPath() throws Exception {
+        // given
+        try (var f = new RootedSdkFixture()) {
+            String template;
+            try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
+                template = new String(java.util.Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8);
+            }
+            var source = f.startYaml(template.replace("<NODE>", "C").replace("<NAMESPACE>", "selector-negative")
+                    .replace("<TIMELINE>", "selector-negative/C"), "selector-negative/C");
+            var root = f.startYaml(template.replace("<NODE>", "B").replace("<NAMESPACE>", "selector-negative")
+                    .replace("<TIMELINE>", "selector-negative/B"), "selector-negative/B");
+            var heads = List.of(root.snapshot().blueId(), source.snapshot().blueId());
+            var histories = List.of(completeHistory(f, root), completeHistory(f, source));
+            f.blue.operations().on(root).from(f.timelines.get("selector-negative/B"))
+                    .call("attach").through("owner")
+                    .requestYaml("edge: c\nsource: {blueId: " + source.snapshot().blueId() + "}")
+                    .selectManagedEpoch(ManagedEpochSelector.exact(source.id(), 0L,
+                            source.snapshot().blueId(), "/peers/not-c")).submit();
+            // when
+            var failure = assertThrows(blue.coordination.api.CoordinationException.class,
+                    () -> f.blue.processing().processNext(root));
+            // then
+            var cause = assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+            assertTrue(cause.getMessage().contains("MANAGED_EPOCH_SELECTOR_PATH_MISMATCH"), cause.toString());
+            assertTrue(cause.getMessage().contains("/peers/not-c"), cause.toString());
+            assertEquals(heads, List.of(root.snapshot().blueId(), source.snapshot().blueId()));
+            assertEquals(histories, List.of(completeHistory(f, root), completeHistory(f, source)));
+        }
+    }
     @Test void retainedSourceEventReachesItsCalculatedConsumer() throws Exception {
         // given
         try (var scenario = new Scenario(100_000L)) {
@@ -112,11 +198,197 @@ final class RootedLocalHistoryRecoveryTest {
         }
     }
 
+    @Test void failedLocalRetainedWorkDoesNotHideAnIndependentJournalInputAfterRestart() throws Exception {
+        // given
+        long successfulGas;
+        try (var calibration = new Scenario(100_000L)) {
+            var reference = RootedCalculationFixture.materializedReference(
+                    calibration.f.control.captureLocalHistory(calibration.root.id()));
+            assertTrue(reference.commits(), String.valueOf(reference.diagnostic()));
+            successfulGas = reference.totalGas();
+        }
+        try (var scenario = new Scenario(successfulGas - 1L)) {
+            var f = scenario.f;
+            var work = f.control.localHistoryWork(scenario.root.id());
+            var input = f.control.captureLocalHistory(scenario.root.id());
+            var reference = RootedCalculationFixture.materializedReference(input);
+            var heads = scenario.heads();
+            var histories = completeHistories(scenario);
+            // when
+            var failed = f.blue.processing().processNext(scenario.root);
+            // then
+            assertEquals(1, failed.rootedRetainedResults().size());
+            var terminal = failed.rootedRetainedResults().get(0);
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, terminal.disposition());
+            var retained = f.blue.advanced().closureExecution(terminal.closureId()).orElseThrow();
+            assertExactFailure(reference, retained);
+            assertEquals(retained.totalGas(), failed.stats().gas());
+            assertEquals(0L, failed.stats().committedTransitions());
+            assertTrue(terminal.changes().isEmpty()); assertTrue(terminal.publicEvents().isEmpty());
+            assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+
+            var independent = f.start("source.yaml", "rcp2/source", Map.of());
+            var independentHistory = completeHistory(f, independent);
+            var entry = f.append(independent, "rcp2/source", "tick", 300L, "{}");
+            for (boolean restart : List.of(false, true)) {
+                if (restart) CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+                for (int audit = 0; audit < 3; audit++) {
+                    assertEquals(ProcessingSelection.Kind.JOURNAL,
+                            f.blue.advanced().auditNextProcessingSelection().kind(),
+                            "An unchanged terminal local gas failure cannot hide an unrelated live input");
+                    assertEquals(ProcessingSelection.Kind.JOURNAL,
+                            f.blue.advanced().auditNextProcessingSelection(
+                                    ProcessingAvailability.of(true)).kind());
+                    assertEquals(work.workIdentity(), f.control.localHistoryWork(scenario.root.id()).workIdentity());
+                    assertExactFailure(reference,
+                            f.blue.advanced().closureExecution(terminal.closureId()).orElseThrow());
+                    assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+                    assertEquals(independentHistory, completeHistory(f, independent));
+                }
+            }
+
+            // Select and commit at most one root input; transport completion is bookkeeping.
+            var completed = f.blue.processing().drainJournal(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED, completed.entry(entry).disposition());
+            assertEquals(1L, completed.stats().committedTransitions());
+            assertEquals(1L, independent.snapshot().longAt("/counter"));
+            assertEquals(independentHistory, completeHistory(f, independent).subList(0, independentHistory.size()));
+            assertEquals(independentHistory.size() + 1, completeHistory(f, independent).size());
+            assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+            assertFalse(failed.quiescent(), "A terminal noncommitting local attempt is not successful progress");
+
+            // A successful journal turn restores historical preference. A second independent
+            // input must still be visible before any explicit retry of the failed local root.
+            var secondEntry = f.append(independent, "rcp2/source", "tick", 400L, "{}");
+            assertEquals(ProcessingSelection.Kind.JOURNAL, f.blue.advanced().auditNextProcessingSelection().kind());
+            assertEquals(ProcessingSelection.Kind.JOURNAL,
+                    f.blue.advanced().auditNextProcessingSelection(ProcessingAvailability.of(true)).kind());
+            var second = f.blue.processing().drainJournal(new DrainBudget(1L, 1L));
+            assertEquals(EntryDisposition.APPLIED, second.entry(secondEntry).disposition());
+            assertEquals(1L, second.stats().committedTransitions());
+            assertEquals(2L, independent.snapshot().longAt("/counter"));
+            assertEquals(independentHistory.size() + 2, completeHistory(f, independent).size());
+            assertEquals(independentHistory, completeHistory(f, independent).subList(0, independentHistory.size()));
+            assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+
+            // Only the retained local failure remains. It is reported once and deferred,
+            // even when the full driver has room for two selected attempts in this call.
+            var bounded = f.blue.processing().drain(new DrainBudget(1L, 2L));
+            assertTrue(bounded.entries().isEmpty());
+            assertEquals(1, bounded.rootedRetainedResults().size());
+            assertEquals(terminal.closureId(), bounded.rootedRetainedResults().get(0).closureId());
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, bounded.rootedRetainedResults().get(0).disposition());
+            assertFalse(bounded.quiescent());
+            assertEquals(0L, bounded.stats().committedTransitions());
+            assertEquals(work.workIdentity(), f.control.localHistoryWork(scenario.root.id()).workIdentity());
+            assertExactFailure(reference, f.blue.advanced().closureExecution(terminal.closureId()).orElseThrow());
+            assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+
+            var repeated = f.blue.processing().processNext(scenario.root);
+            assertFalse(repeated.quiescent());
+            assertEquals(0L, repeated.stats().committedTransitions());
+            assertEquals(terminal.closureId(), repeated.rootedRetainedResults().get(0).closureId());
+            assertEquals(EntryDisposition.GAS_LIMIT_EXCEEDED, repeated.rootedRetainedResults().get(0).disposition());
+            assertExactFailure(reference, f.blue.advanced().closureExecution(terminal.closureId()).orElseThrow());
+            assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+        }
+    }
+
+    @Test void uncommittedLocalPublicationFailurePreservesSelectionsAcrossRestart() throws Exception {
+        // given
+        try (var scenario = new Scenario(100_000L)) {
+            var f = scenario.f;
+            var independent = f.start("source.yaml", "rcp2/source", Map.of());
+            f.append(independent, "rcp2/source", "tick", 300L, "{}");
+            var ordinary = f.blue.advanced().auditNextProcessingSelection();
+            var admission = f.blue.advanced().auditNextProcessingSelection(ProcessingAvailability.of(true));
+            var work = f.control.localHistoryWork(scenario.root.id());
+            var heads = scenario.heads(); var histories = completeHistories(scenario);
+            var independentHead = independent.snapshot().exact().json();
+            var independentHistory = completeHistory(f, independent);
+            f.control.failPublicationAt("BEFORE_SWAP");
+            // when
+            assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(scenario.root));
+            f.control.clearPublicationFailure();
+            // then
+            for (boolean restart : List.of(false, true)) {
+                if (restart) CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+                assertSameSelection(ordinary, f.blue.advanced().auditNextProcessingSelection());
+                assertSameSelection(admission,
+                        f.blue.advanced().auditNextProcessingSelection(ProcessingAvailability.of(true)));
+                assertEquals(work.workIdentity(), f.control.localHistoryWork(scenario.root.id()).workIdentity());
+                assertEquals(heads, scenario.heads()); assertEquals(histories, completeHistories(scenario));
+                assertEquals(independentHead, independent.snapshot().exact().json());
+                assertEquals(independentHistory, completeHistory(f, independent));
+            }
+            var retried = f.blue.processing().processNext(scenario.root);
+            assertEquals(1L, retried.stats().committedTransitions());
+            assertTrue(retried.quiescent());
+            assertEquals(25, scenario.localConsumerTouches());
+            assertEquals(histories.get(0).size() + 1, completeHistories(scenario).get(0).size());
+            assertEquals(histories.subList(1, 3), completeHistories(scenario).subList(1, 3));
+            var committed = completeHistories(scenario);
+            CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
+            assertEquals(0L, f.blue.processing().processNext(scenario.root).stats().committedTransitions());
+            assertEquals(committed, completeHistories(scenario));
+            assertEquals(independentHead, independent.snapshot().exact().json());
+            assertEquals(independentHistory, completeHistory(f, independent));
+        }
+    }
+
+    private static void assertSameSelection(ProcessingSelection expected, ProcessingSelection actual) {
+        assertEquals(expected.kind(), actual.kind());
+        assertEquals(expected.rootedRetainedRoot(), actual.rootedRetainedRoot());
+        assertEquals(expected.managedEpochApplicationWork().map(work -> work.workIdentity()),
+                actual.managedEpochApplicationWork().map(work -> work.workIdentity()));
+    }
+
+    private static void assertExactFailure(ClosureProcessResult reference, ClosureProcessResult actual) {
+        assertEquals(reference.status(), actual.status());
+        assertEquals(reference.invocationIdentity(), actual.invocationIdentity());
+        assertEquals(reference.inputClosureIdentity(), actual.inputClosureIdentity());
+        assertEquals(reference.outputClosureIdentity(), actual.outputClosureIdentity());
+        assertEquals(reference.totalGas(), actual.totalGas());
+        assertEquals(reference.gasTraceIdentity(), actual.gasTraceIdentity());
+        assertEquals(fullTrace(reference), fullTrace(actual));
+        assertTrue(actual.rollbackToInput()); assertFalse(actual.commits());
+        assertNull(actual.commitCompanion());
+        assertEquals(reference.rejectedCharge().rejectedChargeIdentity(), actual.rejectedCharge().rejectedChargeIdentity());
+        assertTrue(actual.checkpointWrites().isEmpty()); assertTrue(actual.managedTransitionReceipts().isEmpty());
+        assertTrue(actual.publicEvents().isEmpty());
+    }
+
+    private static List<List<Object>> fullTrace(ClosureProcessResult result) {
+        return result.gasTrace().stream().map(charge -> java.util.Arrays.<Object>asList(
+                charge.sequence(), charge.namespace(), charge.counter(), charge.quantity(), charge.weight(), charge.subtotal(),
+                charge.documentId(), charge.scopePath(), charge.activationGeneration(), charge.componentGeneration(),
+                charge.contractKey(), charge.logicalPath(), charge.workOccurrenceId(), charge.reason())).toList();
+    }
+
+    private static List<List<List<Object>>> completeHistories(Scenario scenario) {
+        return scenario.roots.values().stream().map(root -> completeHistory(scenario.f, root)).toList();
+    }
+
+    private static List<List<Object>> completeHistory(RootedSdkFixture f, DocumentHandle document) {
+        return f.blue.advanced().auditManagedEpochs(document.id()).stream().map(receipt -> List.<Object>of(
+                receipt.receiptIdentity(), receipt.documentId(), receipt.epoch(), receipt.kind(), receipt.beforeBlueId(),
+                receipt.afterBlueId(), receipt.afterDocument().json(), receipt.originalCauseIdentity(),
+                receipt.sourceEntry().map(entry -> List.of(entry.exact().json(), entry.globalSequence(), entry.timelineSequence())),
+                receipt.sourceOrder(), receipt.contractsTransitionReceiptIdentity(), receipt.commitCompanionIdentity(),
+                receipt.emittedEvents().stream().map(event -> List.of(event.managedEventIdentity(), event.ordinal(),
+                        event.eventOccurrenceOrdinal(), event.sourceDocumentId(), event.eventOccurrenceIdentity(),
+                        event.eventBlueId(), event.exactEvent().json(), event.publicAtSource())).toList(),
+                receipt.processingGas())).toList();
+    }
+
     private static final class Scenario implements AutoCloseable {
         final RootedSdkFixture f;
         final LinkedHashMap<String, DocumentHandle> roots = new LinkedHashMap<>();
         final DocumentHandle root;
         Scenario(long gas) throws Exception {
+            this(gas, false);
+        }
+        Scenario(long gas, boolean explicitSelector) throws Exception {
             f = new RootedSdkFixture(ContractsExecutionPolicy.exactSharedGas(gas, "rooted-local-history-boundary"));
             String template;
             try (var in = getClass().getResourceAsStream("/rooted/node-graph.template.json")) {
@@ -137,8 +409,14 @@ final class RootedLocalHistoryRecoveryTest {
                     ContractsExecutionPolicy.releaseDefault()).entry(changedSource).disposition());
             for (String[] edge : new String[][]{{"A", "b", "B"}, {"B", "c", "C"}}) {
                 var owner = roots.get(edge[0]);
-                last = f.append(owner, "rcp/local-gas/" + edge[0], "attach", ++ordinal * 100L,
-                        "edge: " + edge[1] + "\nsource: {blueId: " + originals.get(edge[2]).blueId() + "}");
+                ++ordinal;
+                String request = "edge: " + edge[1] + "\nsource: {blueId: " + originals.get(edge[2]).blueId() + "}";
+                if (explicitSelector && edge[0].equals("B")) {
+                    last = f.blue.operations().on(owner).from(f.timelines.get("rcp/local-gas/B"))
+                            .call("attach").through("owner").requestYaml(request)
+                            .selectManagedEpoch(ManagedEpochSelector.exact(roots.get("C").id(), -1L,
+                                    originals.get("C").blueId(), "/peers/c")).submit();
+                } else last = f.append(owner, "rcp/local-gas/" + edge[0], "attach", ordinal * 100L, request);
                 assertEquals(EntryDisposition.APPLIED, f.blue.advanced().process(owner, last,
                         ContractsExecutionPolicy.releaseDefault()).entry(last).disposition());
                 boolean done = false;
