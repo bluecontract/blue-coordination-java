@@ -26,6 +26,39 @@ owners from the frozen registry, making this review independent of another local
 checkout. The [rebind procedure](baseline-reconciliation-rebind.md) records the
 maintained files and commands for the new Language artifact tuple.
 
+## Approved baseline-first scope
+
+The user has deferred the whole nested/contextual identity family (C03) to a
+separate follow-up. This includes the earlier donor/e101 explicit-versus-inherited
+type policy and Source-aware minimizer change, not only the uncommitted contextual
+successor. Language will retain pinned merged `450230c1` Core identity/minimizer
+behavior while keeping the other five baseline families: legal later detached
+retargeting, numbered source-epoch continuity, coherent immutable witness contexts,
+fresh same-cause witness selection, and Named Compute contribution provenance.
+
+Coordination needs no production change for this deferral. It does not call the
+Source-aware minimizer overload; its required Language additions remain
+`WorkingDocument.sourceContributionsAt(String)` and
+`ClosureEvidenceFactory.rootedWitnessSelection(...)`. Static separation does not
+prove runtime independence: the reduced candidate requires fresh sealed artifacts,
+maintained generation, native/consumer gates and complete application acceptance.
+
+The two contextual four-form SDK cases introduced in `c2ce06d4` are removed from
+the baseline owner, with their exact source preserved in that commit for the
+deferred follow-up. This is a scope deferral, not skipped tests or a passing run.
+The owner is restored byte-for-byte to `94d73e1c`. All pre-existing upstream and
+retained baseline assertions remain in scope, including redundant canonicalized
+definition maps, raw exact-provider rejection, canonical child copying, history,
+ordering, gas, failure and identity checks.
+
+The recorded generation02/e101 inputs and qualification below are historical.
+They do not qualify the reduced source. The active profile still contains the
+pinned Language specification `sha256:77b48506ff7b5ddbab26b98ce9e060e943cb3babf1e6f5511085bbb3c31c4144`;
+no deferred contextual specification or API binding has been imported into
+Coordination. Rebind generated inputs from the new sealed candidate using the
+[maintained procedure](baseline-reconciliation-rebind.md), without changing RC10
+published defaults or manually rewriting semantic outcomes.
+
 ## Disposition
 
 | Problem / example | Pinned upstream solution | Disposition | Remaining delta | Regression evidence retained |
@@ -54,12 +87,14 @@ maintained files and commands for the new Language artifact tuple.
 
 ## Required APIs and compatibility
 
-Language agent confirms the pinned merged Language does not provide the frozen
-`WorkingDocument.sourceContributionsAt(String)`, Source-aware
-`MinimizedOverlayBuilder.build(FrozenNode, Node, CanonicalTypeIdentityLookup)`, or
-`ClosureEvidenceFactory.rootedWitnessSelection(...)`. The reconciled Language
-candidate retains those necessary APIs. Coordination uses only those frozen
-contracts and the pinned merged APIs; it does not depend on an open PR.
+The pinned merged Language does not provide the frozen
+`WorkingDocument.sourceContributionsAt(String)` or
+`ClosureEvidenceFactory.rootedWitnessSelection(...)`; both remain necessary for
+Coordination's other baseline fixes. The earlier inventory also listed
+`MinimizedOverlayBuilder.build(FrozenNode, Node, CanonicalTypeIdentityLookup)`,
+but Coordination has no code consumer of that overload. Its removal with the
+whole deferred identity family requires no Coordination adapter. Coordination
+uses only the retained frozen contracts and pinned merged APIs, not an open PR.
 
 For named definitions, `canonicalAt` cannot traverse arbitrary verified sibling
 references and `resolvedAt` cannot distinguish explicit exact presence from type
@@ -109,7 +144,11 @@ or passing executions. The existing upstream test corpus remains enabled. New
 acceptance evidence may motivate a separate reconsideration; no POC source is
 authorized by that possibility.
 
-## Implementation status
+## Historical generation02 implementation status
+
+This section records the original combined source and is superseded by the
+baseline-first scope above for the next candidate. No reduced-source pass is
+claimed by its historical status or bindings.
 
 Source and regression reconciliation is complete pending artifact authentication,
 topology regeneration and actual qualification. Measured production shape is 253 sources, 74,084 lines

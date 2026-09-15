@@ -1,5 +1,45 @@
 # Reconciled Language binding and topology evidence
 
+## Baseline-first successor: C03 deferred
+
+The next candidate excludes the whole nested/contextual identity family and
+restores pinned merged Language Core identity/minimizer behavior. The historical
+generation02 bindings below remain in the current Coordination source; they must
+not be mistaken for the forthcoming reduced-source tuple. Coordination contains
+no `specification-set.json`: Language owns that manifest and must retain its
+baseline Language row `77b48506ff7b5ddbab26b98ce9e060e943cb3babf1e6f5511085bbb3c31c4144`
+(217,483 bytes), not the deferred contextual specification `ebbaf3dc...`.
+
+Authenticate all seven profile fields from the new owning JARs and sealed
+manifest. With baseline specifications and tariffs retained, those three fields
+are expected to stay unchanged; release/fixture and cyclic source-role identities
+must be measured and rebound, never guessed. Rebuild BEX/Catalog exports against
+the same new Language manifest even if their source commits do not change.
+Removing the unpublished three-argument minimizer requires no Coordination code
+adapter. Retain the contribution/witness APIs and merged processing-event APIs.
+
+There is no profile generator: patch the authenticated properties and exact
+`SdkCoreSeamsTest` release/fixture literals, changing
+`ROOTED_CONTRACTS_SPECIFICATION` only if its independently verified value changes.
+Commit clean inputs before the filtered topology exporter below. Review all 32
+records, preserving numeric gas, history/state, event/work order, ownership,
+failure and rollback assertions; no manual topology rehash is permitted. Commit
+the reviewed generated JSON/Markdown before export and refresh the exact
+Coordination development version. Keep all RC10 published defaults unchanged.
+
+Before topology/full gates, use the sealed dependency arguments with the focused
+`SdkCoreSeamsTest`, complete `SdkNamedComputeDefinitionTest`,
+`ComputeProgramNormalizerTest`, `RootedNestedDocumentValueIdentityTest`,
+`ScopedProcessorExecutionContextBexDocumentViewTest`,
+`RootedSourcePrerequisiteObservationTest`, and the two `processor.bex` owners
+`ProcessingEventIdentityEvidenceTest` / `BexHandlerEventBindingTest`.
+The two C03-only parameterized SDK cases are deferred, not disabled; every
+pre-existing owner assertion remains. Exact runtime discovery is authoritative.
+Final Java 17/21 `releaseCheck`, extracted-source, exported-consumer and complete
+MyOS gates remain required on one frozen tuple. No new execution is claimed here.
+
+## Historical generation02 procedure status
+
 This procedure was inspected against pinned Coordination RC10 plus the current
 source reconciliation. The reviewed generation02 input bindings below have been
 applied; artifact authentication, regeneration and qualification commands have

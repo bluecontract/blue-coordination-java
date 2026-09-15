@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -174,75 +173,6 @@ final class SdkNamedComputeDefinitionTest {
             // then
             assertCoffeeEvent(blue, document.snapshot().publicEvents());
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"constants", "functions"})
-    void contextualSourceNormalizationKeepsNamedAndCanonicalExactSelectionEquivalent(String field) {
-        String absentDefinition = "type: Coordination/Compute Definition\n";
-        String redundantDefinition = absentDefinition + field + ": {type: Dictionary}\n";
-        ExactBlueValue absentExact;
-        ExactBlueValue redundantExact;
-        ExactBlueValue contextType;
-        try (BlueCoordination preparer = BlueCoordination.inMemory()) {
-            // These are independently stored direct values, not minimized fixture bodies.
-            absentExact = preparer.values().providerContentYaml(absentDefinition);
-            redundantExact = preparer.values().providerContentYaml(redundantDefinition);
-            contextType = preparer.values().providerContentYaml("""
-                    name: Named Compute normalization context
-                    library:
-                      coffeeCode:
-                        type: Coordination/Compute Definition
-                    """);
-            assertNotEquals(absentExact.blueId(), redundantExact.blueId(),
-                    "Distinct exact provider bodies must not be retargeted by Source normalization");
-        }
-        List<ExactBlueValue> retained = List.of(absentExact, redundantExact, contextType);
-        List<String> retainedBodies = retained.stream().map(ExactBlueValue::json).toList();
-        List<String> definitionForms = List.of(
-                absentDefinition,
-                redundantDefinition,
-                "{blueId: " + absentExact.blueId() + "}\n",
-                "{blueId: " + redundantExact.blueId() + "}\n");
-        List<List<Integer>> orders = List.of(
-                List.of(0, 1, 2, 3, 0),
-                List.of(3, 2, 1, 0, 3));
-        for (int orderIndex = 0; orderIndex < orders.size(); orderIndex++) {
-            try (BlueCoordination blue = BlueCoordination.builder().exactNodeProvider(requested ->
-                    retained.stream().filter(value -> value.blueId().equals(requested))
-                            .map(ExactBlueValue::json).findFirst()).build()) {
-                String commonContextSourceId = null;
-                int occurrence = 0;
-                for (int formIndex : orders.get(orderIndex)) {
-                    String contextualSource = "type: {blueId: " + contextType.blueId() + "}\n"
-                            + "library:\n  coffeeCode:\n" + definitionForms.get(formIndex).indent(4);
-                    // Source-first in a fresh runtime, then shared/reordered and warm repeats.
-                    // Equality is the oracle; no candidate-observed BlueId is a golden.
-                    ExactBlueValue normalizedContext = blue.values().yaml(contextualSource);
-                    if (commonContextSourceId == null) {
-                        commonContextSourceId = normalizedContext.blueId();
-                    }
-                    assertEquals(commonContextSourceId, normalizedContext.blueId(),
-                            "Equivalent definitions under the same declared slot must share Source identity");
-                    ExactBlueValue canonicalDefinition = blue.values().yaml(absentDefinition);
-                    assertEquals(canonicalDefinition.blueId(), blue.values().yaml(redundantDefinition).blueId(),
-                            "The redundant authored map is not separate executable input after canonicalization");
-                    for (boolean named : List.of(true, false)) {
-                        String selector = named ? "/library/coffeeCode"
-                                : "{blueId: " + canonicalDefinition.blueId() + "}";
-                        String id = "context-" + field + "-" + orderIndex + "-" + occurrence + "-" + named;
-                        DocumentHandle document = admit(blue, id, contextualSource
-                                + initialization(INLINE_STEP + "  definition: " + selector + "\n"));
-                        assertCoffeeEvent(blue, document.snapshot().publicEvents());
-                    }
-                    assertEquals(retainedBodies, retained.stream().map(ExactBlueValue::json).toList(),
-                            "Canonicalization and execution must not rewrite exact provider content");
-                    occurrence++;
-                }
-            }
-        }
-        // Raw exact-provider declaration rejection is intentionally retained in
-        // exactProviderDefinitionKeepsContainerMeaningAcrossNamedAndExactSelection.
     }
 
     private static Stream<Arguments> redundantDefinitionMaps() {
