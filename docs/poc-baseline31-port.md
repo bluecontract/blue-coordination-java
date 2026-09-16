@@ -1,7 +1,8 @@
 # POC baseline31 reconciliation
 
-Status: source reconciliation only; no build, test, artifact qualification or
-commit is claimed by this record. The previous POC worktree remains unchanged.
+Status: source reconciliation and the focused library/MyOS qualification are
+complete (2026-09-16). The previous POC worktree remains unchanged. This is not
+full application acceptance or qualification of the original long graph.
 
 ## Exact boundary
 
@@ -38,7 +39,7 @@ production files lose only a trailing blank line (+22/-70 lines overall).
 Storage codecs, cache policy, byte-cap compatibility, reference validation,
 history ordering, publication fences and failure classification are preserved.
 
-## Retained controls and pending qualification
+## Retained controls and qualification
 
 - `ManagedEpochIndirectComponentRebindTest`: immutable capsule sharing,
   detached-member mutation, fresh source reacquisition and provider failures.
@@ -53,15 +54,34 @@ history ordering, publication fences and failure classification are preserved.
 - All POC storage/cache owners remain, including
   `RootedStorageResultProfileIntegrationTest` and same-epoch/cold-owner controls.
 
-The seven SDK bindings currently remain those of merged RC11. They must be
-authenticated against the newly exported Language POC tuple before any Gradle
-development invocation; `gradle/development-catalog.gradle` intentionally
-checks them during configuration. Rebind only measured differences, preserving
-the merged baseline specification and C03 deferral. Baseline-generated topology
-artifacts are retained as the starting oracle; do not manually replace scenario
-hashes with old POC identities.
+The seven SDK bindings remain those of merged RC11 and were authenticated against
+the newly exported Language POC tuple before the Gradle development invocation;
+`gradle/development-catalog.gradle` checks them during configuration. No binding
+change or topology-fixture regeneration was required. The merged baseline
+specification, C03 deferral and generated scenario identities are retained.
 
-Qualification requires the final coherent artifact tuple, compilation/API/shape
-checks, retained optimization controls and baseline behavior controls, followed
-by MyOS resident/PostgreSQL confirmation. Prior baseline or batch30 passes do not
-qualify this assembled source. No remote action is part of this reconciliation.
+Tested implementation: `5cb47ec45c2ffafffed3e371c6feba5d939eec1e`, against
+Language `fafffe916badf99d856d72771cd1c785c6b67463`. The clean-source native gate
+passed **256/256 tests across 29 owners**, with zero failures, errors or skips.
+Compilation, API/SDK-shape, Javadoc and dependency guards passed. Both result
+byte-cap profiles retained the intended mechanism result: seven frames, seven
+instances and zero duplicate result frames. This is a mechanism assertion, not
+an application speedup claim.
+The topology aggregation task `verifyCyclicTopologyIdentityEvidence` was skipped
+by its existing complete-selection guard for this filtered test group; zero
+skipped JUnit tests does not mean full topology/conformance regeneration ran.
+
+The exported runtime was compared with the tested artifact: all 932 non-manifest
+entries matched, with the exact dependency closure preserved. The final tuple
+then built MyOS without host source adaptations and passed **10/10 focused
+resident/PostgreSQL cases** with cold restart, cyclic evidence, historical
+references, forwarding and reconnection. Prior batch30 evidence is retained
+separately, not substituted for these new-tuple results.
+
+Evidence root:
+`/Users/kamil/Documents/Projects/Blue/rooted-external-resumption-evidence.c0VVLS/processing-measurement13/baseline31/`.
+See `coordination-qualification.json`, `coordination-controls01/`,
+`coordination-export-audit.json`, and `combined-smoke-summary.json`. The host
+report is `worktrees/rooted-external-myos-baseline31/docs/poc-baseline-refresh-20260916.md`
+under the Blue project directory. Later documentation-only commits do not
+relabel the tested source/artifact. No remote action was performed.
