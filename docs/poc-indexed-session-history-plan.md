@@ -1,7 +1,8 @@
 # P2: indexed session history — implementation and measurement card
 
-Status: implementation plan and executable baseline probe in preparation.
-The merged-baseline refresh is closed; P2 is not yet qualified or wired into MyOS.
+Status: executable baseline probe and membership-only prerequisite qualified.
+The merged-baseline refresh is closed; indexed P2 storage is not yet implemented
+or wired into MyOS.
 Work stays on the existing owned `codex/poc-baseline-refresh-20260916` branches.
 No new source from open PRs, protocol changes, larger record limits or Redis.
 
@@ -122,3 +123,80 @@ payloads must not be opened merely to prove that they were not needed. First
 close the library before/after result; then run the corresponding short MyOS
 PostgreSQL confirmation. Do not use another long application timeout as the
 first test of this hypothesis.
+
+## Measured starting point — 2026-09-16
+
+The final probe uses the same two-document graph with scalar parent state, no L1,
+detached stored bytes and fresh SDK owners. It passed the complete resident/cold
+oracles for all four workloads, including exact full stored-view identity (not
+only final bodies or result hashes), same-epoch positions, successor publication,
+old-root stability and cold reopening followed by a measured current-tip read.
+
+| Numbered parent epochs | Current-tip revision GETs | Current-tip view GETs | Current-tip total GET bytes | Largest session descriptor |
+| ---: | ---: | ---: | ---: | ---: |
+| 5 | 6 | 9 | 2,714,614 | 53,194 bytes |
+| 20 | 21 | 24 | 8,293,093 | 55,078 bytes |
+| 50 | 51 | 54 | 19,476,755 | 82,040 bytes |
+
+The separate five-same-epoch-transition case remains at parent epoch zero: one
+numbered revision and seven view GETs, 1,721,724 bytes for current-tip selection.
+It has six retained parent view positions including its starting view; five
+transitions are not five numbered epochs.
+
+The 50-epoch successor's process phase performs 23,176 object-port GETs after
+submission has already loaded its historical state. Staging then reads another
+20,625,550 bytes, including 52 revision and 55 view GETs, and issues one PUT for
+an unchanged historical payload. Cold selection after reopening repeats the
+growing-history cost. Thus session recovery, index access and staging all belong
+in the proposed change; improving history lookup alone cannot close this gate.
+
+These are library byte-port calls, **not SQL queries or network traffic**. The
+test stores detached arrays behind the actual immutable-object interface; it
+uses real SDK/Contracts execution but no database. Phase times include accounting
+overhead, are single samples and are not application-latency predictions. The
+complete raw phase inventory is preserved. Decoder counts remain unavailable;
+payload GETs must not be relabelled decodes.
+
+"Unrequested" means outside the predeclared logical selected payload/boundary
+set. Current strict restoration deliberately reads the prefix to establish its
+invariants; those reads are not evidence of a correctness bug. The new indexed,
+library-origin path must preserve those invariants without repeating the work.
+The baseline's zero-read/rewrite budget is explicitly **not passing**.
+
+The four membership-only call sites were changed without removing their exact
+owner/head/frontier checks. A controlled test uses the same retained inputs at
+5/20/50 positions: constructing the formerly discarded prefix visits 5/20/50
+positions; the new membership path visits zero. A detached value-identical view
+still fails. This qualifies that narrow traversal reduction only; the table
+above remains the starting point for indexed P2, not a claimed P2 improvement.
+
+## Qualification and handoff
+
+- Implementation/test commit `3e44f34bd3b9c2f8ea946715e3f73f221c516129`:
+  **30/30 tests across nine owners**, including the original four measurement
+  workloads; Javadoc, API/SDK boundary, production-shape and exact dependency
+  controls passed. The normal filtered topology-aggregation task did not run.
+- Test-only refinement `384cef635ec8f5a434149244faaf94082ebec50c`: strengthened
+  complete-view equality and measured selected reads after reopen. Re-ran only
+  those **4/4 workloads**, with 12 phases each. Production/build byte content is
+  unchanged from the 30-test gate. These are **30 distinct tests, not 34**.
+- Both native runs had zero JUnit failures, errors or skips, and unchanged clean
+  pinned source. Test heap was 16 GiB, with no processor-count cap. Neither
+  Language nor BEX nor Catalog was changed; the baseline31 immutable dependencies
+  were reused. MyOS still uses its qualified baseline31 artifact tuple; this
+  prerequisite was not exported to the app or presented as new E2E acceptance.
+
+Evidence root under `/Users/kamil/Documents/Projects/Blue`:
+`rooted-external-resumption-evidence.c0VVLS/processing-measurement13/history32/`.
+`controls01/` preserves the first native run. `probe02/measurement-audit.json`
+and `probe02/measurements.json` are the final cost inventory and raw accesses;
+their receipt binds the tested source, exact dependencies, logs and archived XML.
+The run commands and local 16 GiB profile are retained beside them. Later
+documentation-only commits do not relabel these tested source pins.
+
+Next: implement the indexed session/lineage roots and explicit controlled-origin
+restore path together, add strict-import and selected-corruption controls, then
+prove the predeclared reduction on these same fixtures. Only after that library
+gate should MyOS receive the new tuple for short PostgreSQL confirmation and,
+last, the original long graph. No changes to logical history, gas or ordering are
+authorized by the physical optimization.
