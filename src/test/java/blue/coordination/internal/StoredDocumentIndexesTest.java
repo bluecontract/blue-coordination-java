@@ -270,25 +270,34 @@ final class StoredDocumentIndexesTest {
             for (int i = 0; i < 6; i++) f.start(resource("source.yaml") + "\nlabel: unrelated-" + i + "\n", "unrelated/" + i, ActivationPolicy.fromNow());
             var original = state(f);
             var writer = indexes(f.bytes); var stored = retain(writer, original);
-            Set<String> unrelated = new HashSet<>();
-            for (var entry : stored.sessions().entries()) if (!Set.of(source.id(), parent.id()).contains(entry.getKey())) unrelated.add(entry.getValue().address());
-            var bytes = new CountingBytes(f.bytes.copy(), unrelated);
+            Set<String> unrelated = new HashSet<>(); Set<String> sessionAddresses = new HashSet<>();
+            for (var entry : stored.sessions().entries()) {
+                sessionAddresses.add(entry.getValue().address());
+                if (!Set.of(source.id(), parent.id()).contains(entry.getKey())) unrelated.add(entry.getValue().address());
+            }
+            assertEquals(8, sessionAddresses.size()); assertEquals(6, unrelated.size());
+            var expectedSessionReads = Map.of(stored.sessions().get(source.id()).address(), 1,
+                    stored.sessions().get(parent.id()).address(), 1);
+            var bytes = new CountingBytes(f.bytes.copy(), unrelated, sessionAddresses);
             var cold = indexes(bytes); var opened = reopen(cold, stored);
             assertEquals(original.lineageIndex().lastMutationNodeCopies(), opened.lineages().lastMutationNodeCopies());
             assertEquals(original.graphGenerations().lastOperationComparisonsForTesting(), opened.generations().lastOperationComparisonsForTesting());
             assertEquals(original.graphGenerations().lastOperationCopiedNodesForTesting(), opened.generations().lastOperationCopiedNodesForTesting());
             for (var id : original.sessionIndex().keys()) assertEquals(original.sessionIndex().read(id).comparisons(), opened.sessions().read(id).comparisons());
             for (boolean sourceFirst : List.of(true, false)) try (var owner = cold.openOwner(2)) {
-                int reads = f.providerReads.get(); int writes = bytes.writes; bytes.reads = 0;
+                int reads = f.providerReads.get(); int writes = bytes.writes; bytes.reads = 0; bytes.sessionReads.clear();
                 var first = sourceFirst ? source.id() : parent.id(); var second = sourceFirst ? parent.id() : source.id();
                 var a = select(owner, opened, first).session(); var b = select(owner, opened, second).session();
                 var sourceSession = sourceFirst ? a : b; var parentSession = sourceFirst ? b : a;
                 assertSame(sourceSession.rootedView(), parentSession.requireRootedHistory().admissionSources().storedViews().get(source.id()));
                 assertSame(a, select(owner, opened, first).session(), "One owner preserves mutable selected-session identity");
-                assertTrue(bytes.reads < 160, "Selected histories/index paths must not inspect the other session catalog");
+                assertEquals(expectedSessionReads, bytes.sessionReads,
+                        "Each selected session body is opened exactly once; none of the six unrelated session bodies is opened");
                 assertEquals(reads, f.providerReads.get()); assertEquals(writes, bytes.writes);
                 assertEquals(original.lineageIndex().currentMatches(sourceSession.currentRepresentation().blueId()),
                         cold.lineageMatches(opened.lineages(), StoredDocumentIndexes.LineageRoot.CURRENT, sourceSession.currentRepresentation().blueId()));
+                assertEquals(expectedSessionReads, bytes.sessionReads, "Lineage lookup must not hydrate another session body");
+                assertEquals(reads, f.providerReads.get()); assertEquals(writes, bytes.writes);
             }
             try (var bounded = cold.openOwner(1)) {
                 var first = select(bounded, opened, source.id()).session();
@@ -501,11 +510,16 @@ final class StoredDocumentIndexesTest {
         }
     }
     private static final class CountingBytes implements CoordinationImmutableObjectStore {
-        final CoordinationImmutableObjectStore delegate; final Set<String> denied; int reads; int writes;
-        CountingBytes(CoordinationImmutableObjectStore delegate, Set<String> denied) { this.delegate = delegate; this.denied = Set.copyOf(denied); }
+        final CoordinationImmutableObjectStore delegate; final Set<String> denied; final Set<String> sessionAddresses;
+        final Map<String, Integer> sessionReads = new LinkedHashMap<>(); int reads; int writes;
+        CountingBytes(CoordinationImmutableObjectStore delegate, Set<String> denied, Set<String> sessionAddresses) {
+            this.delegate = delegate; this.denied = Set.copyOf(denied); this.sessionAddresses = Set.copyOf(sessionAddresses);
+        }
         @Override public byte[] putIfAbsent(String digest, byte[] bytes) { writes++; return delegate.putIfAbsent(digest, bytes); }
         @Override public Optional<byte[]> get(String digest, int maximum) {
-            reads++; assertFalse(denied.contains(digest), "Unrelated selected session body read"); return delegate.get(digest, maximum);
+            reads++;
+            if (sessionAddresses.contains(digest)) sessionReads.merge(digest, 1, Integer::sum);
+            assertFalse(denied.contains(digest), "Unrelated selected session body read"); return delegate.get(digest, maximum);
         }
     }
 }

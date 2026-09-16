@@ -21,6 +21,8 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
     private final Map<String, byte[]> bytes = new LinkedHashMap<>();
     private final List<Access> accesses = new ArrayList<>();
     private Set<String> existing = Set.of();
+    private Set<String> originalPayloads = Set.of();
+    private List<String> firstOldPayloadPutStack = List.of();
     private boolean measuring;
 
     record Access(String operation, String address, String category, int bytes, boolean existedBeforePhase) { }
@@ -29,7 +31,8 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
             long oldPayloadPutCalls, long oldPayloadPutBytes, int distinctOldPayloadPuts,
             long unrequestedHistoricalPayloadGetCalls, int unrequestedHistoricalPayloadAddresses,
             List<String> unrequestedHistoricalAddresses,
-            Map<String, Integer> sessionDescriptorBytes, List<Access> addresses) { }
+            Map<String, Integer> sessionDescriptorBytes, List<Access> addresses,
+            List<String> firstOldPayloadPutStack) { }
 
     @Override public byte[] putIfAbsent(String address, byte[] value) {
         byte[] prior = bytes.putIfAbsent(address, value.clone());
@@ -51,9 +54,10 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
         return copy;
     }
 
-    void begin() {
+    void begin(Set<String> historicalPayloads) {
         if (measuring) throw new IllegalStateException("Nested measurement");
-        accesses.clear(); existing = Set.copyOf(bytes.keySet()); measuring = true;
+        accesses.clear(); existing = Set.copyOf(bytes.keySet()); originalPayloads = historicalPayloads;
+        firstOldPayloadPutStack = List.of(); measuring = true;
     }
 
     Measurement end(Set<String> historicalPayloads, Set<String> requiredPayloads) {
@@ -74,7 +78,8 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
             if (access.category().equals("session-descriptor")) descriptors.put(access.address(), access.bytes());
         }
         return new Measurement(counts("GET"), counts("PUT"), oldCalls, oldBytes, oldPuts.size(),
-                unrequestedCalls, unexpected.size(), List.copyOf(unexpected), Map.copyOf(descriptors), List.copyOf(accesses));
+                unrequestedCalls, unexpected.size(), List.copyOf(unexpected), Map.copyOf(descriptors), List.copyOf(accesses),
+                firstOldPayloadPutStack);
     }
 
     Set<String> historicalPayloadAddresses() {
@@ -100,8 +105,15 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
     }
 
     private void observe(String operation, String address, byte[] value) {
-        if (measuring) accesses.add(new Access(operation, address, category(value), value == null ? 0 : value.length,
+        if (!measuring) return;
+        accesses.add(new Access(operation, address, category(value), value == null ? 0 : value.length,
                 existing.contains(address)));
+        if (operation.equals("PUT") && originalPayloads.contains(address) && firstOldPayloadPutStack.isEmpty()) {
+            // One bounded diagnostic only when the zero-rewrite mechanism fails;
+            // successful selective phases do not pay for stack collection.
+            firstOldPayloadPutStack = StackWalker.getInstance().walk(frames -> frames.limit(32)
+                    .map(Object::toString).toList());
+        }
     }
 
     private Map<String, Count> counts(String operation) {

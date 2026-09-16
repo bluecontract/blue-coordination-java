@@ -28,6 +28,10 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 final class RootedSessionHistoryAccessIntegrationTest {
     private static final int MIB = 1024 * 1024, RECORD = 40 * MIB;
+    // This fixed, two-document scalar-state fixture has a bounded admission basis.
+    // A session descriptor must fit one 64 KiB record independent of retained N;
+    // this is a fixture mechanism budget, not a general document/protocol limit.
+    private static final int FIXTURE_SESSION_DESCRIPTOR_BYTES = 64 * 1024;
     private static final SessionRecordCodec ROWS = new SessionRecordCodec(RECORD, 256);
     private static final ClosureProcessResultStorageCodec RESULTS = new ClosureProcessResultStorageCodec(RECORD, 256);
     // viewAddress only encodes/hashes; this oracle never reads or stages an object.
@@ -56,6 +60,8 @@ final class RootedSessionHistoryAccessIntegrationTest {
                 "cache", "disabled", "decoderCountsAvailable", false,
                 "requiredPayloadPolicy", "Point plus fixed current/anchor/predecessor boundary records, declared before reads"));
         fixtureReport.put("restorePolicy", controlled() ? "controlled-library-writer" : "strict-untrusted");
+        fixtureReport.put("sessionDescriptorBudgetBytes", FIXTURE_SESSION_DESCRIPTOR_BYTES);
+        fixtureReport.put("initialCurrentPayloadRoles", f.currentPayloadRoles());
         report(fixtureReport);
 
         // Each independent probe starts from detached bytes with no resident or L1 warming.
@@ -104,15 +110,22 @@ final class RootedSessionHistoryAccessIntegrationTest {
         long unrequestedDistinctByPhase = measurements.stream()
                 .mapToLong(row -> row.accesses().unrequestedHistoricalPayloadAddresses()).sum();
         long rewritten = measurements.stream().mapToLong(row -> row.accesses().oldPayloadPutCalls()).sum();
+        long maximumDescriptorBytes = Math.max(f.objects().sessionDescriptors().values().stream()
+                        .mapToInt(Integer::intValue).max().orElseThrow(),
+                measurements.stream().flatMap(row -> row.accesses().sessionDescriptorBytes().values().stream())
+                        .mapToInt(Integer::intValue).max().orElseThrow());
         report(Map.of("kind", "semantic-result", "workload", f.name(), "status", "PASS",
                 "unrequestedHistoricalPayloadGetCalls", unrequested,
                 "unrequestedHistoricalPayloadDistinctAddressesSummedPerPhase", unrequestedDistinctByPhase,
                 "oldPayloadPutCalls", rewritten, "candidateZeroBudgetAsserted", Boolean.getBoolean("blue.poc.history.requireSelective"),
-                "decoderCountsAvailable", false, "fullAcceptanceClaimed", false));
+                "decoderCountsAvailable", false, "fullAcceptanceClaimed", false,
+                "maximumSessionDescriptorBytes", maximumDescriptorBytes));
         // Off for baseline measurement. Enable on the same workload for the candidate's mechanism gate.
         if (Boolean.getBoolean("blue.poc.history.requireSelective")) {
             assertEquals(0L, unrequested, "P2: unrequested historical payload GETs");
             assertEquals(0L, rewritten, "P2: unchanged historical payload PUTs");
+            assertTrue(maximumDescriptorBytes <= FIXTURE_SESSION_DESCRIPTOR_BYTES,
+                    "P2: fixed-fixture session descriptors must not embed a growing history prefix");
         }
     }
 
@@ -139,6 +152,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
             ColdStorageJournalFixture.Snapshot journal, DocumentId source, DocumentId parent,
             Snapshot before, Snapshot after, long historicalEpoch, String revisionAddress, String revisionDigest,
             ExternalOrderKey historicalBoundary, ViewIdentity viewIdentity, Set<String> currentBoundaries,
+            Map<String, String> currentPayloadRoles,
             Set<String> afterCurrentBoundaries,
             Set<String> positionBoundaries, Set<String> historicalPayloads, String nextYaml, String nextEntryId) { }
 
@@ -163,6 +177,14 @@ final class RootedSessionHistoryAccessIntegrationTest {
             long epoch = sameEpoch ? 0 : 2;
             var revision = parent.revision(epoch);
             var required = currentBoundaries(f.engine, f.source.id(), f.parent.id());
+            var currentRoles = new LinkedHashMap<String, String>();
+            for (var role : Map.of("source", f.source.id(), "parent", f.parent.id()).entrySet()) {
+                var selectedSession = f.engine.documents().require(role.getValue());
+                currentRoles.put(role.getKey() + "/current-revision", digest(ROWS.encodeRevision(selectedSession.currentRevision())));
+                currentRoles.put(role.getKey() + "/current-view", VIEW_IDENTITIES.viewAddress(selectedSession.rootedView()));
+                selectedSession.requireRootedHistory().admissionSources().storedViews().forEach((id, view) ->
+                        currentRoles.put(role.getKey() + "/admission-source/" + id.value(), VIEW_IDENTITIES.viewAddress(view)));
+            }
             var pointRequired = Set.of(VIEW_IDENTITIES.viewAddress(point.view()),
                     VIEW_IDENTITIES.viewAddress(positions.get(selected - 1).view()),
                     VIEW_IDENTITIES.viewAddress(positions.get(0).view()));
@@ -193,7 +215,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
             return new Fixture((sameEpoch ? "same-epoch-positions-" : "numbered-parent-epochs-") + historySize,
                     objects, selection, journal, f.source.id(), f.parent.id(), before, after, epoch,
                     revisionAddress, revisionAddress, boundary,
-                    viewIdentity(point.view()), required, afterRequired, pointRequired,
+                    viewIdentity(point.view()), required, Map.copyOf(currentRoles), afterRequired, pointRequired,
                     historicalPayloads, nextYaml, entry.blueId());
         }
     }
@@ -242,7 +264,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
     private record Measured(String phase, RootedHistoryAccessObjects.Measurement accesses) { }
     private static <T> T phase(Fixture f, String name, RootedHistoryAccessObjects objects, Set<String> required,
             List<Measured> measured, Supplier<T> work) {
-        objects.begin(); long started = System.nanoTime();
+        objects.begin(f.historicalPayloads()); long started = System.nanoTime();
         var cpu = ManagementFactory.getThreadMXBean(); long beforeCpu = cpu.isCurrentThreadCpuTimeSupported() ? cpu.getCurrentThreadCpuTime() : -1;
         try { return work.get(); }
         finally {

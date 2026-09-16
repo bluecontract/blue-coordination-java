@@ -1486,12 +1486,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     private List<PublicEvent> publicEventsAt(DocumentId id, long epoch) {
-        blue.coordination.api.DocumentRevision revision = engine.history(id)
-                .stream()
-                .filter(candidate -> candidate.epoch() == epoch)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "READY revision " + epoch + " is missing for " + id));
+        blue.coordination.api.DocumentRevision revision = engine.revisionAt(id, epoch);
         return revision.emittedEvents().stream()
                 .map(event -> new PublicEvent(
                         ExactBlueValue.wrap(ExactValue.verified(event)),

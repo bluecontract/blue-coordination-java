@@ -688,7 +688,7 @@ def currentProductionShapeLimits = [
         // Physical inventory only; no protocol, closure or logical-gas bound changes.
         // Measured source inventory; see docs/poc-indexed-session-history-plan.md.
         classes: 322,
-        lines: 86_953L,
+        lines: 86_993L,
         publicApiTypes: 94,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.CoordinationException;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
 import blue.coordination.api.storage.CoordinationObjectStorageException;
 import blue.coordination.sdk.EntryDisposition;
@@ -84,11 +85,13 @@ final class RootedHistoryRestorePolicyTest {
             for (String selected : List.of(f.oldRevisionAddress(), f.oldViewAddress())) {
                 var bytes = f.bytes().copy(); bytes.faultAddress = selected; bytes.fault = fault;
                 var journal = ColdStorageJournalFixture.open(f.journal());
-                assertThrows(CoordinationObjectStorageException.class, () -> {
+                CoordinationException failure = assertThrows(CoordinationException.class, () -> {
                     try (var scope = RootedCoordinationStorage.open(bytes, LIMITS, f.selection(), ExactNodeProvider.empty(), journal, cache)) {
                         scope.documentHandle(f.document()).orElseThrow().snapshot();
                     }
                 }, "Untrusted selected session restore must validate the complete retained history");
+                assertInstanceOf(CoordinationObjectStorageException.class, failure.getCause(),
+                        "The existing SDK exception mapping must preserve the actual physical failure as its cause");
                 assertTrue(bytes.reads.contains(selected));
                 assertEquals(0, journal.mutations()); assertEquals(0, bytes.writes);
             }
@@ -108,8 +111,10 @@ final class RootedHistoryRestorePolicyTest {
             assertEquals(f.nextEntryId(), entry.blueId());
             assertEquals(EntryDisposition.APPLIED, scope.coordination().processing()
                     .processNext(scope.documentHandle(f.document()).orElseThrow()).entry(entry).disposition());
+            long processorBeforeStage = processorNanos(scope);
             bytes.writeFault = fault;
             assertThrows(CoordinationObjectStorageException.class, scope::stage);
+            assertEquals(processorBeforeStage, processorNanos(scope), "Failed prewrites do not rerun PROCESS");
             bytes.writeFault = null;
             // No returned successor selection was published. The old selection must
             // remain independently readable despite any unreachable immutable prewrites.
@@ -118,6 +123,7 @@ final class RootedHistoryRestorePolicyTest {
                 assertEquals(f.evidence(), evidence(engine(old).documents().require(f.document())));
             }
             next = scope.stage();
+            assertEquals(processorBeforeStage, processorNanos(scope), "Retrying immutable prewrites does not rerun PROCESS");
             assertEquals(f.after(), evidence(engine(scope).documents().require(f.document())));
             assertEquals(1, journal.mutations(), "Retrying storage does not resubmit or reexecute the input");
         }
@@ -189,8 +195,11 @@ final class RootedHistoryRestorePolicyTest {
     }
     private static void assertReadOnly(RootedCoordinationStorage.Scope scope, ColdStorageJournalFixture journal, Bytes bytes) {
         assertEquals(0, journal.mutations()); assertEquals(0, bytes.writes);
-        assertEquals(0L, CoordinationTestControl.attach(engine(scope)).metricsSnapshot().phaseNanos()
-                .getOrDefault("contracts.closure.processor", 0L));
+        assertEquals(0L, processorNanos(scope));
+    }
+    private static long processorNanos(RootedCoordinationStorage.Scope scope) {
+        return CoordinationTestControl.attach(engine(scope)).metricsSnapshot().phaseNanos()
+                .getOrDefault("contracts.closure.processor", 0L);
     }
     private static String tick(String source, String previous) {
         return """

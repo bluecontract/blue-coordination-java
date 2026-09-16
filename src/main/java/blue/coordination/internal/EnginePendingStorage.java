@@ -93,7 +93,7 @@ final class EnginePendingStorage {
                             return Objects.requireNonNull(p.selection());
                         }, (key, value) -> { });
                 pending = map(Kind.SOURCE_PENDING, selected,
-                        (key, value) -> sources.encodePending(value, sessions::retainView),
+                        (key, value) -> sources.encodePending(value, views::retainView),
                         (key, bytes) -> sources.decodePending(key, bytes, views),
                         (key, value) -> {
                             require(key.equals(value.key()), "Pending source map has foreign key");
@@ -102,7 +102,7 @@ final class EnginePendingStorage {
                                     "Pending source changed its original historical boundary");
                         });
                 submitted = map(Kind.SOURCE_SUBMITTED, selected,
-                        (key, value) -> sources.encodePrepared(value, sessions::retainView),
+                        (key, value) -> sources.encodePrepared(value, views::retainView),
                         (key, bytes) -> sources.decodePrepared(key, bytes, views), this::validateSubmitted);
                 completed = map(Kind.SOURCE_COMPLETED, selected, this::encodeCompleted, this::decodeCompleted, this::validateCompleted);
             } catch (RuntimeException failure) {

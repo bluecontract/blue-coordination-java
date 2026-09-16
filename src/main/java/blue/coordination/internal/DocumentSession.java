@@ -33,6 +33,9 @@ final class DocumentSession {
     private List<RootedViewPosition> rootedViewPositions = SessionHistoryList.empty();
     // Derived, session-local indexes. A value-equal view is not retained publication authority.
     private SessionIdentityPositions<RootedDocumentView> rootedViewFirstPositions = new SessionIdentityPositions<>();
+    // Runtime-only aliases already retained/selected by this owner. Backing replacement must not
+    // replace captured object identities with another scope-interned object at the same address.
+    private PersistentOrderedMap<Long, RootedDocumentView> ownedViewPositions = PersistentOrderedMap.empty(Long::compare);
     private PersistentOrderedMap<String, Long> rootedInvocationFirstPositions = PersistentOrderedMap.empty(String::compareTo);
     private final StateEpochs stateEpochs = new StateEpochs();
     private PersistentOrderedMap<Long, ManagedLineageIndex.RetainedState> retainedStates = PersistentOrderedMap.empty(Long::compare);
@@ -133,6 +136,7 @@ final class DocumentSession {
         copy.rootedView = rootedView;
         copy.rootedViewPositions = SessionHistoryList.copyOf(rootedViewPositions);
         copy.rootedViewFirstPositions = rootedViewFirstPositions.copy();
+        copy.ownedViewPositions = ownedViewPositions;
         copy.rootedInvocationFirstPositions = rootedInvocationFirstPositions;
         return copy;
     }
@@ -156,13 +160,15 @@ final class DocumentSession {
         if (!position.invocationIdentity().equals(view.result().invocationIdentity()))
             throw new IllegalArgumentException("Retained position names a different invocation");
         Long first = rootedViewFirstPositions.get(view);
+        long ownedFirst = first == null ? index : first;
         if (storageViewAccess != null) {
             String address = storageViewAccess.addressForRetention(view);
             Long storedFirst = viewAddressFirstPositions.putIfAbsent(address, (long) index);
             first = storedFirst == null ? index : storedFirst;
         }
         rootedViewPositions.add(position.withFirstPosition(first == null ? index : first));
-        rootedViewFirstPositions.putIfAbsent(view, first == null ? index : first);
+        rootedViewFirstPositions.putIfAbsent(view, ownedFirst);
+        ownedViewPositions = ownedViewPositions.put((long) index, view).map();
         if (!rootedInvocationFirstPositions.containsKey(position.invocationIdentity()))
             rootedInvocationFirstPositions = rootedInvocationFirstPositions.put(position.invocationIdentity(), (long) index).map();
     }
@@ -226,7 +232,9 @@ final class DocumentSession {
 
     private RootedDocumentView selectRootedView(int ordinal) {
         RootedViewPosition selected = rootedViewPositions.get(ordinal);
-        var view = selected.view();
+        var view = ownedViewPositions.get((long) ordinal);
+        boolean alreadyOwned = view != null;
+        if (view == null) view = selected.view();
         if (!selected.invocationIdentity().equals(view.result().invocationIdentity()))
             throw new IllegalArgumentException("Selected view differs from its retained invocation");
         long first = selected.firstPosition() < 0 ? ordinal : selected.firstPosition();
@@ -238,6 +246,7 @@ final class DocumentSession {
                 throw new IllegalArgumentException("Selected view differs from its exact interner-owned position");
         }
         rootedViewFirstPositions.putIfAbsent(view, first);
+        if (!alreadyOwned) ownedViewPositions = ownedViewPositions.put((long) ordinal, view).map();
         return view;
     }
 
@@ -409,7 +418,7 @@ final class DocumentSession {
         representationStatePositions = state.representationStatePositions(); representationStates = state.representationStates();
         representationReceiptPositions = state.representationReceiptPositions(); rootedInvocationFirstPositions = state.invocationFirstPositions();
         viewAddressFirstPositions = state.viewAddressFirstPositions().copy(); lastAnchoredNonReplayableEpoch = state.lastAnchoredNonReplayableEpoch();
-        storageViewAccess = views; rootedViewFirstPositions = new SessionIdentityPositions<>();
+        storageViewAccess = views;
     }
 
     /** Install only successfully retained equivalent backing roots, while the caller owns this session monitor. */
@@ -482,9 +491,19 @@ final class DocumentSession {
                 Collections.unmodifiableSet(new LinkedHashSet<>(terminalEntryBlueIds)),
                 Collections.unmodifiableSet(new LinkedHashSet<>(transitionReceipts)),
                 List.copyOf(componentRepresentationTransitions), rootedHistory, rootedView,
-                List.copyOf(rootedViewPositions), Collections.unmodifiableMap(new LinkedHashMap<>(stateEpochs.first)),
+                storedRootedViewPositions(), Collections.unmodifiableMap(new LinkedHashMap<>(stateEpochs.first)),
                 Collections.unmodifiableSet(new LinkedHashSet<>(stateEpochs.ambiguous)), layout, readyLayout,
                 readyEmbeddedChildren, status, readyThrough, epoch, readyEpoch, graphPublishedEpoch, applicationSequence);
+    }
+
+    /** Exhaustive legacy snapshot keeps live aliases; indexed storage never serializes this overlay. */
+    private List<RootedViewPosition> storedRootedViewPositions() {
+        var positions = new ArrayList<RootedViewPosition>(rootedViewPositions.size());
+        for (int ordinal = 0; ordinal < rootedViewPositions.size(); ordinal++) {
+            var position = rootedViewPositions.get(ordinal);
+            positions.add(new RootedViewPosition(selectRootedView(ordinal), position.boundary()));
+        }
+        return List.copyOf(positions);
     }
 
     static DocumentSession restoreStored(StoredState state) { return new DocumentSession(state); }

@@ -73,7 +73,7 @@ final class StoredFeederProgress {
                 PersistentMapCodec<String> texts = codec("text", UnaryOperator.identity(), value -> encode(limits.indexes().keyBytes(), w -> w.text(value)),
                         bytes -> decode(bytes, limits.indexes().keyBytes(), SessionRecordCodec::text));
                 PersistentMapCodec<RootedDeclaredBirthRejection> rejected = codec("rejected", value -> {
-                    publications.encodeRejection(value, sessions::retainView); return value;
+                    publications.encodeRejection(value, views::retainView); return value;
                 }, value -> publications.encodeRejection(value, sessions::viewAddress), bytes -> publications.decodeRejection(bytes, views));
                 var pendingMap = create(Kind.PENDING, selected, LANE_ORDER, lanes, pending);
                 var rejectedMap = create(Kind.REJECTED, selected, EmbeddingBinding.TEXT_ORDER, texts, rejected);

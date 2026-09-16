@@ -622,6 +622,14 @@ final class ManagedLineageIndex {
                     && RetainedStateHistory.sameBasis(retainedStates, other.retainedStates);
         }
 
+        /** Hashing an index row must not materialize its lazily stored history prefix. */
+        @Override public int hashCode() {
+            // Equality still includes every retained state. Different histories with identical headers
+            // may collide; equal resident and stored representations must always have the same hash.
+            return Objects.hash(documentId, authoredInitialBlueId, initializedBlueId,
+                    currentEpoch, currentBlueId, lastAnchoredNonReplayableEpoch);
+        }
+
         String retainedBlueIdAt(long epoch) {
             return epoch < 0 || epoch >= retainedStates.size()
                     ? null : retainedStates.get(Math.toIntExact(epoch)).blueId();

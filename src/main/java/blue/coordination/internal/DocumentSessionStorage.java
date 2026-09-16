@@ -277,6 +277,13 @@ final class DocumentSessionStorage {
             return address;
         }
 
+        /** Prewrite through this owner; controlled storage may reuse an acknowledged exact object. */
+        synchronized String retainView(RootedDocumentView view) {
+            require(!closed, "Session restoration scope is closed");
+            return physical(() -> RootedEngineStorage.isControlledNamespace(objects)
+                    ? retainIndexedView(view) : DocumentSessionStorage.this.retainView(view));
+        }
+
         /**
          * Pure physical identity for a new view. This is not retained membership
          * or permission to publish it. Kept scope-local so append and stage do

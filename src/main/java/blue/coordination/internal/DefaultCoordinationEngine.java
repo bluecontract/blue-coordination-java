@@ -2132,6 +2132,17 @@ public final class DefaultCoordinationEngine
         return requireDocument(documentId).revisions();
     }
 
+    /**
+     * SDK assembly point read. Unlike the explicit history audit this selects
+     * one numbered revision, preserving the caller's exact READY/current epoch.
+     * @param documentId retained document identity
+     * @param epoch exact numbered position, not the ambient latest head
+     * @return the immutable revision at that position
+     */
+    public synchronized DocumentRevision revisionAt(DocumentId documentId, long epoch) {
+        return requireDocument(documentId).revision(epoch);
+    }
+
     @Override
     public synchronized Set<String> effectiveTimelineIds(
             DocumentId documentId) {

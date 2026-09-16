@@ -61,7 +61,7 @@ final class StoredPublicationIndexes implements AutoCloseable {
                 }, core::encodeAdmission, core::decodeAdmission));
         closureValues = new StoredClosureReceiptReferenceCodec(objects, limits.valueBytes(),
                 codec("closure", value -> {
-                    receipts.encodePublication(value, sessions::retainView);
+                    receipts.encodePublication(value, scope::retainView);
                     if (value.commits()) resultRows.retain(value.attempt().processResult()); return value;
                 }, value -> closureReuse.encode(value, selected -> {
                     byte[] canonical = cache == null ? null : cache.canonicalEncoding(publicationFamily, selected);
@@ -81,7 +81,7 @@ final class StoredPublicationIndexes implements AutoCloseable {
         closures = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, closureValues);
         rejections = codecs.binding("publication/declared-rejection", EmbeddingBinding.TEXT_ORDER, codecs.text,
                 codec("declared-rejection", value -> {
-                    receipts.encodeRejection(value, sessions::retainView); return value;
+                    receipts.encodeRejection(value, scope::retainView); return value;
                 }, value -> receipts.encodeRejection(value, sessions::viewAddress), bytes -> receipts.decodeRejection(bytes, scope)));
     }
 

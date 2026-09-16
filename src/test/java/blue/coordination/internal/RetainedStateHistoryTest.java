@@ -54,12 +54,20 @@ final class RetainedStateHistoryTest {
         byte[] encoded = codecs.lineages.encode(codecs.lineages.prepareForStorage(lineage(64)));
         var first = codecs.lineages.decode(encoded);
         var second = codecs.lineages.decode(encoded);
+        var resident = lineage(64);
+        var flat = new ManagedLineageIndex.Lineage(resident.documentId(), resident.authoredInitialBlueId(),
+                resident.initializedBlueId(), resident.currentEpoch(), resident.currentBlueId(),
+                java.util.List.copyOf(resident.retainedStates()), resident.lastAnchoredNonReplayableEpoch());
+        assertEquals(resident, first); assertEquals(flat, first);
         var changedGap = new ManagedLineageIndex.Lineage(OWNER, "authored", "state-0", 63, "state-63",
                 second.retainedStates(), 12);
         int reads = bytes.reads;
         bytes.failRead = true;
         assertTrue(first.sameIndexedHistory(second));
         assertEquals(first, second);
+        assertEquals(resident.hashCode(), first.hashCode());
+        assertEquals(flat.hashCode(), first.hashCode());
+        assertEquals(first.hashCode(), second.hashCode());
         assertFalse(first.sameIndexedHistory(changedGap), "Anchored representation gaps are part of the basis");
         assertEquals(reads, bytes.reads, "Comparing retained authority must not open any history row");
     }

@@ -236,3 +236,46 @@ secondary indexes, old-root stability, and prewrite failure/retry. The same
 `blue.poc.history.requireSelective` switch asserts its mechanism budgets. Until
 that gate is recorded, this section is an implementation description, not a
 correctness or performance result.
+
+## First candidate gate and correction batch
+
+Candidate `9db69a569335e8398b684ef348f3253d0260da92` completed the grouped
+library gate: 134 tests across 22 classes, 127 passed and 7 failed, no errors or
+skips. Javadoc, production shape, API boundaries and dependency checks passed.
+The failed run is retained under `history33/controls01`; it is not acceptance.
+All four real SDK fixtures completed the full resident/cold equality oracle.
+
+The measurements and review identified the following corrections before rerunning
+the group with the zero-unrequested-read and zero-old-payload-write gates enabled:
+
+- **SDK current selection still enumerated history.** `publicEventsAt` selected
+  one epoch by filtering `engine.history`. At 50 epochs it fetched 51 revisions,
+  although the indexed session already supported exact lookup. Use `revisionAt`
+  through the internal engine assembly; leave explicit full-history APIs intact.
+- **Publication staging bypassed owner reuse.** The receipt's admission source
+  was already retained, but an unscoped view writer rewrote its 81,400-byte frame.
+  Publication, pending-source and feeder codecs now prewrite through their shared
+  session scope. Controlled storage reuses only acknowledged exact-object
+  addresses; raw storage retains the existing strict behavior. This does not
+  approve publication or skip acknowledgement of new bytes.
+- **Backing replacement could change live object identity.** Two distinct,
+  already captured views can have identical immutable bytes. Keep a runtime-only,
+  structurally shared ordinal-to-owned-view overlay when installing storage
+  roots, checking invocation and exact stored address at selection. Cold owners
+  still intern canonical payloads. No extra history root or semantic identity is
+  serialized; a regression covers repeated retention, copies and cold reopening.
+- **Hashing lineage could enumerate indexed metadata.** Use fixed scalar fields
+  for `Lineage.hashCode`, preserving record equality and the equal-values hash
+  contract across indexed and resident histories. Tests forbid storage reads
+  during hashing. This removes a latent traversal; it has not been established
+  as the cause of the measured execution-phase index-read slope.
+- **Test contracts:** strict SDK failures remain wrapped by the existing engine
+  boundary, so assertions inspect their storage cause; the obsolete aggregate
+  GET-count bound is replaced by exact selected-session cardinality and explicit
+  exclusion of all unrelated sessions. Payload budgets are not loosened.
+
+The fixed-body SDK fixture also requires every measured session descriptor to fit
+within 64 KiB as epochs increase. This is a fixture mechanism assertion, not a
+new protocol or configurable storage limit. Index-node traffic remains separately
+reported. This batch changes physical access only; no MyOS wiring or timing claim
+is implied by these library results.
