@@ -428,5 +428,27 @@ honors the existing explicit heap property; the application JAR stayed unchanged
 
 All selected PostgreSQL scenarios, including the three small graphs, passed.
 The full maintained POC matrix and original long catch-up graph were **not** run
-in this confirmation. Test-task durations are not per-operation latency results.
+in this short confirmation. Test-task durations are not per-operation latency results.
 The measured next candidate is [verified index-node reuse](poc-verified-index-node-reuse-plan.md).
+
+### Subsequent original long graph observation
+
+The unchanged original graph ran separately in `myos-p2-longgraph34-postgres-45m-01`
+on MyOS documentation-tip `8a2eef99a7f48907387e4049b934c4827a5fa55d` with the same
+qualified library artifact and application JAR. It did not finish in the single
+45-minute outer budget: 13/14 exact inputs APPLIED, 12 completed helper blocks,
+next imported epoch 30 of fixed endpoint 81, 106 COMPLETE work items. Final emit
+and restart were not reached. Native FAIL contains one interrupted/skipped test,
+not a completed semantic assertion failure; source stayed unchanged.
+
+No end-to-end speedup is established. Heavy concurrent system memory pressure
+and active paging preclude attributing the timing difference to code alone.
+Two bounded profiles identify different costs: snapshot/receipt verification in
+duplicate-occurrence catch-up, and projection work audits invoking rooted scans,
+journal enumeration and receipt/index reads in final reconnect. The latter
+actual SDK call pattern needs its own library access-budget test; P2's payload
+budgets do not prove that auditing or all metadata work is bounded.
+
+The MyOS report is `docs/poc-longgraph34-results.md`; exact progress, profiles,
+resource observations and cleanup are archived in `processing-measurement13/longgraph34/`.
+No implementation, semantics, record limits or assertions changed for this run.
