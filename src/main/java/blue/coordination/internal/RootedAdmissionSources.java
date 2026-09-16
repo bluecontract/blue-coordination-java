@@ -75,7 +75,7 @@ final class RootedAdmissionSources {
                 throw new IllegalArgumentException("Admission source is outside its authenticated frontier");
             }
             view.requirePublishedHead(id, exact.epoch(), exact.blueId());
-            source.rootedPublicationPrefix(view);
+            source.requireRetainedRootedView(view);
             selected.put(id, view);
         }
         return new RootedAdmissionSources(boundary, selected, policy);
@@ -85,7 +85,7 @@ final class RootedAdmissionSources {
             InMemoryDocumentStore documents) {
         if (!requestedBoundary.equals(boundary)) return null;
         RootedDocumentView view = views.get(source);
-        if (view != null) documents.require(source).rootedPublicationPrefix(view);
+        if (view != null) documents.require(source).requireRetainedRootedView(view);
         return view;
     }
 }
