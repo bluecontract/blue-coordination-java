@@ -27,6 +27,7 @@ final class IndexedSessionStorage {
     private final PersistentMapCodec<DocumentSession.RootedViewPosition> positions;
     private final PersistentMapCodec<DocumentSession.ComponentRepresentationTransition> representations;
     private final PersistentMapCodec<DocumentSession.EpochRange> ranges;
+    private final PersistentMapCodec<DocumentSession.CausalRevisionBounds> causalBounds;
     private final PersistentMapCodec<DocumentSession.EpochState> epochStates;
 
     IndexedSessionStorage(CoordinationImmutableObjectStore objects, int maximumBytes,
@@ -71,6 +72,9 @@ final class IndexedSessionStorage {
         }, in -> new DocumentSession.ComponentRepresentationTransition(in.longValue(), text(in), text(in), text(in), nullableText(in)));
         ranges = history.codec("epoch-range", (out, value) -> { out.longValue(value.first()); out.longValue(value.after()); },
                 in -> new DocumentSession.EpochRange(in.longValue(), in.longValue()));
+        causalBounds = history.codec("causal-revision-bounds", (out, value) -> {
+            out.longValue(value.firstEpoch()); out.longValue(value.lastEpoch());
+        }, in -> new DocumentSession.CausalRevisionBounds(in.longValue(), in.longValue()));
         epochStates = history.codec("epoch-state", (out, value) -> { out.longValue(value.epoch()); out.text(value.blueId()); },
                 in -> new DocumentSession.EpochState(in.longValue(), text(in)));
     }
@@ -124,6 +128,7 @@ final class IndexedSessionStorage {
                 retainMap("state-epochs", state.stateEpochs(), history.ordinals), retainSet("ambiguous-states", state.ambiguousStates()),
                 history.retain("retained-states", state.retainedStates(), history.ordinals, history.retainedStates),
                 history.retain("entry-epochs", state.sourceEntryEpochs(), history.strings, history.ordinals),
+                history.retain("causal-entry-bounds", state.causalEntryBounds(), history.strings, causalBounds),
                 history.retain("representation-ranges", state.representationRanges(), history.ordinals, ranges),
                 history.retain("representation-positions", state.representationStatePositions(), epochStates, history.membership),
                 history.retain("representation-states", state.representationStates(), history.strings, history.membership),
@@ -147,6 +152,7 @@ final class IndexedSessionStorage {
             SessionHistoryStorage.root(out, state.rootedViewPositions().root());
             roots(out, state.stateEpochs()); roots(out, state.ambiguousStates().map());
             SessionHistoryStorage.root(out, state.retainedStates()); SessionHistoryStorage.root(out, state.sourceEntryEpochs());
+            SessionHistoryStorage.root(out, state.causalEntryBounds());
             SessionHistoryStorage.root(out, state.representationRanges()); SessionHistoryStorage.root(out, state.representationStatePositions());
             SessionHistoryStorage.root(out, state.representationStates()); SessionHistoryStorage.root(out, state.representationReceiptPositions());
             SessionHistoryStorage.root(out, state.invocationFirstPositions()); roots(out, state.viewAddressFirstPositions());
@@ -168,6 +174,7 @@ final class IndexedSessionStorage {
                     openMap(in, "state-epochs", history.ordinals), openSet(in, "ambiguous-states"),
                     history.open(in, "retained-states", Long::compare, history.ordinals, history.retainedStates),
                     history.open(in, "entry-epochs", String::compareTo, history.strings, history.ordinals),
+                    history.open(in, "causal-entry-bounds", String::compareTo, history.strings, causalBounds),
                     history.open(in, "representation-ranges", Long::compare, history.ordinals, ranges),
                     history.open(in, "representation-positions", Comparator.naturalOrder(), epochStates, history.membership),
                     history.open(in, "representation-states", String::compareTo, history.strings, history.membership),

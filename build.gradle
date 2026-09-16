@@ -684,11 +684,12 @@ def publicBoundarySources = files(
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
         // Baseline31 plus P2: merged RC11 behavior and the reviewed external-storage POC,
-        // including eight private indexed-session/lineage history and provider-frontier helpers.
+        // including eight private indexed-session/lineage history and provider-frontier helpers,
+        // plus causal-entry endpoint metadata for selective SDK change summaries.
         // Physical inventory only; no protocol, closure or logical-gas bound changes.
         // Measured source inventory; see docs/poc-indexed-session-history-plan.md.
         classes: 323,
-        lines: 87_139L,
+        lines: 87_185L,
         publicApiTypes: 94,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

@@ -2143,6 +2143,17 @@ public final class DefaultCoordinationEngine
         return requireDocument(documentId).revision(epoch);
     }
 
+    /**
+     * SDK change-summary selector equivalent to the first and last full-history causal match.
+     * Includes initialization and imported revisions without a direct Timeline source entry.
+     * @param documentId retained document identity
+     * @param entryBlueId exact causal entry identity
+     * @return no match, one matching revision, or the first and last matching revisions
+     */
+    public synchronized List<DocumentRevision> causalRevisionEndpoints(DocumentId documentId, String entryBlueId) {
+        return requireDocument(documentId).causalRevisionEndpoints(entryBlueId);
+    }
+
     @Override
     public synchronized Set<String> effectiveTimelineIds(
             DocumentId documentId) {

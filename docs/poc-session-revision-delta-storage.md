@@ -1,5 +1,11 @@
 # Private session revision delta storage
 
+This document describes the existing strict `/2` path. The pending P2 candidate
+adds a controlled-origin indexed `/3` path; its contract, compatibility boundary
+and qualification status are in [the indexed history plan](poc-indexed-session-history-plan.md).
+The full-prefix reads described below are not the intended controlled `/3`
+behavior. Neither path changes logical history, events, gas or publication rules.
+
 The private `blue-coordination/document-session-storage/2` frame replaces inline
 revision bodies with an ordered list of SHA-256 addresses. Each address selects a
 complete `blue-coordination/document-revision-storage/1` frame, including exact

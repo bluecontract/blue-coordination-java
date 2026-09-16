@@ -40,6 +40,7 @@ final class DocumentSession {
     private final StateEpochs stateEpochs = new StateEpochs();
     private PersistentOrderedMap<Long, ManagedLineageIndex.RetainedState> retainedStates = PersistentOrderedMap.empty(Long::compare);
     private PersistentOrderedMap<String, Long> sourceEntryEpochs = PersistentOrderedMap.empty(String::compareTo);
+    private PersistentOrderedMap<String, CausalRevisionBounds> causalEntryBounds = PersistentOrderedMap.empty(String::compareTo);
     private PersistentOrderedMap<Long, EpochRange> representationRanges = PersistentOrderedMap.empty(Long::compare);
     private PersistentOrderedMap<EpochState, Boolean> representationStatePositions = PersistentOrderedMap.empty(EpochState::compareTo);
     private PersistentOrderedMap<String, Boolean> representationStates = PersistentOrderedMap.empty(String::compareTo);
@@ -107,6 +108,7 @@ final class DocumentSession {
         this.componentRepresentationTransitions = SessionHistoryList.copyOf(source.componentRepresentationTransitions);
         this.retainedStates = source.retainedStates;
         this.sourceEntryEpochs = source.sourceEntryEpochs;
+        this.causalEntryBounds = source.causalEntryBounds;
         this.representationRanges = source.representationRanges;
         this.representationStatePositions = source.representationStatePositions;
         this.representationStates = source.representationStates;
@@ -319,7 +321,8 @@ final class DocumentSession {
             RootedDocumentHistory rootedHistory, RootedDocumentView rootedView,
             SessionHistoryList<RootedViewPosition> rootedViewPositions, SessionHistoryMap<String, Long> stateEpochs,
             SessionHistorySet<String> ambiguousStates, PersistentOrderedMap<Long, ManagedLineageIndex.RetainedState> retainedStates,
-            PersistentOrderedMap<String, Long> sourceEntryEpochs, PersistentOrderedMap<Long, EpochRange> representationRanges,
+            PersistentOrderedMap<String, Long> sourceEntryEpochs,
+            PersistentOrderedMap<String, CausalRevisionBounds> causalEntryBounds, PersistentOrderedMap<Long, EpochRange> representationRanges,
             PersistentOrderedMap<EpochState, Boolean> representationStatePositions,
             PersistentOrderedMap<String, Boolean> representationStates, PersistentOrderedMap<String, Long> representationReceiptPositions,
             PersistentOrderedMap<String, Long> invocationFirstPositions, SessionHistoryMap<String, Long> viewAddressFirstPositions,
@@ -331,7 +334,7 @@ final class DocumentSession {
         return new IndexedState(documentId, authoredInitialBlueId, activeSubscriptions, SessionHistoryList.copyOf(revisions),
                 terminalEntryBlueIds.copy(), transitionReceipts.copy(), SessionHistoryList.copyOf(componentRepresentationTransitions),
                 rootedHistory, rootedView, SessionHistoryList.copyOf(rootedViewPositions), stateEpochs.first.copy(),
-                stateEpochs.ambiguous.copy(), retainedStates, sourceEntryEpochs, representationRanges, representationStatePositions,
+                stateEpochs.ambiguous.copy(), retainedStates, sourceEntryEpochs, causalEntryBounds, representationRanges, representationStatePositions,
                 representationStates, representationReceiptPositions, rootedInvocationFirstPositions, viewAddressFirstPositions.copy(),
                 lastAnchoredNonReplayableEpoch, layout, readyLayout, readyEmbeddedChildren, status, readyThrough,
                 epoch, readyEpoch, graphPublishedEpoch, applicationSequence);
@@ -355,6 +358,7 @@ final class DocumentSession {
                 state.epoch(), state.readyEpoch(), state.graphPublishedEpoch(), state.applicationSequence()));
         requireIndexEqual(checked.retainedStates, state.retainedStates(), "retained numbered metadata");
         requireIndexEqual(checked.sourceEntryEpochs, state.sourceEntryEpochs(), "source entry positions");
+        requireIndexEqual(checked.causalEntryBounds, state.causalEntryBounds(), "causal entry bounds");
         requireIndexEqual(checked.representationRanges, state.representationRanges(), "representation ranges");
         requireIndexEqual(checked.representationStatePositions, state.representationStatePositions(), "representation state positions");
         requireIndexEqual(checked.representationStates, state.representationStates(), "representation state membership");
@@ -414,7 +418,8 @@ final class DocumentSession {
         transitionReceipts = state.transitionReceipts().copy(); componentRepresentationTransitions = state.representationTransitions().copy();
         rootedViewPositions = state.rootedViewPositions().copy(); stateEpochs.first = state.stateEpochs().copy();
         stateEpochs.ambiguous = state.ambiguousStates().copy(); retainedStates = state.retainedStates();
-        sourceEntryEpochs = state.sourceEntryEpochs(); representationRanges = state.representationRanges();
+        sourceEntryEpochs = state.sourceEntryEpochs(); causalEntryBounds = state.causalEntryBounds();
+        representationRanges = state.representationRanges();
         representationStatePositions = state.representationStatePositions(); representationStates = state.representationStates();
         representationReceiptPositions = state.representationReceiptPositions(); rootedInvocationFirstPositions = state.invocationFirstPositions();
         viewAddressFirstPositions = state.viewAddressFirstPositions().copy(); lastAnchoredNonReplayableEpoch = state.lastAnchoredNonReplayableEpoch();
@@ -745,6 +750,26 @@ final class DocumentSession {
         return Optional.of(selected);
     }
 
+    /** Exact first/last causal matches; intervening epochs may belong to other causes. */
+    synchronized List<DocumentRevision> causalRevisionEndpoints(String entryBlueId) {
+        String identity = Objects.requireNonNull(entryBlueId, "entryBlueId");
+        CausalRevisionBounds bounds = causalEntryBounds.get(identity);
+        if (bounds == null) return List.of();
+        DocumentRevision first = revision(bounds.firstEpoch());
+        DocumentRevision last = bounds.firstEpoch() == bounds.lastEpoch() ? first : revision(bounds.lastEpoch());
+        if (first.causalEntryBlueId().filter(identity::equals).isEmpty()
+                || last.causalEntryBlueId().filter(identity::equals).isEmpty())
+            throw new IllegalStateException("Selected causal bounds do not name matching revisions");
+        return first == last ? List.of(first) : List.of(first, last);
+    }
+
+    record CausalRevisionBounds(long firstEpoch, long lastEpoch) {
+        CausalRevisionBounds {
+            if (firstEpoch < 0 || lastEpoch < firstEpoch)
+                throw new IllegalArgumentException("Invalid causal revision endpoints");
+        }
+    }
+
     public synchronized boolean hasTransitionReceipt(String receiptId) {
         return transitionReceipts.contains(Objects.requireNonNull(
                 receiptId, "receiptId"));
@@ -1007,6 +1032,13 @@ final class DocumentSession {
                 new ManagedLineageIndex.RetainedState(documentId, selectedEpoch, revision.after().blueId())).map();
         revision.sourceEntry().ifPresent(entry -> {
             if (!sourceEntryEpochs.containsKey(entry.blueId())) sourceEntryEpochs = sourceEntryEpochs.put(entry.blueId(), selectedEpoch).map();
+        });
+        revision.causalEntryBlueId().ifPresent(identity -> {
+            CausalRevisionBounds previous = causalEntryBounds.get(identity);
+            if (previous != null && previous.lastEpoch() >= selectedEpoch)
+                throw new IllegalArgumentException("Causal revision endpoints are not append ordered");
+            causalEntryBounds = causalEntryBounds.put(identity,
+                    new CausalRevisionBounds(previous == null ? selectedEpoch : previous.firstEpoch(), selectedEpoch)).map();
         });
     }
 

@@ -572,7 +572,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         LinkedHashMap<String, ExactBlueValue> authored = new LinkedHashMap<>();
         aliases.forEach((alias, documentId) -> {
             handles.put(alias, requireDocument(documentId));
-            ExactValue initial = engine.history(documentId).get(0).before()
+            ExactValue initial = engine.revisionAt(documentId, 0L).before()
                     .orElseThrow(() -> new IllegalStateException(
                             "Static admission lost authored history for "
                                     + documentId));

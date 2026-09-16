@@ -13,7 +13,7 @@ final class DocumentSessionIndexedValidationTest {
         try (var f = scenario()) {
             var state = f.engine.documents().require(f.parent.id()).indexedState();
             assertEquals(state.layout().rootBlueId(), DocumentSession.restoreIndexed(state, null).currentRepresentation().blueId());
-            for (String field : List.of("retainedStates", "sourceEntryEpochs", "representationRanges", "representationStatePositions",
+            for (String field : List.of("retainedStates", "sourceEntryEpochs", "causalEntryBounds", "representationRanges", "representationStatePositions",
                     "representationStates", "representationReceiptPositions", "invocationFirstPositions")) {
                 var original = index(state, field);
                 assertFalse(original.isEmpty(), "Fixture must genuinely exercise " + field);

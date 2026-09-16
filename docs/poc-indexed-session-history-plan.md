@@ -2,7 +2,8 @@
 
 Status: indexed P2 candidate implemented; qualification pending. The executable
 baseline probe and membership-only prerequisite remain the last qualified gate.
-The merged-baseline refresh is closed. P2 is not yet wired into MyOS.
+The merged-baseline refresh is closed. MyOS wiring is prepared but has not run
+against this candidate; it is not yet an application acceptance result.
 Work stays on the existing owned `codex/poc-baseline-refresh-20260916` branches.
 No new source from open PRs, protocol changes, larger record limits or Redis.
 
@@ -323,3 +324,30 @@ archived, so the differing field has not yet been proven. Cross-run frame equali
 is not claimed. Within every workload the complete resident-versus-restored
 oracle remains mandatory; addresses and access costs are never normalized to
 hide a semantic difference.
+
+### Grouped frontier gate and SDK response scan
+
+`history33/controls03` stopped at compilation (an unnecessary `iterator()` call
+on a range iterator); no test result is credited to that attempt. After that
+two-line correction, candidate `1503b5e63c70b9a9078a5bc802d9d7e3b9e11167`
+completed `history33/controls04`: **137/140 tests passed across 24 classes**,
+three failed the zero-unrequested-payload-read budget, no errors or skips.
+The five frontier-index controls, Javadoc, API boundaries, production shape and
+dependency checks passed. This is still a failed qualification gate.
+
+Submission no longer reads the old revision prefix. The remaining 5/20/50
+unrequested revision reads now occur during `successor/process`:
+`SdkDrainResultMapper.changes` enumerates the entire history to select the first
+and last revisions with the input's `causalEntryBlueId`. The old submission scan
+had warmed those records and masked this second scan. All four complete semantic
+oracles still pass and all unchanged historical payload PUT counts remain zero.
+
+The correction records **causal-entry first/last numbered positions** alongside
+the other maintained history indexes. These are endpoints, not a claim that
+matching epochs form a contiguous range. This preserves the mapper's original
+first-before/last-after behavior, including multiple reactions and revisions
+without a direct Timeline source entry. Reusing the existing first-source-entry
+index would be incorrect. Strict restore must rebuild and compare this new
+derived index; controlled reads must validate the selected endpoints. Explicit
+full-history enumeration remains exhaustive. A separate admission caller that
+only needs epoch zero should use the existing exact revision selector.
