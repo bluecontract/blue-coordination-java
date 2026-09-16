@@ -99,8 +99,10 @@ def inventory(proof):
         cases = data.get('testCases', [])
         require(cases and all(c.get('failed') is False and c.get('skipped') is False for c in cases),
                 'Failed/skipped/empty tests')
+        require(data.get('executedTests') == len(cases), 'Executed test count mismatch')
+        # JUnit parameterized methods can share class and display name. Keep every
+        # occurrence so comparison detects missing/extra invocations, like inspectBuild.
         result.extend((suite, c['className'], c['name']) for c in cases)
-    require(len(set(result)) == len(result), 'Duplicate test case')
     return sorted(result)
 
 

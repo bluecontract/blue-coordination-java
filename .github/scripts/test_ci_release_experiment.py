@@ -52,16 +52,21 @@ class ReceiptTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 experiment.validate_archive(dict(proof,**{field:value}),'25','a'*64,'source.zip','3.0.0-rc.11')
 
-    def test_report_comparison_rejects_missing_suite_or_duplicate_case(self):
+    def test_report_comparison_preserves_parameterized_display_name_multiplicity(self):
         p={'status':'PASS','topologyEvidenceVerified':True,'suites':{s:{'passed':True,'fullTask':True,
-            'maxParallelForks':4,'testCases':[{'className':'Class','name':s,'failed':False,'skipped':False}]}
+            'maxParallelForks':4,'executedTests':1,'testCases':[{'className':'Class','name':s,'failed':False,'skipped':False}]}
             for s in experiment.SUITES}}
         self.assertEqual(len(experiment.inventory(p)),4)
         broken=dict(p,suites=dict(p['suites']))
         broken['suites'].pop('scenarioTest')
         with self.assertRaises(ValueError):experiment.inventory(broken)
         p['suites']['test']['testCases']*=2
-        with self.assertRaises(ValueError):experiment.inventory(p)
+        p['suites']['test']['executedTests']=2
+        inventory=experiment.inventory(p)
+        self.assertEqual(len(inventory),5)
+        self.assertEqual(inventory.count(('test','Class','test')),2)
+        p['suites']['test']['executedTests']=1
+        with self.assertRaisesRegex(ValueError,'count'):experiment.inventory(p)
 
 class ConsumeTests(unittest.TestCase):
     def test_actual_archive_receipt_and_reject_stale_attempt(self):
@@ -104,9 +109,11 @@ class CompareTests(unittest.TestCase):
             root = Path(temporary)
             binding = {'schema':1,'sha':'a'*40,'tree':'b'*40,'run':'123','attempt':'1'}
             proof = {'status':'PASS','topologyEvidenceVerified':True,'suites':{
-                suite:{'passed':True,'fullTask':True,'maxParallelForks':4,
+                suite:{'passed':True,'fullTask':True,'maxParallelForks':4,'executedTests':1,
                        'testCases':[{'className':'Example','name':suite,'failed':False,'skipped':False}]}
                 for suite in experiment.SUITES}}
+            proof['suites']['test']['testCases'] *= 2
+            proof['suites']['test']['executedTests'] = 2
             for lane in ['baseline','core','archive']:
                 for java in ['25']:
                     folder=root/('coordination-timing-1-'+lane+'-'+java)
@@ -129,7 +136,8 @@ class CompareTests(unittest.TestCase):
                 self.assertIn('20.0%',(root/'summary').read_text())
                 folder=root/'coordination-timing-1-core-25'
                 changed=experiment.read(folder/'scope.json')
-                changed['suites']['test']['testCases'][0]['name']='changed'
+                changed['suites']['test']['testCases'].pop()
+                changed['suites']['test']['executedTests']=1
                 experiment.write(folder/'scope.json',changed)
                 row=experiment.read(folder/'timing.json')
                 row['scopeProofSha256']=experiment.sha(folder/'scope.json')

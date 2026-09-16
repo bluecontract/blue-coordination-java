@@ -1,8 +1,6 @@
 name: RC verification timing experiment (no publication)
 
 on:
-  push:
-    branches: [codex/ci/coordination-release-experiment]
   workflow_dispatch:
 
 permissions:
