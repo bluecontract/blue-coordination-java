@@ -8,7 +8,7 @@ selects the earlier acyclic compatibility profile.
 ## Five-minute path
 
 1. Use Java 17 or newer.
-2. Resolve `blue.coordination:blue-coordination-java:3.0.0-rc.6` from Maven
+2. Resolve `blue.coordination:blue-coordination-java:3.0.0-rc.11` from Maven
    Central.
 3. Create one `BlueCoordination.inMemory()` owner in a try-with-resources
    block.

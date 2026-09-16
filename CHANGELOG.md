@@ -5,6 +5,9 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Select published Language `3.1.0-rc.27` for the reconciled baseline and bind
+  RC preparation/readiness to the RC11 declaration. Retain BEX RC6, Repository
+  RC22, the complete capability inventory, release tier, and historical evidence.
 - Restrict RC dispatch to `next` and push the verified release commit before
   deployment; publish only its tag afterward so later merges cannot block
   recording the published release.

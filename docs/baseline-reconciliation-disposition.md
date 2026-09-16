@@ -1,5 +1,45 @@
 # Coordination baseline reconciliation — 15 September 2026
 
+## Final local qualification and published delivery — 16 September 2026
+
+The reconciled local baseline is **PASS in the agreed C03-deferral scope**:
+Coordination `df40069e3112f266bee3fc8014f378bf2eba6ef1`, Language
+`9a7f0356af29c725cd9d6924a167db0aa5bd5dcc`, MyOS
+`c6705318f79021ab0df67aaea69cdee9a45d245c`, unchanged BEX `ab72af14` and
+Repository `0b68744b`. Sealed bundle03 candidate SHA256 is
+`cc53f8ec781eba9a6ba8d577e7733289d09026f6c8922ffa082df1bac5f63ac0`.
+
+- Coordination: complete Java17 and Java21 `releaseCheck` lanes, each with
+  1186 primary + 54 extracted-source executions; zero failures/errors/skips.
+  Scope, API, dependency, source-artifact and archived-result audits passed.
+- Final immutable handoff: the same three exported-artifact consumers pass
+  on Java17 and Java21 (six executions); exact runtime dependencies verified.
+- Language: 3796 clean-build cases, final quality/RC gates, 394 fresh profile
+  executions, 480 release fixtures and 299 controls pass.
+- MyOS: 1367 required passes and exactly the single agreed C03 skip, across
+  source, integration, packaged and independent HTTP scopes. The original
+  full ring/chord/reconnect/restart case passes normal deadlines, without a
+  further exclusion or increased acceptance timeout.
+- BEX/Catalog native results (968/66 passes) remain applicable to authenticated,
+  byte-identical sealed runtime payloads; no source changes in either repository.
+
+These are the completed local-candidate results, not fresh published-configuration
+results. Language PR #41 subsequently merged and released `3.1.0-rc.27`.
+All six published Language runtime JARs match bundle03 byte-for-byte; POM changes
+are version-only, both required additive APIs exist, and all seven SDK bindings
+match. This branch now transitions to that published Language tuple, retaining
+BEX `1.1.0-rc.6` and Repository `3.0.0-rc.22`, with coherent RC11 release
+authority/readiness metadata. No runtime correction is part of that packaging
+transition. Both complete published Java17/21 PR jobs remain required before
+merge. Existing historical receipts and the sections below retain their original
+source/version scope; their earlier pending statuses do not supersede this one.
+
+The detached B→C path rule is the single explicitly approved normative correction,
+implemented in Language/Contracts and consumed here. Other retained families
+are implementation/API corrections and the documented bounded eligibility memo.
+No POC history cache, verified-artifact reuse mechanism or C03 algorithm change
+is included.
+
 ## Source and qualification boundary
 
 The writable branch `codex/baseline-reconciliation-20260915` starts at pinned,
@@ -13,12 +53,13 @@ its canonical root-pointer follow-up `1a14e0f`, and RC10 metadata. Since the
 historical comparison `0a047461`, upstream changed no rooted processing source.
 Its only additional production changes relative to the common ancestor are in
 Compute normalization and static-type pointer composition. RC10 release metadata,
-release guards and release notes remain the pinned upstream versions.
+release guards and release notes were the pinned reconciliation inputs. The
+published successor is described above; historical release notes remain unchanged.
 
 The frozen review and linked correction records establish the earlier failures
 and qualified donor behavior. They do not qualify this newly assembled source or
-its new Language dependency. New native, generated-evidence, consumer and complete
-MyOS acceptance runs are pending and are owned by the parent workstream.
+its new Language dependency. Fresh qualification was required rather than
+inherited from the donor; its completed results are summarized above.
 
 The local [historical correction record](rooted-baseline-release-fixes.md) extracts
 the concrete failures, rejected alternatives, API/behavior impacts and regression
@@ -56,12 +97,13 @@ They do not qualify the reduced source. The active profile still contains the
 pinned Language specification `sha256:77b48506ff7b5ddbab26b98ce9e060e943cb3babf1e6f5511085bbb3c31c4144`;
 no deferred contextual specification or API binding has been imported into
 Coordination. Rebind generated inputs from the new sealed candidate using the
-[maintained procedure](baseline-reconciliation-rebind.md), without changing RC10
-published defaults or manually rewriting semantic outcomes.
+[maintained procedure](baseline-reconciliation-rebind.md), without manually
+rewriting semantic outcomes. The later published-default transition is recorded
+separately above.
 
 ## Disposition
 
-Current baseline-first inputs (16 September 2026) are bound to sealed Language
+Historical first reduced-candidate inputs (16 September 2026) were bound to sealed Language
 `9204d7fe7064245565c7c609527967aaa968209b` in `baseline-without-c03-01`.
 The complete Language/BEX/Catalog artifact closure and all seven owning-artifact
 identities match the reviewed profile; only four profile values and two exact
@@ -70,7 +112,8 @@ runtime source remain unchanged. All 123 focused cases passed; the 32 regenerate
 topology records were reviewed as consistent identity-only substitutions. Exact
 parameter attribution is supplied by a same-run HTML/XML audit supplement; its
 original display-name-parser failure remains preserved. Native/consumer and
-application qualification remain pending.
+application qualification were pending at that checkpoint; final bundle03
+results above supersede that status.
 
 | Problem / example | Pinned upstream solution | Disposition | Remaining delta | Regression evidence retained |
 | --- | --- | --- | --- | --- |
