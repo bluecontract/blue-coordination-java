@@ -66,13 +66,13 @@ def identity():
     return result
 
 
-def validate(receipt, binding, lane, java):
+def validate(receipt, binding, lane, java, command_factory=commands):
     for key in ['schema', 'sha', 'tree', 'run', 'attempt']:
         require(receipt.get(key) == binding.get(key), 'Receipt mismatch: ' + key)
     require(receipt.get('lane') == lane and receipt.get('java') == java, 'Wrong receipt owner')
     require(receipt.get('success') is True, 'Receipt did not succeed')
     actual = receipt.get('commands', [])
-    require([item.get('args') for item in actual] == commands(lane, java), 'Incomplete/changed command scope')
+    require([item.get('args') for item in actual] == command_factory(lane, java), 'Incomplete/changed command scope')
     require(all(item.get('exit') == 0 for item in actual), 'Failed command')
     start, end = receipt.get('started'), receipt.get('finished')
     require(all(isinstance(t, (int, float)) and math.isfinite(t) for t in [start, end]) and end > start,
@@ -160,16 +160,16 @@ def sample_processes(root_pid, known, measurements):
     measurements['peakProcesses'] = max(measurements['peakProcesses'], len(selected))
 
 
-def measure(lane, java, output):
+def measure(lane, java, output, binding_factory=identity, command_factory=commands, channel="rc"):
     out = Path(output)
     require(not out.exists(), 'Refuse reused output directory')
     out.mkdir(parents=True)
-    receipt = dict(identity(), lane=lane, java=java, started=time.time(), success=False, commands=[])
+    receipt = dict(binding_factory(), lane=lane, java=java, started=time.time(), success=False, commands=[])
     measurements = {'peakRssKiB': 0, 'peakPssKiB': 0, 'peakProcesses': 0, 'memoryReadMisses': 0, 'cpuTicks': {}}
     known = {}
     receipt['hardware'] = {'logicalCpus': os.cpu_count(), 'meminfo': Path('/proc/meminfo').read_text()}
     try:
-        for args in commands(lane, java):
+        for args in command_factory(lane, java):
             start = time.time()
             print('Running:', './gradlew', *args, flush=True)
             process = subprocess.Popen(['./gradlew', *args])
@@ -178,7 +178,7 @@ def measure(lane, java, output):
                 time.sleep(1)
             receipt['commands'].append({'args': args, 'exit': process.returncode, 'elapsedSeconds': time.time() - start})
             require(process.returncode == 0, 'Gradle command failed')
-        identity()
+        binding_factory()
         proof = read(ARCHIVE_REPORT)
         archive = Path('build/distributions') / proof['archiveName']
         validate_archive(proof, java, sha(archive), archive.name, proof['coordinationVersion'])
@@ -193,8 +193,8 @@ def measure(lane, java, output):
             inspection = subprocess.check_output(['node', '-e',
                 "const h=require('./.github/scripts/release-handoff.js');"
                 "console.log(JSON.stringify(h.inspectBuild('build',"
-                "{version:process.argv[1],channel:'rc'},process.argv[2])))",
-                proof['coordinationVersion'], java], text=True)
+                "{version:process.argv[1],channel:process.argv[3]},process.argv[2])))",
+                proof['coordinationVersion'], java, channel], text=True)
             write(out / 'build.json', json.loads(inspection))
             receipt['buildProofSha256'] = sha(out / 'build.json')
         receipt['success'] = True

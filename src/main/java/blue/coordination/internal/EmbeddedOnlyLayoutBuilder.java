@@ -68,7 +68,7 @@ final class EmbeddedOnlyLayoutBuilder {
         return rebuild(exactRoot, previous, true);
     }
 
-    /**
+    /*
      * Retains one independently managed document from a verified closure
      * result without re-hashing a cyclic {@code MASTER#n} member as an
      * acyclic value.

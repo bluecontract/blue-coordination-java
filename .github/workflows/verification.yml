@@ -1,0 +1,130 @@
+name: Verify exact prepared source on Java 25
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      bundle-sha:
+        required: true
+        type: string
+      source-artifact:
+        required: true
+        type: string
+      scope:
+        required: true
+        type: string
+      channel:
+        default: rc
+        type: string
+      release-source:
+        default: false
+        type: boolean
+    outputs:
+      handoff-sha:
+        value: ${{ jobs.core.outputs.handoff-sha }}
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CI: 'true'
+  PYTHONDONTWRITEBYTECODE: '1'
+  ORG_GRADLE_PROJECT_testMaxParallelForks: '4'
+  VERIFICATION_COMMIT: ${{ inputs.commit }}
+  VERIFICATION_SCOPE: ${{ inputs.scope }}
+  RELEASE_COMMIT: ${{ inputs.commit }}
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_BUNDLE_SHA: ${{ inputs.bundle-sha }}
+  RELEASE_CHANNEL: ${{ inputs.channel }}
+
+jobs:
+  archive:
+    name: Extracted-source tests / Java 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '25'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source-artifact }}
+          path: ${{ runner.temp }}/verification-source
+      - name: Restore exact prepared source
+        env:
+          RESTORE: ${{ inputs.release-source && 'restore' || 'restore-source' }}
+        run: node .github/scripts/release-handoff.js "$RESTORE" "$RUNNER_TEMP/verification-source"
+      - name: Verify extracted source archive
+        run: python3 .github/scripts/ci-verification.py run archive "$RUNNER_TEMP/verification-output"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordination-archive-${{ inputs.scope }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verification-output/
+          if-no-files-found: error
+
+  core:
+    name: Full verification and local staging / Java 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    outputs:
+      handoff-sha: ${{ steps.handoff.outputs.handoff-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '25'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source-artifact }}
+          path: ${{ runner.temp }}/verification-source
+      - name: Restore exact prepared source
+        env:
+          RESTORE: ${{ inputs.release-source && 'restore' || 'restore-source' }}
+        run: node .github/scripts/release-handoff.js "$RESTORE" "$RUNNER_TEMP/verification-source"
+      - name: Run full verification with actual archive receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ci-verification.py run core "$RUNNER_TEMP/verification-output"
+      - name: Seal the verified Java 25 artifacts and evidence
+        id: handoff
+        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java25.tar.gz" 25
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-release-java25
+          path: ${{ runner.temp }}/java25.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordination-core-${{ inputs.scope }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verification-output/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure() || cancelled()
+        with:
+          name: coordination-verification-failure-${{ inputs.scope }}-${{ github.run_attempt }}
+          path: |
+            build/reports/**
+            build/test-results/**
+            build/rooted-evidence/**

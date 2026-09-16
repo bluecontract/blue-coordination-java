@@ -1,0 +1,48 @@
+name: Prepare one source bundle for verification
+
+on:
+  workflow_call:
+    outputs:
+      commit:
+        value: ${{ jobs.prepare.outputs.commit }}
+      version:
+        value: ${{ jobs.prepare.outputs.version }}
+      bundle-sha:
+        value: ${{ jobs.prepare.outputs.bundle-sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+      bundle-sha: ${{ steps.source.outputs.bundle-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify release automation
+        run: node --test .github/scripts/*.test.js
+      - name: Seal prepared verification worktree
+        run: |
+          set -euo pipefail
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add .cz.toml
+          git commit --allow-empty -m "ci: prepare verification source"
+          test -z "$(git status --porcelain)"
+      - name: Bundle exact prepared source without a release tag
+        id: source
+        run: node .github/scripts/release-handoff.js source "$RUNNER_TEMP/verification-source"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-verification-source
+          path: ${{ runner.temp }}/verification-source/candidate.bundle
+          if-no-files-found: error

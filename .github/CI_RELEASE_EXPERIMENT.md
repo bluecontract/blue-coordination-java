@@ -83,10 +83,44 @@ archive result from an earlier attempt. Never compare results from another SHA.
   actionlint, diff inspection/check. No local full build.
 - CI: the full baseline gate, full optimized gate, archive smoke
   job and final comparison. Until they complete this is CI_PENDING.
-- Production runtime/handoff changes are also on this review branch. Archive
-  delegation remains experiment-only until measured successfully; it is not yet
-  wired into production release authorization.
+- Production Build and shared RC/stable verification now call `verification.yml`.
+  It runs full Java 25 staging and extracted-source verification concurrently.
+  The core consumes the actual archive receipt before sealing the release handoff;
+  the publication job waits for the reusable workflow, which requires both jobs.
+- Build verifies the checked-in version. Only the production RC release workflow
+  allocates a new RC version. This prevents ordinary PR validation from advancing
+  beyond the checked-in release authority merely because its tag already exists.
 - Baseline and optimized measurements both use Java 25 on the same commit.
   Historical 17/21 RC times are context only, not a controlled Java 25 baseline.
 - Development-only manifest gates that describe existing dependency builds remain
   unchanged; this experiment uses the published-artifact lane.
+
+## Production topology proof
+
+`verify-production-topology.yml` runs only on the experiment branch and calls the
+same source preparation and verification workflows used by Build. It creates an
+empty local source commit, bundles it, restores that exact prepared SHA in both
+runners, and verifies the final sealed handoff in a third job. It has read-only
+permissions, no secrets, no tags, no git pushes, and no external publication.
+RC/stable use their existing candidate preparation and the same verification
+workflow. Source bundles preserve their candidate tag when the release context
+requires it; verification-only bundles require no tag.
+
+Archive receipts are bound to source SHA/tree, workflow run/attempt, Java 25 and
+scope (`build`, `rc`, `stable`, `topology`). Wrong-scope or stale receipts cannot
+satisfy the core gate. The owner executes the original extracted-source task;
+only the core action becomes receipt validation. Both source ZIP bytes and all
+seven focused test names are checked before the original archive proof is used.
+Full unfiltered test suites, topology evidence, artifact hashes and local staged
+bytes are still checked by the existing release handoff inspector.
+
+The first Java 25 run (35114905683) failed before tests because javac25 diagnosed
+two unattached documentation comments under the existing `-Werror` policy. The
+narrow fix converts those two comments to ordinary comments. Compiler warning
+checks remain enabled. No successful build duration is inferred from that run.
+
+Local acceptance includes negative scope/source/attempt tests, an actual prepared
+source bundle restore without release tags, and a tiny real Gradle fixture proving
+valid receipt import plus rejection of wrong scope, task exclusions and publication.
+The full production-topology gate and Java25 A/B measurement remain CI_PENDING
+until observed green remotely; no publication is exercised.

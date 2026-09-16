@@ -222,10 +222,11 @@ if (require.main === module) {
   const root = process.cwd();
   const env = process.env;
   let output;
-  if (command === 'candidate') output = candidate(root, location, env.RELEASE_CHANNEL);
-  else if (command === 'restore') restore(root, location, {
+  if (command === 'source') output = candidate(root, location, 'stable');
+  else if (command === 'candidate') output = candidate(root, location, env.RELEASE_CHANNEL);
+  else if (command === 'restore' || command === 'restore-source') restore(root, location, {
     bundleSha: env.RELEASE_BUNDLE_SHA, commit: env.RELEASE_COMMIT,
-    version: env.RELEASE_VERSION, channel: env.RELEASE_CHANNEL,
+    version: env.RELEASE_VERSION, channel: command === 'restore-source' ? 'build' : env.RELEASE_CHANNEL,
   });
   else if (command === 'seal') output = seal(root, location, java, env);
   else if (command === 'verify') output = verify(root, location, {

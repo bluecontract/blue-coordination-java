@@ -1,0 +1,63 @@
+name: Verify production topology without publication
+
+on:
+  push:
+    branches: [codex/ci/coordination-release-experiment]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: coordination-production-topology-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/codex/ci/coordination-release-experiment'
+    uses: ./.github/workflows/prepare-verification-source.yml
+
+  verify:
+    needs: prepare
+    uses: ./.github/workflows/verification.yml
+    with:
+      commit: ${{ needs.prepare.outputs.commit }}
+      version: ${{ needs.prepare.outputs.version }}
+      bundle-sha: ${{ needs.prepare.outputs.bundle-sha }}
+      source-artifact: coordination-verification-source
+      scope: topology
+
+  verify-handoff:
+    name: Verify final sealed handoff without publication
+    needs: [prepare, verify]
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
+      RELEASE_CHANNEL: rc
+      JAVA25_HANDOFF_SHA: ${{ needs.verify.outputs.handoff-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-verification-source
+          path: ${{ runner.temp }}/verification-source
+      - run: node .github/scripts/release-handoff.js restore-source "$RUNNER_TEMP/verification-source"
+      - uses: actions/download-artifact@v4
+        with:
+          name: coordination-release-java25
+          path: ${{ runner.temp }}/release-handoffs
+      - run: node .github/scripts/release-handoff.js verify "$RUNNER_TEMP/release-handoffs"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coordination-final-verification-proof
+          path: build/reports/release/parallel-gates.json
+          if-no-files-found: error

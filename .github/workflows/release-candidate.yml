@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CI: true
@@ -110,62 +111,15 @@ jobs:
   java25:
     name: Java 25 verification and staging
     needs: prepare
-    runs-on: ubuntu-24.04
-    outputs:
-      handoff-sha: ${{ steps.handoff.outputs.handoff-sha }}
-    env:
-      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
-      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-release
-        with:
-          test-java: '25'
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: coordination-release-candidate
-          path: ${{ runner.temp }}/release-candidate
-
-      - name: Restore the exact release candidate
-        run: node .github/scripts/release-handoff.js restore "$RUNNER_TEMP/release-candidate"
-
-      - name: Verify published dependency availability
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon dependencyPreflight \
-            -PblueDependencyMode=published-artifact
-
-      - name: Build and stage from published dependencies
-        run: ./gradlew --no-daemon --no-build-cache clean stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25
-
-      - name: Seal the verified Java 25 artifacts and evidence
-        id: handoff
-        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java25.tar.gz" 25
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coordination-release-java25
-          path: ${{ runner.temp }}/java25.tar.gz
-          if-no-files-found: error
-          overwrite: true
-          compression-level: 0
-
-      - name: Archive incomplete Java 25 evidence
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coordination-release-java25-failure
-          path: |-
-            build/reports/**
-            build/test-results/**
-            build/rooted-evidence/**
-          overwrite: true
+    uses: ./.github/workflows/verification.yml
+    with:
+      commit: ${{ needs.prepare.outputs.commit }}
+      version: ${{ needs.prepare.outputs.version }}
+      bundle-sha: ${{ needs.prepare.outputs.bundle-sha }}
+      source-artifact: coordination-release-candidate
+      scope: ${{ inputs.channel }}
+      channel: ${{ inputs.channel }}
+      release-source: true
 
   publish:
     name: Publish verified artifacts

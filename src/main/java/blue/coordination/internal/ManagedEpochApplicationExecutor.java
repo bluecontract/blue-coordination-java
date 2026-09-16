@@ -855,7 +855,7 @@ final class ManagedEpochApplicationExecutor {
         return birth;
     }
 
-    /**
+    /*
      * Recognizes every existing member finalized indirectly by this retained
      * application. The directly delivered consumer remains on the ordinary
      * revision lane; an indirect member may only change its representation

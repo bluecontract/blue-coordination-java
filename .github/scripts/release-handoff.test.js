@@ -224,8 +224,8 @@ test('Java 25 verification depends on preparation and publication waits for its 
     const body = job(`java${java}`);
     assert.match(body, /    needs: prepare\n/);
     assert.doesNotMatch(body, /continue-on-error|--tests|\s-x\s/);
-    assert.match(body, new RegExp(`clean ${java === '25' ? 'stageRelease' : 'releaseCheck'} .*?-PtestJavaVersion=${java}`));
-    assert.match(body, /steps.handoff.outputs.handoff-sha/);
+    assert.match(body, /uses: .\/.github\/workflows\/verification.yml/);
+    assert.match(body, /release-source: true/);
   }
   assert.equal(job('java17'), undefined);
   assert.equal(job('java21'), undefined);
@@ -267,10 +267,48 @@ test('CI uses only Java 25 while published bytecode remains Java 17', () => {
   assert.match(build, /targetCompatibility = JavaVersion.VERSION_17/);
   assert.match(build, /options.release = 17/);
   assert.doesNotMatch(build, /JavaLanguageVersion.of\(17\)|JavaLanguageVersion.of\(21\)/);
-  for (const file of ['../actions/setup-release/action.yml', '../workflows/build.yml',
-    '../workflows/ci-release-experiment.yml']) {
+  for (const file of ['../actions/setup-release/action.yml', '../workflows/ci-release-experiment.yml']) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
     assert.match(text, /java-version: '25'/);
     assert.doesNotMatch(text, /JAVA_HOME_(17|21)_X64|java-version: '(17|21)/);
   }
+});
+
+
+test('production verification runs full core and archive independently and checks the sealed handoff', () => {
+  const shared = fs.readFileSync(path.join(__dirname, '../workflows/verification.yml'), 'utf8');
+  assert.match(shared, /  archive:\n/);
+  assert.match(shared, /  core:\n/);
+  assert.doesNotMatch(shared, /needs:|continue-on-error|--tests|\s-x\s/);
+  assert.match(shared, /ci-verification.py run core/);
+  assert.match(shared, /ci-verification.py run archive/);
+  assert.match(shared, /release-handoff.js seal/);
+  assert.match(shared, /coordination-archive-\$\{\{ inputs.scope \}\}-\$\{\{ github.run_attempt \}\}/);
+  const topology = fs.readFileSync(path.join(__dirname, '../workflows/verify-production-topology.yml'), 'utf8');
+  assert.match(topology, /needs: \[prepare, verify\]/);
+  assert.match(topology, /release-handoff.js verify/);
+  assert.doesNotMatch(topology, /secrets\.|git push|git tag|jreleaserDeploy/);
+  const build = fs.readFileSync(path.join(__dirname, '../workflows/build.yml'), 'utf8');
+  assert.match(build, /prepare-verification-source.yml/);
+  assert.match(build, /uses: .\/.github\/workflows\/verification.yml/);
+});
+
+test('prepared verification source restores without creating or requiring a release tag', (t) => {
+  const f = fixture(t, 'stable');
+  write(f.source, '.cz.toml', 'version = "3.0.0-rc.11"\n');
+  f.git(f.source, 'add', '.cz.toml');
+  f.git(f.source, 'commit', '--quiet', '-m', 'Prepared verification source');
+  const directory = path.join(f.root, 'verification-source');
+  const script = path.join(__dirname, 'release-handoff.js');
+  const source = JSON.parse(execFileSync(process.execPath, [script, 'source', directory], {
+    cwd:f.source, env:{...process.env, ...f.env}, encoding:'utf8',
+  }));
+  assert.equal(source.version, '3.0.0-rc.11');
+  assert.notEqual(source.commit, f.expected.commit);
+  execFileSync(process.execPath, [script, 'restore-source', directory], {
+    cwd:f.checkouts.publish, env:{...process.env, ...f.env, RELEASE_COMMIT:source.commit,
+      RELEASE_VERSION:source.version, RELEASE_BUNDLE_SHA:source['bundle-sha']}, encoding:'utf8',
+  });
+  assert.equal(f.git(f.checkouts.publish, 'rev-parse', 'HEAD'), source.commit);
+  assert.equal(f.git(f.checkouts.publish, 'tag', '--list'), '');
 });
