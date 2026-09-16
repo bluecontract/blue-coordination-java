@@ -12,45 +12,45 @@ spec.loader.exec_module(experiment)
 class ReceiptTests(unittest.TestCase):
     def valid(self):
         return {'schema': 1, 'sha': 'a'*40, 'tree': 'b'*40, 'run': '123', 'attempt': '1',
-                'java': '17', 'lane': 'archive', 'success': True,
-                'commands': [{'args': a, 'exit': 0} for a in experiment.commands('archive', '17')],
+                'java': '25', 'lane': 'archive', 'success': True,
+                'commands': [{'args': a, 'exit': 0} for a in experiment.commands('archive', '25')],
                 'started': 100, 'finished': 200}
 
     def test_valid_receipt(self):
-        experiment.validate(self.valid(), self.valid(), 'archive', '17')
+        experiment.validate(self.valid(), self.valid(), 'archive', '25')
 
     def test_wrong_binding_or_failed_receipt(self):
         for field, value in [('sha','c'*40),('tree','d'*40),('run','124'),('attempt','2'),
                              ('java','21'),('lane','baseline'),('success',False)]:
             with self.subTest(field=field), self.assertRaises(ValueError):
-                experiment.validate(dict(self.valid(), **{field:value}), self.valid(), 'archive', '17')
+                experiment.validate(dict(self.valid(), **{field:value}), self.valid(), 'archive', '25')
 
     def test_incomplete_or_failed_commands(self):
         for commands in [[], [{'args':['jreleaserDeploy'], 'exit':0}],
-                         [{'args':a, 'exit':1} for a in experiment.commands('archive','17')]]:
+                         [{'args':a, 'exit':1} for a in experiment.commands('archive','25')]]:
             with self.assertRaises(ValueError):
-                experiment.validate(dict(self.valid(), commands=commands), self.valid(), 'archive','17')
+                experiment.validate(dict(self.valid(), commands=commands), self.valid(), 'archive','25')
 
     def test_invalid_time(self):
         for value in [99, float('nan'), float('inf')]:
             with self.assertRaises(ValueError):
-                experiment.validate(dict(self.valid(),finished=value),self.valid(),'archive','17')
+                experiment.validate(dict(self.valid(),finished=value),self.valid(),'archive','25')
 
     def test_command_scope_preserves_full_rc_gates(self):
-        self.assertIn('stageRelease', experiment.commands('baseline','17')[1])
-        self.assertIn('releaseCheck', experiment.commands('baseline','21')[1])
-        self.assertNotIn('-x',str(experiment.commands('core','17')))
-        self.assertNotIn('jreleaser',str(experiment.commands('core','17')))
+        self.assertIn('stageRelease', experiment.commands('baseline','25')[1])
+        self.assertIn('stageRelease', experiment.commands('baseline','25')[1])
+        self.assertNotIn('-x',str(experiment.commands('core','25')))
+        self.assertNotIn('jreleaser',str(experiment.commands('core','25')))
 
     def test_archive_proof_checks_all_statuses_and_exact_tests(self):
         proof={'schemaId':experiment.ARCHIVE_SCHEMA,'archiveSha256':'a'*64,'archiveName':'source.zip',
-               'coordinationVersion':'3.0.0-rc.11','java':'17','dependencyMode':'published-artifact',
+               'coordinationVersion':'3.0.0-rc.11','java':'25','dependencyMode':'published-artifact',
                'focusedTests':experiment.FOCUSED_TESTS,'focusedTasks':experiment.FOCUSED_TASKS,
                **{name:'PASS' for name in experiment.ARCHIVE_STATUSES}}
-        experiment.validate_archive(proof,'17','a'*64,'source.zip','3.0.0-rc.11')
+        experiment.validate_archive(proof,'25','a'*64,'source.zip','3.0.0-rc.11')
         for field,value in [('archiveSha256','b'*64),('java','21'),('focusedTests',[]),('compileStatus','FAIL')]:
             with self.assertRaises(ValueError):
-                experiment.validate_archive(dict(proof,**{field:value}),'17','a'*64,'source.zip','3.0.0-rc.11')
+                experiment.validate_archive(dict(proof,**{field:value}),'25','a'*64,'source.zip','3.0.0-rc.11')
 
     def test_report_comparison_rejects_missing_suite_or_duplicate_case(self):
         p={'status':'PASS','topologyEvidenceVerified':True,'suites':{s:{'passed':True,'fullTask':True,
@@ -70,36 +70,36 @@ class ConsumeTests(unittest.TestCase):
             archive = root / 'source.zip'
             archive.write_bytes(b'actual archive bytes')
             binding = {'schema':1,'sha':'a'*40,'tree':'b'*40,'run':'123','attempt':'1'}
-            target = root / 'coordination-archive-17-1'
+            target = root / 'coordination-archive-25-1'
             proof = {'schemaId':experiment.ARCHIVE_SCHEMA,'archiveSha256':experiment.sha(archive),
-                'archiveName':archive.name,'coordinationVersion':'3.0.0-rc.11','java':'17',
+                'archiveName':archive.name,'coordinationVersion':'3.0.0-rc.11','java':'25',
                 'dependencyMode':'published-artifact','focusedTests':experiment.FOCUSED_TESTS,
                 'focusedTasks':experiment.FOCUSED_TASKS,
                 **{name:'PASS' for name in experiment.ARCHIVE_STATUSES}}
             experiment.write(target/'archive.json',proof)
-            receipt = dict(binding,lane='archive',java='17',success=True,started=100,finished=200,
-                commands=[{'args':a,'exit':0} for a in experiment.commands('archive','17')],
+            receipt = dict(binding,lane='archive',java='25',success=True,started=100,finished=200,
+                commands=[{'args':a,'exit':0} for a in experiment.commands('archive','25')],
                 archiveProofSha256=experiment.sha(target/'archive.json'))
             experiment.write(target/'timing.json',receipt)
             installed = root/'installed.json'
             with patch.object(experiment,'identity',return_value=binding), \
                  patch.object(experiment,'ARCHIVE_REPORT',installed), \
                  patch.dict(os.environ,{'RUNNER_TEMP':temporary,'EXPERIMENT_LANE':'core'}):
-                experiment.consume('17',str(archive),'3.0.0-rc.11')
+                experiment.consume('25',str(archive),'3.0.0-rc.11')
                 self.assertEqual(experiment.read(installed),proof)
                 installed.unlink()
                 experiment.write(target/'timing.json',dict(receipt,attempt='2'))
                 with self.assertRaisesRegex(ValueError,'attempt'):
-                    experiment.consume('17',str(archive),'3.0.0-rc.11')
+                    experiment.consume('25',str(archive),'3.0.0-rc.11')
                 self.assertFalse(installed.exists())
                 experiment.write(target/'timing.json',receipt)
                 archive.write_bytes(b'changed archive bytes')
                 with self.assertRaisesRegex(ValueError,'archiveSha256'):
-                    experiment.consume('17',str(archive),'3.0.0-rc.11')
+                    experiment.consume('25',str(archive),'3.0.0-rc.11')
                 self.assertFalse(installed.exists())
 
 class CompareTests(unittest.TestCase):
-    def test_complete_six_jobs_then_reject_changed_case_inventory(self):
+    def test_complete_three_jobs_then_reject_changed_case_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             binding = {'schema':1,'sha':'a'*40,'tree':'b'*40,'run':'123','attempt':'1'}
@@ -108,7 +108,7 @@ class CompareTests(unittest.TestCase):
                        'testCases':[{'className':'Example','name':suite,'failed':False,'skipped':False}]}
                 for suite in experiment.SUITES}}
             for lane in ['baseline','core','archive']:
-                for java in ['17','21']:
+                for java in ['25']:
                     folder=root/('coordination-timing-1-'+lane+'-'+java)
                     archive={'java':java,'focusedTests':experiment.FOCUSED_TESTS}
                     experiment.write(folder/'archive.json',archive)
@@ -127,7 +127,7 @@ class CompareTests(unittest.TestCase):
             with patch.object(experiment,'identity',return_value=binding),patch.dict(os.environ,{'GITHUB_STEP_SUMMARY':str(root/'summary')}):
                 experiment.compare(root)
                 self.assertIn('20.0%',(root/'summary').read_text())
-                folder=root/'coordination-timing-1-core-17'
+                folder=root/'coordination-timing-1-core-25'
                 changed=experiment.read(folder/'scope.json')
                 changed['suites']['test']['testCases'][0]['name']='changed'
                 experiment.write(folder/'scope.json',changed)

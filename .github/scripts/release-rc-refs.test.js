@@ -63,11 +63,11 @@ function fixture(t) {
   return { root, remote, publisher, contributor, git, shell, commit, releaseCommit };
 }
 
-test('publishes the commit after both gates and the tag after deployment', () => {
+test('publishes the commit after the Java 25 gate and the tag after deployment', () => {
   const publisher = workflow.slice(workflow.indexOf('\n  publish:\n'));
-  assert.match(publisher, /needs:\n      - prepare\n      - java17\n      - java21/);
+  assert.match(publisher, /needs:\n      - prepare\n      - java25/);
   const names = [
-    'Verify both gates and restore staged artifacts',
+    'Verify Java 25 gate and restore staged artifacts',
     'Push verified release commit',
     'Publish to Maven Central',
     'Push published release tag',

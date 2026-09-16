@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         lane: [baseline, core, archive]
-        java: ['17', '21']
+        java: ['25']
     env:
       CI: 'true'
       PYTHONDONTWRITEBYTECODE: '1'
@@ -37,12 +37,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17.0.19+10'
-      - uses: actions/setup-java@v5
-        if: matrix.java == '21'
-        with:
-          distribution: temurin
-          java-version: '21.0.11+10.0.LTS'
+          java-version: '25'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -56,8 +51,8 @@ jobs:
           set -euo pipefail
           gradle_home="$RUNNER_TEMP/coordination-experiment-gradle"
           mkdir -p "$gradle_home"
-          paths="$JAVA_HOME_17_X64"
-          if [[ "$TEST_JAVA" == "21" ]]; then paths="$paths,$JAVA_HOME_21_X64"; fi
+          test "$TEST_JAVA" = "25"
+          paths="$JAVA_HOME_25_X64"
           {
             echo 'org.gradle.java.installations.auto-detect=false'
             echo 'org.gradle.java.installations.auto-download=false'

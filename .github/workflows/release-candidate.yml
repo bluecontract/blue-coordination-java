@@ -107,8 +107,8 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  java17:
-    name: Java 17 verification and staging
+  java25:
+    name: Java 25 verification and staging
     needs: prepare
     runs-on: ubuntu-24.04
     outputs:
@@ -125,7 +125,7 @@ jobs:
 
       - uses: ./.github/actions/setup-release
         with:
-          test-java: '17'
+          test-java: '25'
 
       - uses: actions/download-artifact@v4
         with:
@@ -142,85 +142,25 @@ jobs:
             -PblueDependencyMode=published-artifact
 
       - name: Build and stage from published dependencies
-        run: ./gradlew --no-daemon --no-build-cache clean stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=17
+        run: ./gradlew --no-daemon --no-build-cache clean stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25
 
-      - name: Seal the verified Java 17 artifacts and evidence
+      - name: Seal the verified Java 25 artifacts and evidence
         id: handoff
-        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java17.tar.gz" 17
+        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java25.tar.gz" 25
 
       - uses: actions/upload-artifact@v4
         with:
-          name: coordination-release-java17
-          path: ${{ runner.temp }}/java17.tar.gz
+          name: coordination-release-java25
+          path: ${{ runner.temp }}/java25.tar.gz
           if-no-files-found: error
           overwrite: true
           compression-level: 0
 
-      - name: Archive incomplete Java 17 evidence
+      - name: Archive incomplete Java 25 evidence
         if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: coordination-release-java17-failure
-          path: |-
-            build/reports/**
-            build/test-results/**
-            build/rooted-evidence/**
-          overwrite: true
-
-  java21:
-    name: Java 21 verification
-    needs: prepare
-    runs-on: ubuntu-24.04
-    outputs:
-      handoff-sha: ${{ steps.handoff.outputs.handoff-sha }}
-    env:
-      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
-      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-      RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-release
-        with:
-          test-java: '21'
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: coordination-release-candidate
-          path: ${{ runner.temp }}/release-candidate
-
-      - name: Restore the exact release candidate
-        run: node .github/scripts/release-handoff.js restore "$RUNNER_TEMP/release-candidate"
-
-      - name: Verify published dependency availability
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon dependencyPreflight \
-            -PblueDependencyMode=published-artifact
-
-      - name: Verify the Java 21 release gate
-        run: ./gradlew --no-daemon --no-build-cache clean releaseCheck -PblueDependencyMode=published-artifact -PtestJavaVersion=21
-
-      - name: Seal the verified Java 21 artifacts and evidence
-        id: handoff
-        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java21.tar.gz" 21
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coordination-release-java21
-          path: ${{ runner.temp }}/java21.tar.gz
-          if-no-files-found: error
-          overwrite: true
-          compression-level: 0
-
-      - name: Archive incomplete Java 21 evidence
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coordination-release-java21-failure
+          name: coordination-release-java25-failure
           path: |-
             build/reports/**
             build/test-results/**
@@ -231,15 +171,13 @@ jobs:
     name: Publish verified artifacts
     needs:
       - prepare
-      - java17
-      - java21
+      - java25
     runs-on: ubuntu-24.04
     env:
       RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
-      JAVA17_HANDOFF_SHA: ${{ needs.java17.outputs.handoff-sha }}
-      JAVA21_HANDOFF_SHA: ${{ needs.java21.outputs.handoff-sha }}
+      JAVA25_HANDOFF_SHA: ${{ needs.java25.outputs.handoff-sha }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -249,7 +187,7 @@ jobs:
 
       - uses: ./.github/actions/setup-release
         with:
-          test-java: '17'
+          test-java: '25'
 
       - uses: actions/download-artifact@v4
         with:
@@ -261,21 +199,16 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: coordination-release-java17
+          name: coordination-release-java25
           path: ${{ runner.temp }}/release-handoffs
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: coordination-release-java21
-          path: ${{ runner.temp }}/release-handoffs
-
-      - name: Verify both gates and restore staged artifacts
+      - name: Verify Java 25 gate and restore staged artifacts
         run: node .github/scripts/release-handoff.js verify "$RUNNER_TEMP/release-handoffs"
 
       - name: Push verified release commit
         if: ${{ inputs.channel == 'rc' }}
         run: git push --no-follow-tags origin HEAD:refs/heads/next
-      # stageRelease passed on Java 17. Both job-bound archive hashes and full
+      # stageRelease passed on Java 25. The job-bound archive hash and full
       # receipts are checked above. Deploy those bytes without repeating gates.
 
       - name: Publish to Maven Central
@@ -287,7 +220,7 @@ jobs:
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
           JRELEASER_REPRODUCIBLE: true
-        run: ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=17
+        run: ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25
 
       - name: Push published release tag
         if: ${{ inputs.channel == 'rc' }}

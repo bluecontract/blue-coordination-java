@@ -1,8 +1,15 @@
 # Complete RC verification experiment, no publication
 
 Branch `codex/ci/coordination-release-experiment`, based on next
-`69cd6db22707028abfbaab04741dc9b61961aa19` (RC11). The existing production
-Build/Release RC/Release stable workflows are unchanged.
+`69cd6db22707028abfbaab04741dc9b61961aa19` (RC11). The review branch now migrates Build/Release RC/Release stable to one Java 25
+runtime, matching MyOS Java. No production workflow has been dispatched.
+Only JDK 25 is installed, including compilation, tests and extracted-source
+validation. `options.release`, source/target compatibility and published bytecode
+remain Java 17; dropping CI coverage of runtimes 17/21 is intentional.
+The handoff validator now requires one complete Java 25 staging receipt and
+rejects obsolete JDK receipts. All four full suites, topology and staged-byte
+checks remain mandatory. Historical Round 12/13 evidence documents retain their
+original runtime records; they do not describe the new CI matrix.
 
 The latest observed complete RC took1:59:48. Its Java17/21 gates already run
 concurrently with four test JVM forks. The95min verification gate includes
@@ -13,15 +20,15 @@ It does not enable parallel methods or shard tests.
 
 ## Matrix and scope
 
-Six independent Ubuntu24.04 jobs (each4vCPU, standard public runner):
+Three independent Ubuntu24.04 jobs (each 4 vCPU, standard public runner):
 
-| Variant | JDK17 | JDK21 |
-|---|---|---|
-| baseline | dependencyPreflight; clean stageRelease | dependencyPreflight; clean releaseCheck |
-| core | identical, with archive receipt import | identical, with archive receipt import |
-| archive | dependencyPreflight; clean verifyExtractedSourceArchive | same |
+| Variant | Java 25 |
+|---|---|
+| baseline | dependencyPreflight; clean stageRelease |
+| core | identical, with archive receipt import |
+| archive | dependencyPreflight; clean verifyExtractedSourceArchive |
 
-All jobs use4forks/max-workers4 and isolated fresh Gradle homes, pinned JDKs,
+All jobs use4forks/max-workers4 and isolated fresh Gradle homes, the same Temurin 25 release,
 no build cache. Wrapper distribution bootstrap is outside timing and retries
 only distribution setup. Dependencies/preflight are inside timing.
 
@@ -48,15 +55,15 @@ untouched. An absent, failed, stale or wrong-source receipt fails the job.
 
 After every main command, the experiment calls the existing production
 `release-handoff.js.inspectBuild`, validating complete cases, artifacts, archive
-proof, Java17 staged bytes/module and RC readiness. The comparison requires the
-same baseline/core handoff and identical cross-JDK artifact/test inventories.
+proof, Java 25 staged bytes/module and RC readiness. The comparison requires the
+same baseline/core handoff and identical baseline/core artifact/test inventories.
 Maven timestamp metadata is not a reproducible artifact input; production
 inspectBuild checks actual JAR/POM/module bytes instead.
 
 ## Measurements
 
-Final summary compares the wall window across both baseline jobs with the window
-across both core and both archive jobs. Windows include staggered measurement
+Final summary compares the wall window of the baseline job with the window
+across core and archive jobs. Windows include staggered measurement
 starts and receipt waiting, but exclude tool setup/upload/summary. Individual
 command times and process-tree sampled CPU/RSS/PSS are retained in timing.json.
 Sampling includes observed detached descendants; very short processes and memory
@@ -72,9 +79,14 @@ archive result from an earlier attempt. Never compare results from another SHA.
 
 ## Verification
 
-- Local: Python receipt/command/inventory tests, existing32 Node release tests,
+- Local: Python receipt/command/inventory tests, existing Node release tests and the Java 25 workflow contract,
   actionlint, diff inspection/check. No local full build.
-- CI: both full baseline gates, both full optimized gates, both archive smoke
-  jobs and final comparison. Until they complete this is CI_PENDING.
-- No source production files changed. Experimental workflow is reviewable before
-  commit/push; remote execution requires pushing this exact branch.
+- CI: the full baseline gate, full optimized gate, archive smoke
+  job and final comparison. Until they complete this is CI_PENDING.
+- Production runtime/handoff changes are also on this review branch. Archive
+  delegation remains experiment-only until measured successfully; it is not yet
+  wired into production release authorization.
+- Baseline and optimized measurements both use Java 25 on the same commit.
+  Historical 17/21 RC times are context only, not a controlled Java 25 baseline.
+- Development-only manifest gates that describe existing dependency builds remain
+  unchanged; this experiment uses the published-artifact lane.

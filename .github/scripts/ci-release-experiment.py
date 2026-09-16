@@ -42,14 +42,14 @@ def sha(path):
 
 
 def commands(lane, java):
-    require(lane in ['baseline', 'core', 'archive'] and java in ['17', '21'], 'Invalid lane/JDK')
+    require(lane in ['baseline', 'core', 'archive'] and java in ['25'], 'Invalid lane/JDK')
     common = ['--no-daemon', '--no-build-cache', '--max-workers=4', '-PtestMaxParallelForks=4',
               '-PblueDependencyMode=published-artifact', '-PtestJavaVersion=' + java]
     preflight = common + ['dependencyPreflight']
     if lane == 'archive':
         return [preflight, common + ['clean', 'verifyExtractedSourceArchive']]
     init = ['--init-script', '.github/scripts/ci-archive-receipt.init.gradle'] if lane == 'core' else []
-    return [preflight, common + init + ['clean', 'stageRelease' if java == '17' else 'releaseCheck']]
+    return [preflight, common + init + ['clean', 'stageRelease']]
 
 
 def identity():
@@ -211,13 +211,13 @@ def compare(directory):
     receipts = {}
     root = Path(directory)
     for lane in ['baseline', 'core', 'archive']:
-        for java in ['17', '21']:
+        for java in ['25']:
             matches = list(root.glob('coordination-timing-' + binding['attempt'] + '-' + lane + '-' + java + '/timing.json'))
             require(len(matches) == 1, 'Missing/duplicate job receipt: ' + lane + java)
             receipt = read(matches[0]); validate(receipt, binding, lane, java)
             receipt['_path'] = matches[0].parent
             receipts[(lane, java)] = receipt
-    for java in ['17', '21']:
+    for java in ['25']:
         baseline, core, archive = [receipts[(lane, java)] for lane in ['baseline', 'core', 'archive']]
         for row in [baseline, core, archive]:
             proof_path = row['_path'] / 'archive.json'
@@ -232,24 +232,18 @@ def compare(directory):
             require(sha(row['_path'] / 'build.json') == row['buildProofSha256'], 'Changed build handoff')
         require(read(baseline['_path'] / 'build.json') == read(core['_path'] / 'build.json'),
                 'Production release handoff differs between baseline and core')
-    # Match the production cross-JDK artifact/inventory agreement check as well.
-    for lane in ['baseline', 'core']:
-        seventeen = read(receipts[(lane, '17')]['_path'] / 'build.json')
-        twenty_one = read(receipts[(lane, '21')]['_path'] / 'build.json')
-        for field in ['artifacts', 'testInventory', 'focusedTests']:
-            require(seventeen[field] == twenty_one[field], 'Cross-JDK release handoff differs: ' + field)
-    baseline = [receipts[('baseline', java)] for java in ['17','21']]
-    parallel = [receipts[(lane, java)] for lane in ['core','archive'] for java in ['17','21']]
+    baseline = [receipts[('baseline', java)] for java in ['25']]
+    parallel = [receipts[(lane, java)] for lane in ['core','archive'] for java in ['25']]
     window = lambda rows: max(r['finished'] for r in rows) - min(r['started'] for r in rows)
     before, after = window(baseline), window(parallel)
     lines = ['## Complete RC verification, without publication', '',
-             f'Baseline two-JDK window: **{before:.1f}s**. Parallel archive window: **{after:.1f}s**.',
+             f'Baseline Java 25 window: **{before:.1f}s**. Parallel archive window: **{after:.1f}s**.',
              f'Observed change: **{(before-after)/before*100:.1f}% faster** (negative means slower).', '',
              '| Lane | JDK | Command window(s) | Peak PSS(MiB) | Sampled cores |', '|---|---|---:|---:|---:|']
     for (lane, java), row in receipts.items():
         metrics = row['processTreeSampling']
         lines.append(f"| {lane} | {java} | {row['finished']-row['started']:.1f} | {metrics['peakPssKiB']/1024:.1f} | {metrics['averageSampledCores']:.2f} |")
-    lines += ['', 'All full test inventories, topology gates, archive proofs and Java17 staged bytes match.',
+    lines += ['', 'All full test inventories, topology gates, archive proofs and Java 25 staged bytes match.',
               'Windows include receipt waits and staggered job starts; exclude setup/upload/final comparison.',
               'Process-tree CPU/PSS sampling is approximate (short-lived processes can be missed).',
               'No Maven publication or release executed; historical publication latency is not included.']

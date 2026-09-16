@@ -89,7 +89,7 @@ function identity(root, env) {
 }
 
 function inspectBuild(build, binding, java) {
-  assert.ok(['17', '21'].includes(java), 'Invalid verification JDK');
+  assert.ok(['25'].includes(java), 'Invalid verification JDK');
   const scope = json(path.join(build, 'reports/test-execution-scope/verifyReleaseTestExecutionScope.json'));
   assert.equal(scope.status, 'PASS', 'Release execution scope did not pass');
   assert.equal(scope.coordinationVersion, binding.version, 'Scope version mismatch');
@@ -138,7 +138,7 @@ function inspectBuild(build, binding, java) {
   }
 
   let stagedModuleSha256;
-  if (java === '17') {
+  if (java === '25') {
     const staged = path.join(build, 'staging-deploy/blue/coordination/blue-coordination-java', binding.version);
     for (const [file, hash] of Object.entries(artifacts)) {
       if (file.startsWith('distributions/')) continue;
@@ -162,7 +162,7 @@ function inspectBuild(build, binding, java) {
   }
   return { schema: 'coordination-release-handoff/1', binding, java, artifacts,
     testInventory, focusedTests: [...archive.focusedTests].sort(),
-    ...(java === '17' ? { stagedModuleSha256 } : {}) };
+    ...(java === '25' ? { stagedModuleSha256 } : {}) };
 }
 
 function regularTree(directory) {
@@ -180,7 +180,7 @@ function seal(root, output, java, env) {
   const binding = identity(root, env);
   const receipt = inspectBuild(build, binding, java);
   fs.writeFileSync(path.join(build, MANIFEST), `${JSON.stringify(receipt, null, 2)}\n`);
-  const directories = [...EVIDENCE_DIRS, ...(java === '17' ? ['staging-deploy'] : [])];
+  const directories = [...EVIDENCE_DIRS, ...(java === '25' ? ['staging-deploy'] : [])];
   for (const directory of directories) regularTree(path.join(build, directory));
   execFileSync('tar', ['-czf', output, '-C', root, `build/${MANIFEST}`,
     ...directories.map((directory) => `build/${directory}`)]);
@@ -190,7 +190,7 @@ function seal(root, output, java, env) {
 function verify(root, directory, expectedHashes, env) {
   const binding = identity(root, env);
   const receipts = {};
-  for (const java of ['17', '21']) {
+  for (const java of ['25']) {
     const archive = path.join(directory, `java${java}.tar.gz`);
     assert.match(expectedHashes[java] || '', /^[0-9a-f]{64}$/, `Missing Java ${java} job SHA`);
     assert.equal(sha(archive), expectedHashes[java], `Java ${java} handoff SHA mismatch`);
@@ -204,14 +204,11 @@ function verify(root, directory, expectedHashes, env) {
     assert.deepEqual(receipt, inspectBuild(build, binding, java), `Java ${java} evidence mismatch`);
     receipts[java] = receipt;
   }
-  for (const field of ['artifacts', 'testInventory', 'focusedTests']) {
-    assert.deepEqual(receipts['17'][field], receipts['21'][field], `JDK gates differ: ${field}`);
-  }
   assert.ok(!fs.existsSync(path.join(root, 'build')), 'Refusing to overwrite local build outputs');
-  fs.cpSync(path.join(directory, 'java17/build'), path.join(root, 'build'), { recursive: true });
+  fs.cpSync(path.join(directory, 'java25/build'), path.join(root, 'build'), { recursive: true });
   const report = { schema: 'coordination-release-gates/1', status: 'PASS', binding,
-    handoffSha256: expectedHashes, artifacts: receipts['17'].artifacts,
-    testCounts: Object.fromEntries(Object.entries(receipts['17'].testInventory)
+    handoffSha256: expectedHashes, artifacts: receipts['25'].artifacts,
+    testCounts: Object.fromEntries(Object.entries(receipts['25'].testInventory)
       .map(([suite, tests]) => [suite, tests.length])) };
   const reportDirectory = path.join(root, 'build/reports/release');
   fs.mkdirSync(reportDirectory, { recursive: true });
@@ -232,7 +229,7 @@ if (require.main === module) {
   });
   else if (command === 'seal') output = seal(root, location, java, env);
   else if (command === 'verify') output = verify(root, location, {
-    17: env.JAVA17_HANDOFF_SHA, 21: env.JAVA21_HANDOFF_SHA,
+    25: env.JAVA25_HANDOFF_SHA,
   }, env);
   else throw new Error(`Unknown release handoff command: ${command}`);
   if (output) {
