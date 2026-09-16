@@ -147,6 +147,13 @@ final class ContractsJournalDrainCoordinator {
         return durableState.processedThrough;
     }
 
+    /** Transport-only completion is a journal turn, but cannot pass a blocked root. */
+    synchronized boolean hasCompletableRootedTransport(RootedCheckpointDriver.Scan remaining) {
+        if (!remaining.blockedRoots().isEmpty()) return false;
+        ExternalOrderKey firstPending = remaining.heads().isEmpty() ? null : remaining.heads().get(0).order();
+        return journal.entries().stream().anyMatch(entry -> pendingRootedTransport(entry, null, firstPending));
+    }
+
     /** Reports each newly terminal transport row once, using root-local progress. */
     synchronized List<TimelineEntry> completeRootedTransport(ExternalOrderKey cutoff,
             RootedCheckpointDriver.Scan remaining) {
@@ -154,8 +161,7 @@ final class ContractsJournalDrainCoordinator {
         List<TimelineEntry> completed = new ArrayList<>();
         ExternalOrderKey firstPending = remaining.heads().isEmpty() ? null : remaining.heads().get(0).order();
         for (TimelineEntry entry : journal.entries()) {
-            if (cutoff != null && entry.sourceOrderKey().compareTo(cutoff) > 0) continue;
-            if (firstPending != null && entry.sourceOrderKey().compareTo(firstPending) >= 0) continue;
+            if (!pendingRootedTransport(entry, cutoff, firstPending)) continue;
             if (durableState.terminalEntries.add(EntryKey.from(entry))) {
                 terminalEntryObserver.accept(entry);
                 completed.add(entry);
@@ -166,6 +172,13 @@ final class ContractsJournalDrainCoordinator {
         }
         completed.sort(java.util.Comparator.comparing(TimelineEntry::sourceOrderKey));
         return List.copyOf(completed);
+    }
+
+    private boolean pendingRootedTransport(TimelineEntry entry, ExternalOrderKey cutoff,
+            ExternalOrderKey firstPending) {
+        return (cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0)
+                && (firstPending == null || entry.sourceOrderKey().compareTo(firstPending) < 0)
+                && !durableState.terminalEntries.contains(EntryKey.from(entry));
     }
 
     /** Whether the ordinary lane has journal work at its retained frontier. */

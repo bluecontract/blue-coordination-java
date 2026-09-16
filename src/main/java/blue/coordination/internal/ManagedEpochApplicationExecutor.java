@@ -132,6 +132,12 @@ final class ManagedEpochApplicationExecutor {
     ContractsClosureAdapter.ManagedApplicationOutcome execute(
             ManagedEpochApplicationWork work,
             Set<DocumentId> excludedConsumers) {
+        return execute(work, excludedConsumers, null);
+    }
+
+    /** A real local terminal input may perform the same independently registered application at an exact join. */
+    ContractsClosureAdapter.ManagedApplicationOutcome execute(
+            ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers, RootedLocalHistory.Step localJoin) {
         ManagedEpochApplicationWork selected = Objects.requireNonNull(
                 work, "work");
         Optional<ManagedEpochApplicationReceipt> prior =
@@ -166,8 +172,8 @@ final class ManagedEpochApplicationExecutor {
         boolean attemptMarkClosed = false;
         try {
             ManagedEpochInvocationCapturer.Capture initialCapture =
-                    invocationCapturer.capture(
-                            selected, excludedConsumers);
+                    localJoin == null ? invocationCapturer.capture(selected, excludedConsumers)
+                            : invocationCapturer.captureRootedJoin(selected, excludedConsumers, localJoin);
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     ContractsClosureAdapter.CohortInvocation,
                     ContractsClosurePublicationReceipt> automatic = host
@@ -208,6 +214,10 @@ final class ManagedEpochApplicationExecutor {
                             initialCapture.sourceTransitionReceipt(),
                             automatic.invocation());
             ClosureProcessResult result = attempt.processResult();
+            if (localJoin != null && (result.rootedProjection() == null
+                    || !result.rootedProjection().owns(ContractsClosureAdapter.closureId(selected.consumerDocumentId())))) {
+                throw ContractsClosureAdapter.stale("Local terminal did not acquire its registered consumer");
+            }
             RootedTerminalEvidence terminal = RootedTerminalEvidence.captureHistorical(capture.invocation(), result, selected);
             ContractsClosurePublicationReceipt receipt = new ContractsClosurePublicationReceipt(
                     terminal == null ? selected.workIdentity() : capture.invocation().rootedEvidence().terminalKey(),
@@ -717,6 +727,8 @@ final class ManagedEpochApplicationExecutor {
             CatchUpPlanStore advancedCatchUpPlans = beforeCatchUpPlans
                     .withCommittedApplication(
                             work, application, excludedConsumers);
+            RootedDocumentView resultingRootedView = result.rootedProjection() == null ? null
+                    : new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder());
             ManagedCatchUpPlanner.PlanningResult catchUp =
                     ManagedCatchUpPlanner.afterPublication(
                             advancedCatchUpPlans,
@@ -746,7 +758,8 @@ final class ManagedEpochApplicationExecutor {
                                     documentId)
                                     ? result.graphGeneration()
                                     : documents.graphGeneration(documentId),
-                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts),
+                            new ManagedRepresentationHistory(documents).afterPublication(receipt, resultingHeads, committedEpochReceipts,
+                                    resultingRootedView),
                             blueId -> objects.cyclicSetProofFor(blueId).proof().orElse(null), result.rootedProjection() != null);
             transaction.stageCatchUpPlans(
                     beforeCatchUpPlans, catchUp.plans());
@@ -756,8 +769,7 @@ final class ManagedEpochApplicationExecutor {
                     .withOperationRouteChanges(
                             preparedRoutes.operationRouteChanges());
             transaction.stageClosurePublicationReceipt(retainedReceipt);
-            if (result.rootedProjection() != null) transaction.stageRootedView(
-                    new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder()));
+            if (resultingRootedView != null) transaction.stageRootedView(resultingRootedView);
             transaction.commit();
             storeCommitted = true;
             runtime.metrics().increment(OCCURRENCES_ADVANCED);

@@ -311,8 +311,21 @@ final class ManagedOccurrenceResolver {
                         "Stable occurrence evidence names an absent lineage "
                                 + retained.targetDocumentId().value()));
             }
-            return resolveSelectedLineage(
-                    index, demand, suppliedBody, stable, true);
+            // A committed detached slot preserves same-lineage selection,
+            // but does not reserve the path permanently for that lineage.
+            // Pending imports still require their exact source/receipt rule.
+            boolean detachedForeign = !retained.active()
+                    && retained.pendingHistoricalEpoch() == null
+                    && !retained.expectedTargetBlueId().equals(suppliedBlueId)
+                    && !stable.currentBlueId().equals(suppliedBlueId)
+                    && !stable.authoredInitialBlueId().equals(suppliedBlueId)
+                    && !stable.initializedBlueId().equals(suppliedBlueId)
+                    && index.retainedMatches(suppliedBlueId).stream()
+                            .noneMatch(state -> state.documentId().equals(stable.documentId()));
+            if (!detachedForeign) {
+                return resolveSelectedLineage(
+                        index, demand, suppliedBody, stable, true);
+            }
         }
 
         LinkedHashMap<DocumentId, ManagedLineageIndex.Lineage> candidates =

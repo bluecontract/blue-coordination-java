@@ -3,11 +3,10 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.SourceHistoryPrerequisite;
+import blue.coordination.api.SourceHistoryPrerequisiteObservation;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.Timeline;
 import blue.coordination.sdk.ExactNodeProvider;
-import blue.language.codec.jackson.UncheckedObjectMapper;
-import blue.language.model.NodeWireForm;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ClosureAttemptResult;
 import blue.language.processor.closure.ManagedOccurrenceEvidenceDemand;
@@ -52,7 +51,7 @@ final class RootedSourceDiscoveryCoordinator {
             Pending candidate = candidate(current, attempt, occurrence);
             if (candidate == null) { accepted.add(occurrence); continue; }
             Prepared next = prepare(candidate);
-            if (next == null) { pending.remove(candidate.key()); accepted.add(occurrence); continue; }
+            if (next == null) { accepted.add(occurrence); continue; }
             pending.put(candidate.key(), candidate);
             missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
                     ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
@@ -105,11 +104,33 @@ final class RootedSourceDiscoveryCoordinator {
             if (!candidate.owns(requestingRoot)) continue;
             if (!stillCurrent(candidate)) { pending.remove(candidate.key()); continue; }
             Prepared next = prepare(candidate);
-            if (next == null) pending.remove(candidate.key()); else values.add(next.descriptor());
+            if (next != null) values.add(next.descriptor());
         }
         values.sort(java.util.Comparator.comparing(SourceHistoryPrerequisite::demandIdentity)
                 .thenComparing(value -> value.sourceDocumentId().value()));
         return List.copyOf(values);
+    }
+
+    SourceHistoryPrerequisiteObservation observe(SourceHistoryPrerequisite expected) {
+        Pending candidate = pending.get(key(expected.requestingInvocationIdentity(), expected.demandIdentity()));
+        if (candidate == null) return new SourceHistoryPrerequisiteObservation(
+                SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
+        if (!expected.requestingRoot().value().equals(candidate.invocation().rootedEvidence()
+                        .context().canonicalRootDocumentId().value())
+                || !expected.sourceDocumentId().equals(candidate.source())
+                || !expected.authoredBlueId().equals(candidate.authored().blueId())
+                || !expected.cutoffExclusive().equals(candidate.cutoff()))
+            throw new IllegalArgumentException("Changed source-prerequisite logical authority");
+        if (!stillCurrent(candidate)) {
+            pending.remove(candidate.key());
+            return new SourceHistoryPrerequisiteObservation(
+                    SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
+        }
+        Prepared next = prepare(candidate);
+        return next == null ? new SourceHistoryPrerequisiteObservation(
+                SourceHistoryPrerequisiteObservation.Status.SATISFIED, Optional.empty())
+                : new SourceHistoryPrerequisiteObservation(
+                        SourceHistoryPrerequisiteObservation.Status.PENDING, Optional.of(next.descriptor()));
     }
 
     Optional<SourceHistoryPrerequisiteResult> completed(SourceHistoryPrerequisite expected) {
@@ -147,6 +168,8 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     private boolean stillCurrent(Pending candidate) {
+        // Terminal rejections can consume the exact requester without changing its document head.
+        if (documents.hasPublicationReceipt(candidate.invocation().rootedEvidence().terminalKey())) return false;
         for (var owner : candidate.invocation().rootedEvidence().context().entryOwners()) {
             DocumentId id = ContractsClosureAdapter.coordinationId(owner);
             var prior = candidate.invocation().rootedEvidence().publicationFence(id);
@@ -174,16 +197,17 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
                     window.identity(), window.diagnostic(), null);
         if (source == null) {
-            String json = UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(NodeWireForm.get(candidate.authored().copyNode()));
-            var compiled = new Contracts10StaticEmbeddedAdmissionCompiler(engine).compile(json, provider,
+            var compiled = new Contracts10StaticEmbeddedAdmissionCompiler(engine).compileExactAuthored(candidate.authored(),
                     Contracts10AuthoredClosureCompiler.ActivationInputs.fullHistory());
             if (!compiled.rootDocumentId().equals(candidate.source()))
                 throw new IllegalArgumentException("Source compiler changed the exact authored identity");
             return selected(candidate, SourceHistoryPrerequisite.Kind.ADMISSION, compiled, null,
                     window.identity(), null, window.evidence());
         }
-        var next = new RootedCheckpointDriver(documents, adapter).select(candidate.source(), journal.entries());
+        var driver = new RootedCheckpointDriver(documents, adapter);
+        var next = driver.select(candidate.source(), journal.entries());
         if (next.blocked()) {
+            if (driver.completeBefore(candidate.source(), journal.entries(), candidate.cutoff())) return null;
             String reason = RootedJoinPrerequisites.pendingBefore(candidate.source(),
                     source.rootedViewBefore(candidate.cutoff()), candidate.cutoff(), documents);
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
@@ -192,7 +216,7 @@ final class RootedSourceDiscoveryCoordinator {
         ExternalOrderKey origin;
         SourceHistoryPrerequisite.Kind kind;
         if (next.live() != null) { origin = next.live().entry().sourceOrderKey(); kind = SourceHistoryPrerequisite.Kind.LIVE; }
-        else if (next.localHistorical() != null) {
+        else if (next.localHistorical() != null && next.historical() == null) {
             origin = next.localHistorical().anchor().sourceOrderKey(); kind = SourceHistoryPrerequisite.Kind.ROOTED_RETAINED;
         } else if (next.historical() != null) {
             origin = documents.catchUpBarrier(next.historical().barrierIdentity()).orElseThrow().causeOrder();
@@ -264,7 +288,7 @@ final class RootedSourceDiscoveryCoordinator {
         String work = admission != null ? admission.invocation().invocationIdentity()
                 : step == null ? candidate.demand().demandIdentity()
                 : step.live() != null ? step.live().invocations().get(0).executionInvocationIdentity()
-                : step.localHistorical() != null ? step.localHistorical().work().workIdentity() : step.historical().workIdentity();
+                : step.historical() != null ? step.historical().workIdentity() : step.localHistorical().work().workIdentity();
         String entry = step != null && step.live() != null ? step.live().entry().blueId() : null;
         String root = candidate.invocation().rootedEvidence().context().canonicalRootDocumentId().value();
         var fields = new ArrayList<String>(List.of(root, candidate.invocation().input().invocationIdentity(),

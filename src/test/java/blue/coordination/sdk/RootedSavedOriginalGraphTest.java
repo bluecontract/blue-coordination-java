@@ -180,10 +180,11 @@ final class RootedSavedOriginalGraphTest {
             var attachedInputs = new java.util.LinkedHashSet<String>();
             EntryHandle precedingAttachment = null;
             for (String[] edge : edges) {
+                var selections = new SelectionBudget();
                 if (settlePreAnchorSource && ordinal == 2) {
                     assertEquals("C", edge[0]);
                     assertEquals("A", edge[2]);
-                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment));
+                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment), selections);
                 }
                 var replayedLiveInputs = new java.util.LinkedHashSet<String>();
                 var root = handles.get(edge[0]);
@@ -200,7 +201,7 @@ final class RootedSavedOriginalGraphTest {
                         "edge: " + edge[1] + "\nsource:\n  blueId: " + saved.blueId());
                 var beforeHeads = handles.values().stream().map(doc -> doc.snapshot().blueId()).toList();
                 var beforeHistories = histories(f, handles);
-                var attached = f.blue.processing().processNext(root);
+                var attached = selections.next(f, root);
                 boolean journalSettled = false;
                 if (expectJoinPrerequisite && ordinal == 3) {
                     assertEquals(EntryDisposition.NEEDS_RESOURCES, attached.entry(submitted).disposition(),
@@ -210,11 +211,11 @@ final class RootedSavedOriginalGraphTest {
                     assertEquals(beforeHistories, histories(f, handles));
                     assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).isEmpty());
                     CoordinationTestControl.attach(f.blue.advanced().rawEngine()).restartFromStores();
-                    var retried = f.blue.processing().processNext(root);
+                    var retried = selections.next(f, root);
                     assertEquals(EntryDisposition.NEEDS_RESOURCES, retried.entry(submitted).disposition());
                     assertEquals(beforeHistories, histories(f, handles));
-                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment), submitted);
-                    attached = f.blue.processing().processNext(root);
+                    settleExactPreAnchorSource(f, handles, java.util.Objects.requireNonNull(precedingAttachment), submitted, selections);
+                    attached = selections.next(f, root);
                 }
                 if (!settlePreAnchorSource && !expectJoinPrerequisite && edges.length == 3 && ordinal == 3) {
                     assertEquals(EntryDisposition.NEEDS_RESOURCES, attached.entry(submitted).disposition());
@@ -222,14 +223,16 @@ final class RootedSavedOriginalGraphTest {
                     assertEquals(beforeHeads, handles.values().stream().map(doc -> doc.snapshot().blueId()).toList());
                     assertEquals(beforeHistories, histories(f, handles));
                     assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).isEmpty());
-                    finishJoinWithPublicDriver(f, handles, submitted, attachedInputs);
+                } else assertEquals(EntryDisposition.APPLIED, attached.entry(submitted).disposition(),
+                        "Saved attachment " + String.join("/", edge) + " " + attached.entry(submitted).diagnostic());
+                if (edges.length == 3 && ordinal == 3) {
+                    // Pre-anchor source readiness does not execute B's original same-cause join work.
+                    finishJoinWithPublicDriver(f, handles, submitted, attachedInputs, attached.entry(submitted), selections);
                     journalSettled = true;
                 }
-                if (!journalSettled) assertEquals(EntryDisposition.APPLIED, attached.entry(submitted).disposition(),
-                        "Saved attachment " + String.join("/", edge) + " " + attached.entry(submitted).diagnostic());
                 for (int step = 0; !journalSettled && step < 32; step++) {
                     Map<String, List<String>> prefixes = histories(f, handles);
-                    var result = f.blue.processing().processNext(root);
+                    var result = selections.next(f, root);
                     for (var prior : prefixes.entrySet()) assertEquals(prior.getValue(),
                             f.history(handles.get(prior.getKey())).subList(0, prior.getValue().size()));
                     if (result.quiescent()) break;
@@ -247,7 +250,7 @@ final class RootedSavedOriginalGraphTest {
                                     && result.entries().isEmpty(),
                             "No independently evidenced processing progress: " + result.diagnostic());
                 }
-                assertTrue(f.blue.processing().processNext(root).quiescent(), "Unfinished saved attachment " + String.join("/", edge));
+                assertTrue(selections.next(f, root).quiescent(), "Unfinished saved attachment " + String.join("/", edge));
                 assertTrue(f.blue.advanced().auditManagedOccurrence(root.id(), "/peers/" + edge[1]).orElseThrow().active());
                 attachedInputs.add(submitted.blueId());
                 precedingAttachment = submitted;
@@ -306,31 +309,42 @@ final class RootedSavedOriginalGraphTest {
 
     /** Explicit host scheduling: each prerequisite remains its own public, metered selection. */
     private static void finishJoinWithPublicDriver(RootedSdkFixture f, Map<String, DocumentHandle> handles,
-            EntryHandle submitted, java.util.Set<String> previouslyApplied) {
-        boolean observed = false;
+            EntryHandle submitted, java.util.Set<String> previouslyApplied, EntryResult initial, SelectionBudget selections) {
+        boolean observed = initial.disposition() == EntryDisposition.APPLIED;
         var invocations = new java.util.HashSet<String>();
-        // The initial root-only wait already consumed one of the unchanged 32 selections.
-        for (int step = 1; step < 32; step++) {
+        if (observed) {
+            assertTrue(initial.publicEvents().isEmpty());
+            initial.closures().forEach(closure -> assertSuccessfulJoinClosure(closure, invocations));
+        }
+        while (selections.hasRemaining()) {
             var prefixes = histories(f, handles);
-            var result = f.blue.processing().drain(new DrainBudget(1L, 1L));
+            var result = selections.drain(f);
             prefixes.forEach((name, prefix) -> assertEquals(prefix,
                     f.history(handles.get(name)).subList(0, prefix.size())));
             assertFalse(result.blocked(), result.diagnostic().toString());
+            assertTrue(result.managedEpochEvidenceFailures().isEmpty());
+            for (var attempt : result.managedEpochApplicationAttempts()) {
+                assertTrue(attempt.attempt().isComplete(), "The join must not hide a suspended managed attempt");
+                assertEquals(ManagedEpochApplicationAttempt.Status.SUCCESS, attempt.attempt().processResult().status());
+                assertTrue(attempt.published(), "A successful managed join attempt must publish its exact receipt");
+                assertTrue(attempt.attempt().processResult().publicEvents().isEmpty());
+            }
+            result.rootedRetainedResults().forEach(closure -> assertSuccessfulJoinClosure(closure, invocations));
             for (var actual : result.entries()) {
                 boolean current = actual.entry().equals(submitted);
                 assertTrue(current || previouslyApplied.contains(actual.entry().blueId()));
                 if (actual.disposition() == EntryDisposition.APPLIED) {
                     if (current) observed = true;
-                    for (var closure : actual.closures()) assertTrue(invocations.add(closure.closureId()),
-                            "A committed invocation must not be executed twice");
-                    assertTrue(actual.publicEvents().isEmpty());
                 } else {
                     assertEquals(EntryDisposition.NO_MATCH, actual.disposition());
                     assertTrue(!current || observed, "A transport marker cannot replace actual application");
-                    assertTrue(actual.closures().isEmpty());
                 }
+                // NO_MATCH describes requested-operation admission, not the absence of a
+                // valid checkpoint/closure. Check every actual outcome in either branch.
+                assertTrue(actual.publicEvents().isEmpty());
+                actual.closures().forEach(closure -> assertSuccessfulJoinClosure(closure, invocations));
             }
-            System.out.println("LATE_JOIN_PUBLIC_DRIVER step=" + step + " entries=" + result.entries().size()
+            System.out.println("LATE_JOIN_PUBLIC_DRIVER step=" + selections.used + " entries=" + result.entries().size()
                     + " retained=" + result.rootedRetainedResults().size() + " quiescent=" + result.quiescent());
             if (result.quiescent()) {
                 assertTrue(observed, "The exact saved-original attachment must be applied");
@@ -340,14 +354,40 @@ final class RootedSavedOriginalGraphTest {
         throw new AssertionError("Saved-original join failed to finish within 32 actual public selections");
     }
 
+    private static void assertSuccessfulJoinClosure(ClosureResult closure, java.util.Set<String> invocations) {
+        assertTrue(closure.disposition() == EntryDisposition.APPLIED || closure.disposition() == EntryDisposition.NO_MATCH,
+                "Unexpected join outcome: " + closure.disposition() + " " + closure.diagnostic());
+        assertTrue(closure.publicEvents().isEmpty());
+        assertTrue(closure.resourceDemands().isEmpty());
+        if (closure.applied()) assertTrue(invocations.add(closure.closureId()),
+                "A committed invocation must not be executed twice");
+    }
+
+    /** One total bound includes initial calls, pre-anchor work, retries and readiness confirmation. */
+    private static final class SelectionBudget {
+        private int used;
+        boolean hasRemaining() { return used < 32; }
+        DrainResult next(RootedSdkFixture f, DocumentHandle root) {
+            return select(() -> f.blue.processing().processNext(root));
+        }
+        DrainResult drain(RootedSdkFixture f) {
+            return select(() -> f.blue.processing().drain(new DrainBudget(1L, 1L)));
+        }
+        private DrainResult select(java.util.function.Supplier<DrainResult> action) {
+            assertTrue(hasRemaining(), "Saved attachment exceeded 32 actual public selections");
+            used++;
+            return action.get();
+        }
+    }
+
     /** Diagnostic scheduling only: A owns its two actual earlier prerequisites before C attaches A. */
     private static void settleExactPreAnchorSource(RootedSdkFixture f,
-            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment) {
-        settleExactPreAnchorSource(f, handles, precedingAttachment, null);
+            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment, SelectionBudget selections) {
+        settleExactPreAnchorSource(f, handles, precedingAttachment, null, selections);
     }
 
     private static void settleExactPreAnchorSource(RootedSdkFixture f,
-            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment, EntryHandle laterInput) {
+            Map<String, DocumentHandle> handles, EntryHandle precedingAttachment, EntryHandle laterInput, SelectionBudget selections) {
         var a = handles.get("A");
         var b = handles.get("B");
         var c = handles.get("C");
@@ -355,7 +395,7 @@ final class RootedSavedOriginalGraphTest {
                 List.of(c.snapshot().epoch(), c.snapshot().blueId()));
         var sourceHistories = List.of(f.history(b), f.history(c));
         var priorAHistory = f.history(a);
-        var live = f.blue.processing().processNext(a);
+        var live = selections.next(f, a);
         assertEquals(EntryDisposition.APPLIED, live.entry(precedingAttachment).disposition());
         assertEquals(1, live.entries().size(), "Only the already supplied B attachment at 200 is processed");
         assertTrue(live.managedEpochApplications().isEmpty());
@@ -366,7 +406,7 @@ final class RootedSavedOriginalGraphTest {
         assertEquals(sourceHistories, List.of(f.history(b), f.history(c)));
         assertEquals(priorAHistory, f.history(a).subList(0, priorAHistory.size()));
         var afterLiveHistory = f.history(a);
-        var local = f.blue.processing().processNext(a);
+        var local = selections.next(f, a);
         assertTrue(local.entries().isEmpty(), "The prerequisite is not a fabricated external entry");
         assertTrue(local.managedEpochApplications().isEmpty(), "No independent B publication is fabricated");
         assertEquals(1, local.rootedRetainedApplications().size());

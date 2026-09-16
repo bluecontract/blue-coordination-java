@@ -1,0 +1,82 @@
+name: Retained nested-existing consumer A
+children: {}
+bChanges: 0
+cChanges: 0
+contracts:
+  embedded:
+    type: Process Embedded
+    collectionPaths:
+      - /children
+  fromBChanged:
+    type: Embedded Node Channel
+    sourcePath: /children/b
+    event:
+      type: Coordination/Event
+      kind: CatchUp/Source Changed
+  onBChanged:
+    type: Coordination/Sequential Workflow
+    channel: fromBChanged
+    event:
+      type: Coordination/Event
+      kind: CatchUp/Source Changed
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /bChanges
+              val: {$add: [{$document: /bChanges}, 1]}
+          - $if:
+              cond: {$eq: [{$document: /bChanges}, 0]}
+              then:
+                - $appendChange:
+                    op: add
+                    path: /children/c
+                    val: {$document: /candidateC}
+          - $return: true
+  fromCChanged:
+    type: Embedded Node Channel
+    sourcePath: /children/c
+    event:
+      type: Coordination/Event
+      kind: CatchUp/Source Changed
+  onCChanged:
+    type: Coordination/Sequential Workflow
+    channel: fromCChanged
+    event:
+      type: Coordination/Event
+      kind: CatchUp/Source Changed
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: replace
+              path: /cChanges
+              val: {$add: [{$document: /cChanges}, 1]}
+          - $return: true
+  ownerChannel:
+    type: Coordination/Timeline Channel
+    timeline:
+      type: MyOS/MyOS Timeline
+      timelineId: retained/nested-existing/alice
+    actor:
+      type: MyOS/Principal Actor
+      accountId: alice
+  attachBAndRetainC:
+    type: Coordination/Sequential Workflow Operation
+    channel: ownerChannel
+    request:
+      b: {}
+      candidateC: {}
+    steps:
+      - type: Coordination/Compute
+        do:
+          - $appendChange:
+              op: add
+              path: /candidateC
+              val: {$binding: event/message/request/candidateC}
+          - $appendChange:
+              op: add
+              path: /children/b
+              val: {$binding: event/message/request/b}
+          - $return: true

@@ -1,6 +1,7 @@
 package blue.coordination.processor.bex;
 
 import blue.bex.api.BexDocumentView;
+import blue.bex.value.BexFrozenWriter;
 import blue.bex.value.BexValue;
 import blue.bex.value.BexValues;
 import blue.language.identity.BlueIds;
@@ -62,20 +63,37 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
     }
 
     private BexValue cursorAt(String absolutePointer) {
-        BexValue exact = exactAt(absolutePointer);
-        return cursorFor(absolutePointer, exact);
+        return exactAt(absolutePointer);
     }
 
     private BexValue cursorFor(
             String absolutePointer,
             BexValue value) {
+        return cursorFor(absolutePointer, value, null);
+    }
+
+    private BexValue cursorFor(
+            String absolutePointer,
+            BexValue value,
+            FrozenNode resolved) {
         if (value.isUndefined()
                 || hasTerminalSemanticContent(value)) {
             return value;
         }
-        return new ProcessorDocumentCursor(
-                absolutePointer,
-                value);
+        ProcessorDocumentCursor cursor = new ProcessorDocumentCursor(
+                absolutePointer, value, resolved);
+        FrozenNode canonical = BexFrozenWriter.toFrozen(value);
+        if (canonical.isReferenceOnly() || !hasSemanticContent(value)) {
+            return cursor;
+        }
+        // Keep the canonical body visible to BEX's output writer. A generic
+        // cursor alone is exported as a reference and loses this local body.
+        return BexValues.admittedExact(
+                canonical,
+                resolved != null
+                        ? resolved : FrozenNode.fromResolvedNode(value.toNode()),
+                value.exactBlueId(), cursor,
+                value.canonicalTypeIdentities());
     }
 
     private boolean hasTerminalSemanticContent(
@@ -119,6 +137,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                 metrics.incrementBexDocumentViewFrozenDirectHits();
             }
             return authoritativeExact(
+                    absolutePointer,
                     workingCanonical,
                     workingResolved);
         }
@@ -134,6 +153,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                 metrics.incrementBexDocumentViewFrozenDirectHits();
             }
             return authoritativeExact(
+                    absolutePointer,
                     workingCanonical != null
                             ? workingCanonical
                             : processorCanonical,
@@ -148,6 +168,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             }
             FrozenNode demanded = FrozenNode.fromNode(processorDocument);
             return authoritativeExact(
+                    absolutePointer,
                     workingCanonical != null
                             ? workingCanonical
                             : processorCanonical,
@@ -170,11 +191,10 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             if (metrics != null) {
                 metrics.incrementBexDocumentViewFrozenRootFallbackHits();
             }
-            return authoritativeExact(
-                            canonicalRoot,
-                            resolvedRoot)
-                    .at(JsonPointer.split(
-                            absolutePointer));
+            List<String> segments = JsonPointer.split(absolutePointer);
+            return cursorFor(absolutePointer,
+                    BexValues.exact(canonicalRoot, resolvedRoot).at(segments),
+                    resolvedRoot.at(segments));
         }
         FrozenNode unresolvedCanonical =
                 workingCanonical != null
@@ -194,6 +214,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                 metrics.incrementBexDocumentViewFrozenDirectHits();
             }
             return authoritativeExact(
+                    absolutePointer,
                     unresolvedCanonical,
                     unresolvedResolved);
         }
@@ -226,13 +247,14 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         }
         FrozenNode canonicalScope = access.processorCanonicalAt(
                 scopePath);
-        BexValue descendant = authoritativeExact(
-                canonicalScope,
-                resolvedScope).at(absoluteSegments.subList(
-                scopeSegments.size(), absoluteSegments.size()));
+        List<String> relativeSegments = absoluteSegments.subList(
+                scopeSegments.size(), absoluteSegments.size());
+        BexValue descendant = BexValues.exact(
+                canonicalScope, resolvedScope).at(relativeSegments);
         return !descendant.isUndefined()
                 && hasSemanticContent(descendant)
-                ? descendant
+                ? cursorFor(absolutePointer, descendant,
+                        resolvedScope.at(relativeSegments))
                 : null;
     }
 
@@ -255,7 +277,8 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                 && !resolved.isReferenceOnly();
     }
 
-    private static BexValue authoritativeExact(
+    private BexValue authoritativeExact(
+            String absolutePointer,
             FrozenNode canonical,
             FrozenNode resolved) {
         if (resolved == null
@@ -263,10 +286,10 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             FrozenNode identity = canonical != null
                     ? canonical
                     : resolved;
-            return BexValues.exact(
+            return cursorFor(absolutePointer, BexValues.exact(
                     canonical,
                     resolved,
-                    identity != null ? identity.blueId() : null);
+                    identity != null ? identity.blueId() : null));
         }
         FrozenNode identity =
                 canonical != null
@@ -274,27 +297,35 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
                         : resolved;
         /*
          * Hosted PROCESS has already established both lanes. Retain the
-         * canonical identity, but make the authoritative resolved cursor the
-         * structural value exposed to BEX. Returning an admitted exact value
-         * also prevents BexRuntime from attaching its standalone default Blue
+         * canonical body and identity separately from the resolved semantic
+         * cursor. Returning an admitted exact value also prevents BexRuntime
+         * from attaching its standalone default Blue
          * as a reference materializer and reopening a persisted scalar or
          * object that this snapshot has already resolved.
          */
-        BexValue semantic =
-                BexValues.frozen(
-                        resolved);
+        BexValue semantic = BexValues.exact(
+                identity, resolved, identity.blueId());
         if (canonical != null
                 && canonical.isReferenceOnly()
                 && BlueIds.hasCyclicMemberSeparator(
                         canonical.getReferenceBlueId())) {
-            return new VerifiedSemanticExactBexValue(
+            return cursorFor(absolutePointer, new VerifiedSemanticExactBexValue(
                     canonical.getReferenceBlueId(),
-                    semantic);
+                    BexValues.frozen(resolved)), resolved);
+        }
+        if (identity.isReferenceOnly() && !hasTerminalSemanticContent(semantic)) {
+            // The semantic body is not canonical structural evidence. Keep
+            // this value as the original reference and resolve descendants
+            // through the invocation-owned path, never a resolved-body hash.
+            return new ProcessorDocumentCursor(
+                    absolutePointer, semantic, resolved);
         }
         return BexValues.admittedExact(
+                identity,
                 resolved,
                 identity.blueId(),
-                semantic);
+                new ProcessorDocumentCursor(
+                        absolutePointer, semantic, resolved));
     }
     private static final class VerifiedSemanticExactBexValue
             implements BexValue {
@@ -332,11 +363,13 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
     private final class ProcessorDocumentCursor implements BexValue {
         private final String absolutePointer;
         private final BexValue delegate;
+        private final FrozenNode resolved;
         private ProcessorDocumentCursor(String absolutePointer,
-                BexValue delegate) {
+                BexValue delegate, FrozenNode resolved) {
             this.absolutePointer = Objects.requireNonNull(
                     absolutePointer, "absolutePointer");
             this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.resolved = resolved;
         }
         @Override public boolean isExact() { return delegate.isExact(); }
         @Override public String exactBlueId() { return delegate.exactBlueId(); }
@@ -358,8 +391,10 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
             }
             if (local != null
                     && !local.isUndefined()
-                    && hasSemanticContent(local))
-                return cursorFor(childPointer, local);
+                    && hasSemanticContent(local)) {
+                return cursorFor(childPointer, local,
+                        resolved != null ? resolved.at(List.of(key)) : null);
+            }
             return cursorAt(childPointer);
         }
         private boolean hasSemanticContent(BexValue value) {
@@ -437,8 +472,10 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         @Override
         public FrozenNode workingCanonicalAt(
                 String absolutePointer) {
-            return stepContext.workingCanonicalAt(
-                    absolutePointer);
+            // WorkingDocument.canonicalAt is its selected/authored lane; a
+            // source-backed node's diagnostic hash is not canonical identity.
+            return stepContext.workingDocument().snapshot()
+                    .canonicalAt(absolutePointer);
         }
 
         @Override
@@ -472,7 +509,7 @@ final class ScopedProcessorExecutionContextBexDocumentView implements BexDocumen
         @Override
         public FrozenNode workingCanonicalRoot() {
             return stepContext.workingDocument()
-                    .canonicalRoot();
+                    .snapshot().frozenCanonicalRoot();
         }
 
         @Override

@@ -651,6 +651,15 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     private final Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceHistoryProcessingResults = new LinkedHashMap<>();
 
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen();
+        Objects.requireNonNull(expected, "expected");
+        exactNodeProvider.beginLookupScope();
+        try { return engine.observeSourceHistoryPrerequisite(expected); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+
     synchronized Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
         ensureOpen();
         return Optional.ofNullable(sourceHistoryProcessingResults.get(Objects.requireNonNull(expected, "expected")));
@@ -669,6 +678,15 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     synchronized DrainResult processNextRoot(DocumentHandle root) {
         return processNextRoot(root, null);
+    }
+
+    synchronized blue.coordination.api.ProcessingSelection auditNextRootProcessingSelection(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        }
+        requireDocument(root.id());
+        return engine.auditNextRootProcessingSelection(root.id());
     }
 
     synchronized DrainResult processNextRoot(DocumentHandle root, String expectedLocalWork) {

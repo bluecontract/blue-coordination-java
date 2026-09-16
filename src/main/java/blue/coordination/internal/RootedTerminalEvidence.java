@@ -126,6 +126,36 @@ final class RootedTerminalEvidence {
 
     ClosureInvocationInput input() { return input; }
 
+    /** The immutable view must name its actual typed publication before its original cause can authorize a join. */
+    static blue.language.processor.closure.ExternalEventCause originalLocalCause(RootedDocumentView view, InMemoryDocumentStore documents) {
+        var projection = view.result().rootedProjection();
+        var key = projection.context().terminalKey(projection.deliveryBasisIdentity());
+        var receipt = documents.closurePublicationReceipt(key).orElse(null);
+        if (receipt == null || receipt.rootedTerminalEvidence() == null) return null;
+        var retained = receipt.rootedTerminalEvidence();
+        retained.requireResult(view.result(), key);
+        return retained.originalLocalCause(documents);
+    }
+
+    /** Follows only actual retained local publications to the original external cause, never a reconstructed event. */
+    private blue.language.processor.closure.ExternalEventCause originalLocalCause(InMemoryDocumentStore documents) {
+        RootedTerminalEvidence current = this;
+        var visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<RootedDocumentView, Boolean>());
+        while (!(current.input.cause() instanceof blue.language.processor.closure.ExternalEventCause)) {
+            var origin = current.rooted.historicalOrigin();
+            if (origin == null) return null; // No original LIVE proof: retain the ordinary join fence.
+            if (!visited.add(origin)) throw new IllegalArgumentException("Cyclic local publication provenance");
+            var result = origin.result();
+            var projection = Objects.requireNonNull(result.rootedProjection());
+            String key = projection.context().terminalKey(projection.deliveryBasisIdentity());
+            var receipt = documents.closurePublicationReceipt(key).orElse(null);
+            if (receipt == null) return null;
+            current = Objects.requireNonNull(receipt.rootedTerminalEvidence());
+            current.requireResult(result, key);
+        }
+        return (blue.language.processor.closure.ExternalEventCause) current.input.cause();
+    }
+
     blue.language.processor.ExternalOrderKey logicalBoundary(CatchUpPlanStore plans) {
         return rooted.historicalOrigin() == null ? RootedAttachmentCapture.logicalBoundary(input, plans)
                 : rooted.historicalOrigin().logicalBoundary();

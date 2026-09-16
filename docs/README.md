@@ -5,9 +5,9 @@ The documentation is organized by task so application guidance, API reference,
 semantic explanation, contributor internals, and historical release evidence do
 not compete as different starting points.
 
-`3.0.0-rc.7` is the current bounded-pilot release candidate. It remains
+`3.0.0-rc.11` is the current bounded-pilot release candidate. It remains
 non-production and consumes the complete published Blue Language
-`3.1.0-rc.25` graph.
+`3.1.0-rc.27` graph.
 
 ## Start here
 
@@ -16,11 +16,11 @@ non-production and consumes the complete published Blue Language
    provider entries, targeted operations, several Timelines, operation-created
    managed documents, ordering, diagnostics, history, atomicity, testing, and
    production boundaries.
-2. Keep the rc.7 [public API reference](reference/public-api.md) nearby while
+2. Keep the [public API reference](reference/public-api.md) nearby while
    writing shared code; use the retained-epoch page below for catch-up details.
 3. Read [Managed Process Embedded documents](semantics/process-embedded-documents.md)
    before designing shared lineages, repeated occurrences, or cycles.
-4. Check rc.7 [Known limitations](limitations.md) before selecting an
+4. Check [Known limitations](limitations.md) before selecting an
    operational deployment profile.
 
 For a five-minute path, use the repository [Start here](../START-HERE.md) and
@@ -93,7 +93,7 @@ Executable public-SDK examples live in:
 ## Release status and historical evidence
 
 The current release authority is the bounded external-pilot
-[`3.0.0-rc.7` decision](releases/3.0.0-rc.7.md). It is not a stable or
+[`3.0.0-rc.11` decision](releases/3.0.0-rc.11.md). It is not a stable or
 production-readiness claim. Documentation of a required gate is not a claim
 that it passed.
 

@@ -389,6 +389,113 @@ final class SdkNamedComputeDefinitionTest {
                 .through("providerChannel").requestYaml("{}").execute();
     }
 
+    @ParameterizedTest
+    @MethodSource("rootDefinitionStaticTypes")
+    void rootAndNestedDefinitionPointersUseTheSameStaticTypeRules(String pointer, boolean valid) {
+        try (BlueCoordination blue = BlueCoordination.inMemory()) {
+            String type = blue.values().yaml(valid ? "name: Coffee Event\n" : "$add: [1, 2]\n").blueId();
+            String event = eventWithStaticType("type", type);
+            String selectedDefinition = definitionWithEvent(event)
+                    .replace("type: Coordination/Compute Definition\n", "");
+            String workflow = initialization(namedStep(blue, DefinitionSelector.NAMED)
+                    .replace("definition: coffeeCode", "definition: " + pointer));
+            String source = pointer.equals("/") ? selectedDefinition + workflow
+                    : "library:\n" + selectedDefinition.indent(2) + workflow;
+            if (valid) {
+                DocumentHandle document = admit(blue, source);
+                assertEquals(List.of(blue.values().yaml(event)), document.snapshot().publicEvents().stream()
+                        .map(PublicEvent::exact).toList());
+            } else {
+                CoordinationException failure = assertThrows(CoordinationException.class, () -> admit(blue, source));
+                assertTrue(failure.getMessage().contains("BEX expressions inside Blue type fields"),
+                        "The rejected expression must be reached, not hidden by an unresolved path: " + failure);
+            }
+        }
+    }
+
+    private static Stream<Arguments> rootDefinitionStaticTypes() {
+        return Stream.of("/", "/library").flatMap(pointer -> Stream.of(
+                Arguments.of(pointer, true), Arguments.of(pointer, false)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("explicitDefinitionMapForms")
+    void exactProviderDefinitionKeepsContainerMeaningAcrossNamedAndExactSelection(
+            String field, String form, boolean named) {
+        String definition = "type: Coordination/Compute Definition\n" + switch (form) {
+            case "absent" -> "";
+            case "empty" -> field + ": {}\n";
+            case "declaration" -> field + ": {type: Dictionary}\n";
+            default -> throw new IllegalArgumentException(form);
+        };
+        ExactBlueValue exact;
+        try (BlueCoordination preparer = BlueCoordination.inMemory()) {
+            // Preserve authored exact content; do not minimize an invalid field out of the fixture.
+            exact = preparer.values().providerContentYaml(definition);
+            System.out.println("NAMED_COMPUTE_DECLARATION_INPUT field=" + field + " form=" + form
+                    + " named=" + named + " exact=" + exact.blueId() + " body=" + exact.json()
+                    + " sourceCanonical=" + preparer.values().yaml(definition).json());
+        }
+        try (BlueCoordination blue = BlueCoordination.builder()
+                .exactNodeProvider(ExactNodeProvider.of(exact)).build()) {
+            String reference = "{blueId: " + exact.blueId() + "}";
+            String step = INLINE_STEP + "  definition: " + (named ? "coffeeCode" : reference) + "\n";
+            String source = initialization(reference + "\n", step);
+            if (form.equals("declaration")) {
+                CoordinationException failure = assertThrows(CoordinationException.class, () -> admit(blue, source),
+                        "BEX plain-name containers cannot reinterpret an explicit type declaration as absence");
+                assertTrue(failure.getMessage().contains(field), failure.getMessage());
+            } else {
+                assertCoffeeEvent(blue, admit(blue, source).snapshot().publicEvents());
+            }
+        }
+    }
+
+    private static Stream<Arguments> explicitDefinitionMapForms() {
+        return Stream.of("constants", "functions").flatMap(field ->
+                Stream.of("absent", "empty", "declaration").flatMap(form -> Stream.of(
+                        Arguments.of(field, form, true), Arguments.of(field, form, false))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("definitionContributionPaths")
+    void exactDefinitionMapMeaningSurvivesInheritedAndReferencedContainers(
+            String field, String form, String location) {
+        ExactBlueValue definition;
+        ExactBlueValue library;
+        ExactBlueValue base;
+        try (BlueCoordination preparer = BlueCoordination.inMemory()) {
+            definition = preparer.values().providerContentYaml("type: Coordination/Compute Definition\n"
+                    + field + (form.equals("empty") ? ": {}\n" : ": {type: Dictionary}\n"));
+            library = preparer.values().providerContentYaml("coffeeCode: {blueId: " + definition.blueId() + "}\n");
+            base = preparer.values().providerContentYaml("library:\n  coffeeCode: {blueId: " + definition.blueId() + "}\n");
+        }
+        List<ExactBlueValue> retained = List.of(definition, library, base);
+        try (BlueCoordination blue = BlueCoordination.builder().exactNodeProvider(requested -> retained.stream()
+                .filter(value -> value.blueId().equals(requested)).map(ExactBlueValue::json).findFirst()).build()) {
+            String topology = switch (location) {
+                case "referenced-parent" -> "library: {blueId: " + library.blueId() + "}\n";
+                case "inherited" -> "type: {blueId: " + base.blueId() + "}\n";
+                case "partial-overlay" -> "type: {blueId: " + base.blueId()
+                        + "}\nlibrary:\n  local: separate overlay\n";
+                default -> throw new IllegalArgumentException(location);
+            };
+            String source = topology + initialization(INLINE_STEP + "  definition: /library/coffeeCode\n");
+            if (form.equals("declaration")) {
+                CoordinationException failure = assertThrows(CoordinationException.class, () -> admit(blue, source));
+                assertTrue(failure.getMessage().contains(field), failure.getMessage());
+            } else {
+                assertCoffeeEvent(blue, admit(blue, source).snapshot().publicEvents());
+            }
+        }
+    }
+
+    private static Stream<Arguments> definitionContributionPaths() {
+        return Stream.of("constants", "functions").flatMap(field -> Stream.of("empty", "declaration")
+                .flatMap(form -> Stream.of("referenced-parent", "inherited", "partial-overlay")
+                        .map(location -> Arguments.of(field, form, location))));
+    }
+
     private static Stream<Arguments> invalidStaticTypes() {
         return Stream.of("type", "nestedType", "itemType", "valueType").flatMap(field -> Stream.of(
                 Arguments.of(field, "name: Invalid Coffee Event\npayload:\n  $add: [1, 2]\n"),

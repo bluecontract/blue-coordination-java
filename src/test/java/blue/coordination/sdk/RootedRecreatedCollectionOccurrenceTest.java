@@ -123,7 +123,7 @@ final class RootedRecreatedCollectionOccurrenceTest {
         }
     }
 
-    @Test void retiredReservationCannotReaddAnotherLineage() throws Exception {
+    @Test void retiredReservationCanAttachAnotherLineage() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {
             // when
@@ -133,17 +133,31 @@ final class RootedRecreatedCollectionOccurrenceTest {
                     .replace("RCP2 Historical A", "Different source").replace("rcp2/a", "rcp2/foreign"), "rcp2/foreign");
             var parent = fixture.startYaml(consumer(), "rcp2/b");
             apply(fixture, parent, fixture.append(parent, "rcp2/b", "attach", 100, reference(source.snapshot().blueId())));
-            apply(fixture, parent, fixture.append(parent, "rcp2/b", "remove", 200, "{}"));
+            var reservedBinding = apply(fixture, parent, fixture.append(parent, "rcp2/b", "remove", 200, "{}"));
             var retired = blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow();
             var histories = List.of(fixture.history(parent), fixture.history(source), fixture.history(foreign));
             var heads = List.of(parent.snapshot().blueId(), source.snapshot().blueId(), foreign.snapshot().blueId());
             var entry = fixture.append(parent, "rcp2/b", "attach", 300, reference(foreign.snapshot().blueId()));
             var result = blue.processing().processNext(parent);
             // then
-            assertNotEquals(EntryDisposition.APPLIED, result.entry(entry).disposition());
-            assertEquals(retired, blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow());
-            assertEquals(heads, List.of(parent.snapshot().blueId(), source.snapshot().blueId(), foreign.snapshot().blueId()));
-            assertEquals(histories, List.of(fixture.history(parent), fixture.history(source), fixture.history(foreign)));
+            assertEquals(EntryDisposition.APPLIED, result.entry(entry).disposition(), result.entry(entry).diagnostic().toString());
+            assertTrue(blue.processing().processNext(parent).quiescent());
+            var active = blue.advanced().auditManagedOccurrence(parent.id(), "/orders/same").orElseThrow();
+            assertTrue(active.active());
+            assertEquals(foreign.id(), active.targetDocumentId());
+            assertEquals(retired.activationGeneration(), active.activationGeneration());
+            var output = blue.advanced().closureExecution(result.entry(entry).closures().get(0).closureId()).orElseThrow();
+            var replacement = output.occurrenceBindings().stream().filter(row -> row.sourcePath().equals("/orders/same"))
+                    .findFirst().orElseThrow();
+            assertNotEquals(reservedBinding.occurrenceIdentity(), replacement.occurrenceIdentity());
+            assertEquals(heads.subList(1, 3), List.of(source.snapshot().blueId(), foreign.snapshot().blueId()));
+            assertEquals(histories.subList(1, 3), List.of(fixture.history(source), fixture.history(foreign)));
+            var finalHistory = fixture.history(parent);
+            var finalHead = parent.snapshot().blueId();
+            CoordinationTestControl.attach(blue.advanced().rawEngine()).restartFromStores();
+            assertTrue(blue.processing().processNext(parent).quiescent());
+            assertEquals(finalHistory, fixture.history(parent));
+            assertEquals(finalHead, parent.snapshot().blueId());
         }
     }
 
