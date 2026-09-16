@@ -1,9 +1,10 @@
 # P2: indexed session history — implementation and measurement card
 
 Status: indexed P2 library gate passed (146/146 tests and all four access-budget
-workloads). The merged-baseline refresh is closed. MyOS wiring is prepared and
-its PostgreSQL qualification is next; no application result is inferred from
-the library gate. See the final qualification section for exact source pins.
+workloads). The merged-baseline refresh is closed. MyOS also passed 25/25
+PostgreSQL store controls and five application scenarios in both physical modes
+(10/10 invocations). This is focused qualification, not the full POC matrix or
+the original long graph. See the final qualification sections for source pins.
 Work stays on the existing owned `codex/poc-baseline-refresh-20260916` branches.
 No new source from open PRs, protocol changes, larger record limits or Redis.
 
@@ -402,3 +403,30 @@ reuses the unchanged Language/BEX/Catalog artifacts; it does not rebuild or
 republish them. The host candidate is `history33/export01-myos-candidate.json`.
 The remaining PostgreSQL/app gates must report their own outcomes; this library
 pass is not full POC acceptance or proof that the original long graph finishes.
+
+## MyOS confirmation
+
+MyOS `81b5066e6dfbd841d294e49cbadf785426251d0c`, using the exact exported
+Coordination artifact above, passed:
+
+- **25/25 PostgreSQL store tests**, including actual indexed `/3` SQL records,
+  producer close/cold reopening, exact result/history/gas, failed publication,
+  rollback, stale fences, reset and retry. Native duration: 56.32 seconds.
+- **Five application scenarios in each physical mode (10/10 invocations):** two
+  cyclic-reference/restart scenarios, plus ring/chord, duplicate-occurrence cycle
+  and forwarding/detach/reconnect small graphs. Resident uses H2; external runtime
+  uses real PostgreSQL with fresh per-case schemas. Complete restart comparisons,
+  exact dependency/JAR bindings, original deadlines and 16 GiB profiles remain.
+
+Evidence: `history33/host02-store/reaudit.json` and
+`history33/combined-smoke-summary.json`. The native store run was green; its first
+auxiliary audit confused XML `classname` with `name`. The corrected read-only
+audit preserves the original failed audit and verifies the same closed run;
+no test was rerun or assertion weakened. An earlier `host01` attempt stopped
+before tests because init scripts are forbidden. The native PostgreSQL task now
+honors the existing explicit heap property; the application JAR stayed unchanged.
+
+All selected PostgreSQL scenarios, including the three small graphs, passed.
+The full maintained POC matrix and original long catch-up graph were **not** run
+in this confirmation. Test-task durations are not per-operation latency results.
+The measured next candidate is [verified index-node reuse](poc-verified-index-node-reuse-plan.md).
