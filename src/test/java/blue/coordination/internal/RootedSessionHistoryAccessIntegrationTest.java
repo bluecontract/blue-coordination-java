@@ -30,6 +30,9 @@ final class RootedSessionHistoryAccessIntegrationTest {
     private static final int MIB = 1024 * 1024, RECORD = 40 * MIB;
     private static final SessionRecordCodec ROWS = new SessionRecordCodec(RECORD, 256);
     private static final ClosureProcessResultStorageCodec RESULTS = new ClosureProcessResultStorageCodec(RECORD, 256);
+    // viewAddress only encodes/hashes; this oracle never reads or stages an object.
+    private static final DocumentSessionStorage VIEW_IDENTITIES = new DocumentSessionStorage(
+            new RootedHistoryAccessObjects(), new DocumentSessionStorage.Limits(RECORD, 256, 512L * MIB));
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
             new RootedEngineStorage.Limits(48 * MIB, 64 * 1024, 32 * MIB, 8192, 32,
@@ -62,7 +65,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
                 f.revisionDigest(), revisionRequired);
         readProbe(f, "historical-position", measurements,
                 scope -> engine(scope).documents().require(f.parent()).rootedViewBefore(f.historicalBoundary()),
-                f.viewDigest(), union(f.currentBoundaries(), f.positionBoundaries()));
+                f.viewIdentity(), union(f.currentBoundaries(), f.positionBoundaries()));
 
         var objects = f.objects().detachedCopy();
         var journal = ColdStorageJournalFixture.open(f.journal());
@@ -82,9 +85,12 @@ final class RootedSessionHistoryAccessIntegrationTest {
             assertEquals(f.after(), snapshot(engine(scope), f.source(), f.parent()));
         }
         var reopenedBytes = objects.detachedCopy();
-        try (var reopened = phase(f, "successor/reopen", reopenedBytes, Set.of(), measurements,
+        try (var reopened = phase(f, "successor/reopen/open", reopenedBytes, f.afterCurrentBoundaries(), measurements,
                 () -> RootedCoordinationStorage.open(reopenedBytes, LIMITS, staged,
                         ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journal.snapshot())))) {
+            String reopenedHead = phase(f, "successor/reopen/select", reopenedBytes, f.afterCurrentBoundaries(), measurements,
+                    () -> reopened.documentHandle(f.parent()).orElseThrow().snapshot().blueId());
+            assertEquals(f.after().heads().get(f.parent()), reopenedHead);
             assertEquals(f.after(), snapshot(engine(reopened), f.source(), f.parent()));
             assertEquals(0L, CoordinationTestControl.attach(engine(reopened)).metricsSnapshot().phaseNanos()
                     .getOrDefault("contracts.closure.processor", 0L), "Cold restore does not rerun the processor");
@@ -119,7 +125,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
             Object actual = phase(f, name + "/select", objects, required, measured, () -> select.apply(scope));
             // Heavy complete encoding is an oracle, never part of the measured read.
             if (actual instanceof DocumentRevision revision) actual = digest(ROWS.encodeRevision(revision));
-            if (actual instanceof RootedDocumentView view) actual = digest(RESULTS.encode(view.result()));
+            if (actual instanceof RootedDocumentView view) actual = viewIdentity(view);
             assertEquals(expected, actual, name);
             assertEquals(0, journal.mutations());
             assertEquals(0L, measured.stream().filter(row -> row.phase().startsWith(name + "/"))
@@ -132,7 +138,8 @@ final class RootedSessionHistoryAccessIntegrationTest {
     private record Fixture(String name, RootedHistoryAccessObjects objects, RootedCoordinationStorage.Selection selection,
             ColdStorageJournalFixture.Snapshot journal, DocumentId source, DocumentId parent,
             Snapshot before, Snapshot after, long historicalEpoch, String revisionAddress, String revisionDigest,
-            ExternalOrderKey historicalBoundary, String viewDigest, Set<String> currentBoundaries,
+            ExternalOrderKey historicalBoundary, ViewIdentity viewIdentity, Set<String> currentBoundaries,
+            Set<String> afterCurrentBoundaries,
             Set<String> positionBoundaries, Set<String> historicalPayloads, String nextYaml, String nextEntryId) { }
 
     private static Fixture construct(int historySize, boolean sameEpoch) throws Exception {
@@ -155,15 +162,10 @@ final class RootedSessionHistoryAccessIntegrationTest {
             assertSame(point.view(), parent.rootedViewBefore(boundary), "Use a genuine unambiguous historical position");
             long epoch = sameEpoch ? 0 : 2;
             var revision = parent.revision(epoch);
-            var physical = new DocumentSessionStorage(objects, new DocumentSessionStorage.Limits(RECORD, 256, 512L * MIB));
-            var required = new LinkedHashSet<String>();
-            for (var id : List.of(f.source.id(), f.parent.id())) {
-                var session = f.engine.documents().require(id);
-                required.add(digest(ROWS.encodeRevision(session.currentRevision())));
-                required.add(physical.viewAddress(session.rootedView()));
-            }
-            var pointRequired = Set.of(physical.viewAddress(point.view()),
-                    physical.viewAddress(positions.get(selected - 1).view()), physical.viewAddress(positions.get(0).view()));
+            var required = currentBoundaries(f.engine, f.source.id(), f.parent.id());
+            var pointRequired = Set.of(VIEW_IDENTITIES.viewAddress(point.view()),
+                    VIEW_IDENTITIES.viewAddress(positions.get(selected - 1).view()),
+                    VIEW_IDENTITIES.viewAddress(positions.get(0).view()));
             Snapshot before = snapshot(f.engine, f.source.id(), f.parent.id());
             var selection = RootedCoordinationStorage.retainPartition(f.blue, objects, LIMITS);
             String revisionAddress = digest(ROWS.encodeRevision(revision));
@@ -183,27 +185,50 @@ final class RootedSessionHistoryAccessIntegrationTest {
             var entry = f.append(nextTime, "tick");
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(f.parent).entry(entry).disposition());
             Snapshot after = snapshot(f.engine, f.source.id(), f.parent.id());
+            // Freeze the successor's required tip payloads from the independent resident
+            // oracle, before any measured durable scope or staged result is inspected.
+            var afterRequired = currentBoundaries(f.engine, f.source.id(), f.parent.id());
             return new Fixture((sameEpoch ? "same-epoch-positions-" : "numbered-parent-epochs-") + historySize,
                     objects, selection, journal, f.source.id(), f.parent.id(), before, after, epoch,
                     revisionAddress, revisionAddress, boundary,
-                    digest(RESULTS.encode(point.view().result())), Set.copyOf(required), pointRequired,
+                    viewIdentity(point.view()), required, afterRequired, pointRequired,
                     historicalPayloads, nextYaml, entry.blueId());
         }
     }
 
     private record Snapshot(Map<DocumentId, String> heads, Map<DocumentId, Long> epochs,
-            Map<DocumentId, List<String>> revisions, Map<DocumentId, List<String>> views,
+            Map<DocumentId, List<String>> revisions, Map<DocumentId, List<ViewPositionIdentity>> views,
             Map<DocumentId, List<String>> representationPositions, Map<String, String> publications) { }
+
+    private record ViewIdentity(String physicalAddress, ExternalOrderKey logicalBoundary) { }
+    private record ViewPositionIdentity(ExternalOrderKey boundary, ViewIdentity view) { }
+
+    private static ViewIdentity viewIdentity(RootedDocumentView view) {
+        // The complete physical frame includes the result, both snapshots, routes,
+        // subscriptions, retained witness/publication bindings and logical boundary.
+        return new ViewIdentity(VIEW_IDENTITIES.viewAddress(view), view.storedState().logicalBoundary());
+    }
+
+    private static Set<String> currentBoundaries(DefaultCoordinationEngine engine, DocumentId source, DocumentId parent) {
+        var required = new LinkedHashSet<String>();
+        for (var id : List.of(source, parent)) {
+            var session = engine.documents().require(id);
+            required.add(digest(ROWS.encodeRevision(session.currentRevision())));
+            required.add(VIEW_IDENTITIES.viewAddress(session.rootedView()));
+        }
+        return Set.copyOf(required);
+    }
 
     private static Snapshot snapshot(DefaultCoordinationEngine engine, DocumentId source, DocumentId parent) {
         var heads = new LinkedHashMap<DocumentId, String>(); var epochs = new LinkedHashMap<DocumentId, Long>();
-        var revisions = new LinkedHashMap<DocumentId, List<String>>(); var views = new LinkedHashMap<DocumentId, List<String>>();
+        var revisions = new LinkedHashMap<DocumentId, List<String>>();
+        var views = new LinkedHashMap<DocumentId, List<ViewPositionIdentity>>();
         var positions = new LinkedHashMap<DocumentId, List<String>>(); var publications = new LinkedHashMap<String, String>();
         for (var id : List.of(source, parent)) {
             var session = engine.documents().require(id); heads.put(id, session.currentRepresentation().blueId()); epochs.put(id, session.epoch());
             revisions.put(id, session.revisions().stream().map(row -> digest(ROWS.encodeRevision(row))).toList());
             views.put(id, session.storedState().rootedViewPositions().stream().map(position ->
-                    position.boundary() + ":" + digest(RESULTS.encode(position.view().result()))).toList());
+                    new ViewPositionIdentity(position.boundary(), viewIdentity(position.view()))).toList());
             positions.put(id, session.representationTransitions().stream().map(Object::toString).toList());
         }
         engine.documents().publicationSnapshot().closurePublicationReceipts().forEach((key, value) ->
