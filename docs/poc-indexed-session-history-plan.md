@@ -1,8 +1,8 @@
 # P2: indexed session history — implementation and measurement card
 
-Status: executable baseline probe and membership-only prerequisite qualified.
-The merged-baseline refresh is closed; indexed P2 storage is not yet implemented
-or wired into MyOS.
+Status: indexed P2 candidate implemented; qualification pending. The executable
+baseline probe and membership-only prerequisite remain the last qualified gate.
+The merged-baseline refresh is closed. P2 is not yet wired into MyOS.
 Work stays on the existing owned `codex/poc-baseline-refresh-20260916` branches.
 No new source from open PRs, protocol changes, larger record limits or Redis.
 
@@ -194,9 +194,45 @@ their receipt binds the tested source, exact dependencies, logs and archived XML
 The run commands and local 16 GiB profile are retained beside them. Later
 documentation-only commits do not relabel these tested source pins.
 
-Next: implement the indexed session/lineage roots and explicit controlled-origin
-restore path together, add strict-import and selected-corruption controls, then
-prove the predeclared reduction on these same fixtures. Only after that library
+Next: qualify the indexed session/lineage roots and explicit controlled-origin
+restore path together, including strict-import and selected-corruption controls,
+then prove the predeclared reduction on these same fixtures. Only after that library
 gate should MyOS receive the new tuple for short PostgreSQL confirmation and,
 last, the original long graph. No changes to logical history, gas or ordering are
 authorized by the physical optimization.
+
+## Candidate implementation
+
+The private session `/3` descriptor stores independent immutable index roots for
+numbered revisions, representation positions, receipts, state occurrences and
+publication membership. Session copies share their prefixes. Revision/view
+payloads remain separate immutable objects; selecting position metadata does not
+load that position's view payload. The lineage `/2` row shares the exact numbered
+metadata root rather than retaining a second flat inventory. Point epoch lookups
+in attachment selection also use that root.
+
+The additive `RootedCoordinationStorage.controlledRepository(objects)` facade is
+the explicit controlled-writer boundary. Its `retainPartition` and subsequent
+scope `stage` issue the indexed selections; reopening requires the host to return
+unchanged, coherently published library-origin data. This does not create a
+signature or grant graph/publication authority. Existing raw `open` validates
+the full selected session and all supplied secondary indexes, including `/3`
+frames; it never infers trust from format, hash or L1 warmth. A selected corrupt
+or missing dependency is still a noncommitting storage failure.
+
+This experimental physical format changes the whole-store lineage codec binding.
+Whole-store selections containing lineage `/1` roots cannot be opened by this
+candidate. Qualification uses newly exported resident fixtures; existing old POC
+databases must remain on their pinned build until an explicit conversion is
+provided, or be recreated from the scenario inputs. There is no implicit on-read
+migration. Standalone legacy session `/1` and `/2` decoding remains.
+No live production migration or larger physical record caps are introduced.
+
+Qualification includes full resident/strict/controlled equality, disabled and warm
+cache, missing/corrupt/unavailable selected history, internally inconsistent
+secondary indexes, old-root stability, and prewrite failure/retry. The same
+5/20/50-epoch and same-epoch SDK probe reports object traffic before and after;
+`blue.poc.history.controlled` selects the new path and the independent
+`blue.poc.history.requireSelective` switch asserts its mechanism budgets. Until
+that gate is recorded, this section is an implementation description, not a
+correctness or performance result.

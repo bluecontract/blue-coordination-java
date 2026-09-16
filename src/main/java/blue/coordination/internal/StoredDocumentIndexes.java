@@ -14,6 +14,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 final class StoredDocumentIndexes {
     enum LineageRoot { DOCUMENT, AUTHORED, INITIALIZED, RETAINED, CURRENT }
     private final DocumentSessionStorage sessions;
+    private final boolean controlledNamespace;
     private final StoreIndexCodecs.Binding<DocumentId, StoreIndexCodecs.SessionAddress> addresses;
     private final StoreIndexCodecs.Binding<DocumentId, Long> generations;
     private final StoreIndexCodecs.Binding<DocumentId, ManagedLineageIndex.Lineage> lineages;
@@ -29,6 +30,7 @@ final class StoredDocumentIndexes {
 
     StoredDocumentIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits mapLimits,
             DocumentSessionStorage.Limits sessionLimits, RootedStorageCache cache) {
+        controlledNamespace = RootedEngineStorage.isControlledNamespace(objects);
         sessions = new DocumentSessionStorage(objects, sessionLimits, cache);
         var codecs = new StoreIndexCodecs(objects, mapLimits);
         addresses = codecs.binding("sessions", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.sessions);
@@ -114,7 +116,8 @@ final class StoredDocumentIndexes {
                     case CURRENT -> row.currentBlueId(); default -> throw new AssertionError();
                 };
                 require(entry.getKey().equals(row.documentId()) && blueId.equals(identity)
-                        && row.equals(state.documents().get(row.documentId())), "Selected lineage bucket differs from its exact owner");
+                        && sameLineage(row, state.documents().get(row.documentId()), controlledNamespace),
+                        "Selected lineage bucket differs from its exact owner");
                 result.add(row);
             }
             return List.copyOf(result);
@@ -271,18 +274,20 @@ final class StoredDocumentIndexes {
                 OwnedSession prior = selected.get(id);
                 if (prior != null) {
                     require(prior.address().equals(address.address())
-                            && prior.document().retainedLineage().equals(lineage)
+                            && sameLineage(prior.document().retainedLineage(), lineage, controlledNamespace)
                             && prior.document().retainedGraphGeneration() == generation,
                             "Selected retained authority changed within one pinned owner");
-                    requireLineageMembership(lineages, lineage);
+                    requireLineageMembership(lineages, lineage, controlledNamespace);
                     return Optional.of(prior.document());
                 }
                 require(selected.size() < maximumSessions, "Selected session owner bound exceeded");
                 DocumentSession session = views.open(address.documentId(), address.address());
-                require(lineage.equals(ManagedLineageIndex.Lineage.from(session)), "Selected lineage differs from complete retained session");
+                var sessionLineage = ManagedLineageIndex.Lineage.from(session);
+                require(sameLineage(lineage, sessionLineage, controlledNamespace),
+                        "Selected lineage differs from retained session history basis");
                 if (session.rootedView() != null) require(session.rootedView().result().graphGeneration() == generation,
                         "Selected graph generation differs from its rooted publication");
-                requireLineageMembership(lineages, lineage);
+                requireLineageMembership(lineages, lineage, controlledNamespace);
                 var document = new SelectedDocument(session, lineage, generation, session.rootedView());
                 // Failed initial validation must never register a mutable working session.
                 selected.put(id, new OwnedSession(address.address(), document));
@@ -293,17 +298,31 @@ final class StoredDocumentIndexes {
     }
 
     static void requireLineageMembership(ManagedLineageIndex index, ManagedLineageIndex.Lineage row) {
+        requireLineageMembership(index, row, false);
+    }
+
+    static void requireLineageMembership(ManagedLineageIndex index, ManagedLineageIndex.Lineage row, boolean controlledNamespace) {
         var state = index.storedState();
         for (var pair : List.of(Map.entry(state.authored(), row.authoredInitialBlueId()),
                 Map.entry(state.initialized(), row.initializedBlueId()), Map.entry(state.current(), row.currentBlueId()))) {
             var bucket = pair.getKey().get(pair.getValue());
-            require(bucket != null && row.equals(bucket.get(row.documentId())), "Selected lineage reverse membership is missing or stale");
+            require(bucket != null && sameLineage(row, bucket.get(row.documentId()), controlledNamespace),
+                    "Selected lineage reverse membership is missing or stale");
         }
+        // In the library-controlled namespace the reverse index was maintained with this exact immutable
+        // history basis at publication. Selected reverse rows are still checked against their primary row.
+        // Generic supplied roots must prove the complete reverse membership as before.
+        if (controlledNamespace) return;
         for (var retained : row.retainedStates()) {
             var bucket = state.retained().get(retained.blueId());
             require(bucket != null && retained.equals(bucket.get(new ManagedLineageIndex.RetainedKey(row.documentId(), retained.epoch()))),
                     "Selected retained-state reverse membership is missing or stale");
         }
+    }
+
+    static boolean sameLineage(ManagedLineageIndex.Lineage expected, ManagedLineageIndex.Lineage actual,
+            boolean controlledNamespace) {
+        return controlledNamespace ? expected.sameIndexedHistory(actual) : expected.equals(actual);
     }
 
     private record OwnedSession(String address, SelectedDocument document) { }

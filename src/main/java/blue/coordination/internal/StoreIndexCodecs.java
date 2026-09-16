@@ -52,20 +52,45 @@ final class StoreIndexCodecs {
         retainedKeys = codec("retained-key", (w, row) -> { w.text(row.documentId().value()); w.longValue(row.epoch()); },
                 r -> new ManagedLineageIndex.RetainedKey(DocumentId.of(text(r)), r.longValue()));
         retainedStates = codec("retained-state", StoreIndexCodecs::retainedState, StoreIndexCodecs::retainedState);
-        lineages = codec("lineage", (w, row) -> {
-            w.text(row.documentId().value()); w.text(row.authoredInitialBlueId()); w.text(row.initializedBlueId());
-            w.longValue(row.currentEpoch()); w.text(row.currentBlueId());
-            list(w, row.retainedStates(), StoreIndexCodecs::retainedState); w.longValue(row.lastAnchoredNonReplayableEpoch());
-        }, r -> {
-            var row = new ManagedLineageIndex.Lineage(DocumentId.of(text(r)), text(r), text(r), r.longValue(), text(r),
-                    list(r, StoreIndexCodecs::retainedState), r.longValue());
-            long epoch = 0;
-            for (var state : row.retainedStates()) {
-                require(state.documentId().equals(row.documentId()) && state.epoch() == epoch++, "Stored lineage is not contiguous for its owner");
+        var history = new SessionHistoryStorage(objects, limits.nodeBytes());
+        boolean controlled = RootedEngineStorage.isControlledNamespace(objects);
+        lineages = new PersistentMapCodec<>() {
+            @Override public String identity() { return "blue-coordination/store-index/lineage/2"; }
+            @Override public ManagedLineageIndex.Lineage prepareForStorage(ManagedLineageIndex.Lineage row) {
+                var source = RetainedStateHistory.indexed(row.documentId(), row.retainedStates());
+                var retained = history.retain("retained-states", source.index(), history.ordinals, history.retainedStates);
+                return new ManagedLineageIndex.Lineage(row.documentId(), row.authoredInitialBlueId(), row.initializedBlueId(),
+                        row.currentEpoch(), row.currentBlueId(), new RetainedStateHistory(row.documentId(), retained),
+                        row.lastAnchoredNonReplayableEpoch());
             }
-            require(row.initializedBlueId().equals(row.retainedStates().get(0).blueId()), "Stored lineage initialization differs");
-            return row;
-        });
+            @Override public byte[] encode(ManagedLineageIndex.Lineage value) {
+                return SessionStorageWire.encode(limits.valueBytes(), w -> {
+                    require(value.retainedStates() instanceof RetainedStateHistory indexed && indexed.index().isStored(),
+                            "Lineage history must be retained before canonical encoding");
+                    var retained = (RetainedStateHistory) value.retainedStates();
+                    w.text(value.documentId().value()); w.text(value.authoredInitialBlueId()); w.text(value.initializedBlueId());
+                    w.longValue(value.currentEpoch()); w.text(value.currentBlueId());
+                    SessionHistoryStorage.root(w, retained.index());
+                    w.longValue(value.lastAnchoredNonReplayableEpoch());
+                });
+            }
+            @Override public ManagedLineageIndex.Lineage decode(byte[] bytes) {
+                return SessionStorageWire.decode(bytes, limits.valueBytes(), r -> {
+                    DocumentId owner = DocumentId.of(text(r));
+                    String authored = text(r), initialized = text(r);
+                    long currentEpoch = r.longValue(); String current = text(r);
+                    var retained = new RetainedStateHistory(owner,
+                            history.open(r, "retained-states", Long::compare, history.ordinals, history.retainedStates));
+                    var row = new ManagedLineageIndex.Lineage(owner, authored, initialized, currentEpoch, current,
+                            retained, r.longValue());
+                    // Only the explicit library-owned namespace preserves the previously established whole-index invariant.
+                    // Generic object stores retain strict enumeration; a format/version/hash alone never opts them out.
+                    if (!controlled) for (var ignored : retained) { /* owner, key and contiguity checked by the view */ }
+                    require(initialized.equals(retained.get(0).blueId()), "Stored lineage initialization differs");
+                    return row;
+                });
+            }
+        };
         occurrenceKeys = codec("occurrence-key", (w, row) -> { w.text(row.sourceDocumentId().value()); w.text(row.sourcePath()); },
                 r -> ManagedOccurrenceInventory.OccurrenceKey.of(DocumentId.of(text(r)), text(r)));
         occurrenceOrder = codec("occurrence-order", (w, row) -> { w.text(row.occurrenceIdentity()); w.text(row.bindingIdentity()); },

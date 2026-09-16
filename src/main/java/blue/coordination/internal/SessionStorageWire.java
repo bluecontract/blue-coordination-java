@@ -39,6 +39,12 @@ final class SessionStorageWire {
         });
     }
 
+    /** Bounded dispatch only; the selected decoder must still consume and validate the whole frame. */
+    static String formatTag(byte[] bytes, int maximumBytes) {
+        require(bytes != null && bytes.length <= maximumBytes, "Oversized or missing physical value");
+        return new Reader(bytes).text(Math.min(maximumBytes, 1024));
+    }
+
     static void order(Writer out, ExternalOrderKey order) {
         List<Object> components = Objects.requireNonNull(order, "order").components();
         out.integer(components.size());

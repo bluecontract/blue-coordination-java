@@ -1962,13 +1962,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (sourceEpoch == -1L) {
             return lineage.authoredInitialBlueId();
         }
-        for (ManagedLineageIndex.RetainedState state
-                : lineage.retainedStates()) {
-            if (state.epoch() == sourceEpoch) {
-                return state.blueId();
-            }
-        }
-        return null;
+        return lineage.retainedBlueIdAt(sourceEpoch);
     }
 
     private CohortInvocation augmentWithManagedDrafts(

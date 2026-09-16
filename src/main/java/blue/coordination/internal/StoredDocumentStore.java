@@ -171,7 +171,8 @@ final class StoredDocumentStore {
                         checkpoints(results).open(selected.root(Root.CHECKPOINTS)).workingCopy(), generic,
                         admissionValues.open(), closureValues.open(), receipt, catchUp);
                 openingChecks = new StoredDocumentReadChecks(maximumSelectedIndexMaps, raw, occurrences, topology, components,
-                        subscriptions, receipts, plans, work, selectedSessions::selected);
+                        subscriptions, receipts, plans, work, selectedSessions::selected,
+                        RootedEngineStorage.isControlledNamespace(objects));
                 initial = openingChecks.open(); checks = openingChecks;
             } catch (RuntimeException failure) {
                 if (openingChecks != null) openingChecks.close();

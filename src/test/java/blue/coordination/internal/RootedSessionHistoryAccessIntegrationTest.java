@@ -48,13 +48,15 @@ final class RootedSessionHistoryAccessIntegrationTest {
     private static void exercise(int historySize, boolean sameEpoch) throws Exception {
         Fixture f = construct(historySize, sameEpoch);
         var measurements = new ArrayList<Measured>();
-        report(Map.of("kind", "fixture", "workload", f.name(), "graphDocuments", 2,
+        var fixtureReport = new LinkedHashMap<String, Object>(Map.of("kind", "fixture", "workload", f.name(), "graphDocuments", 2,
                 "numberedParentEpochs", f.before().epochs().get(f.parent()),
                 "parentRetainedViewPositions", f.before().views().get(f.parent()).size(),
                 "sessionDescriptorBytes", f.objects().sessionDescriptors(),
                 "physicalCategoryInventory", f.objects().categoryInventory(),
                 "cache", "disabled", "decoderCountsAvailable", false,
                 "requiredPayloadPolicy", "Point plus fixed current/anchor/predecessor boundary records, declared before reads"));
+        fixtureReport.put("restorePolicy", controlled() ? "controlled-library-writer" : "strict-untrusted");
+        report(fixtureReport);
 
         // Each independent probe starts from detached bytes with no resident or L1 warming.
         readProbe(f, "current", measurements, scope -> scope.documentHandle(f.parent()).orElseThrow().snapshot().blueId(),
@@ -71,7 +73,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
         var journal = ColdStorageJournalFixture.open(f.journal());
         RootedCoordinationStorage.Selection staged;
         try (var scope = phase(f, "successor/open", objects, f.currentBoundaries(), measurements,
-                () -> RootedCoordinationStorage.open(objects, LIMITS, f.selection(), ExactNodeProvider.empty(), journal))) {
+                () -> open(objects, f.selection(), journal))) {
             var entry = phase(f, "successor/submit", objects, f.currentBoundaries(), measurements,
                     () -> scope.coordination().events().from(scope.timelineHandle("rcp2/source").orElseThrow())
                             .exact(scope.coordination().values().yaml(f.nextYaml())).submit());
@@ -86,8 +88,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
         }
         var reopenedBytes = objects.detachedCopy();
         try (var reopened = phase(f, "successor/reopen/open", reopenedBytes, f.afterCurrentBoundaries(), measurements,
-                () -> RootedCoordinationStorage.open(reopenedBytes, LIMITS, staged,
-                        ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journal.snapshot())))) {
+                () -> open(reopenedBytes, staged, ColdStorageJournalFixture.open(journal.snapshot())))) {
             String reopenedHead = phase(f, "successor/reopen/select", reopenedBytes, f.afterCurrentBoundaries(), measurements,
                     () -> reopened.documentHandle(f.parent()).orElseThrow().snapshot().blueId());
             assertEquals(f.after().heads().get(f.parent()), reopenedHead);
@@ -96,8 +97,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
                     .getOrDefault("contracts.closure.processor", 0L), "Cold restore does not rerun the processor");
         }
         // An old descriptor must still expose its complete old history after staging a successor.
-        try (var old = RootedCoordinationStorage.open(objects.detachedCopy(), LIMITS, f.selection(),
-                ExactNodeProvider.empty(), ColdStorageJournalFixture.open(f.journal()))) {
+        try (var old = open(objects.detachedCopy(), f.selection(), ColdStorageJournalFixture.open(f.journal()))) {
             assertEquals(f.before(), snapshot(engine(old), f.source(), f.parent()));
         }
         long unrequested = measurements.stream().mapToLong(row -> row.accesses().unrequestedHistoricalPayloadGetCalls()).sum();
@@ -121,7 +121,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
             Object expected, Set<String> required) {
         var objects = f.objects().detachedCopy(); var journal = ColdStorageJournalFixture.open(f.journal());
         try (var scope = phase(f, name + "/open", objects, required, measured,
-                () -> RootedCoordinationStorage.open(objects, LIMITS, f.selection(), ExactNodeProvider.empty(), journal))) {
+                () -> open(objects, f.selection(), journal))) {
             Object actual = phase(f, name + "/select", objects, required, measured, () -> select.apply(scope));
             // Heavy complete encoding is an oracle, never part of the measured read.
             if (actual instanceof DocumentRevision revision) actual = digest(ROWS.encodeRevision(revision));
@@ -167,7 +167,9 @@ final class RootedSessionHistoryAccessIntegrationTest {
                     VIEW_IDENTITIES.viewAddress(positions.get(selected - 1).view()),
                     VIEW_IDENTITIES.viewAddress(positions.get(0).view()));
             Snapshot before = snapshot(f.engine, f.source.id(), f.parent.id());
-            var selection = RootedCoordinationStorage.retainPartition(f.blue, objects, LIMITS);
+            var selection = controlled()
+                    ? RootedCoordinationStorage.controlledRepository(objects).retainPartition(f.blue, LIMITS)
+                    : RootedCoordinationStorage.retainPartition(f.blue, objects, LIMITS);
             String revisionAddress = digest(ROWS.encodeRevision(revision));
             var historicalPayloads = objects.historicalPayloadAddresses();
             assertFalse(historicalPayloads.isEmpty(), "Header accounting must recognize real stored payloads");
@@ -255,6 +257,13 @@ final class RootedSessionHistoryAccessIntegrationTest {
 
     private static DefaultCoordinationEngine engine(RootedCoordinationStorage.Scope scope) {
         return (DefaultCoordinationEngine) scope.coordination().advanced().rawEngine();
+    }
+    private static boolean controlled() { return Boolean.getBoolean("blue.poc.history.controlled"); }
+    private static RootedCoordinationStorage.Scope open(RootedHistoryAccessObjects objects,
+            RootedCoordinationStorage.Selection selection, ColdStorageJournalFixture journal) {
+        return controlled()
+                ? RootedCoordinationStorage.controlledRepository(objects).open(LIMITS, selection, ExactNodeProvider.empty(), journal)
+                : RootedCoordinationStorage.open(objects, LIMITS, selection, ExactNodeProvider.empty(), journal);
     }
     private static Set<String> union(Set<String> left, Set<String> right) {
         var result = new LinkedHashSet<>(left); result.addAll(right); return Set.copyOf(result);

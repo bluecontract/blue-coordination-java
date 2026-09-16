@@ -447,12 +447,12 @@ final class StoredDocumentIndexesTest {
         var zero = new ManagedLineageIndex.RetainedState(id, 0, "x");
         var two = new ManagedLineageIndex.RetainedState(id, 2, "x");
         var gap = new ManagedLineageIndex.Lineage(id, "authored", "x", 2, "x", List.of(zero, two), -1);
-        assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(gap)));
+        assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(codecs.lineages.prepareForStorage(gap))));
         var wrongInitial = new ManagedLineageIndex.Lineage(id, "authored", "wrong", 0, "x", List.of(zero), -1);
-        assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(wrongInitial)));
+        assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(codecs.lineages.prepareForStorage(wrongInitial))));
         var valid = new ManagedLineageIndex.Lineage(id, "authored", "x", 2, "x", List.of(zero,
                 new ManagedLineageIndex.RetainedState(id, 1, "y"), two), -1);
-        assertEquals(List.of(0L, 2L), codecs.lineages.decode(codecs.lineages.encode(valid)).epochsFor("x"));
+        assertEquals(List.of(0L, 2L), codecs.lineages.decode(codecs.lineages.encode(codecs.lineages.prepareForStorage(valid))).epochsFor("x"));
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var stored = retain(storage, state(f));

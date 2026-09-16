@@ -17,6 +17,29 @@ public final class RootedEngineStorage {
     private static final String FORMAT = "blue-coordination/rooted-engine-storage/1";
 
     /**
+     * SDK assembly bridge for an explicitly controlled library-writer namespace.
+     * This capability records a host storage-boundary precondition, not content
+     * authenticity, publication permission or a self-authenticating certificate.
+     * @param objects isolated immutable namespace owned by the host
+     * @return library-owned storage capability preserving that boundary
+     */
+    public static CoordinationImmutableObjectStore controlledNamespace(CoordinationImmutableObjectStore objects) {
+        Objects.requireNonNull(objects);
+        return objects instanceof ControlledNamespace ? objects : new ControlledNamespace(objects);
+    }
+
+    static boolean isControlledNamespace(CoordinationImmutableObjectStore objects) {
+        return objects instanceof ControlledNamespace;
+    }
+
+    private static final class ControlledNamespace implements CoordinationImmutableObjectStore {
+        private final CoordinationImmutableObjectStore delegate;
+        private ControlledNamespace(CoordinationImmutableObjectStore delegate) { this.delegate = delegate; }
+        @Override public byte[] putIfAbsent(String address, byte[] bytes) { return delegate.putIfAbsent(address, bytes); }
+        @Override public Optional<byte[]> get(String address, int maximumBytes) { return delegate.get(address, maximumBytes); }
+    }
+
+    /**
      * Named storage-assembly bridge for host-owned cache capacity and lifetime.
      * No decoded artifact, verification insertion or implementation type escapes.
      */

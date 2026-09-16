@@ -38,6 +38,71 @@ public final class RootedCoordinationStorage {
     private RootedCoordinationStorage() { }
 
     /**
+     * Binds a namespace whose durable records and coherent selections are written
+     * exclusively by this library. Library-issued indexed history can then retain
+     * its established prefix invariants across process restarts. This is an explicit
+     * storage-origin contract, not a claim proved by a hash, a cache hit or arbitrary
+     * caller-supplied descriptor bytes.
+     *
+     * <p>The host must isolate writes, preserve returned bytes unchanged and publish
+     * all selected roots coherently. Untrusted imports must use the ordinary strict
+     * {@code open} path. Selected records still undergo integrity, canonical-format
+     * and position checks; missing data never means an empty history.</p>
+     * @param objects host-owned controlled-writer immutable namespace
+     * @return repository retaining library-origin history verification
+     */
+    public static ControlledRepository controlledRepository(CoordinationImmutableObjectStore objects) {
+        return new ControlledRepository(objects);
+    }
+
+    /**
+     * Explicit controlled-origin repository; neither publication authority nor a
+     * durable signature. The host owns its storage lifetime and transaction fences.
+     */
+    public static final class ControlledRepository {
+        private final CoordinationImmutableObjectStore objects;
+        private ControlledRepository(CoordinationImmutableObjectStore objects) {
+            this.objects = RootedEngineStorage.controlledNamespace(Objects.requireNonNull(objects));
+        }
+
+        /**
+         * Retains a library-produced resident partition, issuing indexed descriptors.
+         * @param coordination resident library owner
+         * @param limits physical storage bounds
+         * @return uncommitted coherent selection for host publication
+         */
+        public Selection retainPartition(BlueCoordination coordination, Limits limits) {
+            return RootedCoordinationStorage.retainPartition(coordination, objects, limits);
+        }
+
+        /**
+         * Reopens an unchanged library-issued selection in this namespace.
+         * @param limits physical storage bounds
+         * @param selection coherently pinned library-issued descriptors
+         * @param provider ordinary exact content provider
+         * @param journal matching selected journal
+         * @return fresh owner with selectively restored history
+         */
+        public Scope open(Limits limits, Selection selection, ExactNodeProvider provider, TimelineJournalStore journal) {
+            return openSelected(objects, limits, selection, provider, journal, null);
+        }
+
+        /**
+         * Reopens controlled-origin state with optional host-managed immutable reuse.
+         * @param limits physical storage bounds
+         * @param selection coherently pinned library-issued descriptors
+         * @param provider ordinary exact content provider
+         * @param journal matching selected journal
+         * @param cache host-owned immutable artifact cache
+         * @return fresh selected owner
+         */
+        public Scope open(Limits limits, Selection selection, ExactNodeProvider provider,
+                TimelineJournalStore journal, Cache cache) {
+            return openSelected(objects, limits, selection, provider, journal, Objects.requireNonNull(cache));
+        }
+    }
+
+    /**
      * Host-owned L1 for decoded immutable storage artifacts, shared across fresh
      * operation scopes. No database/client dependency or mutable engine is held.
      * Configure one cache per process runtime; close it only at host shutdown.

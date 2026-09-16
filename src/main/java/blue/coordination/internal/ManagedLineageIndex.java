@@ -144,8 +144,7 @@ final class ManagedLineageIndex {
                     "Session head does not advance indexed lineage "
                             + selected.documentId());
         }
-        ArrayList<RetainedState> retained = new ArrayList<>(
-                prior.retainedStates());
+        ArrayList<RetainedState> addedStates = new ArrayList<>(additions.size());
         /*
          * Any transient mismatch at the indexed head becomes an anchored
          * receipt gap as soon as a later source revision exists. The first
@@ -173,7 +172,7 @@ final class ManagedLineageIndex {
                         lastAnchoredNonReplayableEpoch,
                         Math.subtractExact(revision.epoch(), 1L));
             }
-            retained.add(new RetainedState(
+            addedStates.add(new RetainedState(
                     prior.documentId(),
                     revision.epoch(),
                     revision.after().blueId()));
@@ -187,7 +186,7 @@ final class ManagedLineageIndex {
                 prior.initializedBlueId(),
                 current.epoch(),
                 selected.currentRepresentation().blueId(),
-                retained,
+                new RetainedStateHistory(selected.documentId(), selected.retainedStateIndex()),
                 lastAnchoredNonReplayableEpoch);
         if (selected.epoch() != advanced.currentEpoch()
                 || !selected.currentRepresentation().blueId()
@@ -196,8 +195,7 @@ final class ManagedLineageIndex {
                     "Indexed additions do not reach the session head "
                             + selected.documentId());
         }
-        return advancing(prior, advanced, retained.subList(
-                prior.retainedStates().size(), retained.size()));
+        return advancing(prior, advanced, addedStates);
     }
 
     /**
@@ -570,8 +568,8 @@ final class ManagedLineageIndex {
                         "currentEpoch must be non-negative");
             }
             currentBlueId = requireBlueId(currentBlueId);
-            retainedStates = List.copyOf(Objects.requireNonNull(
-                    retainedStates, "retainedStates"));
+            retainedStates = Objects.requireNonNull(retainedStates, "retainedStates");
+            if (!(retainedStates instanceof RetainedStateHistory)) retainedStates = List.copyOf(retainedStates);
             if (retainedStates.isEmpty()
                     || retainedStates.get(0).epoch() != 0L
                     || retainedStates.get(retainedStates.size() - 1).epoch()
@@ -590,47 +588,16 @@ final class ManagedLineageIndex {
         static Lineage from(DocumentSession session) {
             DocumentSession selected = Objects.requireNonNull(
                     session, "session");
-            List<DocumentRevision> revisions = selected.revisions();
-            if (revisions.isEmpty() || revisions.get(0).epoch() != 0L) {
+            var retained = new RetainedStateHistory(selected.documentId(), selected.retainedStateIndex());
+            if (retained.isEmpty()) {
                 throw new IllegalArgumentException(
                         "Managed lineage has no epoch-zero revision "
                                 + selected.documentId());
             }
-            ArrayList<RetainedState> retained = new ArrayList<>();
-            long lastAnchoredNonReplayableEpoch = -1L;
-            long expectedEpoch = 0L;
-            String priorAfterBlueId = null;
-            for (DocumentRevision revision : revisions) {
-                if (!revision.documentId().equals(selected.documentId())
-                        || revision.epoch() != expectedEpoch) {
-                    throw new IllegalArgumentException(
-                            "Managed lineage history is not contiguous "
-                                    + selected.documentId());
-                }
-                if (priorAfterBlueId != null
-                        && !revision.before().orElseThrow(() ->
-                                new IllegalArgumentException(
-                                        "Retained managed revision has no "
-                                                + "before state "
-                                                + revision.documentId()
-                                                + "@" + revision.epoch()))
-                                .blueId().equals(
-                                priorAfterBlueId)) {
-                    lastAnchoredNonReplayableEpoch = Math.max(
-                            lastAnchoredNonReplayableEpoch,
-                            Math.subtractExact(revision.epoch(), 1L));
-                }
-                retained.add(new RetainedState(
-                        selected.documentId(),
-                        revision.epoch(),
-                        revision.after().blueId()));
-                priorAfterBlueId = revision.after().blueId();
-                expectedEpoch = Math.addExact(expectedEpoch, 1L);
-            }
-            DocumentRevision current = revisions.get(revisions.size() - 1);
+            RetainedState current = retained.get(retained.size() - 1);
             if (selected.epoch() != current.epoch()
                     || !selected.currentRevision().after().blueId()
-                            .equals(current.after().blueId())) {
+                            .equals(current.blueId())) {
                 throw new IllegalArgumentException(
                         "Managed lineage history does not reach its head "
                                 + selected.documentId());
@@ -638,11 +605,26 @@ final class ManagedLineageIndex {
             return new Lineage(
                     selected.documentId(),
                     selected.authoredInitialBlueId(),
-                    revisions.get(0).after().blueId(),
+                    retained.get(0).blueId(),
                     current.epoch(),
                     selected.currentRepresentation().blueId(),
                     retained,
-                    lastAnchoredNonReplayableEpoch);
+                    selected.lastAnchoredNonReplayableEpoch());
+        }
+
+        /** Exact shared history-root comparison; never falls back to materializing a prefix. */
+        boolean sameIndexedHistory(Lineage other) {
+            return other != null && documentId.equals(other.documentId)
+                    && authoredInitialBlueId.equals(other.authoredInitialBlueId)
+                    && initializedBlueId.equals(other.initializedBlueId)
+                    && currentEpoch == other.currentEpoch && currentBlueId.equals(other.currentBlueId)
+                    && lastAnchoredNonReplayableEpoch == other.lastAnchoredNonReplayableEpoch
+                    && RetainedStateHistory.sameBasis(retainedStates, other.retainedStates);
+        }
+
+        String retainedBlueIdAt(long epoch) {
+            return epoch < 0 || epoch >= retainedStates.size()
+                    ? null : retainedStates.get(Math.toIntExact(epoch)).blueId();
         }
 
         /**

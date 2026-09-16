@@ -19,15 +19,24 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private final StoredCatchUpPlanIndexes plans;
     private final StoredCatchUpWorkIndexes works;
     private final Function<DocumentId, StoredDocumentIndexes.SelectedDocument> selected;
+    private final boolean controlledNamespace;
     private boolean closed;
 
     StoredDocumentReadChecks(int maximumMaps, InMemoryDocumentStore.StoreState original,
             StoredOccurrenceIndexes occurrences, StoredTopologyIndexes topology, StoredComponentStateIndexes components,
             StoredSubscriptionIndexes subscriptions, StoredManagedEpochIndexes receipts, StoredCatchUpPlanIndexes plans,
             StoredCatchUpWorkIndexes works, Function<DocumentId, StoredDocumentIndexes.SelectedDocument> selected) {
+        this(maximumMaps, original, occurrences, topology, components, subscriptions, receipts, plans, works, selected, false);
+    }
+
+    StoredDocumentReadChecks(int maximumMaps, InMemoryDocumentStore.StoreState original,
+            StoredOccurrenceIndexes occurrences, StoredTopologyIndexes topology, StoredComponentStateIndexes components,
+            StoredSubscriptionIndexes subscriptions, StoredManagedEpochIndexes receipts, StoredCatchUpPlanIndexes plans,
+            StoredCatchUpWorkIndexes works, Function<DocumentId, StoredDocumentIndexes.SelectedDocument> selected,
+            boolean controlledNamespace) {
         maps = new StoredIndexProjections(maximumMaps); this.original = original; this.occurrences = occurrences;
         this.topology = topology; this.components = components; this.subscriptions = subscriptions; this.receipts = receipts;
-        this.plans = plans; this.works = works; this.selected = selected;
+        this.plans = plans; this.works = works; this.selected = selected; this.controlledNamespace = controlledNamespace;
     }
 
     private <K, V> PersistentOrderedMap<K, V> checked(String family, PersistentOrderedMap<K, V> source,
@@ -52,7 +61,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
         var s = value.storedState(); var raw = original.lineageIndex();
         var primary = stage ? maps.stage(s.documents()) : checked("lineage/documents", s.documents(), (id, row) -> {
             require(id.equals(row.documentId()), "Lineage key differs from its exact owner");
-            StoredDocumentIndexes.requireLineageMembership(raw, row); return row;
+            StoredDocumentIndexes.requireLineageMembership(raw, row, controlledNamespace); return row;
         });
         return ManagedLineageIndex.restoreStored(new ManagedLineageIndex.StoredState(primary,
                 lineageBuckets("authored", s.authored(), stage, ManagedLineageIndex.Lineage::authoredInitialBlueId),
@@ -73,7 +82,8 @@ final class StoredDocumentReadChecks implements AutoCloseable {
         if (stage) return maps.stage(source);
         return checked("lineage/" + kind, source, (blueId, bucket) -> maps.open("lineage/" + kind + "-bucket", blueId, bucket, (id, row) -> {
             require(id.equals(row.documentId()) && blueId.equals(identity.apply(row))
-                    && row.equals(original.lineageIndex().byDocumentId(id)), "Lineage reverse bucket differs from primary");
+                    && StoredDocumentIndexes.sameLineage(row, original.lineageIndex().byDocumentId(id), controlledNamespace),
+                    "Lineage reverse bucket differs from primary");
             return row;
         }, (k, v) -> v), (k, bucket) -> maps.stage(bucket));
     }
