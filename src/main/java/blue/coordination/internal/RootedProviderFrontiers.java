@@ -95,8 +95,8 @@ final class RootedProviderFrontiers {
 
     /** Raw stores cannot establish completeness of this secondary projection through a selected witness alone. */
     void requireMatches(RootedProviderFrontiers expected) {
-        var actualRows = rows.range(null, null).iterator();
-        var expectedRows = expected.rows.range(null, null).iterator();
+        var actualRows = rows.range(null, null);
+        var expectedRows = expected.rows.range(null, null);
         while (actualRows.hasNext() && expectedRows.hasNext()) {
             require(actualRows.next().equals(expectedRows.next()), "Provider frontier projection differs from retained receipts");
         }
