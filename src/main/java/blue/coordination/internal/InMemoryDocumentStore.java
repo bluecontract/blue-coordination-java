@@ -444,16 +444,8 @@ final class InMemoryDocumentStore {
         // selected input when retaining its terminal admission evidence. The
         // promise survives response loss/restart with that atomic receipt;
         // unrelated sources never inherit a global environment watermark.
-        for (ContractsClosurePublicationReceipt receipt : state.closurePublicationReceipts().values()) {
-            RootedTerminalEvidence evidence = receipt.rootedTerminalEvidence();
-            if (evidence == null || !evidence.requiredTimelineIds().contains(entry.timeline().timelineId())
-                    || !(evidence.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause)) continue;
-            long closedThrough = new java.math.BigInteger(cause.sourceOrder().components().get(0).toString()).longValueExact();
-            if (entry.timestampMicros() <= closedThrough) {
-                throw new IllegalArgumentException("Timeline Entry order " + entry.sourceOrderKey()
-                        + " is not after its required Timeline completeness frontier " + cause.sourceOrder());
-            }
-        }
+        state.rootedProviderFrontiers().requireAfter(entry, state.publicationReceiptIndex(),
+                state.closurePublicationReceiptIndex());
     }
 
     /** Looks up one typed admission receipt without opening document heads. */
@@ -942,6 +934,7 @@ final class InMemoryDocumentStore {
                 closurePublicationReceiptIndex;
         private final Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts;
+        private final RootedProviderFrontiers rootedProviderFrontiers;
         private final ManagedEpochReceiptStore managedEpochReceipts;
         private final CatchUpPlanStore catchUpPlans;
 
@@ -1161,6 +1154,7 @@ final class InMemoryDocumentStore {
                     closurePublicationReceiptIndex(processReceipts);
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.rootedProviderFrontiers = RootedProviderFrontiers.from(processReceipts.values());
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1185,6 +1179,7 @@ final class InMemoryDocumentStore {
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceiptIndex,
+                RootedProviderFrontiers rootedProviderFrontiers,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             this.sessionIndex = Objects.requireNonNull(
@@ -1227,6 +1222,7 @@ final class InMemoryDocumentStore {
                     "closurePublicationReceiptIndex");
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.rootedProviderFrontiers = Objects.requireNonNull(rootedProviderFrontiers, "rootedProviderFrontiers");
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1251,6 +1247,7 @@ final class InMemoryDocumentStore {
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceipts,
+                RootedProviderFrontiers rootedProviderFrontiers,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             return new StoreState(
@@ -1268,6 +1265,7 @@ final class InMemoryDocumentStore {
                     publicationReceipts,
                     admissionReceipts,
                     closurePublicationReceipts,
+                    rootedProviderFrontiers,
                     managedEpochReceipts,
                     catchUpPlans);
         }
@@ -1300,6 +1298,8 @@ final class InMemoryDocumentStore {
                 ManagedLineageIndex replacementLineages,
                 ProcessEmbeddedComponentIndex replacementIndex,
                 long replacementIndexGeneration) {
+            // A full reconstruction must not silently discard an unverified supplied frontier projection.
+            rootedProviderFrontiers.rows();
             List<ComponentSnapshot> retainedComponents = componentStates()
                     .stream()
                     .filter(component -> component.orderedMemberDocumentIds()
@@ -1429,6 +1429,8 @@ final class InMemoryDocumentStore {
             return closurePublicationReceipts;
         }
 
+        RootedProviderFrontiers rootedProviderFrontiers() { return rootedProviderFrontiers; }
+
         ManagedEpochReceiptStore managedEpochReceipts() {
             return managedEpochReceipts;
         }
@@ -1450,6 +1452,7 @@ final class InMemoryDocumentStore {
                     publicationReceiptIndex,
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
+                    rootedProviderFrontiers,
                     Objects.requireNonNull(
                             replacement, "managedEpochReceipts"),
                     catchUpPlans);
@@ -1475,6 +1478,7 @@ final class InMemoryDocumentStore {
                     publicationReceiptIndex,
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
+                    rootedProviderFrontiers,
                     managedEpochReceipts,
                     Objects.requireNonNull(replacement, "catchUpPlans"));
         }

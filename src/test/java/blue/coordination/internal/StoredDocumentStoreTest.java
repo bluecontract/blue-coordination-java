@@ -335,7 +335,8 @@ final class StoredDocumentStoreTest {
         return InMemoryDocumentStore.StoreState.trustedTransition(sessions, s.lineageIndex(), s.occurrenceInventory(),
                 s.occurrenceInventoryGeneration(), s.componentIndex(), s.componentIndexGeneration(), s.graphGenerations(),
                 s.componentStateInventory(), s.closureSubscriptions(), s.outboxLog(), s.checkpointEvidenceLog(),
-                s.publicationReceiptIndex(), admissions, s.closurePublicationReceiptIndex(), s.managedEpochReceipts(), s.catchUpPlans());
+                s.publicationReceiptIndex(), admissions, s.closurePublicationReceiptIndex(), s.rootedProviderFrontiers(),
+                s.managedEpochReceipts(), s.catchUpPlans());
     }
     private static void install(DocumentSessionStorageTest.Fixture f, InMemoryDocumentStore.StoreState state) throws Exception {
         var field = InMemoryDocumentStore.class.getDeclaredField("state"); field.setAccessible(true); field.set(f.engine.documents(), state);

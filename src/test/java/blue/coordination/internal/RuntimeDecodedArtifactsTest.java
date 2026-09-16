@@ -433,7 +433,8 @@ final class RuntimeDecodedArtifactsTest {
         var selected = InMemoryDocumentStore.StoreState.trustedTransition(s.sessionIndex(), s.lineageIndex(), s.occurrenceInventory(),
                 s.occurrenceInventoryGeneration(), s.componentIndex(), s.componentIndexGeneration(), s.graphGenerations(),
                 s.componentStateInventory(), s.closureSubscriptions(), s.outboxLog(), s.checkpointEvidenceLog(),
-                membership, s.admissionReceiptIndex(), closures.open(), s.managedEpochReceipts(), s.catchUpPlans());
+                membership, s.admissionReceiptIndex(), closures.open(), s.rootedProviderFrontiers(),
+                s.managedEpochReceipts(), s.catchUpPlans());
         var documents = new InMemoryDocumentStore(new EngineMetrics(), selected);
         documents.bindStoredPublicationReuse(owner.indexes.closureReuse());
         return documents;

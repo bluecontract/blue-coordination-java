@@ -98,6 +98,14 @@ final class RootedHistoryAccessObjects implements CoordinationImmutableObjectSto
 
     String categoryAt(String address) { return category(bytes.get(address)); }
 
+    /** Test evidence outside measured phases; never reconstructs or changes the retained artifact. */
+    byte[] diagnosticBytes(String address) {
+        if (measuring) throw new IllegalStateException("Diagnostics must stay outside measured phases");
+        byte[] selected = bytes.get(address);
+        if (selected == null) throw new IllegalArgumentException("Missing diagnostic artifact " + address);
+        return selected.clone();
+    }
+
     Map<String, Integer> categoryInventory() {
         var result = new LinkedHashMap<String, Integer>();
         bytes.values().forEach(value -> result.merge(category(value), 1, Integer::sum));

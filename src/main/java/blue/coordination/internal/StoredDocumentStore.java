@@ -23,7 +23,7 @@ final class StoredDocumentStore {
         TOPOLOGY_COMPONENT, TOPOLOGY_TARGET, TOPOLOGY_SOURCE, TOPOLOGY_JOIN_MEMBERS, TOPOLOGY_JOIN_ROOTS,
         COMPONENT_LINEAGE, COMPONENT_STATE, COMPONENT_DOCUMENT,
         SUBSCRIPTION_SLOT, SUBSCRIPTION_IDENTITY, SUBSCRIPTION_DOCUMENT, SUBSCRIPTION_DEMAND,
-        OUTBOX, CHECKPOINTS, PUBLICATIONS, ADMISSIONS, CLOSURES,
+        OUTBOX, CHECKPOINTS, PUBLICATIONS, ADMISSIONS, CLOSURES, PROVIDER_FRONTIERS,
         RECEIPT_DOCUMENT, RECEIPT_IDENTITY,
         PLAN_IDENTITY, PLAN_CONSUMER, PLAN_SOURCE, PLAN_OCCURRENCE, PLAN_BARRIER, PLAN_ACTIVE_SOURCE,
         BARRIERS, WORK_WORK, WORK_PENDING, WORK_APPLICATION, WORK_APPLICATION_BY_WORK, WORK_DUE
@@ -110,7 +110,8 @@ final class StoredDocumentStore {
                 var admissions = publication.retainAdmissions(state.admissionReceiptIndex());
                 var closures = publication.retainClosures(state.closurePublicationReceiptIndex());
                 return retained(state, documents.retainSessionPartition(state.sessionIndex()),
-                        publication.retainGeneric(state.publicationReceiptIndex()), admissions, closures, results);
+                        publication.retainGeneric(state.publicationReceiptIndex()), admissions, closures,
+                        publication.retainFrontiers(state.rootedProviderFrontiers().rows()), results);
             }
         });
     }
@@ -165,11 +166,18 @@ final class StoredDocumentStore {
                     InMemoryDocumentStore.StoreState.requireRetainedClosureReceipt(row,
                             new PersistentMapView<>(selectedSessions.open()), "Stored closure receipt"); return row;
                 });
+                var frontierRows = publication.openFrontiers(selected.root(Root.PROVIDER_FRONTIERS));
+                // Raw namespaces cannot prove a maximum from a single witness. Verify before guard, mutation or export,
+                // not during open: mere selection must not materialize every historical receipt and document.
+                var frontiers = RootedEngineStorage.isControlledNamespace(objects)
+                        ? RootedProviderFrontiers.restoreStored(frontierRows)
+                        : RootedProviderFrontiers.restoreStrict(frontierRows, () -> RootedProviderFrontiers.from(
+                                new PersistentMapView<>(closureValues.open()).values()));
                 var raw = InMemoryDocumentStore.StoreState.trustedTransition(selectedSessions.open(), lineages,
                         occurrence, m.occurrenceGeneration(), graph, m.componentGeneration(), generations,
                         component, subscription, outbox(results).open(selected.root(Root.OUTBOX)).workingCopy(),
                         checkpoints(results).open(selected.root(Root.CHECKPOINTS)).workingCopy(), generic,
-                        admissionValues.open(), closureValues.open(), receipt, catchUp);
+                        admissionValues.open(), closureValues.open(), frontiers, receipt, catchUp);
                 openingChecks = new StoredDocumentReadChecks(maximumSelectedIndexMaps, raw, occurrences, topology, components,
                         subscriptions, receipts, plans, work, selectedSessions::selected,
                         RootedEngineStorage.isControlledNamespace(objects));
@@ -194,7 +202,8 @@ final class StoredDocumentStore {
                     var admissions = admissionValues.stage(complete.admissionReceiptIndex(), (key, row) -> row);
                     var closures = closureValues.stage(complete.closurePublicationReceiptIndex(), (key, row) -> row);
                     return retained(checks.stage(complete), selectedSessions.stage(complete.sessionIndex()),
-                            publication.retainGeneric(complete.publicationReceiptIndex()), admissions, closures, results);
+                            publication.retainGeneric(complete.publicationReceiptIndex()), admissions, closures,
+                            publication.retainFrontiers(complete.rootedProviderFrontiers().rows()), results);
                 } finally {
                     // Receipt/check staging can fail before WorkingSessions.stage is reached.
                     selectedSessions.clearVerifiedSelections();
@@ -208,7 +217,8 @@ final class StoredDocumentStore {
             PersistentOrderedMap<DocumentId, StoreIndexCodecs.SessionAddress> addresses,
             PersistentOrderedMap<String, Boolean> generic,
             PersistentOrderedMap<String, ContractsClosureAdmissionReceipt> admissions,
-            PersistentOrderedMap<String, ContractsClosurePublicationReceipt> closures, StoredResultRows results) {
+            PersistentOrderedMap<String, ContractsClosurePublicationReceipt> closures,
+            PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> frontiers, StoredResultRows results) {
         var roots = new EnumMap<Root, byte[]>(Root.class);
         roots.put(Root.SESSIONS, addresses.storedRootDescriptor());
         var lineage = documents.retainLineagePartition(s.lineageIndex());
@@ -230,6 +240,7 @@ final class StoredDocumentStore {
         putFamily(roots, "WORK_", StoredCatchUpWorkIndexes.Root.values(), key -> work.root(works, key));
         roots.put(Root.PUBLICATIONS, generic.storedRootDescriptor()); roots.put(Root.ADMISSIONS, admissions.storedRootDescriptor());
         roots.put(Root.CLOSURES, closures.storedRootDescriptor());
+        roots.put(Root.PROVIDER_FRONTIERS, frontiers.storedRootDescriptor());
         roots.put(Root.OUTBOX, outbox(results).retain(s.outboxLog()).storedRootDescriptor());
         roots.put(Root.CHECKPOINTS, checkpoints(results).retain(s.checkpointEvidenceLog()).storedRootDescriptor());
         return new Selection(roots, Metadata.from(s));

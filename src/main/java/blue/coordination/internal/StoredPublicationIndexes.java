@@ -22,6 +22,7 @@ final class StoredPublicationIndexes implements AutoCloseable {
     private final StoreIndexCodecs.Binding<String, Boolean> generic;
     private final StoreIndexCodecs.Binding<String, ContractsClosureAdmissionReceipt> admissions;
     private final StoreIndexCodecs.Binding<String, ContractsClosurePublicationReceipt> closures;
+    private final StoreIndexCodecs.Binding<String, RootedProviderFrontiers.Frontier> frontiers;
     private final StoreIndexCodecs.Binding<String, RootedDeclaredBirthRejection> rejections;
     private final StoredClosureReceiptReferenceCodec closureValues;
 
@@ -79,6 +80,13 @@ final class StoredPublicationIndexes implements AutoCloseable {
                     return decoded.decoded().value();
                 })));
         closures = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, closureValues);
+        frontiers = codecs.binding("publication/provider-frontier", EmbeddingBinding.TEXT_ORDER, codecs.text,
+                codec("provider-frontier", UnaryOperator.identity(), value -> SessionStorageWire.encode(limits.valueBytes(), out -> {
+                    out.text(value.timelineId()); out.longValue(value.closedThroughMicros());
+                    order(out, value.sourceOrder()); out.text(value.publicationIdentity());
+                }), bytes -> SessionStorageWire.decode(bytes, limits.valueBytes(), in ->
+                        new RootedProviderFrontiers.Frontier(in.text(in.remaining()), in.longValue(), order(in),
+                                in.text(in.remaining())))));
         rejections = codecs.binding("publication/declared-rejection", EmbeddingBinding.TEXT_ORDER, codecs.text,
                 codec("declared-rejection", value -> {
                     receipts.encodeRejection(value, scope::retainView); return value;
@@ -93,6 +101,8 @@ final class StoredPublicationIndexes implements AutoCloseable {
     PersistentOrderedMap<String, ContractsClosureAdmissionReceipt> retainAdmissions(PersistentOrderedMap<String, ContractsClosureAdmissionReceipt> rows) { return admissions.retain(rows); }
     PersistentOrderedMap<String, ContractsClosurePublicationReceipt> openClosures(byte[] root) { return closures.open(root); }
     PersistentOrderedMap<String, ContractsClosurePublicationReceipt> retainClosures(PersistentOrderedMap<String, ContractsClosurePublicationReceipt> rows) { return closures.retain(rows); }
+    PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> openFrontiers(byte[] root) { return frontiers.open(root); }
+    PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> retainFrontiers(PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> rows) { return frontiers.retain(rows); }
     PersistentOrderedMap<String, RootedDeclaredBirthRejection> openRejections(byte[] root) { return rejections.open(root); }
     PersistentOrderedMap<String, RootedDeclaredBirthRejection> retainRejections(PersistentOrderedMap<String, RootedDeclaredBirthRejection> rows) { return rejections.retain(rows); }
 

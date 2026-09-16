@@ -279,3 +279,47 @@ within 64 KiB as epochs increase. This is a fixture mechanism assertion, not a
 new protocol or configurable storage limit. Index-node traffic remains separately
 reported. This batch changes physical access only; no MyOS wiring or timing claim
 is implied by these library results.
+
+The second grouped run (`94e1a21e990dc826bd7dae86f4102ec025eaf049`,
+`history33/controls02`) completed 135 tests across 23 classes: 132 passed and
+three failed the newly enabled access budget. All four complete semantic oracles
+passed. Current selection now reads one revision and two views at 5/20/50 epochs;
+unchanged payload writes are zero in every measured phase. The residual 5/20/50
+old revision reads occur exclusively during entry submission, before execution.
+
+### Remaining submission scan
+
+`InMemoryDocumentStore.requireAfterRootedProviderFrontier` enumerated all prior
+closure receipts to enforce previously promised Timeline completeness. Selecting
+each full receipt also verified its historical revision. With 50 old epochs,
+appending one new external entry therefore read 50 unrelated revision payloads.
+This is not required replay or new logical gas; the question is only whether the
+new timestamp exceeds that Timeline's previously closed boundary.
+
+The correction maintains a persistent per-Timeline maximum closed timestamp,
+with its exact source order and witness publication identity. It is derived from
+the same terminal receipts and published in the same immutable store replacement.
+Noncommitting terminal failures retain their promises; suspension does not add
+one. Session removal does not erase a promise; a genuinely new empty store resets
+it. Existing exact-entry replay keeps its existing idempotent path.
+
+Controlled storage checks the selected small row and publication membership
+without opening the witness payload. A raw strict owner reconstructs the complete
+projection from checked receipts before its first frontier check, mutation or
+export and rejects missing, extra or forged rows. Mere opening stays lazy; it
+does not select every receipt's document or consume the selected-session budget.
+Failed verification cannot establish a reusable validation result. The
+predicate remains `timestampMicros <= closedThroughMicros`, including rejection
+at equal timestamps. A rejection diagnostic can cite the maximum cutoff instead
+of the first rejecting receipt in the old iteration order; this text is not
+retained protocol evidence. No global cross-Timeline watermark is introduced.
+
+The before/after audit also records a limitation: private Parent view frame
+addresses differ between the earlier two baseline runs despite their production
+byte parity. The original baseline run and both indexed runs match each other;
+the test-only refined baseline run differs. Those private frames include
+operational subscription-index counters, but the old payload bytes were not
+archived, so the differing field has not yet been proven. Cross-run frame equality
+is not claimed. Within every workload the complete resident-versus-restored
+oracle remains mandatory; addresses and access costs are never normalized to
+hide a semantic difference.

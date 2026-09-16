@@ -6,9 +6,12 @@ import blue.coordination.sdk.EntryDisposition;
 import blue.coordination.sdk.ExactNodeProvider;
 import blue.coordination.sdk.RootedCoordinationStorage;
 import blue.language.processor.ExternalOrderKey;
+import blue.language.processor.closure.AffectedClosureSnapshotStorageCodec;
 import blue.language.processor.closure.ClosureProcessResultStorageCodec;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -203,6 +206,7 @@ final class RootedSessionHistoryAccessIntegrationTest {
             assertEquals(2, objects.sessionDescriptors().size(), "Exactly two actual session descriptors");
             assertTrue(objects.categoryInventory().getOrDefault("index-node", 0) > 0,
                     "The measured SDK must use the native physical point indexes");
+            if (historySize == 5 && !sameEpoch) physicalFrameDiagnostic(objects, parent.rootedView());
             var journal = ColdStorageJournalFixture.retain(f.engine);
             long nextTime = (additions + 3L) * 100;
             String nextYaml = tick(f.source.snapshot().blueId(), f.previous, nextTime);
@@ -226,6 +230,41 @@ final class RootedSessionHistoryAccessIntegrationTest {
 
     private record ViewIdentity(String physicalAddress, ExternalOrderKey logicalBoundary) { }
     private record ViewPositionIdentity(ExternalOrderKey boundary, ViewIdentity view) { }
+
+    private static void physicalFrameDiagnostic(RootedHistoryAccessObjects objects, RootedDocumentView view)
+            throws java.io.IOException {
+        // Keep the original physical frame. Component fingerprints locate a
+        // cross-JVM difference; they do not replace or normalize the semantic oracle.
+        String address = VIEW_IDENTITIES.viewAddress(view);
+        byte[] frame = objects.diagnosticBytes(address);
+        assertEquals(address, digest(frame));
+        assertTrue(frame.length <= MIB, "Bound this one fixed-fixture diagnostic artifact");
+        Path file = Path.of("build/reports/poc-history-access/parent-five-view.bin");
+        Files.createDirectories(file.getParent());
+        Files.write(file, frame);
+        var state = view.storedState();
+        var snapshots = new AffectedClosureSnapshotStorageCodec(RECORD, 256);
+        var inventory = state.subscriptions().storedState();
+        byte[] inventoryBytes = SessionStorageWire.encode(RECORD, out -> ROWS.inventory(out, state.subscriptions()));
+        byte[] routes = SessionStorageWire.encode(RECORD, out -> SessionRecordCodec.documents(out, state.routes(),
+                (writer, rows) -> SessionRecordCodec.list(writer, rows, ROWS::subscription)));
+        byte[] heads = SessionStorageWire.encode(RECORD, out -> SessionRecordCodec.documents(out, state.publishedHeads(),
+                (writer, head) -> { writer.longValue(head.epoch()); writer.text(head.blueId()); }));
+        var diagnostic = new LinkedHashMap<String, Object>();
+        diagnostic.put("workload", "numbered-parent-epochs-5");
+        diagnostic.put("physicalAddress", address); diagnostic.put("physicalBytes", frame.length);
+        diagnostic.put("archivedArtifact", "history-access/parent-five-view.bin");
+        diagnostic.put("resultFrameSha256", digest(RESULTS.encode(state.result())));
+        diagnostic.put("snapshotFrameSha256", digest(snapshots.encode(state.snapshot())));
+        diagnostic.put("retainedSnapshotFrameSha256", digest(snapshots.encode(state.retainedSnapshot())));
+        diagnostic.put("subscriptionsFrameSha256", digest(inventoryBytes));
+        diagnostic.put("subscriptionCounters", Map.of("comparisons", inventory.comparisons(),
+                "copiedNodes", inventory.copiedNodes(), "visitedRows", inventory.visitedRows()));
+        diagnostic.put("routesFrameSha256", digest(routes)); diagnostic.put("publishedHeadsFrameSha256", digest(heads));
+        diagnostic.put("logicalBoundary", String.valueOf(state.logicalBoundary()));
+        try { System.out.println("ROOTED_HISTORY_FRAME " + JSON.writeValueAsString(diagnostic)); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException failure) { throw new AssertionError(failure); }
+    }
 
     private static ViewIdentity viewIdentity(RootedDocumentView view) {
         // The complete physical frame includes the result, both snapshots, routes,
