@@ -1,0 +1,34 @@
+// Experiment-only replacement for one independently executed archive smoke task.
+// Full Test tasks and production test/topology evidence checks remain unchanged.
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    if (!new File(root.projectDir, '.github/scripts/ci-release-experiment.py').isFile()) return
+    if (System.getenv('GITHUB_REF') != 'refs/heads/codex/ci/coordination-release-experiment'
+            || System.getenv('EXPERIMENT_LANE') != 'core'
+            || System.getenv('GITHUB_REPOSITORY') != 'bluecontract/blue-coordination-java') {
+        throw new GradleException('Archive delegation is restricted to the experiment core job')
+    }
+    if (!gradle.startParameter.excludedTaskNames.empty) {
+        throw new GradleException('The experiment must not exclude verification tasks')
+    }
+    def archive = root.tasks.named('coordinationSourceArchive').get()
+    def smoke = root.tasks.named('verifyExtractedSourceArchive').get()
+    smoke.actions.clear()
+    smoke.outputs.upToDateWhen { false }
+    smoke.doLast {
+        def command = ['python3', new File(root.projectDir, '.github/scripts/ci-release-experiment.py').absolutePath,
+                'consume', root.providers.gradleProperty('testJavaVersion').get(),
+                archive.archiveFile.get().asFile.absolutePath, root.version.toString()]
+        def process = new ProcessBuilder(command).directory(root.projectDir).inheritIO().start()
+        if (process.waitFor() != 0) throw new GradleException('Actual archive job evidence was rejected')
+    }
+    gradle.taskGraph.whenReady { graph ->
+        graph.allTasks.each { task ->
+            if (task.name.toLowerCase().startsWith('jreleaser')
+                    || (task.name ==~ /publish[A-Z].*/
+                    && task.name != 'publishMavenJavaPublicationToStagingRepository')) {
+                throw new GradleException('External publication is forbidden in the experiment: ' + task.path)
+            }
+        }
+    }
+}
