@@ -83,6 +83,17 @@ final class ProcessEmbeddedComponentIndex {
 
     boolean hasRootedViews() { return rootedViews; }
 
+    record StoredIndexes(PersistentOrderedMap<DocumentId, Component> components,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> targets,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> sources,
+            boolean rootedViews, RootedJoinCandidateIndex joins) { }
+
+    StoredIndexes storedIndexes() { return new StoredIndexes(componentByDocument, targetsByDocument, sourcesByDocument, rootedViews, pendingJoins); }
+
+    static ProcessEmbeddedComponentIndex restoreIndexes(StoredIndexes indexes) {
+        return new ProcessEmbeddedComponentIndex(indexes.components(), indexes.targets(), indexes.sources(), indexes.rootedViews(), indexes.joins());
+    }
+
     List<DocumentId> pendingJoinRootsFor(DocumentId member) { return pendingJoins.rootsFor(member); }
 
     ProcessEmbeddedComponentIndex withReconstructedPendingJoins(Collection<DocumentSession> sessions) {

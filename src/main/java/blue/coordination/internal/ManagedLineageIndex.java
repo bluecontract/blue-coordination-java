@@ -19,7 +19,7 @@ import java.util.Set;
  * not rebuild lineage evidence by scanning the ambient session catalog.</p>
  */
 final class ManagedLineageIndex {
-    private static final Comparator<RetainedKey> RETAINED_ORDER = Comparator
+    static final Comparator<RetainedKey> RETAINED_ORDER = Comparator
             .comparing(RetainedKey::documentId,
                     EmbeddingBinding.DOCUMENT_ORDER)
             .thenComparingLong(RetainedKey::epoch);
@@ -80,6 +80,25 @@ final class ManagedLineageIndex {
 
     static ManagedLineageIndex empty() {
         return EMPTY;
+    }
+
+    record StoredState(
+            PersistentOrderedMap<DocumentId, Lineage> documents,
+            PersistentOrderedMap<String, PersistentOrderedMap<DocumentId, Lineage>> authored,
+            PersistentOrderedMap<String, PersistentOrderedMap<DocumentId, Lineage>> initialized,
+            PersistentOrderedMap<String, PersistentOrderedMap<RetainedKey, RetainedState>> retained,
+            PersistentOrderedMap<String, PersistentOrderedMap<DocumentId, Lineage>> current,
+            int copiedNodes) { }
+
+    StoredState storedState() {
+        return new StoredState(byDocumentId, byAuthoredInitialBlueId, byInitializedBlueId,
+                byRetainedBlueId, byCurrentBlueId, lastMutationNodeCopies);
+    }
+
+    /** Exact selected roots; cross-row association is verified by the owning selected document view. */
+    static ManagedLineageIndex restoreStored(StoredState state) {
+        return new ManagedLineageIndex(state.documents(), state.authored(), state.initialized(),
+                state.retained(), state.current(), state.copiedNodes());
     }
 
     /** Adds one newly durable lineage without inspecting any other session. */
@@ -510,8 +529,8 @@ final class ManagedLineageIndex {
         }
     }
 
-    private record RetainedKey(DocumentId documentId, long epoch) {
-        private RetainedKey {
+    record RetainedKey(DocumentId documentId, long epoch) {
+        RetainedKey {
             documentId = Objects.requireNonNull(documentId, "documentId");
             if (epoch < 0L) {
                 throw new IllegalArgumentException(

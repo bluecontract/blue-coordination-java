@@ -403,7 +403,18 @@ final class ContractsRootFeederWindow {
      */
     static final class DurableState {
         private final Map<LaneId, PendingProgress> pendingByLane;
-        private final Map<String, RootedDeclaredBirthRejection> rejectedBirths = new LinkedHashMap<>();
+        private final Map<String, RootedDeclaredBirthRejection> rejectedBirths;
+
+        /** Actual owned maps; storage-backed callers retain their selected mutable identities. */
+        record StoredMaps(Map<LaneId, PendingProgress> pending,
+                Map<String, RootedDeclaredBirthRejection> rejected) {
+            StoredMaps {
+                Objects.requireNonNull(pending, "pending"); Objects.requireNonNull(rejected, "rejected");
+            }
+            static StoredMaps empty() { return new StoredMaps(new LinkedHashMap<>(), new LinkedHashMap<>()); }
+        }
+
+        synchronized StoredMaps storedMaps() { return new StoredMaps(pendingByLane, rejectedBirths); }
 
         synchronized RootedDeclaredBirthRejection rejectedBirth(ContractsClosureAdapter.CohortInvocation input) {
             if (input.rootedEvidence() == null) return null;
@@ -423,27 +434,69 @@ final class ContractsRootFeederWindow {
         private final Map<LaneId, ExternalOrderKey> terminalFrontierByLane;
 
         DurableState() {
-            this(new LinkedHashMap<>(),
+            this(StoredMaps.empty(),
                     new LinkedHashMap<>(),
                     new LinkedHashMap<>());
         }
 
         private DurableState(
-                Map<LaneId, PendingProgress> pendingByLane,
+                StoredMaps maps,
                 Map<EventLaneKey, TerminalProgress> terminalByEventLane,
                 Map<LaneId, ExternalOrderKey> terminalFrontierByLane) {
-            this.pendingByLane = pendingByLane;
+            this.pendingByLane = maps.pending();
+            this.rejectedBirths = maps.rejected();
             this.terminalByEventLane = terminalByEventLane;
             this.terminalFrontierByLane = terminalFrontierByLane;
         }
 
         synchronized DurableState copy() {
             var copy = new DurableState(
-                    new LinkedHashMap<>(pendingByLane),
+                    new StoredMaps(new LinkedHashMap<>(pendingByLane), new LinkedHashMap<>(rejectedBirths)),
                     new LinkedHashMap<>(terminalByEventLane),
                     new LinkedHashMap<>(terminalFrontierByLane));
-            copy.rejectedBirths.putAll(rejectedBirths);
             return copy;
+        }
+
+        synchronized StorageState storageState() {
+            return storageState(true);
+        }
+
+        synchronized StorageState storageState(boolean requireEmptyExtras) {
+            if (requireEmptyExtras && (!pendingByLane.isEmpty() || !rejectedBirths.isEmpty()))
+                throw new blue.coordination.api.storage.CoordinationObjectStorageException(
+                        "Suspended feeder/birth evidence requires the complete attempt storage component");
+            return new StorageState(List.copyOf(terminalByEventLane.values()), terminalFrontierByLane);
+        }
+
+        static DurableState fromStorage(StorageState state) {
+            return fromStorage(state, StoredMaps.empty());
+        }
+
+        static DurableState fromStorage(StorageState state, StoredMaps maps) {
+            var restored = new DurableState(Objects.requireNonNull(maps), new LinkedHashMap<>(), new LinkedHashMap<>());
+            for (var terminal : state.terminalProgress()) {
+                var key = terminal.ticket().eventLaneKey();
+                if (restored.terminalByEventLane.putIfAbsent(key, terminal) != null)
+                    throw new IllegalArgumentException("Repeated terminal feeder key");
+            }
+            restored.terminalFrontierByLane.putAll(state.frontiers());
+            return restored;
+        }
+    }
+
+    record StorageState(List<TerminalProgress> terminalProgress, Map<LaneId, ExternalOrderKey> frontiers) {
+        StorageState {
+            terminalProgress = List.copyOf(terminalProgress);
+            frontiers = Collections.unmodifiableMap(new LinkedHashMap<>(frontiers));
+            Map<LaneId, ExternalOrderKey> expected = new LinkedHashMap<>();
+            Set<EventLaneKey> keys = new LinkedHashSet<>();
+            for (var terminal : terminalProgress) {
+                if (!keys.add(terminal.ticket().eventLaneKey()))
+                    throw new IllegalArgumentException("Repeated terminal feeder key");
+                expected.merge(terminal.ticket().lane(), terminal.ticket().sourceOrder(),
+                        (left, right) -> left.compareTo(right) >= 0 ? left : right);
+            }
+            if (!expected.equals(frontiers)) throw new IllegalArgumentException("Feeder frontier differs from terminal progress");
         }
     }
 

@@ -13,6 +13,28 @@ final class RootedProcessingSchedule {
     private final Set<DocumentId> yielded = new LinkedHashSet<>();
     private final Map<DocumentId, String> isolated = new LinkedHashMap<>();
 
+    record StorageState(boolean historicalTurn, java.util.List<DocumentId> yielded,
+            Map<DocumentId, String> isolated) {
+        StorageState {
+            yielded = java.util.List.copyOf(yielded);
+            isolated = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(isolated));
+            if (new LinkedHashSet<>(yielded).size() != yielded.size())
+                throw new IllegalArgumentException("Repeated yielded root");
+        }
+    }
+
+    StorageState storageState() {
+        return new StorageState(historicalTurn, java.util.List.copyOf(yielded), isolated);
+    }
+
+    static RootedProcessingSchedule fromStorage(StorageState state) {
+        var restored = new RootedProcessingSchedule();
+        restored.historicalTurn = state.historicalTurn();
+        restored.yielded.addAll(state.yielded());
+        restored.isolated.putAll(state.isolated());
+        return restored;
+    }
+
     /** Read-only prediction; an admission hint does not make that root's later LIVE input eligible. */
     RootedCheckpointDriver.Head next(RootedCheckpointDriver.Scan scan, boolean journalAdmission,
             Set<DocumentId> deferredInCall) {

@@ -683,14 +683,12 @@ def publicBoundarySources = files(
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        // Reconciled rooted corrections plus exact-provider Compute presence.
-        // Measured on the pinned RC10 base; omit optional frozen proof sharing,
-        // cross-call representation memo and early LIVE candidate bound.
-        // See docs/baseline-reconciliation-disposition.md. These inventory
-        // limits do not change any protocol, closure or logical-gas bound.
-        classes: 253,
-        lines: 74_084L,
-        publicApiTypes: 87,
+        // Baseline31: merged RC11 behavior plus the reviewed external-storage POC.
+        // Physical inventory only; no protocol, closure or logical-gas bound changes.
+        // Measured after reconciliation; see docs/poc-baseline31-port.md.
+        classes: 315,
+        lines: 85_912L,
+        publicApiTypes: 94,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -730,8 +728,10 @@ def retainedManagedEpochProductionSources = [
         'src/main/java/blue/coordination/sdk/ManagedEpochApplicationWork.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochEvidenceFailure.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochHistory.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochSelector.java',
         'src/main/java/blue/coordination/sdk/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/sdk/VerifiedExactEvidence.java',
         'src/main/java/blue/coordination/sdk/SourceOrder.java'
 ]
 def forbiddenArchitectureTokens = [
@@ -850,7 +850,11 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
                 'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
                 'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java',
-                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java'
+                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',
+                // Named advanced-storage assembly bridges used across the SDK package.
+                'src/main/java/blue/coordination/internal/ExactValueStorageCodec.java',
+                'src/main/java/blue/coordination/internal/InsertionOrderedStorage.java',
+                'src/main/java/blue/coordination/internal/RootedEngineStorage.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'
@@ -872,7 +876,7 @@ tasks.register('verifyPublicApiBoundary') {
 
 tasks.register('verifySdkPublicApiBoundary') {
     group = 'verification'
-    description = 'Allows only DocumentId and the reviewed Builder ContractsExecutionPolicy compatibility surface; rejects every other implementation dependency in normal SDK signatures.'
+    description = 'Allows DocumentId, the reviewed Builder policy and exact named advanced-storage signatures; rejects other implementation dependencies in normal SDK signatures.'
     dependsOn tasks.named('compileJava')
     inputs.files(fileTree('src/main/java/blue/coordination/sdk') {
         include '**/*.java'
@@ -984,6 +988,21 @@ tasks.register('verifySdkPublicApiBoundary') {
                     normalSignature = normalSignature.replaceAll(
                                 /blue\.coordination\.api\.ContractsExecutionPolicy\b/,
                                 '')
+                }
+                // This host-only facade is not exempt from the boundary check:
+                // only its four reviewed storage types are permitted. Other API,
+                // processor or internal types in it or its nested types still fail.
+                if (className == 'blue.coordination.sdk.RootedCoordinationStorage'
+                        || className.startsWith('blue.coordination.sdk.RootedCoordinationStorage$')) {
+                    [
+                            'blue.coordination.api.TimelineJournalStore',
+                            'blue.coordination.api.storage.CoordinationImmutableObjectStore',
+                            'blue.coordination.internal.RootedEngineStorage$Limits',
+                            'blue.coordination.internal.InsertionOrderedStorage$Limits'
+                    ].each { allowed ->
+                        normalSignature = normalSignature.replaceAll(
+                                java.util.regex.Pattern.quote(allowed) + '(?![\\w$])', '')
+                    }
                 }
                 forbiddenSignaturePrefixes.findAll {
                     normalSignature.contains(it)

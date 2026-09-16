@@ -301,6 +301,13 @@ public final class RootedCalculationFixture {
                 .map(batch -> batch.entry().blueId());
     }
 
+    /** Exercises the strict LIVE search bound using an actual retained entry's complete source order. */
+    public java.util.Optional<String> nextLiveInputBefore(DocumentId root, String exclusiveEntryBlueId) {
+        var bound = engine.auditTimelineEntry(exclusiveEntryBlueId).orElseThrow().sourceOrderKey();
+        return engine.contractsClosureAdapter().nextRootLiveInput(root, engine.auditTimelineEntries(), bound)
+                .map(batch -> batch.entry().blueId());
+    }
+
     /**
      * Executes the complete immutable input in a fresh materialized runtime.
      * There is no host publication, rooted projection, cached result, history lookup or

@@ -50,6 +50,17 @@ final class ManagedEpochReceiptStore {
         return EMPTY;
     }
 
+    record StoredState(PersistentOrderedMap<DocumentId, DocumentHistory> documents,
+            PersistentOrderedMap<String, StoredReceipt> identities, int comparisons, int copiedNodes) { }
+
+    StoredState storedState() {
+        return new StoredState(byDocument, byIdentity, lastMutationComparisons, lastMutationNodeCopies);
+    }
+
+    static ManagedEpochReceiptStore restoreStored(StoredState state) {
+        return new ManagedEpochReceiptStore(state.documents(), state.identities(), state.comparisons(), state.copiedNodes());
+    }
+
     /** Appends one receipt, or preserves identity for an exact duplicate. */
     ManagedEpochReceiptStore withReceipt(ManagedEpochReceipt receipt) {
         return withReceipt(receipt, null);
@@ -485,7 +496,7 @@ final class ManagedEpochReceiptStore {
         return value;
     }
 
-    private static final class DocumentHistory {
+    static final class DocumentHistory {
         private final DocumentId documentId;
         private final PersistentOrderedMap<Long, StoredReceipt> receipts;
         private final long latestEpoch;
@@ -508,6 +519,19 @@ final class ManagedEpochReceiptStore {
                     "currentRepresentationBlueId");
             this.lastMutationComparisons = lastMutationComparisons;
             this.lastMutationNodeCopies = lastMutationNodeCopies;
+        }
+
+        record StoredState(DocumentId document, PersistentOrderedMap<Long, StoredReceipt> receipts,
+                long latestEpoch, String currentRepresentation, int comparisons, int copiedNodes) { }
+
+        StoredState storedState() {
+            return new StoredState(documentId, receipts, latestEpoch, currentRepresentationBlueId,
+                    lastMutationComparisons, lastMutationNodeCopies);
+        }
+
+        static DocumentHistory restoreStored(StoredState state) {
+            return new DocumentHistory(state.document(), state.receipts(), state.latestEpoch(), state.currentRepresentation(),
+                    requireNonNegative(state.comparisons(), "comparisons"), requireNonNegative(state.copiedNodes(), "copiedNodes"));
         }
 
         static DocumentHistory first(StoredReceipt stored) {
@@ -663,10 +687,10 @@ final class ManagedEpochReceiptStore {
         }
     }
 
-    private record StoredReceipt(
+    record StoredReceipt(
             ManagedEpochReceipt publicReceipt,
             ManagedDocumentTransitionReceipt transitionReceipt) {
-        private StoredReceipt {
+        StoredReceipt {
             publicReceipt = Objects.requireNonNull(
                     publicReceipt, "publicReceipt");
         }

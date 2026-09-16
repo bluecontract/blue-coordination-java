@@ -25,10 +25,10 @@ final class ManagedRepresentationHistoryEvidenceTest {
             // A different short-lived history reader uses the same store.
             var repeated = f.chain();
             // then
-            // Every reader constructs a fresh proof with the same exact position.
+            // POC readers reuse the same complete proof only after current authority checks.
             assertEquals(2, first.transitions().size());
             for (int i = 0; i < first.transitions().size(); i++) {
-                assertNotSame(first.transitions().get(i), repeated.transitions().get(i));
+                assertSame(first.transitions().get(i), repeated.transitions().get(i));
                 assertEquals(first.transitions().get(i).positionIdentity(), repeated.transitions().get(i).positionIdentity());
                 new ManagedRepresentationHistory(f.engine.documents()).verifySupplied(first.transitions().get(i));
             }

@@ -26,6 +26,13 @@ public final class AdvancedCoordination {
         return runtime.engine();
     }
 
+    // Package-only component access; no public complete-SDK recovery claim.
+    byte[] storageMetadata(int maximumBytes) { return runtime.storageMetadata(maximumBytes); }
+
+    SdkPointStorage.Scope openPointStorage(SdkPointStorage storage, SdkPointStorage.References references) {
+        return runtime.openPointStorage(storage, references);
+    }
+
     /**
      * Processes one root input with an explicit low-level execution policy.
      * Ordinary processing retains the configured release policy.
@@ -180,6 +187,18 @@ public final class AdvancedCoordination {
             DocumentId documentId) {
         return runtime.auditManagedEpochs(
                 Objects.requireNonNull(documentId, "documentId"));
+    }
+
+    /**
+     * Reads current complete history and authenticates reusable immutable receipt prefix artifacts.
+     * Current engine reads are never skipped. A foreign configuration/document, changed receipt
+     * object or cold reconstruction cannot borrow the previous artifact's content validation.
+     * @param documentId exact source lineage
+     * @param previous prior library-issued artifact, or null for a cold audit
+     * @return caller-budgeted immutable history with detached read-only Timeline metadata
+     */
+    public ManagedEpochHistory auditManagedEpochHistory(DocumentId documentId, ManagedEpochHistory previous) {
+        return runtime.auditManagedEpochHistory(Objects.requireNonNull(documentId, "documentId"), previous);
     }
 
     /** Reads one complete source receipt by its canonical identity. */

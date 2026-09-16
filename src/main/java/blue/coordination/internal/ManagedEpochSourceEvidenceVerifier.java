@@ -243,9 +243,9 @@ final class ManagedEpochSourceEvidenceVerifier {
         CyclicSetProofResult result = objects.cyclicSetProofFor(afterBlueId);
         NodeProviderOutcome outcome = result.outcome();
         if (outcome == NodeProviderOutcome.FOUND) {
-            return copyCyclicSetProof(result.proof().orElseThrow(() ->
+            return result.proof().orElseThrow(() ->
                     new IllegalStateException(
-                            "A found cyclic proof result has no proof")));
+                            "A found cyclic proof result has no proof"));
         }
         String diagnostic = result.diagnostic()
                 .map(value -> ": " + value)
@@ -273,14 +273,6 @@ final class ManagedEpochSourceEvidenceVerifier {
         }
         throw new IllegalStateException(
                 "Unsupported cyclic proof outcome " + outcome);
-    }
-
-    private static CyclicSetProof copyCyclicSetProof(
-            CyclicSetProof proof) {
-        return proof == null
-                ? null
-                : CyclicSetProof.fromDeclaredPlaceholderSet(
-                        proof.declaredPlaceholderSet());
     }
 
     private static void requireSameEvents(
@@ -337,12 +329,8 @@ final class ManagedEpochSourceEvidenceVerifier {
             CyclicSetProof afterCyclicProof) {
         VerifiedSourceEvidence {
             receipt = Objects.requireNonNull(receipt, "receipt");
-            afterCyclicProof = copyCyclicSetProof(afterCyclicProof);
-        }
-
-        @Override
-        public CyclicSetProof afterCyclicProof() {
-            return copyCyclicSetProof(afterCyclicProof);
+            // CyclicSetProof owns its members and returns defensive Node copies.
+            // Share only that immutable container, never its mutable extraction.
         }
     }
 }

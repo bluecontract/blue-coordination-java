@@ -11,6 +11,7 @@ import blue.language.processor.SubscriptionDelta;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +33,9 @@ final class DocumentSession {
     private RootedDocumentHistory rootedHistory;
     private RootedDocumentView rootedView;
     private final List<RootedViewPosition> rootedViewPositions = new ArrayList<>();
+    // Derived, session-local indexes. A value-equal view is not retained publication authority.
+    private final Map<RootedDocumentView, Integer> rootedViewFirstPositions = new IdentityHashMap<>();
+    private final Map<String, Integer> rootedInvocationFirstPositions = new LinkedHashMap<>();
     private final StateEpochs stateEpochs = new StateEpochs();
     private EmbeddedOnlyLayout layout;
     private EmbeddedOnlyLayout readyLayout;
@@ -112,6 +116,8 @@ final class DocumentSession {
         DocumentSession copy = new DocumentSession(this);
         copy.rootedView = rootedView;
         copy.rootedViewPositions.addAll(rootedViewPositions);
+        copy.rootedViewFirstPositions.putAll(rootedViewFirstPositions);
+        copy.rootedInvocationFirstPositions.putAll(rootedInvocationFirstPositions);
         return copy;
     }
 
@@ -124,37 +130,180 @@ final class DocumentSession {
             ExternalOrderKey prior = rootedViewPositions.get(rootedViewPositions.size() - 1).boundary();
             if (prior != null && (boundary == null || prior.compareTo(boundary) > 0)) boundary = prior;
         }
-        rootedViewPositions.add(new RootedViewPosition(view, boundary));
+        appendRootedViewPosition(new RootedViewPosition(view, boundary));
         rootedView = view;
+    }
+
+    private void appendRootedViewPosition(RootedViewPosition position) {
+        int index = rootedViewPositions.size();
+        rootedViewPositions.add(position);
+        rootedViewFirstPositions.putIfAbsent(position.view(), index);
+        rootedInvocationFirstPositions.putIfAbsent(position.view().result().invocationIdentity(), index);
     }
 
     /** Exact committed view immediately before the attachment input, never the ambient latest head. */
     synchronized RootedDocumentView rootedViewBefore(ExternalOrderKey boundary) {
         Objects.requireNonNull(boundary, "attachment boundary");
-        for (int index = rootedViewPositions.size() - 1; index >= 0; index--) {
-            RootedViewPosition position = rootedViewPositions.get(index);
-            if (position.boundary() == null || position.boundary().compareTo(boundary) < 0) return position.view();
+        int low = 0, high = rootedViewPositions.size();
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            ExternalOrderKey candidate = rootedViewPositions.get(middle).boundary();
+            if (candidate == null || candidate.compareTo(boundary) < 0) low = middle + 1;
+            else high = middle;
         }
+        if (low > 0) return rootedViewPositions.get(low - 1).view();
         throw new ProjectionUnavailableException("No authenticated rooted source view before attachment boundary " + boundary);
+    }
+
+    /** The exact retained object position, not an endpoint or invocation-identity approximation. */
+    synchronized void requireRetainedRootedView(RootedDocumentView selected) {
+        retainedRootedViewPosition(selected);
+    }
+
+    /** Constant-time membership in a frozen publication prefix; later appends cannot extend it. */
+    synchronized boolean rootedPublicationIncludes(RootedDocumentView selected, String invocationIdentity) {
+        int selectedPosition = retainedRootedViewPosition(selected);
+        Integer publicationPosition = rootedInvocationFirstPositions.get(invocationIdentity);
+        return publicationPosition != null && publicationPosition <= selectedPosition;
+    }
+
+    private int retainedRootedViewPosition(RootedDocumentView selected) {
+        Integer position = rootedViewFirstPositions.get(selected);
+        if (position == null) {
+            throw new ProjectionUnavailableException("Source view is not an actual retained publication position");
+        }
+        return position;
     }
 
     /** Exact publication membership through a retained view, independent of repeated endpoint identities. */
     synchronized java.util.Set<String> rootedPublicationPrefix(RootedDocumentView selected) {
         var invocations = new java.util.LinkedHashSet<String>();
-        for (RootedViewPosition position : rootedViewPositions) {
-            invocations.add(position.view().result().invocationIdentity());
-            if (position.view() == selected) return java.util.Set.copyOf(invocations);
+        int selectedPosition = retainedRootedViewPosition(selected);
+        for (int index = 0; index <= selectedPosition; index++) {
+            invocations.add(rootedViewPositions.get(index).view().result().invocationIdentity());
         }
-        throw new ProjectionUnavailableException("Source view is not an actual retained publication position");
+        return java.util.Set.copyOf(invocations);
     }
 
     synchronized RootedDocumentView rootedViewForInvocation(String invocationIdentity) {
-        return rootedViewPositions.stream().map(RootedViewPosition::view)
-                .filter(view -> view.result().invocationIdentity().equals(invocationIdentity)).findFirst()
-                .orElseThrow(() -> new ProjectionUnavailableException("Original source publication view is unavailable"));
+        Integer position = rootedInvocationFirstPositions.get(invocationIdentity);
+        if (position == null) throw new ProjectionUnavailableException("Original source publication view is unavailable");
+        return rootedViewPositions.get(position).view();
     }
 
-    private record RootedViewPosition(RootedDocumentView view, ExternalOrderKey boundary) { }
+    record RootedViewPosition(RootedDocumentView view, ExternalOrderKey boundary) { }
+
+    /** Complete private storage image; restoration never executes admission or a transition. */
+    record StoredState(DocumentId documentId, String authoredInitialBlueId,
+            List<SubscriptionDelta.Entry> activeSubscriptions, List<DocumentRevision> revisions,
+            Set<String> terminalEntryBlueIds, Set<String> transitionReceipts,
+            List<ComponentRepresentationTransition> representationTransitions,
+            RootedDocumentHistory rootedHistory, RootedDocumentView rootedView,
+            List<RootedViewPosition> rootedViewPositions, Map<String, Long> stateEpochs,
+            Set<String> ambiguousStates, EmbeddedOnlyLayout layout, EmbeddedOnlyLayout readyLayout,
+            Map<String, DocumentId> readyEmbeddedChildren, SessionStatus status, ExternalOrderKey readyThrough,
+            long epoch, long readyEpoch, long graphPublishedEpoch, long applicationSequence) { }
+
+    synchronized StoredState storedState() {
+        return new StoredState(documentId, authoredInitialBlueId, activeSubscriptions, List.copyOf(revisions),
+                Collections.unmodifiableSet(new LinkedHashSet<>(terminalEntryBlueIds)),
+                Collections.unmodifiableSet(new LinkedHashSet<>(transitionReceipts)),
+                List.copyOf(componentRepresentationTransitions), rootedHistory, rootedView,
+                List.copyOf(rootedViewPositions), Collections.unmodifiableMap(new LinkedHashMap<>(stateEpochs.first)),
+                Collections.unmodifiableSet(new LinkedHashSet<>(stateEpochs.ambiguous)), layout, readyLayout,
+                readyEmbeddedChildren, status, readyThrough, epoch, readyEpoch, graphPublishedEpoch, applicationSequence);
+    }
+
+    static DocumentSession restoreStored(StoredState state) { return new DocumentSession(state); }
+
+    private DocumentSession(StoredState state) {
+        this.documentId = Objects.requireNonNull(state.documentId());
+        this.authoredInitialBlueId = Objects.requireNonNull(state.authoredInitialBlueId());
+        this.activeSubscriptions = List.copyOf(state.activeSubscriptions());
+        this.revisions.addAll(state.revisions());
+        this.terminalEntryBlueIds.addAll(state.terminalEntryBlueIds());
+        this.transitionReceipts.addAll(state.transitionReceipts());
+        this.componentRepresentationTransitions.addAll(state.representationTransitions());
+        this.rootedHistory = state.rootedHistory();
+        this.rootedView = state.rootedView();
+        state.rootedViewPositions().forEach(this::appendRootedViewPosition);
+        this.layout = Objects.requireNonNull(state.layout());
+        this.readyLayout = Objects.requireNonNull(state.readyLayout());
+        this.readyEmbeddedChildren = copyChildren(state.readyEmbeddedChildren());
+        this.epoch = state.epoch();
+        this.applicationSequence = state.applicationSequence();
+        restoreCoordinationState(state.status(), state.readyThrough(), state.readyEpoch(), state.graphPublishedEpoch());
+        var terminals = new LinkedHashSet<String>();
+        if (epoch < 0 || epoch != revisions.size() - 1L || applicationSequence != epoch
+                || revisions.get(0).kind() != DocumentRevision.Kind.INITIALIZATION) {
+            throw new IllegalArgumentException("Stored session history is not complete and contiguous");
+        }
+        for (int i = 0; i < revisions.size(); i++) {
+            DocumentRevision revision = revisions.get(i);
+            if (!documentId.equals(revision.documentId()) || revision.epoch() != i
+                    || revision.rootApplicationOrder() != i) {
+                throw new IllegalArgumentException("Stored revision is outside its exact session position");
+            }
+            stateEpochs.record(revision);
+            revision.sourceEntry().ifPresent(entry -> terminals.add(entry.blueId()));
+        }
+        if (!stateEpochs.first.equals(state.stateEpochs()) || !stateEpochs.ambiguous.equals(state.ambiguousStates())
+                || !terminals.equals(terminalEntryBlueIds)
+                || !transitionReceipts.contains("initialization|" + documentId.value())
+                || transitionReceipts.size() != revisions.size() + componentRepresentationTransitions.size()) {
+            throw new IllegalArgumentException("Stored session indexes differ from retained history");
+        }
+        long priorEpoch = -1;
+        var represented = new LinkedHashMap<Long, String>();
+        var representationReceipts = new LinkedHashSet<String>();
+        for (ComponentRepresentationTransition transition : componentRepresentationTransitions) {
+            if (transition.epoch() < priorEpoch || transition.epoch() > epoch
+                    || !transition.beforeBlueId().equals(represented.getOrDefault(transition.epoch(),
+                            revision(transition.epoch()).after().blueId()))
+                    || !transitionReceipts.contains(transition.transitionReceiptIdentity())
+                    || !representationReceipts.add(transition.transitionReceiptIdentity())) {
+                throw new IllegalArgumentException("Stored same-epoch representation history is invalid");
+            }
+            represented.put(transition.epoch(), transition.afterBlueId()); priorEpoch = transition.epoch();
+        }
+        if (!layout.rootBlueId().equals(represented.getOrDefault(epoch, currentRevision().after().blueId()))
+                || !storedRepresentationAt(readyEpoch, readyLayout.rootBlueId())) {
+            throw new IllegalArgumentException("Stored current or READY layout differs from exact history");
+        }
+        if (rootedHistory != null && (!authoredInitialBlueId.equals(rootedHistory.descriptor().get("initialDocumentBlueId"))
+                || !documentId.value().equals(rootedHistory.descriptor().get("documentId")))) {
+            throw new IllegalArgumentException("Stored rooted history belongs to another document");
+        }
+        ExternalOrderKey prior = null;
+        for (RootedViewPosition position : rootedViewPositions) {
+            RootedDocumentView view = Objects.requireNonNull(position.view());
+            long retainedEpoch = view.retainedEpoch(documentId);
+            String head = view.snapshot().managedDocument(ContractsClosureAdapter.closureId(documentId)).blueId();
+            view.requirePublishedHead(documentId, retainedEpoch, head);
+            ExternalOrderKey expectedBoundary = view.logicalBoundary();
+            if (prior != null && (expectedBoundary == null || prior.compareTo(expectedBoundary) > 0)) expectedBoundary = prior;
+            if (!storedRepresentationAt(retainedEpoch, head)
+                    || !Objects.equals(position.boundary(), expectedBoundary)) {
+                throw new IllegalArgumentException("Stored rooted position is outside retained session history");
+            }
+            prior = position.boundary();
+        }
+        if (rootedViewPositions.isEmpty() ? rootedView != null
+                : rootedViewPositions.get(rootedViewPositions.size() - 1).view() != rootedView) {
+            throw new IllegalArgumentException("Current rooted view is not the final retained position");
+        }
+    }
+
+    private boolean storedRepresentationAt(long selectedEpoch, String blueId) {
+        return selectedEpoch >= 0 && selectedEpoch <= epoch && (revision(selectedEpoch).after().blueId().equals(blueId)
+                || representationTransitionRange(selectedEpoch).stream().anyMatch(row ->
+                        row.beforeBlueId().equals(blueId) || row.afterBlueId().equals(blueId)));
+    }
+
+    /** Exact historical position in the already validated numbered/representation chain; never a latest-state lookup. */
+    synchronized boolean retainsStoredPosition(long selectedEpoch, String blueId) {
+        return storedRepresentationAt(selectedEpoch, blueId);
+    }
 
     public DocumentId documentId() {
         return documentId;
@@ -304,8 +453,8 @@ final class DocumentSession {
             String beforeBlueId,
             String afterBlueId,
             String transitionReceiptIdentity) {
-        return componentRepresentationTransitions.stream().anyMatch(row ->
-                row.epoch() == transitionEpoch && row.beforeBlueId().equals(beforeBlueId)
+        return representationTransitionRange(transitionEpoch).stream().anyMatch(row ->
+                row.beforeBlueId().equals(beforeBlueId)
                         && row.afterBlueId().equals(afterBlueId)
                         && row.transitionReceiptIdentity().equals(transitionReceiptIdentity));
     }
@@ -525,6 +674,32 @@ final class DocumentSession {
 
     synchronized List<ComponentRepresentationTransition> representationTransitions() {
         return List.copyOf(componentRepresentationTransitions);
+    }
+
+    /**
+     * Rows are appended only at the current epoch; stored restoration validates that order.
+     * Binary bounds avoid scanning or copying transitions belonging to unrelated epochs.
+     * The returned range is an immutable snapshot, including every same-epoch position.
+     */
+    synchronized List<ComponentRepresentationTransition> representationTransitionsAt(long selectedEpoch) {
+        return List.copyOf(representationTransitionRange(selectedEpoch));
+    }
+
+    private List<ComponentRepresentationTransition> representationTransitionRange(long selectedEpoch) {
+        int first = representationEpochBound(selectedEpoch, false);
+        int after = representationEpochBound(selectedEpoch, true);
+        return componentRepresentationTransitions.subList(first, after);
+    }
+
+    private int representationEpochBound(long selectedEpoch, boolean afterEqual) {
+        int low = 0, high = componentRepresentationTransitions.size();
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            long candidate = componentRepresentationTransitions.get(middle).epoch();
+            if (candidate < selectedEpoch || (afterEqual && candidate == selectedEpoch)) low = middle + 1;
+            else high = middle;
+        }
+        return low;
     }
 
     record ComponentRepresentationTransition(

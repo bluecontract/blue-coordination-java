@@ -24,7 +24,7 @@ import java.util.TreeSet;
 
 /** Complete durable Contracts subscription state, independent of legacy rows. */
 final class ClosureSubscriptionInventory {
-    private static final Comparator<Slot> SLOT_ORDER = Comparator
+    static final Comparator<Slot> SLOT_ORDER = Comparator
             .comparing(Slot::documentId, EmbeddingBinding.TEXT_ORDER)
             .thenComparing(Slot::rawChannelKey, EmbeddingBinding.TEXT_ORDER);
 
@@ -61,6 +61,44 @@ final class ClosureSubscriptionInventory {
     static ClosureSubscriptionInventory empty() {
         return new ClosureSubscriptionInventory(
                 Indexes.empty(), emptyEmbeddedDemands(), new Work());
+    }
+
+    record StoredIndexes(PersistentOrderedMap<Slot, SubscriptionState> slots,
+            PersistentOrderedMap<String, Slot> identities,
+            PersistentOrderedMap<String, PersistentOrderedMap<String, SubscriptionState>> documents,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<String, EmbeddedDemand>> demands,
+            int comparisons, int copiedNodes, int visitedRows) { }
+
+    StoredIndexes storedIndexes() { return new StoredIndexes(bySlot, slotByIdentity, byDocument, embeddedDemandsByDocument,
+            lastOperationComparisons, lastOperationCopiedNodes, lastOperationVisitedRows); }
+
+    static ClosureSubscriptionInventory restoreIndexes(StoredIndexes indexes) {
+        if (indexes.comparisons() < 0 || indexes.copiedNodes() < 0 || indexes.visitedRows() < 0)
+            throw new IllegalArgumentException("Negative retained subscription counters");
+        Work work = new Work(); work.comparisons = indexes.comparisons(); work.copiedNodes = indexes.copiedNodes(); work.visitedRows = indexes.visitedRows();
+        return new ClosureSubscriptionInventory(new Indexes(indexes.slots(), indexes.identities(), indexes.documents()), indexes.demands(), work);
+    }
+
+    record StoredState(List<SubscriptionState> states, Map<DocumentId, List<EmbeddedDemand>> demands,
+            int comparisons, int copiedNodes, int visitedRows) { }
+
+    StoredState storedState() {
+        var demands = new LinkedHashMap<DocumentId, List<EmbeddedDemand>>();
+        embeddedDemandsByDocument.entries().forEach(row -> demands.put(row.getKey(), List.copyOf(row.getValue().values())));
+        return new StoredState(List.copyOf(states()), Map.copyOf(demands), lastOperationComparisons,
+                lastOperationCopiedNodes, lastOperationVisitedRows);
+    }
+
+    static ClosureSubscriptionInventory restoreStored(StoredState state) {
+        ClosureSubscriptionInventory rebuilt = of(state.states());
+        for (var row : state.demands().entrySet()) rebuilt = rebuilt.replaceEmbeddedDemands(row.getKey(), row.getValue());
+        if (state.comparisons() < 0 || state.copiedNodes() < 0 || state.visitedRows() < 0) {
+            throw new IllegalArgumentException("Negative retained inventory operation counters");
+        }
+        Work work = new Work();
+        work.comparisons = state.comparisons(); work.copiedNodes = state.copiedNodes(); work.visitedRows = state.visitedRows();
+        return new ClosureSubscriptionInventory(new Indexes(rebuilt.bySlot, rebuilt.slotByIdentity, rebuilt.byDocument),
+                rebuilt.embeddedDemandsByDocument, work);
     }
 
     static ClosureSubscriptionInventory of(
@@ -962,8 +1000,8 @@ final class ClosureSubscriptionInventory {
         return result;
     }
 
-    private record Slot(String documentId, String rawChannelKey) {
-        private Slot {
+    record Slot(String documentId, String rawChannelKey) {
+        Slot {
             documentId = requireText(documentId, "documentId");
             rawChannelKey = requireText(rawChannelKey, "rawChannelKey");
         }

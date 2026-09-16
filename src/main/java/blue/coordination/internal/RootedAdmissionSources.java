@@ -14,9 +14,47 @@ final class RootedAdmissionSources {
     private final ExternalOrderKey boundary;
     private final Map<DocumentId, RootedDocumentView> views;
 
-    private RootedAdmissionSources(ExternalOrderKey boundary, Map<DocumentId, RootedDocumentView> views) {
+    RootedAdmissionSources(ExternalOrderKey boundary, Map<DocumentId, RootedDocumentView> views) {
+        this(boundary, views, CoordinationEngine.AdmissionPolicy.FROM_FRONTIER);
+    }
+
+    private RootedAdmissionSources(ExternalOrderKey boundary, Map<DocumentId, RootedDocumentView> views,
+            CoordinationEngine.AdmissionPolicy policy) {
         this.boundary = boundary;
         this.views = Map.copyOf(views);
+        if (!this.views.isEmpty() && boundary == null) {
+            throw new IllegalArgumentException("Stored admission sources require their exact frontier");
+        }
+        this.views.forEach((id, view) -> {
+            var member = view.snapshot().managedDocument(ContractsClosureAdapter.closureId(id));
+            if (member == null || policy != CoordinationEngine.AdmissionPolicy.FULL_HISTORY
+                    && view.logicalBoundary() != null && view.logicalBoundary().compareTo(boundary) > 0) {
+                throw new IllegalArgumentException("Stored admission source is outside its authenticated frontier");
+            }
+            view.requirePublishedHead(id, view.retainedEpoch(id), member.blueId());
+        });
+    }
+
+    ExternalOrderKey storedBoundary() { return boundary; }
+    Map<DocumentId, RootedDocumentView> storedViews() { return views; }
+
+    static RootedAdmissionSources restoreStored(ExternalOrderKey boundary, Map<DocumentId, RootedDocumentView> views,
+            Map<String, Object> historyDescriptor) {
+        if (!(historyDescriptor.get("admission") instanceof Map<?, ?> admission)
+                || !(admission.get("mode") instanceof String mode)) {
+            throw new IllegalArgumentException("Stored admission sources require their exact admission mode");
+        }
+        return switch (mode) {
+            case "FULL_HISTORY" -> new RootedAdmissionSources(boundary, views, CoordinationEngine.AdmissionPolicy.FULL_HISTORY);
+            case "FROM_NOW", "FROM_FRONTIER" -> new RootedAdmissionSources(boundary, views);
+            case "CREATED_IN_OPERATION" -> {
+                if (boundary != null || !views.isEmpty()) {
+                    throw new IllegalArgumentException("Created history cannot substitute static admission sources");
+                }
+                yield NONE;
+            }
+            default -> throw new IllegalArgumentException("Stored admission mode is unsupported: " + mode);
+        };
     }
 
     static RootedAdmissionSources capture(ClosureInvocationInput input, ExternalOrderKey boundary,
@@ -40,7 +78,7 @@ final class RootedAdmissionSources {
             source.rootedPublicationPrefix(view);
             selected.put(id, view);
         }
-        return new RootedAdmissionSources(boundary, selected);
+        return new RootedAdmissionSources(boundary, selected, policy);
     }
 
     RootedDocumentView selected(DocumentId source, ExternalOrderKey requestedBoundary,

@@ -55,10 +55,11 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private final String languageSpecificationIdentity;
     private final String contractsSpecificationIdentity;
     private final boolean bundledRelease;
-    private final Map<String, TimelineHandle> timelines =
+    private final ContractsExecutionPolicy contractsExecutionPolicy;
+    private Map<String, TimelineHandle> timelines =
             new LinkedHashMap<>();
-    private final Map<String, EntryIntent> intents = new LinkedHashMap<>();
-    private final Map<String, EntryResult> retainedResults =
+    private Map<String, EntryIntent> intents = new LinkedHashMap<>();
+    private Map<String, EntryResult> retainedResults =
             new LinkedHashMap<>();
     private boolean closed;
 
@@ -69,11 +70,20 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             ExactNodeProvider exactNodeProvider,
             boolean contentDerivedDocumentIds,
             ContractsExecutionPolicy contractsExecutionPolicy) {
+        this(owner, languageIdentity, contractsIdentity, exactNodeProvider, contentDerivedDocumentIds,
+                contractsExecutionPolicy, null);
+    }
+
+    private SdkCoordinationRuntime(
+            Object owner, String languageIdentity, String contractsIdentity, ExactNodeProvider exactNodeProvider,
+            boolean contentDerivedDocumentIds, ContractsExecutionPolicy contractsExecutionPolicy,
+            java.util.function.Function<ExactNodeProvider, DefaultCoordinationEngine> restoredEngine) {
         this.owner = Objects.requireNonNull(owner, "owner");
         this.exactNodeProvider = new ScopedExactNodeProvider(
                 Objects.requireNonNull(
                         exactNodeProvider, "exactNodeProvider"));
         this.contentDerivedDocumentIds = contentDerivedDocumentIds;
+        this.contractsExecutionPolicy = Objects.requireNonNull(contractsExecutionPolicy, "contractsExecutionPolicy");
         BundledContracts10Release.Manifest bundled =
                 BundledContracts10Release.manifest();
         String language = languageIdentity == null
@@ -85,13 +95,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         languageSpecificationIdentity = language;
         contractsSpecificationIdentity = contracts;
         bundledRelease = languageIdentity == null;
-        engine = DefaultCoordinationEngine.createContracts10Sdk(
+        engine = restoredEngine == null ? DefaultCoordinationEngine.createContracts10Sdk(
                 language,
                 contracts,
                 this.exactNodeProvider,
                 Objects.requireNonNull(
                         contractsExecutionPolicy,
-                        "contractsExecutionPolicy"));
+                        "contractsExecutionPolicy")) : Objects.requireNonNull(restoredEngine.apply(this.exactNodeProvider));
         compiler = new Contracts10AuthoredClosureCompiler(engine);
         staticCompiler = new Contracts10StaticEmbeddedAdmissionCompiler(engine);
         mapper = new SdkDrainResultMapper(this, engine);
@@ -128,9 +138,162 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 contractsExecutionPolicy);
     }
 
+    /** Private physical restore entry: the exact core engine is provided, never reconstructed by SDK replay. */
+    static SdkCoordinationRuntime restore(Object owner, SdkStorageCodec.Configuration configuration,
+            ExactNodeProvider provider, java.util.function.Function<ExactNodeProvider, DefaultCoordinationEngine> engine) {
+        Objects.requireNonNull(configuration); Objects.requireNonNull(engine);
+        var runtime = new SdkCoordinationRuntime(owner,
+                configuration.bundledRelease() ? null : configuration.language(), configuration.bundledRelease() ? null : configuration.contracts(),
+                provider, configuration.contentDerivedDocumentIds(), configuration.policy(), engine);
+        try {
+            var binding = runtime.engine.contractsRuntimeBinding();
+            if (!runtime.storageConfiguration().equals(configuration)
+                    || !binding.languageSpecificationIdentity().equals(configuration.language())
+                    || !binding.contractsSpecificationIdentity().equals(configuration.contracts())
+                    || !binding.executionPolicy().equals(configuration.policy()))
+                throw new blue.coordination.api.storage.CoordinationObjectStorageException("Restored SDK owner differs from the exact core release/configuration");
+            return runtime;
+        } catch (RuntimeException failure) {
+            try { runtime.close(); } catch (RuntimeException closeFailure) { failure.addSuppressed(closeFailure); }
+            throw failure;
+        }
+    }
+
+    /** All point-backed maps belong to the same new SDK owner and journal scope. */
+    record StoredMaps(Map<String, TimelineHandle> timelines, Map<String, EntryIntent> intents,
+            Map<String, EntryResult> results, Map<String, CoreEntryRef> entries,
+            Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceResults) {
+        StoredMaps {
+            Objects.requireNonNull(timelines); Objects.requireNonNull(intents); Objects.requireNonNull(results);
+            Objects.requireNonNull(entries); Objects.requireNonNull(sourceResults);
+        }
+    }
+
+    synchronized StoredMaps storedMaps() {
+        ensureOpen(); return new StoredMaps(timelines, intents, retainedResults, coreEntries, sourceHistoryProcessingResults);
+    }
+
+    /** Caller has opened owner-validating point maps; installation performs no scan or submission. */
+    synchronized void installPointMaps(StoredMaps maps) {
+        ensureOpen(); Objects.requireNonNull(maps);
+        if (!timelines.isEmpty() || !intents.isEmpty() || !retainedResults.isEmpty()
+                || !coreEntries.isEmpty() || !sourceHistoryProcessingResults.isEmpty())
+            throw new IllegalStateException("Point maps require a pristine SDK owner");
+        timelines = maps.timelines(); intents = maps.intents(); retainedResults = maps.results();
+        coreEntries = maps.entries(); sourceHistoryProcessingResults = maps.sourceResults();
+    }
+
     synchronized CoordinationEngine engine() {
         ensureOpen();
         return engine;
+    }
+
+    // Internal component only. A complete SDK restore must first supply the exact
+    // restored engine; these bytes never recreate engine state by replay.
+    synchronized byte[] storageMetadata(int maximumBytes) {
+        ensureOpen();
+        Map<String, SdkStorageCodec.CoreEntrySnapshot> entries = new LinkedHashMap<>();
+        coreEntries.forEach((id, ref) -> entries.put(id, SdkStorageCodec.CoreEntrySnapshot.from(ref.entry())));
+        return new SdkStorageCodec(owner, maximumBytes).encode(new SdkStorageCodec.Metadata(
+                storageConfiguration(), timelines, intents, retainedResults, entries, sourceHistoryProcessingResults));
+    }
+
+    synchronized SdkPointStorage.Scope openPointStorage(SdkPointStorage storage, SdkPointStorage.References references) {
+        ensureOpen();
+        return storage.openScope(owner, engine, storageConfiguration(), references, this::requireOpenPointStorageOwner);
+    }
+
+    private synchronized void requireOpenPointStorageOwner() { ensureOpen(); }
+
+    synchronized void installStorageMetadata(byte[] bytes, int maximumBytes) {
+        ensureOpen();
+        if (!timelines.isEmpty() || !intents.isEmpty() || !retainedResults.isEmpty()
+                || !coreEntries.isEmpty() || !sourceHistoryProcessingResults.isEmpty())
+            throw new IllegalStateException("SDK metadata installation requires a pristine owner");
+        SdkStorageCodec codec = new SdkStorageCodec(owner, maximumBytes);
+        SdkStorageCodec.Metadata stored = codec.decode(bytes, SdkStorageCodec.Metadata.class);
+        try {
+            if (!storageConfiguration().equals(stored.configuration()))
+                throw new IllegalArgumentException("Stored SDK configuration differs from this owner");
+            // Submitted SDK entries always retain both their intent and the core
+            // row needed by requireCoreEntry. Advanced engine projections can
+            // additionally retain results without representing an SDK submission.
+            if (!stored.entries().keySet().containsAll(stored.intents().keySet()))
+                throw new IllegalArgumentException("Stored SDK submission is missing its core entry");
+            var actual = engine.contractsRuntimeBinding();
+            if (!actual.languageSpecificationIdentity().equals(languageSpecificationIdentity)
+                    || !actual.contractsSpecificationIdentity().equals(contractsSpecificationIdentity)
+                    || !actual.executionPolicy().equals(contractsExecutionPolicy))
+                throw new IllegalArgumentException("Actual engine bootstrap differs from stored SDK configuration");
+            stored.timelines().forEach((id, handle) -> {
+                if (!id.equals(handle.id()) || handle.owner() != owner)
+                    throw new IllegalArgumentException("Invalid stored Timeline handle binding");
+                Timeline registered = engine.auditRegisteredTimeline(id).orElseThrow(() ->
+                        new IllegalArgumentException("Stored SDK Timeline is absent from restored engine"));
+                if (!registered.actorId().equals(handle.accountId())
+                        || !engine.timelineActorKind(id).equals(handle.actorKind().blueType()))
+                    throw new IllegalArgumentException("Stored SDK Timeline actor differs from engine");
+            });
+            Map<String, CoreEntryRef> restoredEntries = new LinkedHashMap<>();
+            stored.entries().forEach((id, snapshot) -> {
+                TimelineEntry verified = engine.auditTimelineEntry(id).orElseThrow(() ->
+                        new IllegalArgumentException("Stored SDK entry is absent from restored journal"));
+                if (!id.equals(snapshot.exactEvent().blueId()) || !java.util.Arrays.equals(codec.encode(snapshot),
+                        codec.encode(SdkStorageCodec.CoreEntrySnapshot.from(verified))))
+                    throw new IllegalArgumentException("Stored SDK entry differs from verified journal row");
+                validateStoredHandle(handleForStorage(verified, stored.timelines()), stored.timelines());
+                restoredEntries.put(id, new CoreEntryRef(verified));
+            });
+            stored.intents().forEach((id, intent) -> {
+                TimelineEntry entry = engine.auditTimelineEntry(id).orElseThrow(() ->
+                        new IllegalArgumentException("Stored intent has no retained entry"));
+                if (intent.targeted()) {
+                    if (intent.targetId() == null || intent.expectedTargetBlueId() == null
+                            || !Objects.equals(intent.timelineId(), entry.timeline().timelineId())
+                            || !Objects.equals(intent.actorId(), entry.timeline().actorId())
+                            || !Objects.equals(intent.operation(), entry.operation()) || !Objects.equals(intent.channel(), entry.channel()))
+                        throw new IllegalArgumentException("Stored targeted intent differs from its entry");
+                } else if (!intent.equals(EntryIntent.broadcast()))
+                    throw new IllegalArgumentException("Broadcast intent carries targeted operands");
+            });
+            stored.results().forEach((id, result) -> {
+                if (!id.equals(result.entry().blueId())) throw new IllegalArgumentException("Stored result key differs from entry");
+                validateStoredHandle(result.entry(), stored.timelines());
+            });
+            stored.sourceResults().values().forEach(result -> result.entries()
+                    .forEach(entry -> validateStoredHandle(entry.entry(), stored.timelines())));
+            // All validation and physical reads complete before mutating the new owner.
+            timelines.putAll(stored.timelines()); intents.putAll(stored.intents()); retainedResults.putAll(stored.results());
+            coreEntries.putAll(restoredEntries); sourceHistoryProcessingResults.putAll(stored.sourceResults());
+        } catch (blue.language.processor.NoncommittingExecutionException failure) {
+            throw failure;
+        } catch (RuntimeException failure) {
+            throw new blue.coordination.api.storage.CoordinationObjectStorageException("SDK metadata installation failed", failure);
+        }
+    }
+
+    private EntryHandle handleForStorage(TimelineEntry entry, Map<String, TimelineHandle> registered) {
+        TimelineHandle timeline = registered.get(entry.timeline().timelineId());
+        if (timeline == null) throw new IllegalArgumentException("Stored entry has no SDK Timeline handle");
+        return new EntryHandle(owner, timeline, entry.blueId(), entry.globalSequence(), entry.timelineSequence());
+    }
+
+    private void validateStoredHandle(EntryHandle handle, Map<String, TimelineHandle> registered) {
+        TimelineEntry entry = engine.auditTimelineEntry(handle.blueId()).orElseThrow(() ->
+                new IllegalArgumentException("Stored result handle has no verified journal entry"));
+        EntryHandle expected = handleForStorage(entry, registered);
+        if (handle.owner() != owner || !handle.timeline().equals(expected.timeline())
+                || !handle.globalSequence().equals(expected.globalSequence())
+                || !handle.timelineSequence().equals(expected.timelineSequence()))
+            throw new IllegalArgumentException("Stored entry handle differs from verified journal coordinates");
+    }
+
+    synchronized SdkStorageCodec.Configuration storageConfiguration() {
+        Map<String, String> identities = new LinkedHashMap<>();
+        if (bundledRelease) for (String key : List.of("release", "fixtures", "gas", "finalizer", "verifier"))
+            identities.put(key, bundledIdentity(key).orElseThrow());
+        return new SdkStorageCodec.Configuration(languageSpecificationIdentity, contractsSpecificationIdentity,
+                bundledRelease, contentDerivedDocumentIds, contractsExecutionPolicy, identities);
     }
 
     synchronized Optional<ManagedOccurrenceAudit> auditManagedOccurrence(
@@ -164,6 +327,12 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 .stream()
                 .map(this::publicManagedEpochReceipt)
                 .toList();
+    }
+
+    synchronized ManagedEpochHistory auditManagedEpochHistory(DocumentId documentId, ManagedEpochHistory previous) {
+        ensureOpen();
+        return ManagedEpochHistory.capture(documentId, storageConfiguration(),
+                engine.auditManagedEpochs(documentId), previous, this::publicManagedEpochReceipt);
     }
 
     synchronized Optional<ManagedEpochReceipt> auditManagedEpochReceipt(
@@ -540,6 +709,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return new SdkDocumentHandle(this, id);
     }
 
+    synchronized Optional<DocumentHandle> findStoredDocumentHandle(DocumentId id) {
+        ensureOpen();
+        DocumentId selected = Objects.requireNonNull(id, "id");
+        return engine.hasStoredDocument(selected)
+                ? Optional.of(new SdkDocumentHandle(this, selected)) : Optional.empty();
+    }
+
     synchronized DocumentHandle promotePublicRoot(DocumentId id) {
         ensureOpen();
         DocumentId selected = Objects.requireNonNull(id, "id");
@@ -633,6 +809,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     synchronized DrainResult processRootInput(DocumentHandle root, EntryHandle input,
             blue.coordination.api.ContractsExecutionPolicy policy) {
         ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this) {
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        }
         if (input.owner() != owner) {
             throw new IllegalArgumentException("Entry belongs to another runtime");
         }
@@ -649,7 +828,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         finally { exactNodeProvider.endLookupScope(); }
     }
 
-    private final Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceHistoryProcessingResults = new LinkedHashMap<>();
+    private Map<blue.coordination.api.SourceHistoryPrerequisite, DrainResult> sourceHistoryProcessingResults = new LinkedHashMap<>();
 
     synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
             blue.coordination.api.SourceHistoryPrerequisite expected) {
@@ -864,12 +1043,25 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     public synchronized void close() {
         if (!closed) {
             closed = true;
-            engine.close();
-            timelines.clear();
-            intents.clear();
-            retainedResults.clear();
-            coreEntries.clear();
+            RuntimeException failure = null;
+            try { engine.close(); } catch (RuntimeException problem) { failure = problem; }
+            for (Map<?, ?> map : List.of(timelines, intents, retainedResults, coreEntries, sourceHistoryProcessingResults)) {
+                try { closeOwnedMap(map); }
+                catch (RuntimeException problem) {
+                    if (failure == null) failure = problem;
+                    else failure.addSuppressed(problem);
+                }
+            }
+            if (failure != null) throw failure;
         }
+    }
+
+    private static void closeOwnedMap(Map<?, ?> map) {
+        if (map instanceof AutoCloseable owned) {
+            try { owned.close(); }
+            catch (RuntimeException failure) { throw failure; }
+            catch (Exception failure) { throw new IllegalStateException("Cannot close SDK storage scope", failure); }
+        } else map.clear();
     }
 
     private ContractsClosureAdmissionReceipt admitCompiled(
@@ -1011,12 +1203,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         timeline, operation, epochSelections);
             }
         }
+        EntryHandle handle = retainCoreEntry(appended);
         intents.put(appended.blueId(), EntryIntent.targeted(
                 target,
                 call.operation(),
                 call.channel(),
                 call.timeline()));
-        return retainCoreEntry(appended);
+        return handle;
     }
 
     private ContractsManagedEpochSelectionPlan managedEpochSelectionPlan(
@@ -1200,8 +1393,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             throw new IllegalArgumentException(
                     "Exact event does not belong to the selected Timeline");
         }
+        EntryHandle handle = retainCoreEntry(entry);
         intents.putIfAbsent(entry.blueId(), EntryIntent.broadcast());
-        return retainCoreEntry(entry);
+        return handle;
     }
 
     private EntryResult terminalResult(
@@ -1244,7 +1438,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return ref.entry();
     }
 
-    private final Map<String, CoreEntryRef> coreEntries =
+    private Map<String, CoreEntryRef> coreEntries =
             new LinkedHashMap<>();
 
     private EntryHandle retainCoreEntry(TimelineEntry entry) {
@@ -1442,8 +1636,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         }
     }
 
-    private record CoreEntryRef(TimelineEntry entry) {
-        private CoreEntryRef {
+    record CoreEntryRef(TimelineEntry entry) {
+        CoreEntryRef {
             entry = Objects.requireNonNull(entry, "entry");
         }
     }

@@ -1,0 +1,33 @@
+{
+  "scope": "Selected publication/rejection map bindings and bounded original result-row identity scope; not complete runtime installation",
+  "baseCommit": "5509160ba000e88c9d869390747542efb7af354c",
+  "archive": "/Users/kamil/Documents/Projects/Blue/rooted-publication-index-evidence.XXSQ6M/final-focused",
+  "startedUtc": "2026-09-11T05:05:42Z",
+  "finishedUtc": "2026-09-11T05:06:54Z",
+  "javaHome": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home",
+  "languageCommit": "8542285144a8969f157d73e73292398885105c46",
+  "bexCommit": "ab72af14ee54c6123e6d80349956af373a887680",
+  "catalogCommit": "0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+  "exactCommandAndManifests": "receipt.json in archive",
+  "exitCode": 0,
+  "sourceStable": true,
+  "testedInputCount": 840,
+  "tests": 41,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "javadoc": "SUCCESS (up-to-date after initial focused task)",
+  "newTests": {"StoredPublicationIndexesTest": 3},
+  "existingTests": {"CohortInvocationStorageCodecTest": 7, "DocumentSessionStorageTest": 12, "OperationPlanStorageCodecTest": 3, "PublicationReceiptStorageCodecTest": 5, "StoredStructuralIndexesTest": 4, "StoredCatchUpWorkIndexesTest": 4, "StoredCatchUpWorkSdkTest": 1, "StoredProcessingReceiptSdkTest": 2},
+  "sha256": {
+    "receipt.json": "f17eb3dc45369eaaf9f6eab5ccc206e53c1fa79474d6fabbbbdb3564bd210eff",
+    "gradle.log": "cedd8ef93f6a99637b4de94df4f49e1517a7ba0b574b5260ac3c9419516cff41",
+    "tested-source.tar.gz": "45949e470fab960ea06313d8e0b6afe5570a9bd63056e1d7052268702c135a56",
+    "source-before.json": "81452ebe1a8bc251368e1be44135c2dfd5baf15b060c0682e87c9ed2ca172394"
+  },
+  "priorRunsNotCounted": [
+    {"directory": "initial-focused", "tests": 3, "failures": 1, "outcome": "Fixture expected public event from parent-relative source delivery; actual source-owned publication supplies public outbox rows"},
+    {"directory": "actual-focused", "tests": 3, "failures": 0, "javadoc": "PASS", "outcome": "Initial component pass, before additional referenced-history locality control"}
+  ],
+  "postGateChange": "Only this compact evidence manifest added; all 840 tested source inputs rechecked unchanged"
+}

@@ -134,15 +134,37 @@ final class ContractsClosureAdapter implements AutoCloseable {
             automaticResolutionCoordinator;
     private final ManagedEpochApplicationExecutor
             managedEpochApplicationExecutor;
-    private final Map<String, ContractsManagedDraftPlan> managedDraftPlans =
-            new LinkedHashMap<>();
-    private final Map<String, ContractsManagedEpochSelectionPlan>
-            managedEpochSelectionPlans = new LinkedHashMap<>();
+    private final Map<String, ContractsManagedDraftPlan> managedDraftPlans;
+    private final Map<String, ContractsManagedEpochSelectionPlan> managedEpochSelectionPlans;
+
+    /** Exact journal-keyed rows owned by the current runtime scope. */
+    record StoredPlans(Map<String, ContractsManagedDraftPlan> drafts,
+            Map<String, ContractsManagedEpochSelectionPlan> selections) {
+        StoredPlans { Objects.requireNonNull(drafts); Objects.requireNonNull(selections); }
+        static StoredPlans empty() { return new StoredPlans(new LinkedHashMap<>(), new LinkedHashMap<>()); }
+    }
+
+    synchronized StoredPlans storedPlans() { ensureOpen(); return new StoredPlans(managedDraftPlans, managedEpochSelectionPlans); }
     private Consumer<PublicationFailurePoint> publicationFailureInjector =
             ignored -> { };
     private Consumer<MultiDocumentPublicationTransaction.FailurePoint>
             storeFailureInjector = ignored -> { };
     private boolean closed;
+
+    void requireControlStorageSupported() {
+        if (!managedDraftPlans.isEmpty() || !managedEpochSelectionPlans.isEmpty())
+            throw new blue.coordination.api.storage.CoordinationObjectStorageException(
+                    "Retained draft/selection plans require their exact storage component");
+    }
+
+    /** Reads one exact retained append-time row; this neither prepares work nor installs a runtime. */
+    synchronized java.util.Optional<OperationPlanStorageCodec.Plans> operationPlanForStorage(String entryBlueId) {
+        ensureOpen();
+        var draft = managedDraftPlans.get(Objects.requireNonNull(entryBlueId));
+        var selection = managedEpochSelectionPlans.get(entryBlueId);
+        return draft == null && selection == null ? java.util.Optional.empty()
+                : java.util.Optional.of(new OperationPlanStorageCodec.Plans(entryBlueId, draft, selection));
+    }
 
     ContractsClosureAdapter(
             BlueRuntime runtime,
@@ -177,6 +199,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
             InMemoryDocumentStore documents, OperationRouteIndex routes, ContractsClosureProfile profile,
             ContractsActiveSourceTimelineIndex activeSourceTimelines,
             java.util.function.Supplier<List<TimelineEntry>> timelineHistory) {
+        this(runtime, objects, layoutBuilder, documents, routes, profile, activeSourceTimelines, timelineHistory, StoredPlans.empty());
+    }
+
+    ContractsClosureAdapter(BlueRuntime runtime, WholeObjectStore objects, EmbeddedOnlyLayoutBuilder layoutBuilder,
+            InMemoryDocumentStore documents, OperationRouteIndex routes, ContractsClosureProfile profile,
+            ContractsActiveSourceTimelineIndex activeSourceTimelines,
+            java.util.function.Supplier<List<TimelineEntry>> timelineHistory, StoredPlans plans) {
+        this.managedDraftPlans = plans.drafts(); this.managedEpochSelectionPlans = plans.selections();
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.layoutBuilder = Objects.requireNonNull(
@@ -378,12 +408,23 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /** Selects the first still-new exact LIVE input in this root's committed view. */
     synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries) {
+        return nextRootLiveInput(root, entries, null);
+    }
+
+    /** Retained work wins equal-order ties, so only an earlier LIVE input can displace it. */
+    synchronized Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries,
+            ExternalOrderKey strictlyBefore) {
+        return nextRootLiveInput(root, entries, strictlyBefore, null);
+    }
+
+    private Optional<FrozenBatch> nextRootLiveInput(DocumentId root, List<TimelineEntry> entries,
+            ExternalOrderKey strictlyBefore, RootedCapturedState state) {
         ensureOpen();
         if (!profile.rootedCheckpoint()) throw new IllegalStateException("Rooted selection requires its exact profile");
         // This synchronized decision cannot publish between candidate entries.
         // Capture its exact view once; the next decision captures fresh fences.
-        RootedCapturedState state = null;
         for (TimelineEntry entry : entries.stream().sorted(Comparator.comparing(TimelineEntry::sourceOrderKey)).toList()) {
+            if (strictlyBefore != null && entry.sourceOrderKey().compareTo(strictlyBefore) >= 0) break;
             if (state == null) state = captureRootedState(root);
             CohortInvocation invocation = captureRootedView(entry, root, profile.executionPolicy(), true, state);
             if (invocation == null) continue;
@@ -402,6 +443,23 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return RootedLocalHistory.select(root, captureRootedState(root), entries, documents, objects,
                 profile.executionPolicy(), environment);
     }
+
+    /** One decision owns one verified capture; neither candidate outlives its ordinary publication fences. */
+    synchronized RootInputCandidates nextRootInputCandidates(DocumentId root, List<TimelineEntry> entries,
+            java.util.function.Supplier<ExternalOrderKey> registeredOrder) {
+        RootedCapturedState state = captureRootedState(root);
+        var local = RootedLocalHistory.select(root, state, entries, documents, objects,
+                profile.executionPolicy(), environment);
+        if (local.pending() && local.step() == null) return new RootInputCandidates(local, Optional.empty());
+        // Preserve the driver's delayed lookup: unavailable local history must not read later registered work.
+        ExternalOrderKey cutoff = registeredOrder.get();
+        if (local.step() != null && (cutoff == null || local.step().sourceOrder().compareTo(cutoff) < 0)) {
+            cutoff = local.step().sourceOrder();
+        }
+        return new RootInputCandidates(local, nextRootLiveInput(root, entries, cutoff, state));
+    }
+
+    record RootInputCandidates(RootedLocalHistory.Selection local, Optional<FrozenBatch> live) { }
 
     /** Captures a fresh terminal only after every receiving root has completed its real prefix. */
     synchronized List<RootedLocalHistory.Step> captureTerminalPeers(RootedJoinEligibility.Fence fence,
@@ -1701,9 +1759,32 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
         AffectedClosureSnapshot snapshot() { return snapshot; }
         Map<DocumentId, CapturedDocument> documents() { return documents; }
-        OperationRouteIndex routes() { return routes; }
+        OperationRouteIndex routes() {
+            return Objects.requireNonNull(routes, "A restored submitted step is not a fresh routing-selection capability");
+        }
         RootedDocumentView view() { return view; }
         DocumentId anchor() { return anchor; }
+
+        RootedCapturedState originalCaptureForStorage() { return originalCapture; }
+        Map<DocumentId, RootedLocalHistory.Step> peerPrefixesForStorage() { return peerPrefixes; }
+
+        /**
+         * Restores retained submitted-step verification evidence, not a fresh routing capability.
+         * Original and peer publication fences remain exact; execution must reselect through the driver.
+         */
+        static RootedCapturedState restoreStored(AffectedClosureSnapshot snapshot,
+                Map<DocumentId, CapturedDocument> documents, RootedDocumentView view,
+                DocumentId anchor, RootedCapturedState original,
+                Map<DocumentId, RootedLocalHistory.Step> peers) {
+            Objects.requireNonNull(snapshot); Objects.requireNonNull(view); Objects.requireNonNull(anchor);
+            if (!documents.containsKey(anchor)) throw new IllegalArgumentException("Stored capture omitted its anchor");
+            peers.forEach((id, peer) -> {
+                if (!peer.invocation().rootedEvidence().context().entryOwners().contains(closureId(id)))
+                    throw new IllegalArgumentException("Stored peer has another owner");
+            });
+            return new RootedCapturedState(snapshot, Map.copyOf(documents), null,
+                    view, anchor, original, peers);
+        }
 
         void requireRetainedInput(ClosureInvocationInput input, InMemoryDocumentStore store) {
             requireCurrentView(store);

@@ -257,12 +257,29 @@ final class ContractsJournalDrainCoordinator {
     static final class DurableState {
         private final Set<EntryKey> terminalEntries = new LinkedHashSet<>();
         private ExternalOrderKey processedThrough;
+
+        StorageState storageState() { return new StorageState(List.copyOf(terminalEntries), processedThrough); }
+
+        static DurableState fromStorage(StorageState state) {
+            var restored = new DurableState();
+            restored.terminalEntries.addAll(state.terminalEntries());
+            restored.processedThrough = state.processedThrough();
+            return restored;
+        }
     }
 
-    private record EntryKey(
+    record StorageState(List<EntryKey> terminalEntries, ExternalOrderKey processedThrough) {
+        StorageState {
+            terminalEntries = List.copyOf(terminalEntries);
+            if (new LinkedHashSet<>(terminalEntries).size() != terminalEntries.size())
+                throw new IllegalArgumentException("Repeated terminal journal key");
+        }
+    }
+
+    record EntryKey(
             String entryBlueId,
             ExternalOrderKey sourceOrder) {
-        private EntryKey {
+        EntryKey {
             entryBlueId = Objects.requireNonNull(entryBlueId, "entryBlueId");
             sourceOrder = Objects.requireNonNull(sourceOrder, "sourceOrder");
         }

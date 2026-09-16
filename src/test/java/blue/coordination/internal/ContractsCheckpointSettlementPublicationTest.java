@@ -4,6 +4,7 @@ import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
+import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.Operation;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.Timeline;
@@ -21,8 +22,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -56,6 +60,7 @@ final class ContractsCheckpointSettlementPublicationTest {
                             .PUBLISHED,
                     admitted.publicationOutcome());
             String driverBefore = publicEngine.document(DRIVER).blueId();
+            DocumentSession beforeSession = engine.documents().require(DRIVER).copyForAtomicPublication();
 
             Timeline timeline = publicEngine.registerTimeline(
                     TIMELINE, "alice");
@@ -119,6 +124,7 @@ final class ContractsCheckpointSettlementPublicationTest {
                             capturedBefore.head(),
                             contractsDriver,
                             transition(result, DRIVER)));
+            assertColdCheckpointProof(engine, result, DRIVER, beforeSession);
         }
     }
 
@@ -142,6 +148,7 @@ final class ContractsCheckpointSettlementPublicationTest {
             ContractsClosureAdapter.CapturedDocument sourceBefore = invocation
                     .documents().get(SOURCE);
             int sourceHistoryBefore = publicEngine.history(SOURCE).size();
+            DocumentSession beforeSession = engine.documents().require(SOURCE).copyForAtomicPublication();
             assertEquals(List.of(DRIVER),
                     invocation.publicationIdentityMembers());
             assertTrue(invocation.members().contains(SOURCE));
@@ -195,6 +202,7 @@ final class ContractsCheckpointSettlementPublicationTest {
                             .occurrenceIdentity(),
                     transition.emittedRootEvents().get(1)
                             .occurrenceIdentity());
+            assertColdCheckpointProof(engine, result, SOURCE, beforeSession);
         }
     }
 
@@ -417,7 +425,63 @@ final class ContractsCheckpointSettlementPublicationTest {
                     ContractsClosureAdapter.ProjectionUnavailableException.class,
                     () -> ContractsClosureAdapter.requiresDocumentPublication(
                             result, before, forgedSameEpoch, transition));
+            assertThrows(IllegalArgumentException.class, () -> InMemoryDocumentStore.StoreState.requireRetainedResult(
+                    List.of(documentId), result, Map.of(documentId, engine.documents().require(documentId)),
+                    "Unverified same-epoch work change", List.of(forgedSameEpoch)));
         }
+    }
+
+    private static void assertColdCheckpointProof(DefaultCoordinationEngine engine, ClosureProcessResult result,
+            DocumentId id, DocumentSession beforeSession) {
+        var codec = new blue.language.processor.closure.ClosureProcessResultStorageCodec(32 * 1024 * 1024, 128);
+        byte[] exactResult = codec.encode(result);
+        var state = engine.documents().storedState();
+        assertDoesNotThrow(() -> state.withSessions(state.sessions(), state.lineageIndex(),
+                state.componentIndex(), state.componentIndexGeneration()));
+        var session = engine.documents().require(id);
+        var exact = resulting(result, id);
+        assertDoesNotThrow(() -> requireRetainedCheckpoint(result, exact, session));
+        assertThrows(IllegalArgumentException.class, () -> requireRetainedCheckpoint(result, exact, beforeSession),
+                "A correct result without its actual E+1 publication is not retained history");
+        var revision = session.revision(exact.epoch() + 1L);
+        var receipt = revision.managedEpochReceipt().orElseThrow();
+        for (String corruption : List.of("missing-receipt", "transition", "companion", "cause", "gas", "events", "predecessor", "kind",
+                "missing-source-entry", "causal-entry")) {
+            String foreign = "sha256:" + "f".repeat(64);
+            boolean embeddedCausalMismatch = corruption.equals("causal-entry");
+            var kind = embeddedCausalMismatch ? DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION
+                    : corruption.equals("kind") ? DocumentRevision.Kind.CATCH_UP_COMPLETED : revision.kind();
+            var before = corruption.equals("predecessor") ? revision.after() : revision.before().orElseThrow();
+            long gas = corruption.equals("gas") ? receipt.processingGas() + 1L : receipt.processingGas();
+            var altered = corruption.equals("missing-receipt") ? null : ManagedEpochReceipt.identified(id,
+                    revision.epoch(), kind, before.blueId(), revision.after(),
+                    corruption.equals("cause") ? foreign : receipt.originalCauseIdentity(),
+                    corruption.equals("missing-source-entry") ? null : receipt.sourceEntry().orElse(null), receipt.sourceOrder().orElse(null),
+                    corruption.equals("transition") ? foreign : receipt.contractsTransitionReceiptIdentity(),
+                    corruption.equals("companion") ? foreign : receipt.commitCompanionIdentity(),
+                    corruption.equals("events") ? List.of() : receipt.emittedEvents(), gas);
+            // A supported embedded revision intentionally omits sourceEntry;
+            // only its separately retained causal BlueId contradicts this receipt.
+            var replacement = new DocumentRevision(id, revision.epoch(), revision.rootApplicationOrder(), kind,
+                    before, revision.after(), embeddedCausalMismatch ? null : revision.sourceEntry().orElse(null), revision.sourceOrderKey().orElse(null),
+                    embeddedCausalMismatch ? before.blueId() : revision.causalEntryBlueId().orElse(null),
+                    revision.catchUpCause().orElse(null), revision.emittedEvents(), gas, altered);
+            var revisions = new java.util.ArrayList<>(session.revisions());
+            revisions.set(Math.toIntExact(revision.epoch()), replacement);
+            var terminals = new java.util.LinkedHashSet<String>();
+            revisions.forEach(row -> row.sourceEntry().ifPresent(entry -> terminals.add(entry.blueId())));
+            var mismatched = DocumentSession.restoreStored(DocumentSessionStorageTest.change(session.storedState(),
+                    Map.of("revisions", revisions, "terminalEntryBlueIds", terminals)));
+            assertThrows(IllegalArgumentException.class, () -> requireRetainedCheckpoint(result, exact, mismatched),
+                    "Matching E+1 body cannot hide mismatched retained proof: " + corruption);
+        }
+        assertArrayEquals(exactResult, codec.encode(result), "Read validation never changes the original Contracts result or gas");
+        assertDoesNotThrow(() -> requireRetainedCheckpoint(result, exact, session));
+    }
+
+    private static void requireRetainedCheckpoint(ClosureProcessResult result, ResultingDocument exact, DocumentSession session) {
+        InMemoryDocumentStore.StoreState.requireRetainedResult(List.of(session.documentId()), result,
+                Map.of(session.documentId(), session), "Checkpoint settlement", List.of(exact));
     }
 
     private static boolean sameBoundary(DocumentTransitionEvidence evidence) {

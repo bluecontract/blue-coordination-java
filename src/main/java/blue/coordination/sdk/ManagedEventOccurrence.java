@@ -7,10 +7,12 @@ import java.util.Objects;
 /** Immutable SDK projection of one complete managed Root event occurrence. */
 public final class ManagedEventOccurrence {
     private final blue.coordination.api.ManagedEventOccurrence occurrence;
+    private final ExactBlueValue exactEvent;
 
     private ManagedEventOccurrence(
             blue.coordination.api.ManagedEventOccurrence occurrence) {
         this.occurrence = Objects.requireNonNull(occurrence, "occurrence");
+        this.exactEvent = ExactBlueValue.wrap(occurrence.exactEvent());
     }
 
     static ManagedEventOccurrence wrap(
@@ -50,7 +52,7 @@ public final class ManagedEventOccurrence {
 
     /** Complete exact event value. */
     public ExactBlueValue exactEvent() {
-        return ExactBlueValue.wrap(occurrence.exactEvent());
+        return exactEvent;
     }
 
     /** Whether the emitting source Root was public at this transition. */

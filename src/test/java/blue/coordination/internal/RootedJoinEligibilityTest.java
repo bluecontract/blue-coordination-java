@@ -148,7 +148,7 @@ final class RootedJoinEligibilityTest {
         }
     }
 
-    private static final class Fixture implements AutoCloseable {
+    static final class Fixture implements AutoCloseable {
         final Map<String, String> exact = new LinkedHashMap<>();
         final Map<DocumentId, String> authored = new LinkedHashMap<>();
         final BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()

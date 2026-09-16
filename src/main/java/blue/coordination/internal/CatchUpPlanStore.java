@@ -66,6 +66,21 @@ final class CatchUpPlanStore {
         return EMPTY;
     }
 
+    ManagedCatchUpPlanIndex storedPlans() { return plans; }
+
+    PersistentOrderedMap<String, ManagedCatchUpBarrier> storedBarriers() { return barriers; }
+
+    record StoredState(ManagedCatchUpPlanIndex plans, PersistentOrderedMap<String, ManagedCatchUpBarrier> barriers,
+            ManagedCatchUpWorkIndex work, int activeBarriers, int comparisons, int copiedNodes) { }
+
+    StoredState storedState() {
+        return new StoredState(plans, barriers, work, activeBarrierCount, lastMutationComparisons, lastMutationNodeCopies);
+    }
+
+    static CatchUpPlanStore restoreStored(StoredState state) {
+        return new CatchUpPlanStore(state.plans(), state.barriers(), state.work(), state.activeBarriers(), state.comparisons(), state.copiedNodes());
+    }
+
     CatchUpPlanStore withPlan(ManagedOccurrenceCatchUpPlan plan) {
         ManagedCatchUpPlanIndex changed = plans.withPlan(
                 Objects.requireNonNull(plan, "plan"), false);
@@ -717,6 +732,11 @@ final class CatchUpPlanStore {
 
     private ManagedCatchUpBarrier canonicalBarrier(
             ManagedCatchUpBarrier definition) {
+        return canonicalBarrier(plans, definition);
+    }
+
+    static ManagedCatchUpBarrier canonicalBarrier(
+            ManagedCatchUpPlanIndex plans, ManagedCatchUpBarrier definition) {
         if (definition.planIdentities().isEmpty()) {
             throw new IllegalArgumentException(
                     "A catch-up barrier requires at least one plan");
