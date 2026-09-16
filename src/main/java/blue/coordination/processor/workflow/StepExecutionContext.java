@@ -358,6 +358,10 @@ public final class StepExecutionContext implements BexWorkflowStepContext {
         try {
             return workingDocument().previewAndApplyPatches(patches);
         } catch (RuntimeException ex) {
+            RuntimeException classified = ComputeStepExecutor.classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
             throwFatal("Working document preview failed: " + ex.getMessage());
             return null;
         }
@@ -370,6 +374,10 @@ public final class StepExecutionContext implements BexWorkflowStepContext {
         try {
             return workingDocument().previewAndApplyFrozenPatches(patches);
         } catch (RuntimeException ex) {
+            RuntimeException classified = ComputeStepExecutor.classifiedBoundaryFailure(ex);
+            if (classified != null) {
+                throw classified;
+            }
             throwFatal("Working document preview failed: " + ex.getMessage());
             return null;
         }

@@ -416,10 +416,8 @@ final class ComputeResultEmitter {
         long frozenValueCount = frozenValueCount(patches);
         try {
             /*
-             * Keep provider/evidence exceptions visible to the Compute
-             * executor. StepExecutionContext's convenience wrapper maps every
-             * RuntimeException to runtime-fatal, which would erase Language's
-             * deterministic InvalidExecutionEvidence category.
+             * Classify preview and effect-buffering failures together below,
+             * preserving the same boundary categories as StepExecutionContext.
              */
             preview = context.workingDocument()
                     .previewAndApplyFrozenPatches(patches);
