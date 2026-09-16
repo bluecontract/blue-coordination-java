@@ -266,7 +266,11 @@ test('CI uses only Java 25 while published bytecode remains Java 17', () => {
   assert.match(build, /sourceCompatibility = JavaVersion.VERSION_17/);
   assert.match(build, /targetCompatibility = JavaVersion.VERSION_17/);
   assert.match(build, /options.release = 17/);
-  assert.doesNotMatch(build, /JavaLanguageVersion.of\(17\)|JavaLanguageVersion.of\(21\)/);
+  for (const file of ['build.gradle', 'gradle/test-execution-scope.gradle',
+    'gradle/topology-test-evidence.gradle', 'gradle/coordination-staging.gradle']) {
+    const script = fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
+    assert.doesNotMatch(script, /JavaLanguageVersion.of\((17|21)\)|getOrElse\('(17|21)'\)/);
+  }
   for (const file of ['../actions/setup-release/action.yml', '../workflows/ci-release-experiment.yml']) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
     assert.match(text, /java-version: '25'/);
