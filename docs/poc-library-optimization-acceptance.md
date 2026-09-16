@@ -173,8 +173,9 @@ Evidence under `processing-measurement13/profile30/` in the POC evidence archive
 `coordination-mechanism-before01/`, `coordination-controls-after01/`,
 `language-controls02/` and `library-mechanism-comparison.json`.
 The next storage package must pass P2/P3's independent read/write budgets before
-another long MyOS run is used as confirmation. P2–P4 remain unimplemented.
-P2 now has a real SDK baseline probe and an exact session/lineage implementation
+another long MyOS run is used as confirmation. P2's library gate now passes;
+P3/P4 remain unimplemented, and MyOS confirmation has its own gate.
+P2 has a real SDK baseline probe and an exact session/lineage implementation
 card: [indexed session history](poc-indexed-session-history-plan.md). Its 5/20/50
 epoch measurements prove the growing cold-read/staging cost and preserve exact
 resident/restart equality; they do not claim the new selective budgets pass.

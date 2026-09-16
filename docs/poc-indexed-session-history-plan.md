@@ -1,9 +1,9 @@
 # P2: indexed session history — implementation and measurement card
 
-Status: indexed P2 candidate implemented; qualification pending. The executable
-baseline probe and membership-only prerequisite remain the last qualified gate.
-The merged-baseline refresh is closed. MyOS wiring is prepared but has not run
-against this candidate; it is not yet an application acceptance result.
+Status: indexed P2 library gate passed (146/146 tests and all four access-budget
+workloads). The merged-baseline refresh is closed. MyOS wiring is prepared and
+its PostgreSQL qualification is next; no application result is inferred from
+the library gate. See the final qualification section for exact source pins.
 Work stays on the existing owned `codex/poc-baseline-refresh-20260916` branches.
 No new source from open PRs, protocol changes, larger record limits or Redis.
 
@@ -351,3 +351,54 @@ index would be incorrect. Strict restore must rebuild and compare this new
 derived index; controlled reads must validate the selected endpoints. Explicit
 full-history enumeration remains exhaustive. A separate admission caller that
 only needs epoch zero should use the existing exact revision selector.
+
+## Qualified P2 library result — 2026-09-16
+
+Implementation `052687128efb84563d3722b564d9d55c0b1d844b` passed
+**146/146 tests across 25 classes**, with zero failures, errors or skips
+(`history33/controls05`). Javadoc, production shape, both API boundaries and
+exact dependency checks passed. All 48 measured phases (four real SDK workloads)
+passed the zero-unrequested-historical-payload-GET and zero-unchanged-payload-PUT
+budgets. The complete resident/cold history and result oracles remain unchanged.
+One unchanged N5 test was repeated in a fresh JVM (`frame-check01`): its complete
+archived view frame was byte-identical, including result, snapshots, routes,
+published heads and subscription counters. This is 146 distinct tests, not 147.
+
+For the 50-numbered-epoch fixture, physical byte-port reads changed as follows
+(decimal MB; neither SQL query counts nor decoder counts):
+
+| Phase | Previous strict storage | Controlled indexed storage |
+| --- | ---: | ---: |
+| Cold current selection | 19.477 MB; 51 revision + 54 view GETs | 0.623 MB; 1 revision + 2 view GETs |
+| Submit next input | 41.901 MB | 0.180 MB |
+| Process successor | 11.710 MB | 12.212 MB |
+| Stage successor | 20.626 MB; 1 unchanged payload PUT | 1.021 MB; 0 unchanged payload PUTs |
+
+All numbered 5/20/50 fixtures now select one current revision and two current
+views. The largest measured session descriptor is 56,580 bytes in each workload,
+including the same-epoch fixture (the previous 50-epoch descriptor was 82,040
+bytes). Submission + execution + staging read 74.236 MB before versus 13.413 MB
+after, about 82% fewer bytes in this fixed fixture.
+
+This is **not** a claim that every phase is faster or independent of history
+length. Execution still makes 23,681 index-node GET calls at 50 epochs, for 438
+distinct index addresses. In this sample its CPU time increased from 2.274 s to
+3.124 s, while submission fell from 1.945 s to 0.029 s. These are single instrumented
+samples under changing machine load, not a benchmark or application latency SLA.
+Some reads/writes also move between phases as earlier prefix warming disappears.
+The mechanism gate proves selective payload access and no unchanged payload
+rewrites; it does not prove selective metadata validation or O(delta) total work.
+
+Two separately identified follow-ups remain unimplemented: repeated projected
+lineage/reverse-index validation and map-operation-local cache lifetimes; and
+the full receipt fallback in `closureReceiptForApplication` for retained
+historical/idempotent applications. The latter has not been shown to run in this
+simple successor fixture. Whole-result segmentation and catch-up windows remain
+P3/P4, not part of this qualification.
+
+`history33/export01-audit.json` binds the exported Coordination artifact to all
+959 tested runtime entries (the version manifest is checked separately). It
+reuses the unchanged Language/BEX/Catalog artifacts; it does not rebuild or
+republish them. The host candidate is `history33/export01-myos-candidate.json`.
+The remaining PostgreSQL/app gates must report their own outcomes; this library
+pass is not full POC acceptance or proof that the original long graph finishes.
