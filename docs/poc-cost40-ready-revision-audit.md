@@ -17,4 +17,26 @@ path; they are not new numbered revisions. Full history APIs remain unchanged.
 
 Production inventory grows by 16 lines, with no additional public type. Tests
 compare exact point results with maintained public history and check READY bounds.
-Verification status: pending; this document does not claim full POC acceptance.
+## Verification
+
+The final implementation is Coordination `08e31572d70918542321fa8af2c8c614c3169053`;
+documentation-only follow-ups do not change it. Language, BEX and Catalog are
+unchanged by this package. No PostgreSQL/storage dependency enters the library.
+
+The focused lane passed **16/16** tests: `ReadyRevisionPointAuditTest` (2),
+`DocumentSessionHistoryRangeTest` (7), and the unchanged
+`ManagedRepresentationHistorySinglePassTest` (7). The production-shape gate passes
+at 327 classes / 87,765 lines / 96 public types. Archived XML is under
+`processing-measurement13/cost40/coordination-01/` in the retained POC evidence.
+
+Mini candidate `f3300343c6e69d1cdc76acb423590e649a4512b9` uses this artifact in the
+qualified `cost40-02` build. Its 83-test host/PostgreSQL/E2E batch, seven matching
+resident scenarios and original long graph plus cold restart all pass. Full
+coverage and timing qualifications are in Mini's
+`docs/poc-cost40-projection-history-delta.md`; this is not full-suite/release
+qualification or a proof of arbitrary-history bounded processing.
+
+The change removes the need for the host to request the complete public history
+just to project its new revision. It does not optimize the library's internal
+same-epoch representation-chain authentication or introduce a reusable proof for
+skipping that authentication. Those integrity controls remain unchanged.
