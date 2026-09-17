@@ -136,6 +136,22 @@ final class ContractsClosureAdapter implements AutoCloseable {
             managedEpochApplicationExecutor;
     private final Map<String, ContractsManagedDraftPlan> managedDraftPlans;
     private final Map<String, ContractsManagedEpochSelectionPlan> managedEpochSelectionPlans;
+    private final RootedObservationReuse observationReuse = new RootedObservationReuse();
+    private long planRevision;
+
+    private record ReadFence(InMemoryDocumentStore.StoreState documents, long routes, long objects,
+            long plans, ContractsRootFeederWindow.DurableState feeder, long rejectedBirths) { }
+    private ReadFence readFence() {
+        return new ReadFence(documents.storedState(), routes.generation(), objects.observationRevision(),
+                planRevision, feederDecisions, feederDecisions.rejectionRevision());
+    }
+    synchronized <T> T reuseObservation(Object key, java.util.function.Supplier<T> read,
+            java.util.function.Predicate<T> reusable, String counter) {
+        ensureOpen();
+        return observationReuse.read(readFence(), key, read, this::readFence, reusable,
+                () -> runtime.metrics().increment(counter));
+    }
+    private record CaptureKey(DocumentId root) { }
 
     /** Exact journal-keyed rows owned by the current runtime scope. */
     record StoredPlans(Map<String, ContractsManagedDraftPlan> drafts,
@@ -525,6 +541,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 plan, "plan");
         ContractsManagedDraftPlan prior = managedDraftPlans.putIfAbsent(
                 identity, selected);
+        planRevision++;
         if (prior != null && prior != selected) {
             throw new IllegalStateException(
                     "A managed draft plan is already registered for "
@@ -538,6 +555,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             String entryBlueId,
             ContractsManagedDraftPlan plan) {
         ensureOpen();
+        planRevision++;
         if (!managedDraftPlans.remove(
                 Objects.requireNonNull(entryBlueId, "entryBlueId"),
                 Objects.requireNonNull(plan, "plan"))) {
@@ -549,6 +567,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     /** Forgets disposable host evidence after its journal entry is terminal. */
     synchronized void completeManagedDraftPlan(String entryBlueId) {
         ensureOpen();
+        planRevision++;
         String identity = Objects.requireNonNull(
                 entryBlueId, "entryBlueId");
         managedDraftPlans.remove(identity);
@@ -567,6 +586,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             String entryBlueId,
             ContractsManagedEpochSelectionPlan plan) {
         ensureOpen();
+        planRevision++;
         String identity = Objects.requireNonNull(
                 entryBlueId, "entryBlueId");
         if (identity.isBlank()) {
@@ -590,6 +610,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             String entryBlueId,
             ContractsManagedEpochSelectionPlan plan) {
         ensureOpen();
+        planRevision++;
         if (!managedEpochSelectionPlans.remove(
                 Objects.requireNonNull(entryBlueId, "entryBlueId"),
                 Objects.requireNonNull(plan, "plan"))) {
@@ -1090,6 +1111,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
     public synchronized void close() {
         if (!closed) {
             closed = true;
+            observationReuse.clear();
             managedDraftPlans.clear();
             managedEpochSelectionPlans.clear();
             managedEpochApplicationExecutor.resetAfterRouteRebuild();
@@ -1670,6 +1692,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /** Captures the committed selected view and current fences only for its entry owners. */
     synchronized RootedCapturedState captureRootedState(DocumentId requestedRoot) {
+        return reuseObservation(new CaptureKey(requestedRoot), () -> captureRootedStateFresh(requestedRoot),
+                ignored -> true, "rooted.observation.captureReuses");
+    }
+
+    private RootedCapturedState captureRootedStateFresh(DocumentId requestedRoot) {
+        runtime.metrics().increment("rooted.observation.captures");
         DocumentSession root = documents.require(requestedRoot);
         RootedDocumentView view = Objects.requireNonNull(root.rootedView(), "Root has no retained rooted view");
         view.requirePublishedHead(requestedRoot, root.epoch(), root.currentRepresentation().blueId());

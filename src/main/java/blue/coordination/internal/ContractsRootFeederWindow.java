@@ -402,6 +402,8 @@ final class ContractsRootFeederWindow {
      * progress is durable and therefore cannot be overtaken or re-driven.</p>
      */
     static final class DurableState {
+        private long rejectionRevision;
+        synchronized long rejectionRevision() { return rejectionRevision; }
         private final Map<LaneId, PendingProgress> pendingByLane;
         private final Map<String, RootedDeclaredBirthRejection> rejectedBirths;
 
@@ -427,6 +429,7 @@ final class ContractsRootFeederWindow {
                 InMemoryDocumentStore documents) {
             decision.requireCurrentFences(documents);
             var prior = rejectedBirths.putIfAbsent(decision.terminalKey(), decision);
+            rejectionRevision++;
             if (prior != null && prior != decision) throw new IllegalStateException("Conflicting declared-birth terminal decision");
             return decision;
         }

@@ -542,11 +542,13 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     synchronized void forceProviderUnavailable(String blueId) {
+        observationRevision++;
         unavailableProviderBlueIds.add(Objects.requireNonNull(
                 blueId, "blueId"));
     }
 
     synchronized void restoreProviderAvailability(String blueId) {
+        observationRevision++;
         unavailableProviderBlueIds.remove(Objects.requireNonNull(
                 blueId, "blueId"));
     }
@@ -571,6 +573,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     /** Restores only keys changed after the supplied nested savepoint. */
     public synchronized void rollbackTo(Mark mark) {
         requireTopMark(mark);
+        observationRevision++;
         List<Map.Entry<String, PriorState>> changes = new ArrayList<>(
                 mark.priorByBlueId.entrySet());
         for (int index = changes.size() - 1; index >= 0; index--) {
@@ -765,7 +768,12 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
         return checked.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
 
+    private long observationRevision;
+
+    synchronized long observationRevision() { return observationRevision; }
+
     private void recordBeforeMutation(String blueId) {
+        observationRevision++;
         if (activeMarks.isEmpty()) {
             return;
         }
@@ -780,6 +788,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     private void recordProofBeforeMutation(String masterBlueId) {
+        observationRevision++;
         if (activeMarks.isEmpty()) {
             return;
         }

@@ -136,6 +136,30 @@ final class RootedStorageCache implements AutoCloseable {
         return entry == null ? null : entry.bytes().clone();
     }
 
+    /** No frame allocation: only an existing library-issued canonical certificate can match. */
+    synchronized boolean hasCanonicalEncoding(String family, Object value, String digest, int length) {
+        requireOpen();
+        var keys = canonicalValues.get(new ValueKey(Objects.requireNonNull(family), Objects.requireNonNull(value)));
+        if (keys == null || keys.size() != 1) return false;
+        var key = keys.iterator().next();
+        var entry = entries.get(key);
+        if (entry == null || entry.encodingIdentity() != value || !key.digest().equals(digest)
+                || entry.bytes().length != length) return false;
+        hits++;
+        diagnosticEvent(family, digest, "CANONICAL_DESCRIPTOR_HIT", true, entry.weight());
+        return true;
+    }
+
+    /** Owner has already authenticated this address; keep the artifact under the same process budget. */
+    synchronized boolean retainsDecoded(String family, String digest, Object value) {
+        requireOpen();
+        Entry entry = entries.get(new Key(family, digest, false));
+        if (entry == null || entry.value() != value) return false;
+        hits++;
+        diagnosticEvent(family, digest, "AUTHENTICATED_OWNER_HIT", false, entry.weight());
+        return true;
+    }
+
     /** Returns only the retained opaque certificate for its exact immutable subject. */
     synchronized <T> T canonicalValue(String family, Object value) {
         Entry entry = canonicalEntry(family, value);

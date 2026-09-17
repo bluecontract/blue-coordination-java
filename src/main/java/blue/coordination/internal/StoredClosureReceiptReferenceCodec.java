@@ -15,6 +15,13 @@ final class StoredClosureReceiptReferenceCodec
     private final int maximumPayloadBytes;
     private final int maximumDescriptorBytes;
     private final PersistentMapCodec<ContractsClosurePublicationReceipt> payloads;
+    @FunctionalInterface interface RetainedCanonical {
+        boolean contains(ContractsClosurePublicationReceipt value, String digest, int length);
+    }
+    private final RetainedCanonical retainedCanonical;
+    // Non-owning handles into the host-budgeted decoded cache, authenticated in this owner only.
+    private final java.util.LinkedHashMap<Reference, java.lang.ref.WeakReference<ContractsClosurePublicationReceipt>>
+            authenticated = new java.util.LinkedHashMap<>(16, .75f, true);
     // One fully decoded immutable value only; no receipt history or payload byte map is retained.
     private ContractsClosurePublicationReceipt lastValue;
     private byte[] lastDescriptor;
@@ -22,11 +29,17 @@ final class StoredClosureReceiptReferenceCodec
 
     StoredClosureReceiptReferenceCodec(CoordinationImmutableObjectStore objects, int maximumPayloadBytes,
             PersistentMapCodec<ContractsClosurePublicationReceipt> payloads) {
+        this(objects, maximumPayloadBytes, payloads, (value, digest, length) -> false);
+    }
+
+    StoredClosureReceiptReferenceCodec(CoordinationImmutableObjectStore objects, int maximumPayloadBytes,
+            PersistentMapCodec<ContractsClosurePublicationReceipt> payloads, RetainedCanonical retainedCanonical) {
         this.objects = Objects.requireNonNull(objects);
         require(maximumPayloadBytes > 0, "Invalid closure receipt payload bound");
         this.maximumPayloadBytes = maximumPayloadBytes;
         maximumDescriptorBytes = Math.min(maximumPayloadBytes, MAXIMUM_DESCRIPTOR_BYTES);
         this.payloads = Objects.requireNonNull(payloads);
+        this.retainedCanonical = Objects.requireNonNull(retainedCanonical);
     }
 
     @Override public String identity() { return "blue-coordination/publication-index-row/closure/2"; }
@@ -89,6 +102,14 @@ final class StoredClosureReceiptReferenceCodec
                 require(length > 0 && length <= maximumPayloadBytes, "Invalid closure receipt reference byte bound");
                 return new Reference(HexFormat.of().formatHex(digest), length);
             });
+            if (RootedEngineStorage.isControlledNamespace(objects)) {
+                var handle = authenticated.get(reference);
+                var known = handle == null ? null : handle.get();
+                if (known != null && retainedCanonical.contains(known, reference.address(), reference.length())) {
+                    remember(known, selected);
+                    return known;
+                }
+            }
             byte[] bytes = payload(objects.get(reference.address(), reference.length())
                     .orElseThrow(() -> new blue.coordination.api.storage.CoordinationObjectStorageException("Missing selected closure receipt")));
             require(bytes.length == reference.length(), "Closure receipt reference length differs");
@@ -96,6 +117,11 @@ final class StoredClosureReceiptReferenceCodec
             var restored = Objects.requireNonNull(payloads.decode(bytes.clone()));
             require(Arrays.equals(bytes, payload(payloads.encode(restored))), "Noncanonical referenced closure receipt");
             remember(restored, selected);
+            if (RootedEngineStorage.isControlledNamespace(objects)
+                    && retainedCanonical.contains(restored, reference.address(), reference.length())) {
+                while (authenticated.size() >= 2048) authenticated.remove(authenticated.keySet().iterator().next());
+                authenticated.put(reference, new java.lang.ref.WeakReference<>(restored));
+            }
             return restored;
         });
     }
@@ -119,7 +145,7 @@ final class StoredClosureReceiptReferenceCodec
     private void requireOpen() { require(!closed, "Closure receipt reference codec is closed"); }
 
     @Override public synchronized void close() {
-        closed = true; lastValue = null; lastDescriptor = null;
+        closed = true; lastValue = null; lastDescriptor = null; authenticated.clear();
     }
 
     private record Reference(String address, int length) { }

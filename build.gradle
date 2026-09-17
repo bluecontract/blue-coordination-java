@@ -688,8 +688,10 @@ def currentProductionShapeLimits = [
         // plus causal-entry endpoint metadata for selective SDK change summaries.
         // Physical inventory only; no protocol, closure or logical-gas bound changes.
         // Measured source inventory; see docs/poc-indexed-session-history-plan.md.
-        classes: 323,
-        lines: 87_185L,
+        // Cost38: one private observation memo plus reviewed bounded artifact-read paths.
+        // Public inventory and per-source limits are unchanged; see the Cost38 package note.
+        classes: 325,
+        lines: 87_659L,
         publicApiTypes: 94,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

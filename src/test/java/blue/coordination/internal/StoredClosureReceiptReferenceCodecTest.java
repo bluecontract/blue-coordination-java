@@ -30,6 +30,58 @@ final class StoredClosureReceiptReferenceCodecTest {
     private static final PersistentMapStorage.Limits MAP_LIMITS = new PersistentMapStorage.Limits(40 * 1024 * 1024, 4096, MAX, 4096, 8);
     private static List<ContractsClosurePublicationReceipt> receipts;
 
+    @Test void controlledWarmReferenceUsesOwnerAuthenticatedCertificateWithoutReadingPayloadAgain() {
+        try (var binding = new Binding(new Bytes()); var cache = new RootedStorageCache(256L * 1024 * 1024, 8, 256L * 1024 * 1024)) {
+            String family = "test/complete-publication/" + MAX;
+            int[] decodes = {0};
+            var payloads = new PersistentMapCodec<ContractsClosurePublicationReceipt>() {
+                public String identity() { return binding.legacy.identity(); }
+                public ContractsClosurePublicationReceipt prepareForStorage(ContractsClosurePublicationReceipt value) {
+                    return binding.legacy.prepareForStorage(value);
+                }
+                public byte[] encode(ContractsClosurePublicationReceipt value) {
+                    byte[] retained = cache.canonicalEncoding(family, value);
+                    return retained == null ? binding.legacy.encode(value) : retained;
+                }
+                public ContractsClosurePublicationReceipt decode(byte[] frame) {
+                    return cache.decodeCanonical(family, frame, bytes -> {
+                        decodes[0]++; return binding.legacy.decode(bytes);
+                    }, binding.legacy::encode);
+                }
+            };
+            var controlled = RootedEngineStorage.controlledNamespace(binding.bytes);
+            StoredClosureReceiptReferenceCodec.RetainedCanonical proof = (value, digest, length) ->
+                    cache.hasCanonicalEncoding(family, value, digest, length);
+            byte[] descriptor;
+            try (var references = new StoredClosureReceiptReferenceCodec(controlled, MAX, payloads, proof)) {
+                descriptor = references.prepareEncoding(receipts.get(0)).consume(references);
+                var first = references.decode(descriptor); int reads = binding.bytes.reads.size();
+                int coldDecodes = decodes[0];
+                for (int n = 0; n < 100; n++) {
+                    assertSame(first, references.decode(descriptor));
+                    assertArrayEquals(descriptor, references.encode(first));
+                }
+                assertEquals(reads, binding.bytes.reads.size(), "100 warm reference reads must transfer zero payload bytes");
+                assertEquals(coldDecodes, decodes[0]);
+                cache.clear(); references.decode(descriptor);
+                assertTrue(binding.bytes.reads.size() > reads); assertEquals(coldDecodes + 1, decodes[0]);
+            }
+            int reads = binding.bytes.reads.size();
+            try (var newOwner = new StoredClosureReceiptReferenceCodec(controlled, MAX, payloads, proof)) {
+                newOwner.decode(descriptor); assertTrue(binding.bytes.reads.size() > reads,
+                        "The shared artifact does not authenticate storage in a new owner");
+            }
+            try (var strict = new StoredClosureReceiptReferenceCodec(binding.bytes, MAX, payloads, proof)) {
+                strict.decode(descriptor); reads = binding.bytes.reads.size(); strict.decode(descriptor);
+                assertTrue(binding.bytes.reads.size() > reads, "Raw/untrusted reads keep full integrity checks");
+            }
+            binding.bytes.records.clear();
+            try (var newOwner = new StoredClosureReceiptReferenceCodec(controlled, MAX, payloads, proof)) {
+                assertThrows(CoordinationObjectStorageException.class, () -> newOwner.decode(descriptor));
+            }
+        }
+    }
+
     @BeforeAll static void realCompletedReceipts() throws Exception {
         var completed = new ArrayList<ContractsClosurePublicationReceipt>();
         try (var fixture = new DocumentSessionStorageTest.Fixture()) {

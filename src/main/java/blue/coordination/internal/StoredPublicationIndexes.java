@@ -83,7 +83,8 @@ final class StoredPublicationIndexes implements AutoCloseable {
                             value -> Math.addExact(value.decoded().views().encodedBytes(), PROOF_DEPENDENCY_BYTES),
                             value -> scope.acceptViews(value.decoded().views()));
                     return decoded.decoded().value();
-                }), prepareClosure));
+                }), prepareClosure), (value, digest, length) -> cache != null
+                        && cache.hasCanonicalEncoding(publicationFamily, value, digest, length));
         closures = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, closureValues);
         frontiers = codecs.binding("publication/provider-frontier", EmbeddingBinding.TEXT_ORDER, codecs.text,
                 codec("provider-frontier", UnaryOperator.identity(), value -> SessionStorageWire.encode(limits.valueBytes(), out -> {

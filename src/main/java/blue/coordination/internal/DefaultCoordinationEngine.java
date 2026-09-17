@@ -1526,7 +1526,14 @@ public final class DefaultCoordinationEngine
             throw new IllegalArgumentException(
                     "expectedWorkIdentity must be a lowercase sha256 identity");
         }
-        ProcessingSelection next = auditNextProcessingSelection();
+        // Retain the exact head validated here for execution. Fairness is still
+        // evaluated on every command, not cached as part of the derived scan.
+        var driver = contractsClosureProfile.rootedCheckpoint()
+                ? new RootedCheckpointDriver(documents, contractsClosureAdapter) : null;
+        var head = driver == null ? null : contractsRecoveryState.rootedSchedule.next(
+                driver.scan(journal.entries(), null), false, Set.of());
+        ProcessingSelection next = head == null ? auditNextProcessingSelection()
+                : rootedSelection(head.selection());
         String actual = next.managedEpochApplicationWork()
                 .map(ManagedEpochApplicationWork::workIdentity)
                 .orElse(null);
@@ -1538,10 +1545,8 @@ public final class DefaultCoordinationEngine
                     "MANAGED_EPOCH_APPLICATION", next, expected);
         }
         if (contractsClosureProfile.rootedCheckpoint()) {
-            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter);
-            var selected = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
             long started = System.nanoTime();
-            var completed = executeScheduledRoot(selected);
+            var completed = executeScheduledRoot(Objects.requireNonNull(head));
             if (!completed.quiescent()) return completed;
             var remaining = driver.scan(journal.entries(), null);
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
@@ -1981,11 +1986,7 @@ public final class DefaultCoordinationEngine
             if (selected == null) return supplied.journalAdmissionAvailable()
                     || contractsJournalCoordinator.hasCompletableRootedTransport(scan)
                     ? ProcessingSelection.journal() : ProcessingSelection.none();
-            var next = selected.selection();
-            if (next.localHistorical() != null && next.historical() == null)
-                return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
-            return next.historical() == null ? ProcessingSelection.journal()
-                    : ProcessingSelection.managedEpochApplication(next.historical());
+            return rootedSelection(selected.selection());
         }
         Optional<ManagedEpochApplicationWork> managed =
                 nextFairManagedEpochApplicationWork();
@@ -2003,6 +2004,13 @@ public final class DefaultCoordinationEngine
         return managed
                 .map(ProcessingSelection::managedEpochApplication)
                 .orElseGet(ProcessingSelection::none);
+    }
+
+    private static ProcessingSelection rootedSelection(RootedCheckpointDriver.Selection next) {
+        if (next.localHistorical() != null && next.historical() == null)
+            return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
+        return next.historical() == null ? ProcessingSelection.journal()
+                : ProcessingSelection.managedEpochApplication(next.historical());
     }
 
     /** Mirrors managed round rollover without mutating the retained round. */

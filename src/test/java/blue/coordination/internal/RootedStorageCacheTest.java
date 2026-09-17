@@ -9,6 +9,22 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RootedStorageCacheTest {
+    @Test void descriptorProofIsExactBoundedAndDisappearsOnEviction() {
+        byte[] frame = {1, 2, 3};
+        try (var cache = new RootedStorageCache(10000, 1, 10000)) {
+            var value = cache.decodeCanonical("family/limit-3", frame, ignored -> new Object(), ignored -> frame);
+            String digest = PersistentMapStorage.digest(frame);
+            assertTrue(cache.hasCanonicalEncoding("family/limit-3", value, digest, 3));
+            assertFalse(cache.hasCanonicalEncoding("family/limit-4", value, digest, 3));
+            assertFalse(cache.hasCanonicalEncoding("family/limit-3", new Object(), digest, 3));
+            assertFalse(cache.hasCanonicalEncoding("family/limit-3", value, digest, 2));
+            assertFalse(cache.hasCanonicalEncoding("family/limit-3", value, "0".repeat(64), 3));
+            cache.decode("other", new byte[]{4}, Object::new);
+            assertFalse(cache.hasCanonicalEncoding("family/limit-3", value, digest, 3));
+            cache.clear();
+            assertFalse(cache.hasCanonicalEncoding("family/limit-3", value, digest, 3));
+        }
+    }
     @Test void exactFramesAndCodecFamiliesIsolateEntriesAndKeysAreOwned() {
         try (var cache = new RootedStorageCache(100_000, 10, 100_000)) {
             byte[] frame = {1, 2}; Object original = new Object();

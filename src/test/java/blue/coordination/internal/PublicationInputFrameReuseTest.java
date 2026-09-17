@@ -76,9 +76,12 @@ final class PublicationInputFrameReuseTest {
                 counts.clear();
                 var restored = codec.decodePublication(bytes, scope);
                 assertEquals(1, counts.get("invocation-decode"));
-                assertEquals(1, counts.get("invocation-encode"), "Complete envelope canonical equality still runs");
+                assertEquals(0, counts.getOrDefault("invocation-encode", 0),
+                        "Complete envelope equality reuses invocation bytes already checked by its full decoder");
                 assertSame(restored.managedSurfaceEvidence().originalInvocation(), restored.rootedTerminalEvidence().input());
                 assertArrayEquals(bytes, codec.encodePublication(restored, scope::addressOf));
+                assertEquals(1, counts.get("invocation-encode"),
+                        "The decoder's subframe certificate does not survive into a later encode call");
                 assertEquals(historical.attempt().processResult().gasTraceIdentity(), restored.attempt().processResult().gasTraceIdentity());
                 assertEquals(historical.attempt().processResult().totalGas(), restored.attempt().processResult().totalGas());
             }

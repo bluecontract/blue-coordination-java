@@ -28,6 +28,30 @@ import static org.junit.jupiter.api.Assertions.*;
 final class StoredPersistentOrderedMapTest {
     @TempDir Path temporary;
 
+    @Test void controlledOwnerReusesSmallAuthenticatedNodesButNewOwnersAndRawStoresReadAgain() {
+        try (var cache = new RootedStorageCache(4 * 1024 * 1024, 100, 1024 * 1024)) {
+        var rows = new Rows(); var map = StoredMapFixtures.open(rows, null);
+        for (int n = 0; n < 40; n++) map = map.put(n, "value-" + n).map();
+        byte[] root = map.storedRootDescriptor();
+        var controlled = RootedEngineStorage.controlledNamespace(rows, cache);
+        var selected = StoredMapFixtures.open(controlled, root);
+        assertEquals("value-21", selected.get(21)); int cold = rows.reads;
+        for (int n = 0; n < 100; n++) assertEquals("value-21", selected.get(21));
+        assertEquals(cold, rows.reads, "Repeated reads reuse this owner's authenticated structural frames");
+        var reopened = StoredMapFixtures.open(controlled, root);
+        assertEquals("value-21", reopened.get(21)); assertTrue(rows.reads > cold);
+        var strict = StoredMapFixtures.open(rows, root); int before = rows.reads;
+        strict.get(21); strict.get(21); assertTrue(rows.reads > before);
+        assertEquals("changed", selected.put(21, "changed").map().get(21));
+        assertEquals("value-21", selected.get(21), "Old immutable root remains exact after path copying");
+        int beforeClear = rows.reads; cache.clear(); selected.get(21);
+        assertTrue(rows.reads > beforeClear, "Process cache clear also invalidates non-owning node handles");
+        rows.bytes.clear();
+        assertThrows(CoordinationObjectStorageException.class, () -> StoredMapFixtures.open(controlled, root));
+        assertThrows(CoordinationObjectStorageException.class, () -> strict.get(21));
+        }
+    }
+
     @Test void preparedEncodingKeepsGenericPreparationAndCanonicalValidationOrder() {
         var calls = new ArrayList<String>();
         var keys = new PersistentMapCodec<Integer>() {

@@ -36,6 +36,10 @@ final class PersistentMapStorage<K, V> {
     private final Limits limits;
     private final ThreadLocal<LinkedHashMap<String, NodeBytes>> opened = new ThreadLocal<>();
     private final ThreadLocal<HashSet<String>> created = new ThreadLocal<>();
+    // Weak owner handles only; actual frames share the host's process cache budget.
+    private final LinkedHashMap<String, java.lang.ref.WeakReference<NodeBytes>> authenticated = new LinkedHashMap<>(16, .75f, true);
+    private final RootedStorageCache sharedCache;
+    private final String nodeFamily;
 
     /** Explicit physical bounds, never a protocol gas or closure limit. */
     record Limits(int nodeBytes, int keyBytes, int valueBytes, int descriptorBytes,
@@ -59,6 +63,10 @@ final class PersistentMapStorage<K, V> {
         this.valueIdentity = identity(values.identity());
         this.objects = Objects.requireNonNull(objects, "objects");
         this.limits = Objects.requireNonNull(limits, "limits");
+        sharedCache = RootedEngineStorage.controlledCache(objects);
+        nodeFamily = "blue-coordination/map-node/1/" + this.orderingIdentity.length() + ":" + this.orderingIdentity
+                + keyIdentity.length() + ":" + keyIdentity + valueIdentity.length() + ":" + valueIdentity
+                + "/" + limits.nodeBytes() + "/" + limits.keyBytes() + "/" + limits.valueBytes();
     }
 
     <T> T scoped(Supplier<T> operation) {
@@ -189,6 +197,13 @@ final class PersistentMapStorage<K, V> {
         LinkedHashMap<String, NodeBytes> cache = opened.get();
         require(cache != null, "Node access outside bounded operation scope");
         NodeBytes data = cache.get(expected.digest());
+        if (data == null && sharedCache != null) {
+            synchronized (authenticated) {
+                var weak = authenticated.get(expected.digest());
+                var known = weak == null ? null : weak.get();
+                if (known != null && sharedCache.retainsDecoded(nodeFamily, expected.digest(), known)) data = known;
+            }
+        }
         if (data == null) {
             byte[] bytes;
             try {
@@ -197,33 +212,55 @@ final class PersistentMapStorage<K, V> {
             } catch (RuntimeException failure) { throw invalid("Immutable node read unavailable", failure); }
             bytes = boundedCopy(bytes, limits.nodeBytes(), "node");
             require(expected.digest().equals(digest(bytes)), "Immutable node digest mismatch");
-            try (DataInputStream input = input(bytes)) {
-                require(input.readInt() == NODE_MAGIC, "Unknown node format");
-                readBinding(input);
-                byte[] key = readBytes(input, limits.keyBytes());
-                byte[] value = readBytes(input, limits.valueBytes());
-                Handle left = readHandle(input), right = readHandle(input);
-                int height = input.readInt(), size = input.readInt();
-                require(input.available() == 0, "Trailing node bytes");
-                require(height == 1 + Math.max(height(left), height(right))
-                        && size == 1L + size(left) + size(right), "Inconsistent node dimensions");
-                // Existing AVL rotations allocate transient unbalanced nodes. Only
-                // nodes constructed in this operation can have that temporary shape.
-                int maximumBalance = created.get().contains(expected.digest()) ? 2 : 1;
-                require(Math.abs(height(left) - height(right)) <= maximumBalance,
-                        "Invalid AVL branch heights");
-                decode(keys, key, limits.keyBytes());
-                // The authenticated, bounded value frame is interpreted only
-                // when selected. Traversal and path copying are structural;
-                // opening a root is not an audit of every retained payload.
-                data = new NodeBytes(key, value, left, right, height, size);
-            } catch (IOException failure) { throw invalid("Malformed node bytes", failure); }
-            if (cache.size() >= limits.cachedNodes()) cache.remove(cache.keySet().iterator().next());
-            cache.put(expected.digest(), data);
+            boolean constructing = created.get().contains(expected.digest());
+            byte[] frame = bytes;
+            if (sharedCache == null || constructing) {
+                data = decodeNode(frame, constructing);
+                if (sharedCache != null && Math.abs(height(data.left()) - height(data.right())) <= 1) {
+                    NodeBytes verified = data;
+                    data = sharedCache.decode(nodeFamily, frame, () -> verified);
+                }
+            } else data = sharedCache.decode(nodeFamily, frame, () -> decodeNode(frame, false));
+            rememberAuthenticated(expected.digest(), data);
         }
+        if (cache.size() >= limits.cachedNodes()) cache.remove(cache.keySet().iterator().next());
+        cache.put(expected.digest(), data);
         require(expected.height() == data.height() && expected.size() == data.size(),
                 "Node disagrees with authenticated parent dimensions");
         return data;
+    }
+
+    private NodeBytes decodeNode(byte[] bytes, boolean constructing) {
+        try (DataInputStream input = input(bytes)) {
+            require(input.readInt() == NODE_MAGIC, "Unknown node format");
+            readBinding(input);
+            byte[] key = readBytes(input, limits.keyBytes());
+            byte[] value = readBytes(input, limits.valueBytes());
+            Handle left = readHandle(input), right = readHandle(input);
+            int height = input.readInt(), size = input.readInt();
+            require(input.available() == 0, "Trailing node bytes");
+            require(height == 1 + Math.max(height(left), height(right))
+                    && size == 1L + size(left) + size(right), "Inconsistent node dimensions");
+            // Existing AVL rotations allocate transient unbalanced nodes. Only
+            // nodes constructed in this operation can have that temporary shape.
+            int maximumBalance = constructing ? 2 : 1;
+            require(Math.abs(height(left) - height(right)) <= maximumBalance,
+                    "Invalid AVL branch heights");
+            decode(keys, key, limits.keyBytes());
+            // The authenticated, bounded value frame is interpreted only
+            // when selected. Traversal and path copying are structural;
+            // opening a root is not an audit of every retained payload.
+            return new NodeBytes(key, value, left, right, height, size);
+        } catch (IOException failure) { throw invalid("Malformed node bytes", failure); }
+    }
+
+    private void rememberAuthenticated(String digest, NodeBytes value) {
+        if (sharedCache == null
+                || Math.abs(height(value.left()) - height(value.right())) > 1) return;
+        synchronized (authenticated) {
+            while (authenticated.size() >= limits.cachedNodes()) authenticated.remove(authenticated.keySet().iterator().next());
+            authenticated.put(digest, new java.lang.ref.WeakReference<>(value));
+        }
     }
 
     private record Handle(String digest, int height, int size) {

@@ -50,7 +50,11 @@ final class PublicationReceiptStorageCodec {
     }
 
     byte[] encodePublication(ContractsClosurePublicationReceipt value, Function<RootedDocumentView, String> retainView) {
-        var frames = new PublicationFrames();
+        return encodePublication(value, retainView, new PublicationFrames());
+    }
+
+    private byte[] encodePublication(ContractsClosurePublicationReceipt value,
+            Function<RootedDocumentView, String> retainView, PublicationFrames frames) {
         return SessionStorageWire.encode(maximumBytes, out -> {
             out.text(PUBLICATION); out.text(value.publicationIdentity()); list(out, value.documentIds(), (w, id) -> w.text(id.value()));
             core.attempt(out, value.attempt()); out.longValue(value.automaticRetryCount()); surface(out, value.managedSurfaceEvidence(), frames);
@@ -75,7 +79,8 @@ final class PublicationReceiptStorageCodec {
                 var rejected = in.bool() ? terminal == null ? plans.draftPlan(in) : terminal.storedState().managedDraftPlan() : null;
                 return new ContractsClosurePublicationReceipt(identity, members, attempt, retries, surface, rejected, terminal);
             });
-            require(Arrays.equals(bytes, encodePublication(value, scope::addressOf)), "Noncanonical publication receipt"); return value;
+            require(Arrays.equals(bytes, encodePublication(value, scope::addressOf, frames.canonical)),
+                    "Noncanonical publication receipt"); return value;
         });
     }
 
@@ -176,10 +181,15 @@ final class PublicationReceiptStorageCodec {
     private final class PublicationInputs {
         private byte[] firstFrame;
         private ClosureInvocationInput firstInput;
+        private final PublicationFrames canonical = new PublicationFrames();
 
         ClosureInvocationInput invocation(byte[] bytes) {
             if (firstFrame != null && Arrays.equals(firstFrame, bytes)) return firstInput;
             var input = evidence.decodeInvocation(bytes);
+            // The complete Language invocation decoder already performed its own
+            // exact canonical byte comparison. Preserve that private frame for
+            // this enclosing receipt's comparison only; do not encode it again.
+            canonical.inputs.put(input, bytes.clone());
             frameEncoded.accept("invocation-decode", input);
             if (firstFrame == null) { firstFrame = bytes; firstInput = input; }
             return input;

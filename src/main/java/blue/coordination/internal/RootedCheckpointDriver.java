@@ -22,8 +22,15 @@ final class RootedCheckpointDriver {
     }
 
     Selection select(DocumentId root, List<TimelineEntry> entries) {
-        return select(root, entries, RootedJoinEligibility.captureForRoot(documents, root));
+        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries)),
+                () -> select(root, entries, RootedJoinEligibility.captureForRoot(documents, root)),
+                selected -> !selected.blocked() && (selected.live() != null
+                        || selected.historical() != null || selected.localHistorical() != null),
+                "rooted.observation.selectionReuses");
     }
+
+    private record SelectionKey(DocumentId root, List<TimelineEntry> entries) { }
+    private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
 
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
     boolean completeBefore(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey cutoff) {
@@ -97,6 +104,13 @@ final class RootedCheckpointDriver {
 
     /** A transport entry is not a substitute for each root's retained progress. */
     Scan scan(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
+        return adapter.reuseObservation(new ScanKey(List.copyOf(entries), cutoff),
+                () -> scanFresh(entries, cutoff),
+                selected -> !selected.heads().isEmpty() && selected.blockedRoots().isEmpty(),
+                "rooted.observation.scanReuses");
+    }
+
+    private Scan scanFresh(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
         List<Head> heads = new ArrayList<>();
         Set<DocumentId> blocked = new LinkedHashSet<>();
         var joins = RootedJoinEligibility.capture(documents);

@@ -216,3 +216,13 @@ does not need; it was corrected to exercise an actual late outer-frame size
 failure and retry. Production code did not change after `check06`. This is narrow
 qualification, not full-graph performance or whole-POC acceptance. Diagnostic evidence lives at
 `processing-measurement13/cost36/receipt-encode-probe01` in the POC evidence root.
+## Packet-local canonical invocation handoff
+
+After its full invocation decoder has checked canonical byte equality, the
+receipt decoder retains that exact private subframe for the enclosing receipt's
+canonical comparison. It no longer serializes the invocation a second time.
+The first invocation decode, complete receipt comparison, terminal binding and
+all limits remain. A differing second invocation is decoded independently.
+The bytes are copied, bounded by the enclosing packet, and discarded with that
+synchronous call; a subsequent encode still uses the ordinary encoder. This is
+not a fresh-result trust flag, cross-call identity cache or publication proof.

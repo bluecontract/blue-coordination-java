@@ -32,9 +32,21 @@ public final class RootedEngineStorage {
         return objects instanceof ControlledNamespace;
     }
 
+    static CoordinationImmutableObjectStore controlledNamespace(CoordinationImmutableObjectStore objects, RootedStorageCache cache) {
+        return new ControlledNamespace(objects, cache);
+    }
+
+    static RootedStorageCache controlledCache(CoordinationImmutableObjectStore objects) {
+        return objects instanceof ControlledNamespace selected ? selected.cache : null;
+    }
+
     private static final class ControlledNamespace implements CoordinationImmutableObjectStore {
         private final CoordinationImmutableObjectStore delegate;
-        private ControlledNamespace(CoordinationImmutableObjectStore delegate) { this.delegate = delegate; }
+        private final RootedStorageCache cache;
+        private ControlledNamespace(CoordinationImmutableObjectStore delegate) { this(delegate, null); }
+        private ControlledNamespace(CoordinationImmutableObjectStore delegate, RootedStorageCache cache) {
+            this.delegate = delegate; this.cache = cache;
+        }
         @Override public byte[] putIfAbsent(String address, byte[] bytes) { return delegate.putIfAbsent(address, bytes); }
         @Override public Optional<byte[]> get(String address, int maximumBytes) { return delegate.get(address, maximumBytes); }
     }
@@ -128,6 +140,7 @@ public final class RootedEngineStorage {
     }
 
     private RootedEngineStorage(CoordinationImmutableObjectStore objects, Limits limits, RootedStorageCache cache) {
+        if (isControlledNamespace(objects) && cache != null) objects = controlledNamespace(objects, cache);
         this.objects = Objects.requireNonNull(objects); this.limits = Objects.requireNonNull(limits);
         sessions = new DocumentSessionStorage(objects, limits.sessions(), cache);
         documents = new StoredDocumentStore(objects, limits.indexes(), limits.logs(), limits.sessions(), cache);
