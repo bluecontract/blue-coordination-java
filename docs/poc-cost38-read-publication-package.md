@@ -1,7 +1,8 @@
 # Cost38: repeated reads and publication — one POC package
 
-Status: implemented candidate; combined verification and timing pending. This is
-not a semantic change or a release proposal. The preceding measured candidate
+Status: focused controls and original long-graph/restart pass; the <60-second
+complete-operation latency gate is **not met**. This is not a semantic change or
+a release proposal. The preceding measured candidate
 completed the original ring/restart, but its two attachments took 272.402 and
 888.102 seconds. Measurements are retained separately in `processing-measurement13/cost37/ANALYSIS.md`.
 
@@ -60,3 +61,24 @@ only SQL projection needs an explicit durable authority, not an assumed cache hi
    costs visible if they remain a bottleneck; do not loosen correctness assertions.
 
 No upstream/other-engineer branch or PR is changed. No library is published.
+
+## Measured outcome, 17 September 2026
+
+Coordination commit `72e9bcd8`: 121/121 selected controls pass with Language
+`f7a9eb6a`. After Language's cache-disabled-call guard correction (`833aa953`),
+the relevant codec/failure/selection subset passes 24/24. Host controls pass
+195/195 (132 PostgreSQL, 63 unit/projection); Language controls pass 49/49.
+These are scoped controls, not the full regression inventory.
+
+The final tuple (`833aa953` / `72e9bcd8` / MyOS `68c74240`) passes the original
+full graph and cold restart on fresh PostgreSQL. Step 7 takes 267.575 seconds;
+step 13 takes 771.480 seconds. Total through restart is 1,220.006 seconds.
+The complete scenario still makes 272 host commands; its 52/83 slow-window
+managed applications have no retries. No semantic step was removed.
+
+The small storage/selection controls are insufficient evidence of useful reuse
+across the actual long-history owner lifecycle. In particular, weak observations
+can disappear with GC and first reads in new owners still authenticate/adopt
+dependencies. Their real hit rates and cost must be measured before extending
+the optimization. This timing run had no detailed method profiler; it does not
+establish which one of those mechanisms now dominates.
