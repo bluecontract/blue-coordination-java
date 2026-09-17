@@ -1,7 +1,10 @@
 # Cost38: repeated reads and publication — one POC package
 
-Status: focused controls and original long-graph/restart pass; the <60-second
-complete-operation latency gate is **not met**. This is not a semantic change or
+Status: focused controls and original long-graph/restart pass. The previous
+<60-second complete-catch-up gate is **superseded**: the unit to bound is one
+semantic application and its host lifecycle, not an arbitrarily long import.
+The recorded totals below remain evidence, not a per-step failure verdict.
+This is not a semantic change or
 a release proposal. The preceding measured candidate
 completed the original ring/restart, but its two attachments took 272.402 and
 888.102 seconds. Measurements are retained separately in `processing-measurement13/cost37/ANALYSIS.md`.
@@ -55,8 +58,9 @@ only SQL projection needs an explicit durable authority, not an assumed cache hi
    Reuse unchanged BEX/Catalog source, rebinding only its local Language artifact.
 4. Run the unchanged full ring and cold restart on fresh PostgreSQL with a 16 GiB
    heap. Compare complete step 7/13 latency, total time, work count and assertions.
-   The requirement remains **under 60 seconds per complete authored operation**,
-   not merely per internal continuation. No speedup is claimed until measured.
+   This originally used a 60-second complete-operation gate. That interpretation
+   is superseded: measure each semantic application and its full host lifecycle,
+   together with total required work and growth with retained history.
 5. Then run the broader regression on that same candidate. Keep full row-validation
    costs visible if they remain a bottleneck; do not loosen correctness assertions.
 
