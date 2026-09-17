@@ -164,9 +164,9 @@ jobs:
       - name: Verify Java 17 gate and restore staged artifacts
         run: node .github/scripts/release-handoff.js verify "$RUNNER_TEMP/release-handoffs"
 
-      - name: Push verified release commit
+      - name: Reserve verified release commit and tag
         if: ${{ inputs.channel == 'rc' }}
-        run: git push --no-follow-tags origin HEAD:refs/heads/next
+        run: git push --atomic --no-follow-tags origin HEAD:refs/heads/next "refs/tags/v$RELEASE_VERSION:refs/tags/v$RELEASE_VERSION"
       # stageRelease passed on Java 17. The job-bound archive hash and full
       # receipts are checked above. Deploy those bytes without repeating gates.
 
@@ -189,10 +189,6 @@ jobs:
           JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
           JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
         run: python3 .github/scripts/wait-maven-central.py build/jreleaser/output.properties --receipt build/jreleaser/maven-central-publication.json
-
-      - name: Push published release tag
-        if: ${{ inputs.channel == 'rc' }}
-        run: git push --no-follow-tags origin "refs/tags/v$RELEASE_VERSION"
 
       - name: Archive publication evidence
         if: always()

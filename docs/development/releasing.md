@@ -81,11 +81,11 @@ The shared workflow:
     commit, source tree, version, workflow run, dependency lock, complete test
     inventories, topology and extracted-source receipts, and identical JARs,
     POM and source archive; it also checks Java 17 readiness and staged bytes;
-11. restores the verified Java 17 staging output and pushes the verified release
-    commit to `next` without publishing tags for RCs; a competing change to
-    `next` rejects this push before any external deployment;
+11. restores the verified Java 17 staging output and atomically reserves the
+    exact RC commit on `next` and its annotated version tag. A competing branch
+    update or conflicting tag rejects the entire push before external deployment;
 12. deploys the signed bundle to Maven Central;
-13. for RCs, pushes only the release tag after deployment succeeds;
+13. waits for Maven Central to confirm publication;
 14. archives JARs, source distribution, reports, test results, staging output,
     and JReleaser evidence.
 
@@ -103,23 +103,30 @@ contain all their original reports, test results, gas evidence, source
 distributions, JARs and publication files. Failed or cancelled jobs upload
 their available diagnostic evidence separately.
 
-The tag is intentionally absent while Maven Central publication is pending.
-A failed gate or deployment leaves the remote tag untouched.
-The verified release commit is already on the remote before deployment starts.
-If `next` advances during deployment, the final tag-only push leaves the newer
-branch head in place and still identifies the exact published commit. A failed
-deployment can therefore leave a verified release commit on `next` without a
-published tag; the commit message alone is not evidence of publication.
+The remote RC tag reserves a verified version before upload; it is not proof
+that Maven Central publication succeeded. A failed verification gate creates no
+remote reservation. A failed deployment or publication wait leaves the reserved
+commit and tag in place, so a later preparation selects a higher RC instead of
+reusing a potentially uploaded version. The exact release-authority check still
+applies: a higher RC requires an explicitly updated release decision. Automation
+does not rewrite that authority or remove reservations to retry a used version.
+Automatic `chore: release ...` pushes enter a separate skip concurrency group;
+actual and manually dispatched RC runs retain the shared serialized queue.
 
-The separate Build workflow independently repeats `releaseCheck` on Java 17
-and Java 21 and runs `verifyRcReadiness` on the canonical Java 17 lane.
+Core verification archives retain JUnit XML on both success and failure so
+individual test durations can be examined alongside aggregate timing receipts.
 
-All three workflows select four independent test JVMs, including the
-extracted-source smoke. The runtime matrix and all release gates remain in
-place. Test execution-scope receipts and rooted gas evidence are included in
-the uploaded evidence.
+The separate Build workflow independently repeats `releaseCheck` and
+`verifyRcReadiness` on Java 17.
 
-### Repeated post-merge verification
+The workflows run on Java 17 with two test JVMs and two concurrent test
+methods per JVM, including the extracted-source smoke. Test execution-scope
+receipts and rooted gas evidence are included in the uploaded evidence.
+
+### Historical baseline: repeated post-merge verification
+
+The following measurements describe the earlier Java 17/21 workflow, not the
+current Java 17 configuration.
 
 The merge push still starts both the Build matrix and Release RC, and the
 release commit starts the Build matrix again. These independent Build runs
