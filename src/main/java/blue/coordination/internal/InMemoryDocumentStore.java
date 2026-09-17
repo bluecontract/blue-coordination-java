@@ -590,13 +590,15 @@ final class InMemoryDocumentStore {
             ManagedEpochApplicationReceipt application) {
         ContractsClosurePublicationReceipt legacy = state.closurePublicationReceipts().get(application.workIdentity());
         if (legacy != null) return Optional.of(legacy);
-        List<ContractsClosurePublicationReceipt> matches = state.closurePublicationReceipts().values().stream()
-                .filter(receipt -> receipt.attempt().processResult().commits())
-                .filter(receipt -> receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity()))
-                .filter(receipt -> receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
-                .toList();
-        if (matches.size() > 1) throw new IllegalStateException("Ambiguous retained rooted application result");
-        return matches.stream().findFirst();
+        String publicationIdentity = state.closureApplicationResults().publication(
+                application.contractsResultIdentity(), application.commitCompanionIdentity());
+        if (publicationIdentity == null) return Optional.empty();
+        var receipt = state.closurePublicationReceipts().get(publicationIdentity);
+        if (receipt == null || !receipt.attempt().processResult().commits()
+                || !receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity())
+                || !receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
+            throw new IllegalStateException("Retained application result differs from its publication index");
+        return Optional.of(receipt);
     }
 
     synchronized Optional<ManagedEpochApplicationWork> catchUpWork(
@@ -935,6 +937,7 @@ final class InMemoryDocumentStore {
         private final Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts;
         private final RootedProviderFrontiers rootedProviderFrontiers;
+        private final ClosureApplicationResultIndex closureApplicationResults;
         private final ManagedEpochReceiptStore managedEpochReceipts;
         private final CatchUpPlanStore catchUpPlans;
 
@@ -1155,6 +1158,7 @@ final class InMemoryDocumentStore {
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
             this.rootedProviderFrontiers = RootedProviderFrontiers.from(processReceipts.values());
+            this.closureApplicationResults = ClosureApplicationResultIndex.from(processReceipts.values());
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1180,6 +1184,7 @@ final class InMemoryDocumentStore {
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceiptIndex,
                 RootedProviderFrontiers rootedProviderFrontiers,
+                ClosureApplicationResultIndex closureApplicationResults,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             this.sessionIndex = Objects.requireNonNull(
@@ -1223,6 +1228,7 @@ final class InMemoryDocumentStore {
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
             this.rootedProviderFrontiers = Objects.requireNonNull(rootedProviderFrontiers, "rootedProviderFrontiers");
+            this.closureApplicationResults = Objects.requireNonNull(closureApplicationResults, "closureApplicationResults");
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1248,6 +1254,7 @@ final class InMemoryDocumentStore {
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceipts,
                 RootedProviderFrontiers rootedProviderFrontiers,
+                ClosureApplicationResultIndex closureApplicationResults,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             return new StoreState(
@@ -1266,6 +1273,7 @@ final class InMemoryDocumentStore {
                     admissionReceipts,
                     closurePublicationReceipts,
                     rootedProviderFrontiers,
+                    closureApplicationResults,
                     managedEpochReceipts,
                     catchUpPlans);
         }
@@ -1300,6 +1308,7 @@ final class InMemoryDocumentStore {
                 long replacementIndexGeneration) {
             // A full reconstruction must not silently discard an unverified supplied frontier projection.
             rootedProviderFrontiers.rows();
+            closureApplicationResults.rows();
             List<ComponentSnapshot> retainedComponents = componentStates()
                     .stream()
                     .filter(component -> component.orderedMemberDocumentIds()
@@ -1430,6 +1439,7 @@ final class InMemoryDocumentStore {
         }
 
         RootedProviderFrontiers rootedProviderFrontiers() { return rootedProviderFrontiers; }
+        ClosureApplicationResultIndex closureApplicationResults() { return closureApplicationResults; }
 
         ManagedEpochReceiptStore managedEpochReceipts() {
             return managedEpochReceipts;
@@ -1453,6 +1463,7 @@ final class InMemoryDocumentStore {
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
                     rootedProviderFrontiers,
+                    closureApplicationResults,
                     Objects.requireNonNull(
                             replacement, "managedEpochReceipts"),
                     catchUpPlans);
@@ -1479,6 +1490,7 @@ final class InMemoryDocumentStore {
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
                     rootedProviderFrontiers,
+                    closureApplicationResults,
                     managedEpochReceipts,
                     Objects.requireNonNull(replacement, "catchUpPlans"));
         }

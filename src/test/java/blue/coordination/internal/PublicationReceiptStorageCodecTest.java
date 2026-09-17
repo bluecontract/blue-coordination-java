@@ -89,6 +89,10 @@ final class PublicationReceiptStorageCodecTest {
             assertTrue(outcome.attempt().isComplete()); assertTrue(outcome.attempt().processResult().commits()); assertFalse(outcome.published());
             var original = f.engine.documents().closurePublicationReceipt(outcome.publicationIdentity()).orElseThrow();
             assertNotNull(original.rejectedDraftPlan()); assertTrue(original.attempt().processResult().totalGas() > 0);
+            assertEquals(original.publicationIdentity(), f.engine.documents().storedState().closureApplicationResults().publication(
+                    original.attempt().processResult().outputClosureIdentity(),
+                    original.attempt().processResult().commitCompanion().companionIdentity()),
+                    "Application selection uses PROCESS commits, not final publication commits");
             var storage = new DocumentSessionStorage(new Bytes(), LIMITS); var codec = new PublicationReceiptStorageCodec(MAX, 256);
             byte[] bytes = codec.encodePublication(original, storage::retainView); int reads = f.reads.get();
             try (var scope = storage.openScope()) {

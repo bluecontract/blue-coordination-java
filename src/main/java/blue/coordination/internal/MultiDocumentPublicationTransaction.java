@@ -1067,6 +1067,7 @@ final class MultiDocumentPublicationTransaction {
                 resultingClosurePublicationReceipts =
                 before.closurePublicationReceiptIndex();
         RootedProviderFrontiers resultingProviderFrontiers = before.rootedProviderFrontiers();
+        ClosureApplicationResultIndex resultingApplicationResults = before.closureApplicationResults();
         if (stagedClosurePublicationReceipt != null) {
             PersistentOrderedMap.Mutation<String,
                     ContractsClosurePublicationReceipt> mutation =
@@ -1075,6 +1076,7 @@ final class MultiDocumentPublicationTransaction {
                             stagedClosurePublicationReceipt);
             resultingClosurePublicationReceipts = mutation.map();
             resultingProviderFrontiers = resultingProviderFrontiers.withReceipt(stagedClosurePublicationReceipt);
+            resultingApplicationResults = resultingApplicationResults.withReceipt(stagedClosurePublicationReceipt);
             receiptComparisons = Math.addExact(
                     receiptComparisons, mutation.comparisons());
             receiptNodesCopied = Math.addExact(
@@ -1122,6 +1124,7 @@ final class MultiDocumentPublicationTransaction {
                         resultingAdmissionReceipts,
                         resultingClosurePublicationReceipts,
                         resultingProviderFrontiers,
+                        resultingApplicationResults,
                         resultingManagedEpochReceipts,
                         resultingCatchUpPlans);
         failureInjector.accept(FailurePoint.BEFORE_SWAP);

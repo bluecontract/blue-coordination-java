@@ -24,6 +24,21 @@ final class RootedLocalHistoryRecoveryTest {
             assertEquals(ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION, selection.kind());
             assertEquals(scenario.root.id(), selection.rootedRetainedRoot().orElseThrow());
             var global = scenario.f.blue.advanced().auditNextProcessingSelection();
+            String workIdentity = selection.managedEpochApplicationWork().orElseThrow().workIdentity();
+            String missingWork = "sha256:" + "0".repeat(64);
+            String otherMissingWork = "sha256:" + "1".repeat(64);
+            var batch = scenario.f.blue.advanced().auditManagedEpochApplicationWorks(
+                    List.of(missingWork, workIdentity, otherMissingWork, workIdentity));
+            assertEquals(3, batch.size(), "One explicit observation per distinct requested identity");
+            assertEquals(scenario.f.blue.advanced().auditManagedEpochApplicationWork(workIdentity)
+                            .orElseThrow().workIdentity(),
+                    batch.get(workIdentity).orElseThrow().workIdentity());
+            assertEquals(java.util.Optional.empty(), batch.get(missingWork));
+            assertEquals(java.util.Optional.empty(), batch.get(otherMissingWork));
+            assertThrows(UnsupportedOperationException.class, batch::clear);
+            assertTrue(scenario.f.blue.advanced().auditManagedEpochApplicationWorks(List.of()).isEmpty());
+            assertEquals(heads, scenario.heads(), "Batched discovery cannot publish or reserve work");
+            assertEquals(histories, completeHistories(scenario));
             for (int audit = 0; audit < 3; audit++) {
                 assertSameSelection(selection, scenario.f.blue.advanced().auditNextRootProcessingSelection(scenario.root));
                 assertSameSelection(global, scenario.f.blue.advanced().auditNextProcessingSelection());
@@ -65,6 +80,10 @@ final class RootedLocalHistoryRecoveryTest {
             assertEquals(0L, replay.stats().committedTransitions());
             assertEquals(afterHeads, scenario.heads());
             assertEquals(afterHistories, completeHistories(scenario));
+            var afterBatch = scenario.f.blue.advanced().auditManagedEpochApplicationWorks(List.of(workIdentity, missingWork));
+            assertEquals(java.util.Optional.empty(), afterBatch.get(workIdentity),
+                    "A subsequent call must not retain the consumed pre-operation selection");
+            assertEquals(java.util.Optional.empty(), afterBatch.get(missingWork));
         }
     }
 

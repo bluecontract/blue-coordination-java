@@ -434,6 +434,7 @@ final class RuntimeDecodedArtifactsTest {
                 s.occurrenceInventoryGeneration(), s.componentIndex(), s.componentIndexGeneration(), s.graphGenerations(),
                 s.componentStateInventory(), s.closureSubscriptions(), s.outboxLog(), s.checkpointEvidenceLog(),
                 membership, s.admissionReceiptIndex(), closures.open(), s.rootedProviderFrontiers(),
+                s.closureApplicationResults(),
                 s.managedEpochReceipts(), s.catchUpPlans());
         var documents = new InMemoryDocumentStore(new EngineMetrics(), selected);
         documents.bindStoredPublicationReuse(owner.indexes.closureReuse());

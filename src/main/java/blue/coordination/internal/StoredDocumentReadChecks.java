@@ -55,6 +55,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
                 subscription(s.closureSubscriptions(), stage), s.outboxLog(), s.checkpointEvidenceLog(),
                 s.publicationReceiptIndex(), s.admissionReceiptIndex(), s.closurePublicationReceiptIndex(),
                 s.rootedProviderFrontiers(),
+                s.closureApplicationResults(),
                 receipt(s.managedEpochReceipts(), stage), catchUp(s.catchUpPlans(), stage));
     }
 

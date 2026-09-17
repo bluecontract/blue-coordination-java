@@ -259,6 +259,22 @@ public interface CoordinationEngine extends AutoCloseable {
     }
 
     /**
+     * Reads several exact work identities without reserving or executing them.
+     * Every requested identity is present in the returned map, including absence.
+     * Implementations may share pure discovery inside this call; its result is
+     * not a capability to execute work after the underlying state changes.
+     * @param workIdentities exact identities; duplicates are queried once
+     * @return immutable requested identity to current observation mapping
+     */
+    default java.util.Map<String, Optional<ManagedEpochApplicationWork>>
+            auditManagedEpochApplicationWorks(List<String> workIdentities) {
+        var selected = List.copyOf(Objects.requireNonNull(workIdentities, "workIdentities"));
+        var result = new java.util.LinkedHashMap<String, Optional<ManagedEpochApplicationWork>>();
+        for (String identity : selected) result.computeIfAbsent(identity, this::auditManagedEpochApplicationWork);
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    /**
      * Reads the exact lane that owns the next bounded processing turn.
      * Implementations without retained fair-lane scheduling report none.
      */

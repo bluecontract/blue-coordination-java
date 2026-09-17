@@ -23,6 +23,7 @@ final class StoredPublicationIndexes implements AutoCloseable {
     private final StoreIndexCodecs.Binding<String, ContractsClosureAdmissionReceipt> admissions;
     private final StoreIndexCodecs.Binding<String, ContractsClosurePublicationReceipt> closures;
     private final StoreIndexCodecs.Binding<String, RootedProviderFrontiers.Frontier> frontiers;
+    private final StoreIndexCodecs.Binding<String, ClosureApplicationResultIndex.Publications> applicationResults;
     private final StoreIndexCodecs.Binding<String, RootedDeclaredBirthRejection> rejections;
     private final StoredClosureReceiptReferenceCodec closureValues;
 
@@ -87,6 +88,16 @@ final class StoredPublicationIndexes implements AutoCloseable {
                 }), bytes -> SessionStorageWire.decode(bytes, limits.valueBytes(), in ->
                         new RootedProviderFrontiers.Frontier(in.text(in.remaining()), in.longValue(), order(in),
                                 in.text(in.remaining())))));
+        applicationResults = codecs.binding("publication/application-result", EmbeddingBinding.TEXT_ORDER, codecs.text,
+                codec("application-result", UnaryOperator.identity(), value -> SessionStorageWire.encode(limits.valueBytes(), out -> {
+                    out.integer(value.identities().size());
+                    for (String identity : value.identities()) out.text(identity);
+                }), bytes -> SessionStorageWire.decode(bytes, limits.valueBytes(), in -> {
+                    int size = in.integer(); require(size >= 1 && size <= 2, "Invalid application-result witness count");
+                    var identities = new java.util.ArrayList<String>(size);
+                    for (int i = 0; i < size; i++) identities.add(in.text(in.remaining()));
+                    return new ClosureApplicationResultIndex.Publications(identities);
+                })));
         rejections = codecs.binding("publication/declared-rejection", EmbeddingBinding.TEXT_ORDER, codecs.text,
                 codec("declared-rejection", value -> {
                     receipts.encodeRejection(value, scope::retainView); return value;
@@ -103,6 +114,8 @@ final class StoredPublicationIndexes implements AutoCloseable {
     PersistentOrderedMap<String, ContractsClosurePublicationReceipt> retainClosures(PersistentOrderedMap<String, ContractsClosurePublicationReceipt> rows) { return closures.retain(rows); }
     PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> openFrontiers(byte[] root) { return frontiers.open(root); }
     PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> retainFrontiers(PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> rows) { return frontiers.retain(rows); }
+    PersistentOrderedMap<String, ClosureApplicationResultIndex.Publications> openApplicationResults(byte[] root) { return applicationResults.open(root); }
+    PersistentOrderedMap<String, ClosureApplicationResultIndex.Publications> retainApplicationResults(PersistentOrderedMap<String, ClosureApplicationResultIndex.Publications> rows) { return applicationResults.retain(rows); }
     PersistentOrderedMap<String, RootedDeclaredBirthRejection> openRejections(byte[] root) { return rejections.open(root); }
     PersistentOrderedMap<String, RootedDeclaredBirthRejection> retainRejections(PersistentOrderedMap<String, RootedDeclaredBirthRejection> rows) { return rejections.retain(rows); }
 

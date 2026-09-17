@@ -336,6 +336,7 @@ final class StoredDocumentStoreTest {
                 s.occurrenceInventoryGeneration(), s.componentIndex(), s.componentIndexGeneration(), s.graphGenerations(),
                 s.componentStateInventory(), s.closureSubscriptions(), s.outboxLog(), s.checkpointEvidenceLog(),
                 s.publicationReceiptIndex(), admissions, s.closurePublicationReceiptIndex(), s.rootedProviderFrontiers(),
+                s.closureApplicationResults(),
                 s.managedEpochReceipts(), s.catchUpPlans());
     }
     private static void install(DocumentSessionStorageTest.Fixture f, InMemoryDocumentStore.StoreState state) throws Exception {

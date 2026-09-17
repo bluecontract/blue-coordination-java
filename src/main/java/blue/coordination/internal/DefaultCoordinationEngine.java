@@ -1938,6 +1938,30 @@ public final class DefaultCoordinationEngine
     }
 
     @Override
+    public synchronized Map<String, Optional<ManagedEpochApplicationWork>>
+            auditManagedEpochApplicationWorks(List<String> workIdentities) {
+        ensureOpen();
+        var identities = List.copyOf(Objects.requireNonNull(workIdentities, "workIdentities"));
+        var result = new LinkedHashMap<String, Optional<ManagedEpochApplicationWork>>();
+        for (String identity : identities) result.computeIfAbsent(identity, documents::catchUpWork);
+        if (contractsClosureProfile.rootedCheckpoint() && result.values().stream().anyMatch(Optional::isEmpty)) {
+            // One synchronized observation: no cache survives into another call,
+            // where document, journal or provider evidence may have changed.
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            for (var head : scan.heads()) {
+                var local = head.selection().localHistorical();
+                if (local == null) continue;
+                String identity = local.work().workIdentity();
+                // Keep direct managed-index precedence and first-match behavior
+                // identical to the individual query. Not-next is not absence.
+                if (result.containsKey(identity) && result.get(identity).isEmpty())
+                    result.put(identity, Optional.of(local.work()));
+            }
+        }
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    @Override
     public synchronized ProcessingSelection auditNextProcessingSelection() {
         return auditNextProcessingSelection(ProcessingAvailability.none());
     }

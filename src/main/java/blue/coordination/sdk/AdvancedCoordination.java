@@ -238,6 +238,20 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Observes exact work identities together, sharing discovery for this call.
+     * Absence is explicit for every requested identity, not inferred from the
+     * globally next work item. The observations do not reserve work.
+     * @param workIdentities identities to query; duplicates are collapsed
+     * @return immutable map including present and absent requested work
+     */
+    public java.util.Map<String, Optional<blue.coordination.api.ManagedEpochApplicationWork>>
+            auditManagedEpochApplicationWorks(List<String> workIdentities) {
+        var selected = List.copyOf(Objects.requireNonNull(workIdentities, "workIdentities"));
+        selected.forEach(identity -> requireIdentity(identity, "workIdentity"));
+        return runtime.engine().auditManagedEpochApplicationWorks(selected);
+    }
+
+    /**
      * Reads the exact next fair bounded lane without executing or reserving it.
      */
     public ProcessingSelection auditNextProcessingSelection() {
