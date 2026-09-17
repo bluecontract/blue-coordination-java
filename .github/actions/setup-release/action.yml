@@ -2,7 +2,7 @@ name: Set up release tools
 description: Pin the canonical compiler and selected test runtime for a release job.
 inputs:
   test-java:
-    description: Test runtime, 25
+    description: Test runtime, 17
     required: true
 runs:
   using: composite
@@ -11,11 +11,11 @@ runs:
       shell: bash
       run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/coordination-release-gradle" >> "$GITHUB_ENV"
 
-    - name: Set up Java 25
+    - name: Set up Java 17
       uses: actions/setup-java@v5
       with:
         distribution: temurin
-        java-version: '25'
+        java-version: '17'
         architecture: x64
         check-latest: false
 
@@ -25,8 +25,8 @@ runs:
         TEST_JAVA: ${{ inputs.test-java }}
       run: |
         set -euo pipefail
-        test "$TEST_JAVA" = "25"
-        toolchain_paths="$JAVA_HOME_25_X64"
+        test "$TEST_JAVA" = "17"
+        toolchain_paths="$JAVA_HOME_17_X64"
         mkdir -p "$GRADLE_USER_HOME"
         {
           echo "org.gradle.java.installations.auto-detect=false"

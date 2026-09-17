@@ -9,39 +9,39 @@ spec.loader.exec_module(support)
 class ReceiptTests(unittest.TestCase):
     def valid(self):
         return {'schema': 1, 'sha': 'a'*40, 'tree': 'b'*40, 'run': '123', 'attempt': '1',
-                'java': '25', 'lane': 'archive', 'success': True,
-                'commands': [{'args': a, 'exit': 0} for a in support.commands('archive', '25')],
+                'java': '17', 'lane': 'archive', 'success': True,
+                'commands': [{'args': a, 'exit': 0} for a in support.commands('archive', '17')],
                 'started': 100, 'finished': 200}
 
     def test_valid_receipt(self):
-        support.validate(self.valid(), self.valid(), 'archive', '25')
+        support.validate(self.valid(), self.valid(), 'archive', '17')
 
     def test_wrong_binding_or_failed_receipt(self):
         for field, value in [('sha','c'*40),('tree','d'*40),('run','124'),('attempt','2'),
                              ('java','21'),('lane','baseline'),('success',False)]:
             with self.subTest(field=field), self.assertRaises(ValueError):
-                support.validate(dict(self.valid(), **{field:value}), self.valid(), 'archive', '25')
+                support.validate(dict(self.valid(), **{field:value}), self.valid(), 'archive', '17')
 
     def test_incomplete_or_failed_commands(self):
         for commands in [[], [{'args':['jreleaserDeploy'], 'exit':0}],
-                         [{'args':a, 'exit':1} for a in support.commands('archive','25')]]:
+                         [{'args':a, 'exit':1} for a in support.commands('archive','17')]]:
             with self.assertRaises(ValueError):
-                support.validate(dict(self.valid(), commands=commands), self.valid(), 'archive','25')
+                support.validate(dict(self.valid(), commands=commands), self.valid(), 'archive','17')
 
     def test_invalid_time(self):
         for value in [99, float('nan'), float('inf')]:
             with self.assertRaises(ValueError):
-                support.validate(dict(self.valid(),finished=value),self.valid(),'archive','25')
+                support.validate(dict(self.valid(),finished=value),self.valid(),'archive','17')
 
     def test_command_scope_preserves_full_rc_gates(self):
-        self.assertIn('stageRelease', support.commands('core','25')[1])
-        self.assertIn('stageRelease', support.commands('core','25')[1])
-        self.assertNotIn('-x',str(support.commands('core','25')))
-        self.assertNotIn('jreleaser',str(support.commands('core','25')))
+        self.assertIn('stageRelease', support.commands('core','17')[1])
+        self.assertIn('stageRelease', support.commands('core','17')[1])
+        self.assertNotIn('-x',str(support.commands('core','17')))
+        self.assertNotIn('jreleaser',str(support.commands('core','17')))
 
     def test_commands_use_bounded_two_by_two_concurrency(self):
         for lane in ['core', 'archive']:
-            for command in support.commands(lane, '25'):
+            for command in support.commands(lane, '17'):
                 self.assertIn('-PtestMaxParallelForks=2', command)
                 self.assertIn('-PtestMethodParallelism=2', command)
                 self.assertIn('--max-workers=4', command)
@@ -66,15 +66,15 @@ class ReceiptTests(unittest.TestCase):
 
     def test_archive_proof_checks_all_statuses_and_exact_tests(self):
         proof={'schemaId':support.ARCHIVE_SCHEMA,'archiveSha256':'a'*64,'archiveName':'source.zip',
-               'coordinationVersion':'3.0.0-rc.11','java':'25','dependencyMode':'published-artifact',
+               'coordinationVersion':'3.0.0-rc.11','java':'17','dependencyMode':'published-artifact',
                'focusedTests':support.FOCUSED_TESTS,'focusedTasks':support.FOCUSED_TASKS,
                'testMaxParallelForks':2,'testMethodParallelism':2,'testMaxWorkers':4,
                **{name:'PASS' for name in support.ARCHIVE_STATUSES}}
-        support.validate_archive(proof,'25','a'*64,'source.zip','3.0.0-rc.11')
+        support.validate_archive(proof,'17','a'*64,'source.zip','3.0.0-rc.11')
         for field,value in [('archiveSha256','b'*64),('java','21'),('focusedTests',[]),('compileStatus','FAIL'),
                             ('testMaxParallelForks',4),('testMethodParallelism',1),('testMaxWorkers',2)]:
             with self.assertRaises(ValueError):
-                support.validate_archive(dict(proof,**{field:value}),'25','a'*64,'source.zip','3.0.0-rc.11')
+                support.validate_archive(dict(proof,**{field:value}),'17','a'*64,'source.zip','3.0.0-rc.11')
 
     def test_report_comparison_preserves_parameterized_display_name_multiplicity(self):
         p={'status':'PASS','topologyEvidenceVerified':True,'suites':{s:{'passed':True,'fullTask':True,

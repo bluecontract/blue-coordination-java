@@ -1359,7 +1359,7 @@ def verifyAcceptedBaseApiCompatibility = tasks.register(
                             + baselineJarSha256)
         }
         def launcher = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(25)
+            languageVersion = JavaLanguageVersion.of(17)
         }.get()
         String javapName = System.getProperty('os.name')
                 .toLowerCase(Locale.ROOT).contains('windows')

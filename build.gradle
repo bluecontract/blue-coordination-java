@@ -215,8 +215,8 @@ repositories {
 }
 
 java {
-    toolchain { languageVersion = JavaLanguageVersion.of(25) }
-    // The CI runtime changes to Java 25; published library compatibility stays 17.
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
+    // The CI runtime changes to Java 17; published library compatibility stays 17.
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
     withSourcesJar()
@@ -414,7 +414,7 @@ tasks.withType(Test).configureEach {
     javaLauncher = javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(
                 providers.gradleProperty('testJavaVersion')
-                        .getOrElse('25') as int)
+                        .getOrElse('17') as int)
     }
     maxParallelForks = testForks
     inputs.property('testMaxParallelForks', testForks)
@@ -491,7 +491,7 @@ def configureRound13EvidenceRuntime = { JavaExec task ->
     task.javaLauncher = javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(
                 providers.gradleProperty('testJavaVersion')
-                        .getOrElse('25') as int)
+                        .getOrElse('17') as int)
     }
     task.jvmArgs '-Xmx2g'
     task.outputs.upToDateWhen { false }
@@ -541,13 +541,13 @@ tasks.register('playgroundRuntimeCampaign', JavaExec) {
 
 tasks.register('cyclicPerformanceAcceptance', JavaExec) {
     group = 'verification'
-    description = 'Writes the dedicated Java 25 cyclic correctness and performance acceptance report.'
+    description = 'Writes the dedicated Java 17 cyclic correctness and performance acceptance report.'
     classpath = sourceSets.test.runtimeClasspath
     mainClass =
             'blue.coordination.internal.CyclicPerformanceAcceptance'
     dependsOn tasks.named(sourceSets.test.classesTaskName)
     javaLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(17)
     }
     jvmArgs '-Xms2g',
             '-Xmx2g',
@@ -899,7 +899,7 @@ tasks.register('verifySdkPublicApiBoundary') {
         include '**/*.java'
     }, sourceSets.main.output.classesDirs)
     def inspectionLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(17)
     }
     doLast {
         File sdkClasses = layout.buildDirectory.dir(
@@ -4318,7 +4318,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     inputs.file(coordinationSpecificationFile)
     inputs.property('dependencyMode', dependencyMode)
     inputs.property('testJavaVersion', providers.gradleProperty(
-            'testJavaVersion').getOrElse('25'))
+            'testJavaVersion').getOrElse('17'))
     inputs.property('testMaxParallelForks', testForks)
     inputs.property('testMethodParallelism', testMethodThreads)
     inputs.property('testMaxWorkers', gradle.startParameter.maxWorkerCount)
@@ -4438,7 +4438,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
         command.addAll(focusedTasks.drop(2))
         command.add(
                 '-PtestJavaVersion=' + providers.gradleProperty(
-                        'testJavaVersion').getOrElse('25'))
+                        'testJavaVersion').getOrElse('17'))
         extractedSourceArchiveProjectProperties.get().each { propertyName, value ->
             command.add("-P${propertyName}=${value}".toString())
         }
@@ -4481,7 +4481,7 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 bexSourceCommit: immutableDevelopmentBex
                         ? developmentBexSourceCommit : null,
                 java: providers.gradleProperty(
-                        'testJavaVersion').getOrElse('25'),
+                        'testJavaVersion').getOrElse('17'),
                 extractedConfiguration: 'PASS',
                 compileStatus: 'PASS',
                 dependencyIsolationStatus: 'PASS',

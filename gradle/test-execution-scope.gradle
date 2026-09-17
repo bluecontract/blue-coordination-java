@@ -8,7 +8,7 @@ def inventoryCompiler = tasks.register('compileTestClassInventory', JavaCompile)
     classpath = files(configurations.testCompileClasspath, configurations.testRuntimeClasspath)
     destinationDirectory = layout.buildDirectory.dir('test-class-inventory-tool')
     javaCompiler = javaToolchains.compilerFor {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
@@ -28,7 +28,7 @@ suites.each { suiteName ->
         mainClass = 'blue.coordination.verification.TestClassInventory'
         javaLauncher = javaToolchains.launcherFor {
             languageVersion = JavaLanguageVersion.of(
-                    providers.gradleProperty('testJavaVersion').getOrElse('25') as int)
+                    providers.gradleProperty('testJavaVersion').getOrElse('17') as int)
         }
         inputs.files(suite.output.classesDirs)
         outputs.file(output)
@@ -92,7 +92,7 @@ def registerScope = { String name, List<String> selected ->
                 tasks.named(suiteName, Test).get().reports.junitXml.outputLocation.get().asFile
             })
         }
-        inputs.property('testJavaVersion', providers.gradleProperty('testJavaVersion').getOrElse('25'))
+        inputs.property('testJavaVersion', providers.gradleProperty('testJavaVersion').getOrElse('17'))
         def output = layout.buildDirectory.file("reports/test-execution-scope/${name}.json")
         outputs.file(output)
         // Task exclusions and onlyIf predicates belong to this invocation, so
@@ -154,7 +154,7 @@ def registerScope = { String name, List<String> selected ->
             report.setText(JsonOutput.prettyPrint(JsonOutput.toJson([
                     schemaId: 'blue-coordination-test-execution-scope-v1',
                     status: passed ? 'PASS' : 'FAIL', coordinationVersion: project.version.toString(),
-                    javaVersion: providers.gradleProperty('testJavaVersion').getOrElse('25'),
+                    javaVersion: providers.gradleProperty('testJavaVersion').getOrElse('17'),
                     topologyEvidenceVerified: topologyVerified,
                     suites: results])) + '\n', 'UTF-8')
             if (!passed) {

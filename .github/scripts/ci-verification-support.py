@@ -39,7 +39,7 @@ def sha(path):
 
 
 def commands(lane, java):
-    require(lane in ['core', 'archive'] and java in ['25'], 'Invalid lane/JDK')
+    require(lane in ['core', 'archive'] and java in ['17'], 'Invalid lane/JDK')
     common = ['--no-daemon', '--no-build-cache', '--max-workers=4', '--no-parallel',
               '-PtestMaxParallelForks=2', '-PtestMethodParallelism=2',
               '-PblueDependencyMode=published-artifact', '-PtestJavaVersion=' + java]

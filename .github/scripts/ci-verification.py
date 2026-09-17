@@ -71,7 +71,7 @@ def run(lane, output):
     timing.require(lane in ['core', 'archive'], 'Invalid production verification lane')
     channel = os.environ.get('RELEASE_CHANNEL', 'rc')
     timing.require(channel in ['rc', 'stable'], 'Invalid release channel')
-    timing.measure(lane, '25', output, identity, commands, channel)
+    timing.measure(lane, '17', output, identity, commands, channel)
 
 
 if __name__ == '__main__':

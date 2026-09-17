@@ -113,8 +113,8 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  java25:
-    name: Java 25 verification and staging
+  java17:
+    name: Java 17 verification and staging
     needs: prepare
     uses: ./.github/workflows/verification.yml
     with:
@@ -130,13 +130,13 @@ jobs:
     name: Publish verified artifacts
     needs:
       - prepare
-      - java25
+      - java17
     runs-on: ubuntu-24.04
     env:
       RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       RELEASE_BUNDLE_SHA: ${{ needs.prepare.outputs.bundle-sha }}
-      JAVA25_HANDOFF_SHA: ${{ needs.java25.outputs.handoff-sha }}
+      JAVA17_HANDOFF_SHA: ${{ needs.java17.outputs.handoff-sha }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
 
       - uses: ./.github/actions/setup-release
         with:
-          test-java: '25'
+          test-java: '17'
 
       - uses: actions/download-artifact@v4
         with:
@@ -158,16 +158,16 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: coordination-release-java25
+          name: coordination-release-java17
           path: ${{ runner.temp }}/release-handoffs
 
-      - name: Verify Java 25 gate and restore staged artifacts
+      - name: Verify Java 17 gate and restore staged artifacts
         run: node .github/scripts/release-handoff.js verify "$RUNNER_TEMP/release-handoffs"
 
       - name: Push verified release commit
         if: ${{ inputs.channel == 'rc' }}
         run: git push --no-follow-tags origin HEAD:refs/heads/next
-      # stageRelease passed on Java 25. The job-bound archive hash and full
+      # stageRelease passed on Java 17. The job-bound archive hash and full
       # receipts are checked above. Deploy those bytes without repeating gates.
 
       - name: Publish to Maven Central
@@ -181,7 +181,7 @@ jobs:
           JRELEASER_REPRODUCIBLE: true
         run: |
           rm -f build/jreleaser/output.properties build/jreleaser/maven-central-publication.json
-          ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25 -PmavenCentralSeparateWait=true
+          ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=17 -PmavenCentralSeparateWait=true
 
       - name: Wait for Maven Central publication
         timeout-minutes: 35

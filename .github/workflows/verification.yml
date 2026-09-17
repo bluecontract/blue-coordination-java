@@ -1,4 +1,4 @@
-name: Verify exact prepared source on Java 25
+name: Verify exact prepared source on Java 17
 
 on:
   workflow_call:
@@ -46,7 +46,7 @@ env:
 
 jobs:
   archive:
-    name: Extracted-source tests / Java 25
+    name: Extracted-source tests / Java 17
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -56,7 +56,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-release
         with:
-          test-java: '25'
+          test-java: '17'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -78,7 +78,7 @@ jobs:
           if-no-files-found: error
 
   core:
-    name: Full verification and local staging / Java 25
+    name: Full verification and local staging / Java 17
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     outputs:
@@ -90,7 +90,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-release
         with:
-          test-java: '25'
+          test-java: '17'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -106,13 +106,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ci-verification.py run core "$RUNNER_TEMP/verification-output"
-      - name: Seal the verified Java 25 artifacts and evidence
+      - name: Seal the verified Java 17 artifacts and evidence
         id: handoff
-        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java25.tar.gz" 25
+        run: node .github/scripts/release-handoff.js seal "$RUNNER_TEMP/java17.tar.gz" 17
       - uses: actions/upload-artifact@v4
         with:
-          name: coordination-release-java25
-          path: ${{ runner.temp }}/java25.tar.gz
+          name: coordination-release-java17
+          path: ${{ runner.temp }}/java17.tar.gz
           if-no-files-found: error
           compression-level: 0
       - uses: actions/upload-artifact@v4

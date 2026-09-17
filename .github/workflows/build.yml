@@ -25,7 +25,7 @@ jobs:
     uses: ./.github/workflows/prepare-verification-source.yml
 
   verify:
-    name: Java 25 verification
+    name: Java 17 verification
     needs: prepare
     uses: ./.github/workflows/verification.yml
     with:

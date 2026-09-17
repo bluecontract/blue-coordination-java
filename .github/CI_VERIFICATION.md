@@ -1,6 +1,6 @@
 # CI verification and publication
 
-Build and validate, Release RC and Release stable use Java 25 and the shared
+Build and validate, Release RC and Release stable use Java 17 and the shared
 `verification.yml` workflow. Preparation seals one exact source bundle. The full
 core verification and extracted-source archive tests run in parallel. The core
 checks the archive receipt and exact source/archive identity instead of running
