@@ -327,6 +327,15 @@ public final class AdvancedCoordination {
                 SdkPreconditions.requireText(timelineId, "timelineId"));
     }
 
+    /**
+     * Reads a Timeline head and the journal-wide timestamp maximum in one pinned
+     * view, using point indexes rather than enumerating history. This is an audit,
+     * not append authority or Timeline completeness evidence.
+     */
+    public TimelineJournalPosition auditTimelinePosition(String timelineId) {
+        return runtime.auditTimelinePosition(SdkPreconditions.requireText(timelineId, "timelineId"));
+    }
+
     public String blueLanguageSpecificationIdentity() {
         return runtime.languageSpecificationIdentity();
     }

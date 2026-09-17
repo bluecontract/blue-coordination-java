@@ -326,6 +326,37 @@ final class StoredTimelineJournalTest {
         }
     }
 
+    @Test void authoringPositionReopensColdAndDoesNotLoadTheJournalPrefix() {
+        TimelineEntry last;
+        try (Context context = new Context(new FileTimelineJournalStore(directory))) {
+            for (int i = 1; i <= 32; i++) context.journal.append(A, VALUE, i * 100L);
+            last = context.journal.append(B, ABSENT, 50);
+        }
+        var store = new FileTimelineJournalStore(directory);
+        try (Context reopened = new Context(store)) {
+            var position = reopened.journal.position(B.timelineId());
+            assertEntry(last, position.head().orElseThrow());
+            assertEquals(3200, position.maximumTimestampMicros());
+            assertEquals(33, position.journalRevision());
+            assertTrue(store.bodyReads.get() <= 12, "Cold selected read must not restore the journal");
+        }
+    }
+
+    @Test void authoringPositionRejectsBrokenSelectedIndexesAndPhysicalFailures() {
+        var faults = new FaultStore(new FileTimelineJournalStore(directory));
+        try (Context context = new Context(faults)) {
+            context.journal.append(A, ABSENT, 100);
+            context.journal.append(A, VALUE, 200);
+            for (String phase : List.of("open", "read", "close", "state", "changed-state", "wrong-selected-index",
+                    "missing-index", "wrong-head", "missing-head", "missing-latest", "stale-latest")) {
+                faults.phase = phase;
+                assertThrows(TimelineJournalStorageException.class, () -> context.journal.position(A.timelineId()), phase);
+                faults.phase = "";
+                assertEquals(200, context.journal.position(A.timelineId()).maximumTimestampMicros());
+            }
+        }
+    }
+
     @Test void indexAndPinnedStateTamperingNeverProduceCompleteHistory() {
         var faults = new FaultStore(new FileTimelineJournalStore(directory));
         try (Context context = new Context(faults)) {
@@ -440,14 +471,20 @@ final class StoredTimelineJournalTest {
                     return phase.equals("wrong-head") ? view.atTimelineSequence(id, 1) : view.timelineHead(id);
                 }
                 @Override public Optional<TimelineEntry> atAppendPosition(int p) {
-                    fail("read"); return view.atAppendPosition(phase.equals("wrong-index") ? 1 : p);
+                    fail("read"); return view.atAppendPosition(phase.equals("wrong-index") ? 1
+                            : phase.equals("wrong-selected-index") ? 0 : p);
                 }
                 @Override public Optional<TimelineEntry> atTimelineSequence(String id, long s) { fail("read"); return view.atTimelineSequence(id, s); }
                 @Override public Optional<TimelineEntry> nextExternal(ExternalOrderKey after) {
                     fail("read"); return phase.equals("null-read") ? null : view.nextExternal(after);
                 }
                 @Override public Optional<TimelineEntry> atExternalOrder(ExternalOrderKey order) { fail("read"); return view.atExternalOrder(order); }
-                @Override public Optional<ExternalOrderKey> latestExternalOrder() { fail("read"); return view.latestExternalOrder(); }
+                @Override public Optional<ExternalOrderKey> latestExternalOrder() {
+                    fail("read");
+                    if (phase.equals("missing-latest")) return Optional.empty();
+                    if (phase.equals("stale-latest")) return view.atAppendPosition(0).map(TimelineEntry::sourceOrderKey);
+                    return view.latestExternalOrder();
+                }
                 @Override public void close() { view.close(); fail("close"); }
             };
         }

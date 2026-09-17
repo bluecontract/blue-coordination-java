@@ -593,6 +593,12 @@ public final class DefaultCoordinationEngine
         return journal.entries(requireAuditText(timelineId, "timelineId"));
     }
 
+    /** Reads only the selected head and maximum-order entry, under one journal view. */
+    public synchronized blue.coordination.api.TimelineJournalPosition auditTimelinePosition(String timelineId) {
+        ensureOpen();
+        return journal.position(requireAuditText(timelineId, "timelineId"));
+    }
+
     synchronized Timeline timeline(String timelineId, String actorId) {
         return registerTimeline(timelineId, actorId);
     }

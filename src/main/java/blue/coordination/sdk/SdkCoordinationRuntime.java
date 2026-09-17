@@ -947,6 +947,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 .toList();
     }
 
+    synchronized TimelineJournalPosition auditTimelinePosition(String timelineId) {
+        ensureOpen();
+        var position = engine.auditTimelinePosition(requireText(timelineId, "timelineId"));
+        return new TimelineJournalPosition(position.timelineId(), position.head().map(this::publicTimelineEntry),
+                position.maximumTimestampMicros(), position.journalRevision());
+    }
+
     synchronized List<TimelineEntrySnapshot> auditTimeline(
             String timelineId) {
         ensureOpen();

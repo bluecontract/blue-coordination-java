@@ -159,6 +159,29 @@ class DefaultTimelineJournal implements TimelineJournal {
         return canonical;
     }
 
+    @Override public synchronized blue.coordination.api.TimelineJournalPosition position(String timelineId) {
+        String selected = requireText(timelineId, "timelineId");
+        try (ReadView view = open()) {
+            Optional<TimelineEntry> selectedHead = head(view, selected);
+            ExternalOrderKey latest = view.latestExternalOrder().orElse(null);
+            long maximumTimestamp = 0L;
+            if (latest != null) {
+                TimelineEntry maximum = checked(view, view.atExternalOrder(latest)
+                        .orElseThrow(() -> corrupt("Missing latest source row")));
+                if (!maximum.sourceOrderKey().equals(latest) || view.nextExternal(latest).isPresent())
+                    throw corrupt("Wrong latest order");
+                maximumTimestamp = maximum.timestampMicros();
+            } else if (view.state().entryCount() != 0) {
+                throw corrupt("Missing latest order");
+            }
+            if (selectedHead.isPresent() && selectedHead.orElseThrow().timestampMicros() > maximumTimestamp)
+                throw corrupt("Timeline head is beyond the journal maximum");
+            metrics.increment("journal.positionReads");
+            return new blue.coordination.api.TimelineJournalPosition(selected, selectedHead,
+                    maximumTimestamp, view.state().revision());
+        }
+    }
+
     @Override public synchronized Optional<TimelineEntry> nextExternal(
             ExternalOrderKey after, ExternalOrderKey through) {
         try (ReadView view = open()) {
