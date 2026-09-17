@@ -35,7 +35,8 @@ permissions:
 env:
   CI: 'true'
   PYTHONDONTWRITEBYTECODE: '1'
-  ORG_GRADLE_PROJECT_testMaxParallelForks: '4'
+  ORG_GRADLE_PROJECT_testMaxParallelForks: '2'
+  ORG_GRADLE_PROJECT_testMethodParallelism: '2'
   VERIFICATION_COMMIT: ${{ inputs.commit }}
   VERIFICATION_SCOPE: ${{ inputs.scope }}
   RELEASE_COMMIT: ${{ inputs.commit }}

@@ -39,19 +39,49 @@ class ReceiptTests(unittest.TestCase):
         self.assertNotIn('-x',str(support.commands('core','25')))
         self.assertNotIn('jreleaser',str(support.commands('core','25')))
 
+    def test_commands_use_bounded_two_by_two_concurrency(self):
+        for lane in ['core', 'archive']:
+            for command in support.commands(lane, '25'):
+                self.assertIn('-PtestMaxParallelForks=2', command)
+                self.assertIn('-PtestMethodParallelism=2', command)
+                self.assertIn('--max-workers=4', command)
+                self.assertIn('--no-parallel', command)
+
+    def test_inventory_rejects_disabled_or_unbounded_parallelism(self):
+        valid = {'enabled':'true','mode.default':'concurrent','mode.classes.default':'concurrent',
+                 'config.strategy':'fixed','config.fixed.parallelism':'2',
+                 'config.fixed.max-pool-size':'2','config.fixed.saturate':'true'}
+        for field, value in [('enabled','false'), ('config.fixed.max-pool-size','256'),
+                             ('config.fixed.parallelism','4'), ('mode.classes.default','same_thread'),
+                             ('config.strategy','dynamic'), ('config.fixed.saturate','false')]:
+            suites = {s: {'passed':True,'fullTask':True,'maxParallelForks':2,
+                'junitParallelism':dict(valid),'executedTests':1,
+                'testCases':[{'className':'Class','name':s,'failed':False,'skipped':False}]}
+                for s in support.SUITES}
+            proof = {'status':'PASS','topologyEvidenceVerified':True,'suites':suites}
+            support.inventory(proof)
+            suites['test']['junitParallelism'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                support.inventory(proof)
+
     def test_archive_proof_checks_all_statuses_and_exact_tests(self):
         proof={'schemaId':support.ARCHIVE_SCHEMA,'archiveSha256':'a'*64,'archiveName':'source.zip',
                'coordinationVersion':'3.0.0-rc.11','java':'25','dependencyMode':'published-artifact',
                'focusedTests':support.FOCUSED_TESTS,'focusedTasks':support.FOCUSED_TASKS,
+               'testMaxParallelForks':2,'testMethodParallelism':2,'testMaxWorkers':4,
                **{name:'PASS' for name in support.ARCHIVE_STATUSES}}
         support.validate_archive(proof,'25','a'*64,'source.zip','3.0.0-rc.11')
-        for field,value in [('archiveSha256','b'*64),('java','21'),('focusedTests',[]),('compileStatus','FAIL')]:
+        for field,value in [('archiveSha256','b'*64),('java','21'),('focusedTests',[]),('compileStatus','FAIL'),
+                            ('testMaxParallelForks',4),('testMethodParallelism',1),('testMaxWorkers',2)]:
             with self.assertRaises(ValueError):
                 support.validate_archive(dict(proof,**{field:value}),'25','a'*64,'source.zip','3.0.0-rc.11')
 
     def test_report_comparison_preserves_parameterized_display_name_multiplicity(self):
         p={'status':'PASS','topologyEvidenceVerified':True,'suites':{s:{'passed':True,'fullTask':True,
-            'maxParallelForks':4,'executedTests':1,'testCases':[{'className':'Class','name':s,'failed':False,'skipped':False}]}
+            'maxParallelForks':2,'junitParallelism':{
+                'enabled':'true','mode.default':'concurrent','mode.classes.default':'concurrent',
+                'config.strategy':'fixed','config.fixed.parallelism':'2',
+                'config.fixed.max-pool-size':'2','config.fixed.saturate':'true'},'executedTests':1,'testCases':[{'className':'Class','name':s,'failed':False,'skipped':False}]}
             for s in support.SUITES}}
         self.assertEqual(len(support.inventory(p)),4)
         broken=dict(p,suites=dict(p['suites']))

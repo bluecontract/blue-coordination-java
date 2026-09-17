@@ -134,7 +134,12 @@ def registerScope = { String name, List<String> selected ->
                         && task.options.includeTags.empty && task.options.excludeTags.empty
                         && task.options.includeEngines.empty && task.options.excludeEngines.empty
                 results[suiteName] = inspectScope(expected, cases, fullTask) + [
-                        maxParallelForks: task.maxParallelForks, testCases: cases]
+                        maxParallelForks: task.maxParallelForks,
+                        junitParallelism: task.systemProperties.findAll { key, value ->
+                            key.startsWith('junit.jupiter.execution.parallel.')
+                        }.collectEntries { key, value ->
+                            [(key.substring('junit.jupiter.execution.parallel.'.length())): value.toString()]
+                        }, testCases: cases]
             }
             // The exporter case collects during a full run. Its exact runtime
             // comparison must also have executed successfully in this graph;

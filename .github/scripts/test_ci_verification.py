@@ -74,7 +74,8 @@ class ConsumeProductionProofTests(unittest.TestCase):
             proof = {'schemaId':timing.ARCHIVE_SCHEMA,'archiveSha256':timing.sha(archive),
                 'archiveName':archive.name,'coordinationVersion':'3.0.0-rc.11','java':'25',
                 'dependencyMode':'published-artifact','focusedTests':timing.FOCUSED_TESTS,
-                'focusedTasks':timing.FOCUSED_TASKS, **{key:'PASS' for key in timing.ARCHIVE_STATUSES}}
+                'focusedTasks':timing.FOCUSED_TASKS,
+                'testMaxParallelForks':2,'testMethodParallelism':2,'testMaxWorkers':4, **{key:'PASS' for key in timing.ARCHIVE_STATUSES}}
             timing.write(folder/'archive.json',proof)
             receipt = dict(binding,lane='archive',java='25',success=True,started=100,finished=200,
                 commands=[{'args':args,'exit':0} for args in verification.commands('archive','25')],

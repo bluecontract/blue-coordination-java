@@ -14,7 +14,8 @@ permissions:
 
 env:
   CI: true
-  ORG_GRADLE_PROJECT_testMaxParallelForks: '4'
+  ORG_GRADLE_PROJECT_testMaxParallelForks: '2'
+  ORG_GRADLE_PROJECT_testMethodParallelism: '2'
   RELEASE_CHANNEL: ${{ inputs.channel }}
 
 jobs:

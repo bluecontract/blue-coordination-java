@@ -40,7 +40,8 @@ def sha(path):
 
 def commands(lane, java):
     require(lane in ['core', 'archive'] and java in ['25'], 'Invalid lane/JDK')
-    common = ['--no-daemon', '--no-build-cache', '--max-workers=4', '-PtestMaxParallelForks=4',
+    common = ['--no-daemon', '--no-build-cache', '--max-workers=4', '--no-parallel',
+              '-PtestMaxParallelForks=2', '-PtestMethodParallelism=2',
               '-PblueDependencyMode=published-artifact', '-PtestJavaVersion=' + java]
     preflight = common + ['dependencyPreflight']
     if lane == 'archive':
@@ -65,7 +66,8 @@ def validate(receipt, binding, lane, java, command_factory=commands):
 def validate_archive(proof, java, digest, name, version):
     expected = {'schemaId': ARCHIVE_SCHEMA, 'archiveSha256': digest, 'archiveName': name,
                 'coordinationVersion': version, 'java': java, 'dependencyMode': 'published-artifact',
-                'focusedTasks': FOCUSED_TASKS}
+                'focusedTasks': FOCUSED_TASKS, 'testMaxParallelForks': 2,
+                'testMethodParallelism': 2, 'testMaxWorkers': 4}
     for key, value in expected.items():
         require(proof.get(key) == value, 'Archive proof mismatch: ' + key)
     require(sorted(proof.get('focusedTests', [])) == sorted(FOCUSED_TESTS), 'Incomplete archive test inventory')
@@ -77,8 +79,13 @@ def inventory(proof):
     require(set(proof.get('suites', {})) == set(SUITES), 'Missing/extra test suite')
     result = []
     for suite, data in proof['suites'].items():
-        require(data.get('passed') is True and data.get('fullTask') is True and data.get('maxParallelForks') == 4,
+        require(data.get('passed') is True and data.get('fullTask') is True and data.get('maxParallelForks') == 2,
                 'Incomplete suite or wrong forks')
+        require(data.get('junitParallelism') == {
+            'enabled': 'true', 'mode.default': 'concurrent', 'mode.classes.default': 'concurrent',
+            'config.strategy': 'fixed', 'config.fixed.parallelism': '2',
+            'config.fixed.max-pool-size': '2', 'config.fixed.saturate': 'true'},
+            'Wrong or unbounded JUnit parallelism')
         cases = data.get('testCases', [])
         require(cases and all(c.get('failed') is False and c.get('skipped') is False for c in cases),
                 'Failed/skipped/empty tests')

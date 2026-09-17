@@ -400,6 +400,14 @@ if (!(requestedTestForks ==~ /[1-9][0-9]*/) || new BigInteger(requestedTestForks
     throw new GradleException('testMaxParallelForks must be a positive integer')
 }
 def testForks = Math.min(requestedTestForks.toInteger(), gradle.startParameter.maxWorkerCount)
+def requestedTestMethods = providers.gradleProperty('testMethodParallelism').getOrElse('1')
+if (!(requestedTestMethods ==~ /[1-9][0-9]*/) || new BigInteger(requestedTestMethods) > Integer.MAX_VALUE) {
+    throw new GradleException('testMethodParallelism must be a positive integer')
+}
+def testMethodThreads = requestedTestMethods.toInteger()
+if (testForks.toLong() * testMethodThreads > gradle.startParameter.maxWorkerCount) {
+    throw new GradleException('Test forks * method parallelism must not exceed --max-workers')
+}
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
@@ -410,7 +418,14 @@ tasks.withType(Test).configureEach {
     }
     maxParallelForks = testForks
     inputs.property('testMaxParallelForks', testForks)
-    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    inputs.property('testMethodParallelism', testMethodThreads)
+    systemProperty('junit.jupiter.execution.parallel.enabled', (testMethodThreads > 1).toString())
+    systemProperty 'junit.jupiter.execution.parallel.mode.default', 'concurrent'
+    systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+    systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'fixed'
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.parallelism', testMethodThreads.toString()
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.max-pool-size', testMethodThreads.toString()
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.saturate', 'true'
     maxHeapSize = '2g'
     reports {
         junitXml.required = true
@@ -4305,6 +4320,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('25'))
     inputs.property('testMaxParallelForks', testForks)
+    inputs.property('testMethodParallelism', testMethodThreads)
+    inputs.property('testMaxWorkers', gradle.startParameter.maxWorkerCount)
     inputs.property('extractedSourceArchiveProjectProperties',
             extractedSourceArchiveProjectProperties)
     if (immutableContractsRepository) {
@@ -4409,8 +4426,10 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 'blue.coordination.sdk.RootedLocalHistoryRecoveryTest'
         ]
         command.addAll([
-                '--no-daemon', '--no-build-cache', '--max-workers=' + testForks,
-                '-PtestMaxParallelForks=' + testForks
+                '--no-daemon', '--no-build-cache', '--no-parallel',
+                '--max-workers=' + gradle.startParameter.maxWorkerCount,
+                '-PtestMaxParallelForks=' + testForks,
+                '-PtestMethodParallelism=' + testMethodThreads
         ])
         command.addAll(['clean', 'test'])
         focusedTests.each { focusedTest ->
@@ -4467,6 +4486,9 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 compileStatus: 'PASS',
                 dependencyIsolationStatus: 'PASS',
                 focusedTestsStatus: 'PASS',
+                testMaxParallelForks: testForks,
+                testMethodParallelism: testMethodThreads,
+                testMaxWorkers: gradle.startParameter.maxWorkerCount,
                 focusedTasks: focusedTasks,
                 focusedTests: focusedTests
         ]
