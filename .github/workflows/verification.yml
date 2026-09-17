@@ -77,8 +77,47 @@ jobs:
           path: ${{ runner.temp }}/verification-output/
           if-no-files-found: error
 
+  tests:
+    name: Test shard ${{ matrix.shard }} / Java 17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-release
+        with:
+          test-java: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.source-artifact }}
+          path: ${{ runner.temp }}/verification-source
+      - name: Restore exact prepared source
+        env:
+          RESTORE: ${{ inputs.release-source && 'restore' || 'restore-source' }}
+        run: node .github/scripts/release-handoff.js "$RESTORE" "$RUNNER_TEMP/verification-source"
+      - name: Run assigned complete test classes
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: python3 .github/scripts/ci-test-shards.py run "$SHARD" "$RUNNER_TEMP/test-shard"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coordination-tests-${{ matrix.shard }}-of-3-${{ inputs.scope }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/test-shard/
+          if-no-files-found: error
+
   core:
-    name: Full verification and local staging / Java 17
+    name: Aggregate tests, verify and stage / Java 17
+    needs: [tests, archive]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     outputs:
@@ -102,9 +141,15 @@ jobs:
         env:
           RESTORE: ${{ inputs.release-source && 'restore' || 'restore-source' }}
         run: node .github/scripts/release-handoff.js "$RESTORE" "$RUNNER_TEMP/verification-source"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coordination-tests-*-of-3-${{ inputs.scope }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/test-shards
       - name: Run full verification with actual archive receipt
         env:
           GH_TOKEN: ${{ github.token }}
+          CI_TEST_MODE: aggregate
+          CI_TEST_SHARDS_DIRECTORY: ${{ runner.temp }}/test-shards
         run: python3 .github/scripts/ci-verification.py run core "$RUNNER_TEMP/verification-output"
       - name: Seal the verified Java 17 artifacts and evidence
         id: handoff

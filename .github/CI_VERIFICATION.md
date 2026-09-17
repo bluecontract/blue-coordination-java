@@ -2,22 +2,31 @@
 
 Build and validate, Release RC and Release stable use Java 17 and the shared
 `verification.yml` workflow. Preparation seals one exact source bundle. The full
-core verification and extracted-source archive tests run in parallel. The core
-checks the archive receipt and exact source/archive identity instead of running
-those tests a second time. Full suite coverage, topology evidence and staged
-artifact hashes remain required before publication.
+test inventory is split into three complete-class groups, alongside independent
+extracted-source archive tests. Each group discovers current compiled classes;
+historical timing weights only balance assignment and new classes are included.
+The final core job requires all groups and the archive to succeed, validates their
+source/run/attempt bindings and file hashes, then imports XML and generated evidence.
+It runs the complete topology comparison and remaining release/artifact gates,
+without repeating the test groups. Scope receipts explicitly identify delegated
+execution; normal local Gradle commands retain their full unfiltered test graph.
+Colliding XML/topology ownership or conflicting semantic evidence is rejected.
+Parameterized testcase multiplicity is retained. This preserves class-coverage
+checks; exact testcase parity against the prior full run is also checked during rollout.
 
 RC and stable share `release-candidate.yml`. The publishing job restores only
 verified staged artifacts, then runs these steps in order:
 
-1. Publish to Maven Central: sign/upload/validate and submit publication using
+1. Reserve the verified next commit and RC tag atomically (RC only), before upload.
+   An existing tag or changed branch prevents publication; failed publication does
+   not make the reserved version available for reuse.
+2. Publish to Maven Central: sign/upload/validate and submit publication using
    JReleaser. `-PmavenCentralSeparateWait=true` stops its final wait after Central
    acknowledges publishing. Local JReleaser invocations still wait by default.
-2. Wait for Maven Central publication: read the deployment ID from this invocation's
+3. Wait for Maven Central publication: read the deployment ID from this invocation's
    `build/jreleaser/output.properties` and call only Central's status endpoint until
    `PUBLISHED`. Missing IDs, rejected deployments, malformed responses or timeout
    fail the step. It does not upload or submit publication again.
-3. Push the published release tag (RC only), after successful confirmation.
 
 The wait receipt is archived in `build/jreleaser/maven-central-publication.json`.
 A green release still means Maven Central confirmed publication. Splitting the

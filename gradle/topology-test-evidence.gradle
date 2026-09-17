@@ -17,7 +17,8 @@ topologyTest.configure {
     outputs.dir(topologyFragments)
     systemProperty 'blue.test.topologyEvidenceDirectory', topologyFragments.get().asFile.absolutePath
     doFirst {
-        systemProperty 'blue.test.collectTopologyEvidence', completeTopologySelection().toString()
+        systemProperty 'blue.test.collectTopologyEvidence',
+                (completeTopologySelection() || project.ext.has('ciTestShard')).toString()
         File directory = topologyFragments.get().asFile
         if (directory.exists() && !directory.deleteDir()) {
             throw new GradleException('Could not clear old topology evidence: ' + directory)
@@ -51,9 +52,10 @@ def topologyEvidence = tasks.register('verifyCyclicTopologyIdentityEvidence', Ja
     }
     doFirst {
         def selected = topologyTest.get()
-        if (!gradle.taskGraph.hasTask(selected) || !selected.enabled || selected.state.noSource
+        if (!project.ext.has('ciDelegatedTestEvidence')
+                && (!gradle.taskGraph.hasTask(selected) || !selected.enabled || selected.state.noSource
                 || (selected.state.skipped && !selected.state.upToDate
-                && selected.state.skipMessage != 'FROM-CACHE')) {
+                && selected.state.skipMessage != 'FROM-CACHE'))) {
             throw new GradleException('Topology evidence requires a complete successful test task')
         }
     }

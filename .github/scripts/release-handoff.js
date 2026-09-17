@@ -95,12 +95,29 @@ function inspectBuild(build, binding, java) {
   assert.equal(scope.coordinationVersion, binding.version, 'Scope version mismatch');
   assert.equal(scope.javaVersion, java, 'Scope JDK mismatch');
   assert.equal(scope.topologyEvidenceVerified, true, 'Topology comparison did not pass');
+  const delegated = scope.delegatedTestEvidence;
+  if (delegated) {
+    execFileSync('python3', [path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
+    assert.deepEqual(delegated, json(path.join(build, 'reports/ci-test-shards/delegated.json')));
+    assert.equal(delegated.version, binding.version, 'Delegated version mismatch');
+    assert.equal(delegated.java, java, 'Delegated JDK mismatch');
+    if (process.env.GITHUB_RUN_ATTEMPT)
+      assert.equal(delegated.attempt, process.env.GITHUB_RUN_ATTEMPT, 'Delegated attempt mismatch');
+    if (process.env.VERIFICATION_SCOPE)
+      assert.equal(delegated.scope, process.env.VERIFICATION_SCOPE, 'Delegated scope mismatch');
+    if (binding.commit) {
+      assert.equal(delegated.sha, binding.commit, 'Delegated source mismatch');
+      assert.equal(delegated.tree, binding.tree, 'Delegated tree mismatch');
+      assert.equal(delegated.run, binding.runId, 'Delegated run mismatch');
+    }
+  }
   assert.deepEqual(Object.keys(scope.suites).sort(), [...SUITES].sort(), 'Missing release suite');
   const testInventory = {};
   for (const suite of SUITES) {
     const result = scope.suites[suite];
     assert.equal(result.passed, true, `${suite} did not pass`);
-    assert.equal(result.fullTask, true, `${suite} was filtered or excluded`);
+    assert.ok(result.fullTask === true || (delegated && result.fullTask === false
+      && result.executionMode === 'delegated'), `${suite} was filtered or excluded`);
     assert.equal(result.failures, 0, `${suite} failed`);
     assert.equal(result.skipped, 0, `${suite} skipped tests`);
     assert.ok(result.testCases.length > 0, `${suite} has no tests`);

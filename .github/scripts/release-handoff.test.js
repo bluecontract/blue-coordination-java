@@ -283,7 +283,9 @@ test('production verification runs full core and archive independently and check
   const shared = fs.readFileSync(path.join(__dirname, '../workflows/verification.yml'), 'utf8');
   assert.match(shared, /  archive:\n/);
   assert.match(shared, /  core:\n/);
-  assert.doesNotMatch(shared, /needs:|continue-on-error|--tests|\s-x\s/);
+  assert.match(shared, /needs: \[tests, archive\]/);
+  assert.match(shared, /shard: \[0, 1, 2\]/);
+  assert.doesNotMatch(shared, /continue-on-error|--tests|\s-x\s/);
   assert.match(shared, /ci-verification.py run core/);
   assert.match(shared, /ci-verification.py run archive/);
   assert.match(shared, /release-handoff.js seal/);

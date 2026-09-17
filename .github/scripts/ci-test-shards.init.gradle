@@ -1,0 +1,90 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    def mode = System.getenv('CI_TEST_MODE')
+    if (!(mode in ['shard', 'aggregate'])
+            || System.getenv('GITHUB_REPOSITORY') != 'bluecontract/blue-coordination-java'
+            || !(System.getenv('VERIFICATION_SCOPE') in ['build', 'rc', 'stable'])
+            || !gradle.startParameter.excludedTaskNames.empty) {
+        throw new GradleException('Test delegation requires bound CI mode and no excluded tasks')
+    }
+    def suites = ['test', 'integrationTest', 'consumerTest', 'scenarioTest']
+    if (mode == 'shard') {
+        def plan = new JsonSlurper().parse(new File(System.getenv('CI_TEST_PLAN')))
+        def selected = plan.groups[System.getenv('CI_TEST_SHARD')]
+        if (selected == null) throw new GradleException('Missing shard assignment')
+        root.ext.ciTestShard = true
+        root.tasks.named('test') { setFinalizedBy([]) }
+        suites.each { name ->
+            root.tasks.named(name, Test) {
+                filter.setIncludePatterns(*selected[name])
+                filter.failOnNoMatchingTests = true
+                onlyIf { !selected[name].empty }
+            }
+        }
+        root.tasks.register('ciShardProof') {
+            dependsOn suites.collect { root.tasks.named(it) }
+            doLast {
+                def result = [:]
+                suites.each { name ->
+                    def task = root.tasks.named(name, Test).get()
+                    def classes = selected[name] as List
+                    if (task.filter.includePatterns.sort() != classes
+                            || !task.filter.excludePatterns.empty || !task.filter.commandLineIncludePatterns.empty
+                            || !task.includes.empty || !task.excludes.empty
+                            || !task.options.includeTags.empty || !task.options.excludeTags.empty
+                            || !task.options.includeEngines.empty || !task.options.excludeEngines.empty) {
+                        throw new GradleException('Unexpected shard selectors: ' + name)
+                    }
+                    def prefix = 'junit.jupiter.execution.parallel.'
+                    [enabled:'true', 'mode.default':'concurrent', 'mode.classes.default':'concurrent',
+                     'config.strategy':'fixed', 'config.fixed.parallelism':'2',
+                     'config.fixed.max-pool-size':'2', 'config.fixed.saturate':'true'].each { key, value ->
+                        if (task.systemProperties[prefix + key]?.toString() != value)
+                            throw new GradleException('Unbounded JUnit configuration')
+                    }
+                    result[name] = [selectors:[classes:classes, methods:[], excludeClasses:[], tags:[], engines:[]],
+                        executed:task.state.executed && !task.state.skipped && task.state.failure == null,
+                        java:task.javaLauncher.get().metadata.languageVersion.asInt(),
+                        maxParallelForks:task.maxParallelForks, methodThreads:2,
+                        maxWorkers:gradle.startParameter.maxWorkerCount]
+                }
+                def output = root.file('build/reports/ci-test-shards/runtime.json')
+                output.parentFile.mkdirs()
+                output.text = JsonOutput.prettyPrint(JsonOutput.toJson(result)) + '\n'
+            }
+        }
+    } else {
+        def importer = root.tasks.register('importCiTestShards') {
+            mustRunAfter root.tasks.named('clean')
+            doLast {
+                def process = new ProcessBuilder('python3', '.github/scripts/ci-test-shards.py',
+                        'consume', System.getenv('CI_TEST_SHARDS_DIRECTORY'))
+                        .directory(root.projectDir).inheritIO().start()
+                if (process.waitFor() != 0) throw new GradleException('Delegated tests rejected')
+                root.ext.ciDelegatedTestEvidence = new JsonSlurper().parse(
+                        root.file('build/reports/ci-test-shards/delegated.json'))
+            }
+        }
+        suites.each { name ->
+            root.tasks.named(name, Test) {
+                dependsOn importer
+                onlyIf {
+                    if (!root.ext.has('ciDelegatedTestEvidence'))
+                        throw new GradleException('Missing verified delegated test evidence')
+                    false
+                }
+            }
+        }
+    }
+    gradle.taskGraph.whenReady { graph ->
+        graph.allTasks.each { task ->
+            if (task.name.toLowerCase().startsWith('jreleaser')
+                    || (task.name ==~ /publish[A-Z].*/
+                    && task.name != 'publishMavenJavaPublicationToStagingRepository'))
+                throw new GradleException('External publication forbidden during test verification')
+        }
+    }
+}

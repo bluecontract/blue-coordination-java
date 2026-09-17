@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -46,7 +47,8 @@ def commands(lane, java):
     preflight = common + ['dependencyPreflight']
     if lane == 'archive':
         return [preflight, common + ['clean', 'verifyExtractedSourceArchive']]
-    init = ['--init-script', '.github/scripts/ci-archive-handoff.init.gradle'] if lane == 'core' else []
+    init = ['--init-script', '.github/scripts/ci-archive-handoff.init.gradle',
+            '--init-script', '.github/scripts/ci-test-shards.init.gradle'] if lane == 'core' else []
     return [preflight, common + init + ['clean', 'stageRelease']]
 
 
@@ -79,7 +81,17 @@ def inventory(proof):
     require(set(proof.get('suites', {})) == set(SUITES), 'Missing/extra test suite')
     result = []
     for suite, data in proof['suites'].items():
-        require(data.get('passed') is True and data.get('fullTask') is True and data.get('maxParallelForks') == 2,
+        delegated = proof.get('delegatedTestEvidence')
+        if delegated is not None:
+            require(delegated.get('schema') == 1 and delegated.get('status') == 'PASS'
+                    and delegated.get('shardIds') == [0, 1, 2]
+                    and re.fullmatch('[0-9a-f]{64}', delegated.get('planSha256', ''))
+                    and set(delegated.get('receiptSha256', {})) == {'0', '1', '2'}
+                    and all(re.fullmatch('[0-9a-f]{64}', h) for h in delegated['receiptSha256'].values()),
+                    'Invalid delegated test evidence')
+        complete = data.get('fullTask') is True or (delegated is not None
+                    and data.get('executionMode') == 'delegated' and data.get('fullTask') is False)
+        require(data.get('passed') is True and complete and data.get('maxParallelForks') == 2,
                 'Incomplete suite or wrong forks')
         require(data.get('junitParallelism') == {
             'enabled': 'true', 'mode.default': 'concurrent', 'mode.classes.default': 'concurrent',
@@ -94,6 +106,48 @@ def inventory(proof):
         # occurrence so comparison detects missing/extra invocations, like inspectBuild.
         result.extend((suite, c['className'], c['name']) for c in cases)
     return sorted(result)
+
+
+def validate_test_shards(receipts, binding, plan):
+    """Validate complete class ownership without deduplicating parameterized cases."""
+    require(len(receipts) == 3 and sorted(r.get('shard', -1) for r in receipts) == [0, 1, 2],
+            'Missing or duplicate shard')
+    require(set(plan) == {'0', '1', '2'}, 'Invalid shard plan')
+    owned = set()
+    files = {}
+    cases = []
+    for receipt in receipts:
+        for key, value in binding.items():
+            require(receipt.get(key) == value, 'Shard binding mismatch: ' + key)
+        require(receipt.get('success') is True, 'Shard failed')
+        assignment = plan[str(receipt['shard'])]
+        require(receipt.get('assigned') == assignment, 'Wrong assigned classes')
+        require(set(receipt.get('suites', {})) == set(assignment), 'Missing suite')
+        for suite, classes in assignment.items():
+            require(len(classes) == len(set(classes)), 'Duplicate assigned class')
+            for name in classes:
+                require((suite, name) not in owned, 'Overlapping class ownership')
+                owned.add((suite, name))
+            result = receipt['suites'][suite]
+            require(result.get('selectors') == dict(classes=classes, methods=[], excludeClasses=[], tags=[], engines=[]),
+                    'Unexpected test selectors')
+            rows = result.get('testCases', [])
+            require(sorted({c['className'] for c in rows}) == classes
+                    and result.get('executedClasses') == classes, 'Missing assigned class')
+            require(all(c.get('failed') is False and c.get('skipped') is False for c in rows),
+                    'Failed or skipped shard test')
+            cases.extend((suite, c['className'], c['name']) for c in rows)
+        for name, digest in receipt.get('files', {}).items():
+            path = Path(name)
+            require(not path.is_absolute() and '..' not in path.parts and path.parts
+                    and path.parts[0] in ['reports', 'test-results', 'rooted-evidence'], 'Unsafe evidence path')
+            require(re.fullmatch('[0-9a-f]{64}', digest) is not None, 'Invalid evidence digest')
+            if name in files:
+                require(not name.startswith(('test-results/', 'rooted-evidence/topology-fragments/')),
+                        'Duplicate XML or topology ownership')
+                require(files[name] == digest, 'Evidence file collision')
+            files[name] = digest
+    return sorted(cases)
 
 
 def sample_processes(root_pid, known, measurements):
