@@ -12,6 +12,7 @@ final class StoredCatchUpWorkIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(1024 * 1024, 4096, 512 * 1024, 4096, 8);
 
     @Test void warmWorkAndApplicationFramesStillRequireCurrentCrosslinks() {
+        // given
         try (var cache = new RootedStorageCache(16 * 1024 * 1024, 100, 16 * 1024 * 1024)) {
             var bytes = new DocumentSessionStorageTest.Bytes(); var fixture = fixture(3, "consumer");
             var storage = new StoredCatchUpWorkIndexes(bytes, LIMITS, 256, cache);
@@ -19,7 +20,9 @@ final class StoredCatchUpWorkIndexesTest {
             var selected = storage.pending(stored, fixture.work.planIdentity()).work();
             long loads = cache.statistics().loads();
             for (int i = 0; i < 5; i++) {
+                // when
                 var reopened = storage.open(roots(storage, stored)::get, 0, 0);
+                // then
                 assertSame(selected, storage.pending(reopened, fixture.work.planIdentity()).work());
             }
             assertEquals(loads, cache.statistics().loads());
@@ -41,12 +44,16 @@ final class StoredCatchUpWorkIndexesTest {
     }
 
     @Test void cachedRegisteredWorkCannotBypassStricterNestedKeyLimit() throws Exception {
+        // given
         try (var cache = new RootedStorageCache(16 * 1024 * 1024, 100, 16 * 1024 * 1024)) {
             var bytes = new DocumentSessionStorageTest.Bytes(); var fixture = fixture(3, "consumer");
             var permissive = new StoredCatchUpWorkIndexes(bytes, LIMITS, 256, cache);
             var retained = permissive.retainPartition(ManagedCatchUpWorkIndex.empty().withWork(fixture.work, fixture.barrier, fixture.source));
             var raw = retained.storedIndexes().work().get(fixture.work.workIdentity());
-            var firstCodec = registeredCodec(permissive); byte[] frame = firstCodec.encode(raw);
+            var firstCodec = registeredCodec(permissive);
+            // when
+            byte[] frame = firstCodec.encode(raw);
+            // then
             assertSame(raw, firstCodec.decode(frame));
             var strictLimits = new PersistentMapStorage.Limits(LIMITS.nodeBytes(), 8, LIMITS.valueBytes(), LIMITS.descriptorBytes(), LIMITS.cachedNodes());
             var strict = registeredCodec(new StoredCatchUpWorkIndexes(bytes, strictLimits, 256, cache));
@@ -63,6 +70,7 @@ final class StoredCatchUpWorkIndexesTest {
     }
 
     @Test void coldDueAndApplicationIndexesPreserveOrderCountersDuplicatesAndOldRoots() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         var resident = ManagedCatchUpWorkIndex.empty(); var fixtures = new ArrayList<Fixture>();
         for (int i = 1; i <= 16; i++) {
@@ -71,8 +79,10 @@ final class StoredCatchUpWorkIndexesTest {
         var retained = storage.retainPartition(resident); var roots = roots(storage, retained);
         var copy = bytes.copy(); var coldStorage = storage(copy); var cold = coldStorage.open(roots::get, retained.lastMutationComparisons(), retained.lastMutationNodeCopies());
         var barriers = new HashMap<String, ManagedCatchUpBarrier>(); var receipts = new HashMap<String, ManagedEpochReceipt>();
+        // when
         fixtures.forEach(f -> { barriers.put(f.barrier.barrierIdentity(), f.barrier); receipts.put(f.source.receiptIdentity(), f.source); });
         for (var excluded : List.of(Set.<DocumentId>of(), Set.of(DocumentId.of("consumer-1")), Set.of(DocumentId.of("consumer-1"), DocumentId.of("consumer-2")))) {
+            // then
             assertDue(resident.nextDueWorkExcluding(excluded), coldStorage.nextDue(cold, excluded, barriers::get, w -> receipts.get(w.sourceReceiptIdentity())));
         }
         for (var f : fixtures) {
@@ -103,11 +113,14 @@ final class StoredCatchUpWorkIndexesTest {
     }
 
     @Test void conflictingDueOrderingAndMissingCrosslinksArePhysicalFailuresNotAlternativeSelection() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes); var f = fixture(1, "consumer");
         var stored = storage.retainPartition(ManagedCatchUpWorkIndex.empty().withWork(f.work, f.barrier, f.source)); var s = stored.storedIndexes();
         var registered = s.work().get(f.work.workIdentity()); var k = registered.dueKey();
         var wrongOrder = new ManagedCatchUpWorkIndex.DueKey(order(-1), k.sourceOrder(), k.sourceDocumentId(), k.sourceEpoch(), k.consumerDocumentId(), k.targetPath(), k.activationGeneration());
+        // when
         var extraEarlier = state(s, s.work(), s.pending(), s.applications(), s.applicationsByWork(), s.due().put(wrongOrder, f.work.workIdentity()).map());
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage.nextDue(extraEarlier, Set.of(), id -> f.barrier, w -> f.source), "A duplicate earlier due key cannot overtake the registered canonical key");
         var missingPending = state(s, s.work(), s.pending().remove(f.work.planIdentity()).map(), s.applications(), s.applicationsByWork(), s.due());
         assertThrows(CoordinationObjectStorageException.class, () -> storage.work(missingPending, f.work.workIdentity()));
@@ -120,8 +133,12 @@ final class StoredCatchUpWorkIndexesTest {
     }
 
     @Test void unavailableSelectedSourceAndFailedMultiRootStagingCannotDropOriginalPendingWork() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes); var f = fixture(4, "consumer");
-        var stored = storage.retainPartition(ManagedCatchUpWorkIndex.empty().withWork(f.work, f.barrier, f.source)); var roots = roots(storage, stored);
+        var stored = storage.retainPartition(ManagedCatchUpWorkIndex.empty().withWork(f.work, f.barrier, f.source));
+        // when
+        var roots = roots(storage, stored);
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage.nextDue(stored, Set.of(), id -> f.barrier,
                 w -> { throw new CoordinationObjectStorageException("Selected exact source unavailable"); }));
         bytes.failAtWrite = bytes.writes + 2;
@@ -138,9 +155,12 @@ final class StoredCatchUpWorkIndexesTest {
     }
 
     @Test void applicationTransportCannotSilentlyChangeReceiptCoordinatesOrOriginalWork() {
+        // given
         var storage = storage(new DocumentSessionStorageTest.Bytes()); var f = fixture(9, "consumer");
         var receipt = application(f.work, 91); var row = new ManagedCatchUpWorkIndex.RegisteredApplication(receipt, f.work);
+        // when
         byte[] encoded = storage.applicationsCodec.encode(row);
+        // then
         assertArrayEquals(encoded, storage.applicationsCodec.encode(storage.applicationsCodec.decode(encoded)));
         var standalone = new ManagedApplicationStorageCodec(LIMITS.valueBytes(), 256);
         byte[] packet = standalone.encode(receipt, f.work); var decoded = standalone.decode(packet);

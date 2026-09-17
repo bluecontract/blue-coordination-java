@@ -7,13 +7,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class StoredProcessingReceiptSdkTest {
     @Test void actualNumberedSuccessorAndRepresentationDrainsRetainFullOriginalReceipts() throws Exception {
+        // given
         ReceiptStorageFixture storage;
         try (var scenario = new RootedTerminalTailSdkScenario(100_000L, false, 1)) {
             storage = new ReceiptStorageFixture(scenario.f.blue.advanced().rawEngine());
             var sources = scenario.sourceState(); int numbered = 0, representations = 0; boolean ready = false;
             for (int step = 0; step < 32; step++) {
+                // when
                 var receipt = storage.next(scenario.consumer.id());
                 for (var attempt : receipt.managedEpochApplicationAttempts()) {
+                    // then
                     assertTrue(attempt.published()); assertTrue(attempt.attempt().processResult().commits());
                     if (attempt.work().successorRepresentationCause().isPresent()) numbered++;
                     if (attempt.work().isRepresentationApplication()) representations++;
@@ -29,6 +32,7 @@ final class StoredProcessingReceiptSdkTest {
     }
 
     @Test void actualLocalRetainedDrainKeepsOriginalHistoryOriginAndPublicationFence() throws Exception {
+        // given
         ReceiptStorageFixture storage;
         try (var f = new RootedSdkFixture()) {
             String template = RootedSdkFixture.resource("node-graph.template.json");
@@ -40,7 +44,9 @@ final class StoredProcessingReceiptSdkTest {
                 roots.put(name, f.startYaml(yaml, "receipt-storage/all"));
             }
             var a = roots.get("A"); var b = roots.get("B");
+            // when
             var first = f.append(a, "receipt-storage/all", "attach", 100, "edge: b\nsource: {blueId: " + originals.get("B") + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(a, first).entry(first).disposition()); settle(f, a);
             var second = f.append(b, "receipt-storage/all", "attach", 200, "edge: c\nsource: {blueId: " + originals.get("C") + "}");
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(b, second).entry(second).disposition()); settle(f, b);

@@ -14,11 +14,14 @@ final class DocumentSessionOwnedViewStorageTest {
             ExternalOrderKey.of(List.of(BigInteger.valueOf(1_000), "timeline", "entry"));
 
     @Test void controlledRetentionPreservesDistinctLiveAliasesAndColdPublicationMeaning() throws Exception {
+        // given
         try (var fixture = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var session = fixture.engine.documents().require(fixture.parent.id()).copyForAtomicPublication();
             var original = session.rootedView();
             var aliasOne = RootedDocumentView.restoreStored(original.storedState());
+            // when
             var aliasTwo = RootedDocumentView.restoreStored(original.storedState());
+            // then
             assertNotSame(original, aliasOne);
             assertNotSame(aliasOne, aliasTwo);
             int firstAliasOrdinal = session.indexedState().rootedViewPositions().size();

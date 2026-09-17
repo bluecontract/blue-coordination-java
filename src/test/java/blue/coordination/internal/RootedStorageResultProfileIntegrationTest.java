@@ -34,6 +34,7 @@ final class RootedStorageResultProfileIntegrationTest {
     private static final SessionRecordCodec REVISION = new SessionRecordCodec(RECORD, 256);
 
     @Test void realColdSdkOwnersShareExactResultsAcrossSessionAndPublicationByteProfiles() throws Exception {
+        // given
         var originalBytes = new ObservedObjects();
         RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journal;
@@ -42,7 +43,9 @@ final class RootedStorageResultProfileIntegrationTest {
         String nextEntryYaml, nextEntryId;
         try (var fixture = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             for (int position = 3; position <= HISTORY; position++) {
+                // when
                 var entry = fixture.append(position * 100L);
+                // then
                 assertEquals(EntryDisposition.APPLIED,
                         fixture.blue.processing().processNext(fixture.parent).entry(entry).disposition());
             }

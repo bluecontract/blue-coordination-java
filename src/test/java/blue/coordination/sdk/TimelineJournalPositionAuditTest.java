@@ -6,13 +6,16 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class TimelineJournalPositionAuditTest {
     @Test void sdkPositionMatchesFullAuditWithoutChangingDocumentOrJournal() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var document = f.start("historical-a.yaml", "rcp2/a", Map.of());
             var state = document.snapshot().blueId();
             f.timelines.put("other", f.blue.timelines().register("other", "alice"));
             var first = f.append(document, "rcp2/a", "tick", 900, "{}");
             var second = f.append(document, "other", "tick", 100, "{}");
+            // when
             var position = f.blue.advanced().auditTimelinePosition("other");
+            // then
             assertEquals(second.blueId(), position.head().orElseThrow().blueId());
             assertEquals(900, position.maximumTimestampMicros());
             assertEquals(2, position.journalRevision());

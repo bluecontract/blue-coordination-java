@@ -15,8 +15,11 @@ final class TimelineJournalPositionTest {
     private static final Operation OP = Operation.withoutRequest("tick", "owner");
 
     @Test void positionMatchesTheOldScanWithOutOfOrderCrossTimelineImportsAndRollback() {
+        // given
         try (var f = new Fixture()) {
+            // when
             var empty = f.journal.position("a");
+            // then
             assertTrue(empty.head().isEmpty());
             assertEquals(0, empty.maximumTimestampMicros());
             assertEquals(0, empty.journalRevision());
@@ -44,6 +47,7 @@ final class TimelineJournalPositionTest {
     }
 
     @Test void selectedReadsStayConstantAsTheUnrelatedJournalGrows() {
+        // given
         try (var f = new Fixture()) {
             f.journal.append(A, OP, 1);
             int previous = 0;
@@ -54,7 +58,9 @@ final class TimelineJournalPositionTest {
                 long start = System.nanoTime();
                 var position = f.journal.position("a");
                 long indexedNanos = System.nanoTime() - start;
+                // when
                 int indexedReads = f.store.rowReads;
+                // then
                 assertEquals(size + 1L, position.maximumTimestampMicros());
                 assertEquals(1, f.store.opens, "Both coordinates must come from the same pinned view");
                 assertEquals(1, f.store.closes);

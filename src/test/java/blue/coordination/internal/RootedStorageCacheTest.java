@@ -10,10 +10,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RootedStorageCacheTest {
     @Test void descriptorProofIsExactBoundedAndDisappearsOnEviction() {
+        // given
         byte[] frame = {1, 2, 3};
         try (var cache = new RootedStorageCache(10000, 1, 10000)) {
             var value = cache.decodeCanonical("family/limit-3", frame, ignored -> new Object(), ignored -> frame);
+            // when
             String digest = PersistentMapStorage.digest(frame);
+            // then
             assertTrue(cache.hasCanonicalEncoding("family/limit-3", value, digest, 3));
             assertFalse(cache.hasCanonicalEncoding("family/limit-4", value, digest, 3));
             assertFalse(cache.hasCanonicalEncoding("family/limit-3", new Object(), digest, 3));
@@ -26,8 +29,12 @@ class RootedStorageCacheTest {
         }
     }
     @Test void exactFramesAndCodecFamiliesIsolateEntriesAndKeysAreOwned() {
+        // given
         try (var cache = new RootedStorageCache(100_000, 10, 100_000)) {
-            byte[] frame = {1, 2}; Object original = new Object();
+            byte[] frame = {1, 2};
+            // when
+            Object original = new Object();
+            // then
             assertSame(original, cache.decode("view/1/depth256", frame, () -> original));
             frame[0] = 3;
             assertSame(original, cache.decode("view/1/depth256", new byte[]{1, 2}, () -> fail("Decoded twice")));
@@ -38,10 +45,13 @@ class RootedStorageCacheTest {
     }
 
     @Test void lruUsesLastAccessAndChargesTransitiveDependencies() {
+        // given
         long each = RootedStorageCache.estimatedWeight(1, 0);
         try (var cache = new RootedStorageCache(each * 2, 10, each * 2)) {
             Object first = cache.decode("view", new byte[]{1}, Object::new);
+            // when
             Object second = cache.decode("view", new byte[]{2}, Object::new);
+            // then
             assertSame(first, cache.decode("view", new byte[]{1}, Object::new));
             cache.decode("view", new byte[]{3}, Object::new);
             assertSame(first, cache.decode("view", new byte[]{1}, Object::new));
@@ -56,10 +66,13 @@ class RootedStorageCacheTest {
     }
 
     @Test void disabledOversizeAndFailedDecodeNeverRetain() {
+        // given
         for (var cache : new RootedStorageCache[]{new RootedStorageCache(0, 0, 0),
                 new RootedStorageCache(1000, 1, 10)}) {
             try (cache) {
+                // when
                 Object first = cache.decode("view", new byte[]{1}, Object::new);
+                // then
                 assertNotSame(first, cache.decode("view", new byte[]{1}, Object::new));
                 assertEquals(0, cache.statistics().retainedEntries());
             }
@@ -77,12 +90,15 @@ class RootedStorageCacheTest {
     }
 
     @Test void sameKeyLoadsOnceWithoutBlockingAnUnrelatedKey() throws Exception {
+        // given
         var pool = Executors.newFixedThreadPool(3);
         try (var cache = new RootedStorageCache(10000, 10, 10000)) {
             var entered = new CountDownLatch(1); var release = new CountDownLatch(1); var decodes = new AtomicInteger();
+            // when
             var one = pool.submit(() -> cache.decode("view", new byte[]{1}, () -> {
                 decodes.incrementAndGet(); entered.countDown(); await(release); return new Object();
             }));
+            // then
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             var two = pool.submit(() -> cache.decode("view", new byte[]{1}, () -> {
                 decodes.incrementAndGet(); return new Object();
@@ -96,13 +112,16 @@ class RootedStorageCacheTest {
     }
 
     @Test void clearingDuringLoadPreventsLateRepopulationAndCloseRejectsNewUse() throws Exception {
+        // given
         var cache = new RootedStorageCache(10000, 10, 10000);
         var pool = Executors.newSingleThreadExecutor();
         try (cache) {
             var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+            // when
             var loading = pool.submit(() -> cache.decode("view", new byte[]{1}, () -> {
                 entered.countDown(); await(release); return new Object();
             }));
+            // then
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             try { cache.clear(); } finally { release.countDown(); }
             assertNotNull(loading.get(5, TimeUnit.SECONDS)); assertEquals(0, cache.statistics().retainedEntries());
@@ -114,15 +133,23 @@ class RootedStorageCacheTest {
     }
 
     @Test void limitsSupportGiBAndWeightsSaturateWithoutOverflow() {
+        // given
         assertDoesNotThrow(() -> new RootedStorageCache(4L * 1024 * 1024 * 1024, 65536, 512L * 1024 * 1024));
-        assertEquals(Long.MAX_VALUE, RootedStorageCache.estimatedWeight(1, Long.MAX_VALUE));
+        // when
+        long saturatedWeight = RootedStorageCache.estimatedWeight(1, Long.MAX_VALUE);
+        // then
+        assertEquals(Long.MAX_VALUE, saturatedWeight);
         assertThrows(IllegalArgumentException.class, () -> new RootedStorageCache(-1, 1, 1));
         assertThrows(IllegalArgumentException.class, () -> new RootedStorageCache(1, 0, 1));
     }
 
     @Test void canonicalCrossRecordHitsAdoptDependenciesAndRejectedAliasesDecodeNormally() {
+        // given
         record Packet(Object subject, long dependencyBytes) { }
-        var decodes = new AtomicInteger(); var encodes = new AtomicInteger(); var accepts = new AtomicInteger();
+        var decodes = new AtomicInteger(); var encodes = new AtomicInteger();
+        // when
+        var accepts = new AtomicInteger();
+        // then
         Function<byte[], Packet> decode = bytes -> {
             decodes.incrementAndGet(); var value = new Packet(new Object(), 20);
             encodes.incrementAndGet(); assertArrayEquals(new byte[]{1, 2}, bytes); // The codec's own canonical check.
@@ -151,14 +178,17 @@ class RootedStorageCacheTest {
     }
 
     @Test void canonicalCrossRecordFailuresAndCapacityNeverGrantEncodingEvidence() {
+        // given
         Object rejected = new Object();
         try (var cache = new RootedStorageCache(100_000, 10, 100_000)) {
+            // when
             for (int i = 0; i < 2; i++) assertThrows(blue.coordination.api.storage.CoordinationObjectStorageException.class,
                     () -> cache.decodeVerifiedCanonical("receipt", new byte[]{1}, bytes -> {
                         SessionStorageWire.require(java.util.Arrays.equals(bytes, new byte[]{2}), "Noncanonical test frame");
                         return rejected;
                     },
                             value -> value, value -> 10, value -> true));
+            // then
             assertEquals(0, cache.statistics().retainedEntries()); assertEquals(2, cache.statistics().failedLoads());
             assertNull(cache.canonicalEncoding("receipt", rejected));
             assertThrows(blue.coordination.api.storage.CoordinationObjectStorageException.class,

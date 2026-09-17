@@ -10,8 +10,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Strict imported indexed roots must prove every derived index, not only valid tip payloads. */
 final class DocumentSessionIndexedValidationTest {
     @Test void strictRestoreRejectsOmittedSecondaryRowsWithUnchangedPayloadsAndScalars() throws Exception {
+        // given
         try (var f = scenario()) {
+            // when
             var state = f.engine.documents().require(f.parent.id()).indexedState();
+            // then
             assertEquals(state.layout().rootBlueId(), DocumentSession.restoreIndexed(state, null).currentRepresentation().blueId());
             for (String field : List.of("retainedStates", "sourceEntryEpochs", "causalEntryBounds", "representationRanges", "representationStatePositions",
                     "representationStates", "representationReceiptPositions", "invocationFirstPositions")) {
@@ -29,11 +32,14 @@ final class DocumentSessionIndexedValidationTest {
     }
 
     @Test void strictRestoreRejectsAValidLookingWrongMiddleMetadataValueWithoutChangingCountsOrEndpoints() throws Exception {
+        // given
         try (var f = scenario()) {
             var state = f.engine.documents().require(f.parent.id()).indexedState();
             var changed = state.retainedStates().put(1L, new ManagedLineageIndex.RetainedState(state.documentId(), 1L,
                     state.retainedStates().get(0L).blueId())).map();
+            // when
             var tampered = replace(state, "retainedStates", changed);
+            // then
             assertEquals(state.retainedStates().size(), changed.size());
             assertEquals(state.retainedStates().get(0L), changed.get(0L));
             assertEquals(state.retainedStates().get(state.epoch()), changed.get(state.epoch()));
@@ -43,9 +49,12 @@ final class DocumentSessionIndexedValidationTest {
     }
 
     @Test void strictRestoreRejectsAnAlteredHistoricalGapDespiteUnchangedCurrentRepresentation() throws Exception {
+        // given
         try (var f = scenario()) {
             var state = f.engine.documents().require(f.parent.id()).indexedState();
+            // when
             long changed = state.lastAnchoredNonReplayableEpoch() == -1L ? 0L : -1L;
+            // then
             assertTrue(changed < state.epoch());
             var tampered = replace(state, "lastAnchoredNonReplayableEpoch", changed);
             assertSame(state.rootedView(), tampered.rootedView());

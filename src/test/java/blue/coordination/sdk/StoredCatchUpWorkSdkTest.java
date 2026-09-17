@@ -7,11 +7,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class StoredCatchUpWorkSdkTest {
     @Test void actualNumberedSuccessorAndTwoRepresentationApplicationsMatchResidentThroughRepeatedColdIndexReplacement() throws Exception {
+        // given
         try (var reference = new RootedTerminalTailSdkScenario(100_000L, false, 1);
              var stored = new RootedTerminalTailSdkScenario(100_000L, false, 1)) {
             var expected = new CatchUpWorkStorageFixture(reference.f.blue.advanced().rawEngine());
             var actual = new CatchUpWorkStorageFixture(stored.f.blue.advanced().rawEngine());
-            var sourceBefore = stored.sourceState(); assertEquals(reference.sourceState(), sourceBefore);
+            // when
+            var sourceBefore = stored.sourceState();
+            // then
+            assertEquals(reference.sourceState(), sourceBefore);
             assertEquals(reference.consumerProgress(), stored.consumerProgress());
             boolean complete = false;
             for (int step = 0; step < 32; step++) {

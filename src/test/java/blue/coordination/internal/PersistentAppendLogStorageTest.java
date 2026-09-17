@@ -15,11 +15,14 @@ final class PersistentAppendLogStorageTest {
     };
 
     @Test void workingSuffixRetainsOnlyNewCompleteChunksWithoutOpeningOldValues() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "events");
         var prefix = storage.open(null);
         for (int i = 0; i < 100; i++) prefix = prefix.appendAll(List.of("old" + i));
         byte[] original = prefix.storedRootDescriptor(); bytes.reads = 0; bytes.writes = 0;
+        // when
         var working = prefix.workingCopy().appendAll(List.of("a", "a")).appendAll(List.of("b"));
+        // then
         assertEquals(0, bytes.reads); assertEquals(0, bytes.writes); assertEquals(103, working.size());
         assertTrue(working.extendsLog(prefix)); assertEquals(0, bytes.reads);
         var staged = storage.retain(working);
@@ -32,6 +35,7 @@ final class PersistentAppendLogStorageTest {
     }
 
     @Test void failedWorkingSuffixStageKeepsOriginalPrefixAndExactMutableRowsForRetry() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes();
         var mutableRows = new PersistentMapCodec<StringBuilder>() {
             public String identity() { return "test/mutable-log/1"; }
@@ -44,7 +48,9 @@ final class PersistentAppendLogStorageTest {
         var value = new StringBuilder("interim");
         var working = prefix.workingCopy().appendAll(List.of(value)).appendAll(List.of(new StringBuilder("tail")));
         value.replace(0, value.length(), "complete");
+        // when
         bytes.failAtWrite = bytes.writes + 2;
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage.retain(working));
         bytes.failAtWrite = -1;
         assertSame(value, working.values().get(1));
@@ -55,10 +61,14 @@ final class PersistentAppendLogStorageTest {
     }
 
     @Test void coldChunksPreserveExactOrderMultiplicityBoundariesAndPrefixAcrossWrappers() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "events");
         var resident = PersistentAppendLog.<String>empty().appendAll(List.of("a", "a")).appendAll(List.of("b"));
         var retained = storage.retain(resident); var first = storage.retain(PersistentAppendLog.<String>empty().appendAll(List.of("a", "a")));
-        var coldBytes = bytes.copy(); var cold = storage(coldBytes, "events"); var opened = cold.open(retained.storedRootDescriptor());
+        var coldBytes = bytes.copy(); var cold = storage(coldBytes, "events");
+        // when
+        var opened = cold.open(retained.storedRootDescriptor());
+        // then
         assertEquals(resident.values(), opened.values()); assertEquals(3, opened.size());
         assertTrue(opened.extendsLog(cold.open(first.storedRootDescriptor())));
         assertTrue(opened.extendsLog(cold.open(null)));
@@ -78,21 +88,28 @@ final class PersistentAppendLogStorageTest {
     }
 
     @Test void oneAppendAfterLargeHistoryWritesOneChunkWithoutReadingOrCopyingItsPrefix() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "checkpoint");
         var log = storage.open(null);
         for (int i = 0; i < 1000; i++) log = log.appendAll(List.of(Integer.toString(i)));
         var coldBytes = bytes.copy(); var cold = storage(coldBytes, "checkpoint"); var prefix = cold.open(log.storedRootDescriptor());
         coldBytes.reads = 0; coldBytes.writes = 0;
+        // when
         var appended = prefix.appendAll(List.of("1000"));
+        // then
         assertEquals(1, coldBytes.writes); assertEquals(0, coldBytes.reads);
         assertTrue(appended.extendsLog(prefix)); assertTrue(coldBytes.reads <= 1);
         assertEquals(1001, appended.size()); assertEquals("0", appended.values().get(0)); assertEquals("1000", appended.values().get(1000));
     }
 
     @Test void missingCorruptWrongBindingAndBadAcknowledgmentNeverReturnAPublishableNewRoot() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "events");
         var initial = storage.open(null).appendAll(List.of("before")); var descriptor = initial.storedRootDescriptor();
-        var coldBytes = bytes.copy(); var cold = storage(coldBytes, "events");
+        var coldBytes = bytes.copy();
+        // when
+        var cold = storage(coldBytes, "events");
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage(coldBytes, "checkpoints").open(descriptor));
         var root = coldBytes.records.keySet().iterator().next(); coldBytes.records.remove(root);
         assertThrows(CoordinationObjectStorageException.class, () -> cold.open(descriptor));
@@ -106,8 +123,12 @@ final class PersistentAppendLogStorageTest {
     }
 
     @Test void physicalBoundsAndCanonicalDecodeDoNotBecomeSemanticEmptyHistory() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "events");
-        var log = storage.open(null); assertThrows(CoordinationObjectStorageException.class, () -> log.appendAll(List.of("x".repeat(4097))));
+        // when
+        var log = storage.open(null);
+        // then
+        assertThrows(CoordinationObjectStorageException.class, () -> log.appendAll(List.of("x".repeat(4097))));
         assertTrue(log.isEmpty());
         var stored = log.appendAll(List.of("MixedCase"));
         var coercing = new PersistentMapCodec<String>() {
@@ -123,9 +144,13 @@ final class PersistentAppendLogStorageTest {
     }
 
     @Test void malformedPredecessorCoverageAndUnavailableSelectedPrefixFailBeforePartialOutput() throws Exception {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes, "events");
         byte[] wrongCoverage = chunk(2, 2, "0".repeat(64));
-        String wrongDigest = digest(wrongCoverage); bytes.records.put(wrongDigest, wrongCoverage);
+        String wrongDigest = digest(wrongCoverage);
+        // when
+        bytes.records.put(wrongDigest, wrongCoverage);
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage.open(storage.descriptor(new PersistentAppendLogStorage.Handle(wrongDigest, 2))));
         byte[] missingPrefix = chunk(2, 1, "0".repeat(64));
         String missingDigest = digest(missingPrefix); bytes.records.put(missingDigest, missingPrefix);

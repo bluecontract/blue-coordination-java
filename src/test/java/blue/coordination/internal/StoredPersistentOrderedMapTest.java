@@ -29,12 +29,15 @@ final class StoredPersistentOrderedMapTest {
     @TempDir Path temporary;
 
     @Test void controlledOwnerReusesSmallAuthenticatedNodesButNewOwnersAndRawStoresReadAgain() {
+        // given
         try (var cache = new RootedStorageCache(4 * 1024 * 1024, 100, 1024 * 1024)) {
         var rows = new Rows(); var map = StoredMapFixtures.open(rows, null);
         for (int n = 0; n < 40; n++) map = map.put(n, "value-" + n).map();
         byte[] root = map.storedRootDescriptor();
         var controlled = RootedEngineStorage.controlledNamespace(rows, cache);
+        // when
         var selected = StoredMapFixtures.open(controlled, root);
+        // then
         assertEquals("value-21", selected.get(21)); int cold = rows.reads;
         for (int n = 0; n < 100; n++) assertEquals("value-21", selected.get(21));
         assertEquals(cold, rows.reads, "Repeated reads reuse this owner's authenticated structural frames");
@@ -53,6 +56,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void preparedEncodingKeepsGenericPreparationAndCanonicalValidationOrder() {
+        // given
         var calls = new ArrayList<String>();
         var keys = new PersistentMapCodec<Integer>() {
             public String identity() { return StoredMapFixtures.INTS.identity(); }
@@ -69,7 +73,9 @@ final class StoredPersistentOrderedMapTest {
         var rows = new Rows();
         var map = PersistentOrderedMap.stored(Comparator.naturalOrder(), StoredMapFixtures.ORDER,
                 keys, values, rows, StoredMapFixtures.LIMITS, null);
+        // when
         var changed = map.put(7, "seven").map();
+        // then
         assertEquals(List.of("prepare-key", "prepare-value", "encode-key", "decode-key", "encode-key",
                 "encode-value", "decode-value", "encode-value"), calls);
         assertEquals(1, rows.writes);
@@ -78,10 +84,13 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void oneShotEncodingOwnsBytesAndStillEnforcesBoundsAndCanonicalDecoding() {
+        // given
         byte[] supplied = StoredMapFixtures.TEXT.encode("owned");
         var prepared = PersistentMapCodec.PreparedEncoding.<String>encoded(supplied);
         supplied[0] = 'x';
+        // when
         byte[] consumed = prepared.consume(StoredMapFixtures.TEXT);
+        // then
         assertArrayEquals(StoredMapFixtures.TEXT.encode("owned"), consumed);
         consumed[0] = 'y';
         assertThrows(IllegalStateException.class, () -> prepared.consume(StoredMapFixtures.TEXT));
@@ -115,6 +124,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void oneShotPreparationCapturesASnapshotWithoutCertifyingLaterMutableValues() {
+        // given
         var mutable = new StringBuilder("captured");
         var codec = new PersistentMapCodec<StringBuilder>() {
             public String identity() { return "test/mutable-snapshot/1"; }
@@ -129,7 +139,9 @@ final class StoredPersistentOrderedMapTest {
         var rows = new Rows();
         var empty = PersistentOrderedMap.stored(Comparator.naturalOrder(), StoredMapFixtures.ORDER,
                 StoredMapFixtures.INTS, codec, rows, StoredMapFixtures.LIMITS, null);
+        // when
         var stored = empty.put(1, mutable).map();
+        // then
         assertEquals("captured-later", mutable.toString());
         assertEquals("captured", stored.get(1).toString());
         assertArrayEquals(StoredMapFixtures.TEXT.encode("captured-later"), codec.encode(mutable));
@@ -140,6 +152,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void metadataMembershipPreservesKeyChecksAndAbsenceWithoutProjectingValues() {
+        // given
         Rows rows = new Rows(); var source = StoredMapFixtures.open(rows, null);
         for (int key = 0; key < 31; key++) source = source.put(key, "v" + key).map();
         var original = source.storedRootDescriptor();
@@ -148,7 +161,10 @@ final class StoredPersistentOrderedMapTest {
         var projection = StoredMapFixtures.open(coldRows, original).projectValues((key, value) -> {
             mapped.add(key); return new StringBuilder(value);
         }, absent::add);
-        var working = projection.open(); int writes = coldRows.writes;
+        var working = projection.open();
+        // when
+        int writes = coldRows.writes;
+        // then
         assertTrue(working.containsKeyWithoutValue(5));
         assertFalse(working.containsKeyWithoutValue(-1));
         assertEquals(List.of(-1), absent); assertTrue(mapped.isEmpty());
@@ -164,13 +180,16 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void lazyWorkingProjectionPreservesMutableValuesWithoutOpeningOrWritingUnselectedRows() {
+        // given
         Rows rows = new Rows(); var source = StoredMapFixtures.open(rows, null);
         for (int key = 0; key < 127; key++) source = source.put(key, "v" + key).map();
         byte[] original = source.storedRootDescriptor();
         var mapped = new ArrayList<Integer>(); var retained = new ArrayList<Integer>();
         var projection = source.projectValues((key, value) -> { mapped.add(key); return new StringBuilder(value); });
         int reads = rows.reads, writes = rows.writes;
+        // when
         var working = projection.open();
+        // then
         assertEquals(reads, rows.reads); assertEquals(writes, rows.writes); assertTrue(mapped.isEmpty());
         assertEquals("v5", working.get(5).toString()); assertEquals(List.of(5), mapped); mapped.clear();
         var value = new StringBuilder("interim");
@@ -189,6 +208,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void lazyWorkingProjectionMatchesResidentAvlMetricsAcrossRotationsRemovalsAndColdStaging() {
+        // given
         Rows rows = new Rows(); var source = StoredMapFixtures.open(rows, null);
         var resident = PersistentOrderedMap.<Integer, String>empty(Comparator.naturalOrder());
         for (int key = 0; key < 100; key++) { source = source.put(key, "v" + key).map(); resident = resident.put(key, "v" + key).map(); }
@@ -197,7 +217,9 @@ final class StoredPersistentOrderedMapTest {
         for (int i = 0; i < 180; i++) {
             int key = random.nextInt(150); boolean remove = random.nextBoolean();
             var expected = remove ? resident.remove(key) : resident.put(key, "new" + i);
+            // when
             var actual = remove ? working.remove(key) : working.put(key, "new" + i);
+            // then
             assertEquals(expected.changed(), actual.changed()); assertEquals(expected.metrics(), actual.metrics());
             resident = expected.map(); working = actual.map();
             assertEquals(writes, rows.writes); assertEquals(resident.entries(), working.entries());
@@ -212,12 +234,15 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void failedFinalProjectionStagingLeavesOriginalRootAndWorkingObjectsAvailableForRetry() {
+        // given
         Rows rows = new Rows(); var source = StoredMapFixtures.open(rows, null);
         for (int key = 0; key < 31; key++) source = source.put(key, "v" + key).map();
         byte[] original = source.storedRootDescriptor();
         var projection = source.projectValues((key, value) -> new StringBuilder(value));
         var value = new StringBuilder("first"); var working = projection.open().put(9, value).map().put(32, new StringBuilder("extra")).map();
+        // when
         rows.failAfterWrites = rows.writes + 2;
+        // then
         assertPhysical(() -> projection.stage(working, (key, item) -> item.toString()));
         assertSame(value, working.get(9)); value.append("-final");
         rows.failAfterWrites = Integer.MAX_VALUE;
@@ -231,6 +256,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void coldRandomizedMutationsPreserveTheExistingAvlAlgorithmAndMetrics() {
+        // given
         Rows rows = new Rows();
         var stored = StoredMapFixtures.open(rows, null);
         PersistentOrderedMap<Integer, String> resident = PersistentOrderedMap.empty(Comparator.naturalOrder());
@@ -240,7 +266,9 @@ final class StoredPersistentOrderedMapTest {
             int key = random.nextInt(100);
             boolean remove = random.nextInt(3) == 0;
             var actual = remove ? stored.remove(key) : stored.put(key, "v" + index);
+            // when
             var expected = remove ? resident.remove(key) : resident.put(key, "v" + index);
+            // then
             assertEquals(expected.changed(), actual.changed());
             assertEquals(expected.metrics(), actual.metrics(), "same AVL comparisons/copies");
             assertEquals(resident.entries(), stored.entries(), "prior immutable root");
@@ -252,13 +280,16 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void residentShapeColdRangeBoundariesAndIndependentDescriptorsRemainExact() {
+        // given
         Rows rows = new Rows();
         var resident = PersistentOrderedMap.<Integer, String>empty(Comparator.naturalOrder());
         for (int key : List.of(40, 10, 70, 5, 30, 60, 90, 20, 35)) resident = resident.put(key, "v" + key).map();
         var stored = resident.storedCopy(StoredMapFixtures.ORDER, StoredMapFixtures.INTS,
                 StoredMapFixtures.TEXT, rows, StoredMapFixtures.LIMITS);
         byte[] descriptor = stored.storedRootDescriptor();
+        // when
         var cold = StoredMapFixtures.open(rows.fresh(), descriptor);
+        // then
         assertEquals(resident.heightForTesting(), cold.heightForTesting());
         assertEquals(resident.entries(), cold.entries());
         for (int key = 0; key < 100; key++) assertEquals(resident.read(key), cold.read(key));
@@ -287,6 +318,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void physicalCacheMissesChangeNeitherLogicalComparisonsNorCopiedNodes() {
+        // given
         Rows rows = new Rows();
         var stored = StoredMapFixtures.open(rows, null);
         var resident = PersistentOrderedMap.<Integer, String>empty(Comparator.naturalOrder());
@@ -297,8 +329,10 @@ final class StoredPersistentOrderedMapTest {
         for (int cachedNodes : List.of(1, 2, 64)) {
             var limits = new PersistentMapStorage.Limits(4096, 16, 2048, 1024, cachedNodes);
             Rows coldRows = rows.fresh();
+            // when
             var cold = PersistentOrderedMap.stored(Comparator.<Integer>naturalOrder(), StoredMapFixtures.ORDER,
                     StoredMapFixtures.INTS, StoredMapFixtures.TEXT, coldRows, limits, descriptor);
+            // then
             assertEquals(resident.read(2), cold.read(2));
             assertEquals(resident.read(-1), cold.read(-1));
             assertEquals(resident.put(2, "new").metrics(), cold.put(2, "new").metrics());
@@ -311,9 +345,12 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void emptyAndLookupDescriptorsRejectDifferentCodecBindings() {
+        // given
         Rows rows = new Rows();
         var empty = StoredMapFixtures.open(rows, null);
+        // when
         byte[] descriptor = empty.storedRootDescriptor();
+        // then
         assertEquals(0, rows.reads);
         assertTrue(StoredMapFixtures.open(rows, descriptor).isEmpty());
         assertEquals(0, rows.reads, "A bound empty descriptor has no physical node");
@@ -330,6 +367,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void freshJvmContinuesFromFilesAndOriginalRootRemainsReadable() throws Exception {
+        // given
         Path directory = temporary.resolve("objects");
         var map = StoredMapFixtures.open(new FileCoordinationObjectStore(directory, 4096), null);
         for (int key = 0; key < 127; key++) map = map.put(key, "value-" + key).map();
@@ -344,7 +382,10 @@ final class StoredPersistentOrderedMapTest {
                 "-cp", classpath, StoredPersistentMapRestartMain.class.getName(), directory.toString(),
                 before.toString(), after.toString()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
         boolean finished = child.waitFor(30, TimeUnit.SECONDS);
-        if (!finished) child.destroyForcibly();
+        if (!finished)
+        // when
+        child.destroyForcibly();
+        // then
         assertTrue(finished, "owned child did not complete");
         assertEquals(0, child.exitValue(), () -> readText(output));
         assertTrue(Files.readString(output).contains("COLD_MAP_OK"));
@@ -358,6 +399,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void malformedUnvisitedCountCannotPreallocateExhaustiveOutputInSmallHeapJvm() throws Exception {
+        // given
         Path directory = temporary.resolve("malformed-count-objects");
         var store = new FileCoordinationObjectStore(directory, 4096);
         byte[] childBytes = node(1, "one", null, 0, 0, 1, 1);
@@ -374,20 +416,26 @@ final class StoredPersistentOrderedMapTest {
                 "-Xmx32m", "-cp", classpath, StoredPersistentMapRestartMain.class.getName(), directory.toString(),
                 descriptor.toString(), "unused", "malformed-size").redirectErrorStream(true).redirectOutput(output.toFile()).start();
         boolean finished = child.waitFor(30, TimeUnit.SECONDS);
-        if (!finished) child.destroyForcibly();
+        if (!finished)
+        // when
+        child.destroyForcibly();
+        // then
         assertTrue(finished, "owned small-heap child did not complete");
         assertEquals(0, child.exitValue(), () -> readText(output));
         assertTrue(Files.readString(output).contains("MALFORMED_COUNT_REJECTED"));
     }
 
     @Test void coldLookupMutationAndRangeReadOnlyTheirPathsAmongUnrelatedKeys() {
+        // given
         for (int count : List.of(127, 4095)) {
             Rows rows = new Rows();
             var map = StoredMapFixtures.open(rows, null);
             for (int key = 0; key < count; key++) map = map.put(key, "v" + key).map();
             byte[] root = map.storedRootDescriptor();
             Rows coldRows = rows.fresh();
+            // when
             var cold = StoredMapFixtures.open(coldRows, root);
+            // then
             assertEquals(1, coldRows.reads, "open authenticates only root");
             coldRows.reads = 0;
             var read = cold.read(42);
@@ -413,12 +461,15 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void missingTamperedCollidingAndUnavailableObjectsFailNoncommitting() {
+        // given
         Rows rows = new Rows();
         var map = StoredMapFixtures.open(rows, null).put(1, "one").map();
         byte[] root = map.storedRootDescriptor();
         String rootId = rootId(root);
         byte[] valid = rows.bytes.get(rootId).clone();
+        // when
         rows.bytes.remove(rootId);
+        // then
         assertPhysical(() -> StoredMapFixtures.open(rows.fresh(), root));
         rows.bytes.put(rootId, valid.clone());
         rows.bytes.get(rootId)[0] ^= 1;
@@ -434,6 +485,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void structuralReadsAndAvlCopiesNeverDecodeUnselectedValues() {
+        // given
         Rows rows = new Rows();
         List<String> decoded = new ArrayList<>();
         PersistentMapCodec<String> values = new PersistentMapCodec<>() {
@@ -453,8 +505,10 @@ final class StoredPersistentOrderedMapTest {
             resident = resident.put(key, "v" + key).map();
         }
         decoded.clear();
+        // when
         stored = PersistentOrderedMap.stored(Comparator.<Integer>naturalOrder(), StoredMapFixtures.ORDER,
                 StoredMapFixtures.INTS, values, rows.fresh(), StoredMapFixtures.LIMITS, stored.storedRootDescriptor());
+        // then
         assertTrue(decoded.isEmpty(), "opening the root must not interpret its value");
         assertEquals(resident.keys(), stored.keys());
         stored.assertStructurallyValid();
@@ -490,13 +544,16 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void unselectedNoncanonicalValueIsNotBlessedByStructuralCopy() throws Exception {
+        // given
         Rows rows = new Rows();
         byte[] noncanonical = node(10, "z", null, 0, 0, 1, 1);
         // Publish an adversarial, hash-consistent one-byte UTF-8 value frame.
         // Selected decode returns U+FFFD; re-encode must detect the mismatch.
+        // when
         int valueOffset = -1;
         for (int offset = 0; offset < noncanonical.length; offset++) {
             if (noncanonical[offset] == (byte) 'z') {
+                // then
                 assertEquals(-1, valueOffset, "the fixture marker must identify only the value frame");
                 valueOffset = offset;
             }
@@ -519,12 +576,15 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void canonicalMalformedMetadataOrderingAndBindingChecksNeedNoWholeScan() throws Exception {
+        // given
         Rows rows = new Rows();
         byte[] left = node(99, "wrong-left", null, 0, 0, 1, 1);
         String leftId = PersistentMapStorage.digest(left);
         rows.bytes.put(leftId, left);
         byte[] parent = node(10, "root", leftId, 1, 1, 2, 2);
+        // when
         var map = StoredMapFixtures.open(rows, rootFor(rows, parent, 2, 2));
+        // then
         assertEquals(1, rows.reads, "root validation must not walk children");
         assertPhysical(() -> map.get(0));
 
@@ -543,6 +603,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void mutableInputOutputBytesCannotChangeStoredAuthorityAndBoundsArePhysical() {
+        // given
         Rows rows = new Rows();
         PersistentMapCodec<byte[]> bytesCodec = new PersistentMapCodec<>() {
             @Override public String identity() { return "test/bytes/1"; }
@@ -555,7 +616,9 @@ final class StoredPersistentOrderedMapTest {
         map = map.put(1, input).map();
         input[0] = 99;
         byte[] returned = map.get(1);
+        // when
         returned[1] = 99;
+        // then
         assertArrayEquals(new byte[] {1, 2, 3}, map.get(1));
         var fixed = map;
         assertPhysical(() -> fixed.put(2, new byte[2049]));
@@ -567,6 +630,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void unavailableSelectedChildCannotBecomeAnAbsentKeyAndUnvisitedChildIsNotOpened() throws Exception {
+        // given
         Rows rows = new Rows();
         byte[] child = node(5, "five", null, 0, 0, 1, 1);
         String childId = PersistentMapStorage.digest(child);
@@ -574,7 +638,9 @@ final class StoredPersistentOrderedMapTest {
         byte[] parent = node(10, "ten", childId, 1, 1, 2, 2);
         byte[] root = rootFor(rows, parent, 2, 2);
         rows.bytes.remove(childId);
+        // when
         var cold = StoredMapFixtures.open(rows, root);
+        // then
         assertEquals("ten", cold.get(10), "root hit does not open unrelated descendants");
         assertNull(cold.get(11), "authenticated absent branch is ordinary absence");
         assertPhysical(() -> cold.get(5));
@@ -584,6 +650,7 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void maliciousRootBalanceAndOversizedHostResultsAreRejected() throws Exception {
+        // given
         Rows rows = new Rows();
         byte[] leaf = node(1, "one", null, 0, 0, 1, 1);
         String leafId = PersistentMapStorage.digest(leaf);
@@ -591,7 +658,9 @@ final class StoredPersistentOrderedMapTest {
         byte[] branch = node(2, "two", leafId, 1, 1, 2, 2);
         String branchId = PersistentMapStorage.digest(branch);
         rows.bytes.put(branchId, branch);
+        // when
         byte[] unbalanced = node(3, "three", branchId, 2, 2, 3, 3);
+        // then
         assertPhysical(() -> StoredMapFixtures.open(rows, rootFor(rows, unbalanced, 3, 3)));
 
         byte[] proper = StoredMapFixtures.open(rows, null).put(1, "one").map().storedRootDescriptor();
@@ -609,13 +678,16 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void failedWriteAfterSomePathCopiesLeavesOriginalRootAuthoritative() {
+        // given
         Rows rows = new Rows();
         var map = StoredMapFixtures.open(rows, null);
         for (int key = 0; key < 31; key++) map = map.put(key, "v" + key).map();
         byte[] original = map.storedRootDescriptor();
         List<Map.Entry<Integer, String>> expected = map.entries();
         rows.failAfterWrites = rows.writes + 2;
+        // when
         var fixed = map;
+        // then
         assertPhysical(() -> fixed.put(0, "tentative"));
         rows.failAfterWrites = Integer.MAX_VALUE;
         assertArrayEquals(original, map.storedRootDescriptor());
@@ -623,13 +695,16 @@ final class StoredPersistentOrderedMapTest {
     }
 
     @Test void rangeFailureDoesNotAdvanceAndExhaustionMatchesResidentContract() {
+        // given
         Rows rows = new Rows();
         var map = StoredMapFixtures.open(rows, null);
         for (int key = 1; key <= 3; key++) map = map.put(key, "v" + key).map();
         var range = StoredMapFixtures.open(rows, map.storedRootDescriptor()).range(null, 4);
         // First read is hasNext(); fail after it, while next() is constructing
         // the result and the prospective traversal stack.
+        // when
         rows.failReadAt = rows.reads + 2;
+        // then
         assertPhysical(range::next);
         rows.failReadAt = Integer.MAX_VALUE;
         assertEquals(Map.entry(1, "v1"), range.next(), "failed read must not consume the row");

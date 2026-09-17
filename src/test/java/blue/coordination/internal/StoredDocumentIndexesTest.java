@@ -17,6 +17,7 @@ final class StoredDocumentIndexesTest {
     private static final PersistentMapStorage.Limits MAP = new PersistentMapStorage.Limits(1024 * 1024, 4096, 512 * 1024, 4096, 32);
 
     @Test void workingSelectionReusesOnlyItsPositivePinnedFactAndStagesReauthenticateIt() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var other = f.start(resource("source.yaml") + "\nlabel: independent\n", "independent", ActivationPolicy.fromNow());
@@ -34,7 +35,9 @@ final class StoredDocumentIndexesTest {
             var working = scope.open();
             try (scope; var strict = storage.openOwner(1)) {
                 reads.clear();
+                // when
                 var selected = working.get(source.id());
+                // then
                 assertTrue(reads.contains(reverse), "The first selection must authenticate reverse membership");
                 select(strict, pinned, source.id()); reads.clear();
                 assertSame(selected, working.get(source.id()));
@@ -65,6 +68,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void failedMembershipOrOwningStoreCheckCannotGrantAWorkingSelectionFact() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var pinned = reopen(storage, retain(storage, state(f)));
@@ -72,7 +76,10 @@ final class StoredDocumentIndexesTest {
             byte[] valid = f.bytes.records.get(reverse).clone(); int[] checks = {0};
             try (var scope = storage.openWorkingSessions(pinned.sessions(), pinned.lineages(), pinned.generations(), 1,
                     (id, selected) -> { if (++checks[0] == 1) throw new CoordinationObjectStorageException("Injected owning-store check failure"); })) {
-                var working = scope.open(); f.bytes.records.get(reverse)[0] ^= 1;
+                var working = scope.open();
+                // when
+                f.bytes.records.get(reverse)[0] ^= 1;
+                // then
                 assertPhysical(() -> working.get(source.id())); assertEquals(0, checks[0]);
                 f.bytes.records.put(reverse, valid.clone());
                 assertPhysical(() -> working.get(source.id())); assertEquals(1, checks[0]);
@@ -85,6 +92,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void directWorkingStageChecksRemovedAndReplacedOriginalsBeforeAnyPrewrite() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var pinned = reopen(storage, retain(storage, state(f)));
@@ -95,7 +103,9 @@ final class StoredDocumentIndexesTest {
             for (boolean remove : List.of(false, true)) {
                 try (var scope = storage.openWorkingSessions(pinned.sessions(), pinned.lineages(), pinned.generations(), 1, (id, row) -> { })) {
                     var working = scope.open(); var selected = working.get(source.id());
+                    // when
                     var changed = remove ? working.remove(source.id()).map() : working.put(source.id(), replacement).map();
+                    // then
                     assertNotSame(selected, changed.get(source.id()), "Changed rows are mutable working values, not the selected original");
                     f.bytes.records.remove(reverse); int writes = f.bytes.writes;
                     assertPhysical(() -> scope.stage(changed)); assertEquals(writes, f.bytes.writes);
@@ -111,14 +121,17 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void workingSelectionDoesNotCarryAuthorityAcrossChangedOrStaleIndexRoots() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var before = retain(storage, state(f));
             try (var old = storage.openWorkingSessions(before.sessions(), before.lineages(), before.generations(), 1, (id, row) -> { })) {
                 var original = old.open().get(source.id());
                 f.process(source, f.append(source, "rcp2/source", "tick"));
+                // when
                 var after = retain(storage, state(f));
                 try (var mixed = storage.openWorkingSessions(before.sessions(), after.lineages(), after.generations(), 1, (id, row) -> { })) {
+                    // then
                     assertPhysical(() -> mixed.open().get(source.id()));
                 }
                 var rows = after.lineages().storedState();
@@ -141,12 +154,15 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void workingStageSharesOnlyNewImmutableViewEncodingAcrossDistinctSessionOwners() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var parent = f.start(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
             var s = f.engine.documents().require(source.id());
+            // when
             var p = f.engine.documents().require(parent.id());
+            // then
             assertSame(s.rootedView(), p.requireRootedHistory().admissionSources().storedViews().get(source.id()));
             String sharedView = f.storage.viewAddress(s.rootedView());
             var readKeys = new ArrayList<String>(); var writeKeys = new ArrayList<String>();
@@ -177,6 +193,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void actualWorkingStageReauthenticatesKnownViewsWithoutRewritingThemOrDroppingMutableRows() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var original = retain(indexes(f.bytes), state(f));
@@ -195,7 +212,9 @@ final class StoredDocumentIndexesTest {
                 var working = scope.open(); var session = working.get(source.id());
                 String view = scope.viewScope().addressOf(session.rootedView());
                 session.markCatchingUp(); readKeys.clear(); writeKeys.clear();
+                // when
                 var staged = scope.stage(working);
+                // then
                 assertEquals(1L, readKeys.stream().filter(view::equals).count(), "Actual stage uses the selected-view byte path");
                 assertEquals(0L, writeKeys.stream().filter(view::equals).count(), "A freshly authenticated dependency is not rewritten");
                 String selectedAddress = staged.get(source.id()).address();
@@ -222,6 +241,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void workingSessionsStageOnlyCompleteCurrentInstancesIncludingChangesWithoutIndexPuts() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var pinned = retain(storage, state(f));
@@ -229,7 +249,10 @@ final class StoredDocumentIndexesTest {
             try (var scope = storage.openWorkingSessions(pinned.sessions(), pinned.lineages(), pinned.generations(), 1,
                     (id, selected) -> checked.add(id))) {
                 int reads = f.bytes.reads, writes = f.bytes.writes;
-                var working = scope.open(); assertEquals(reads, f.bytes.reads); assertEquals(writes, f.bytes.writes);
+                // when
+                var working = scope.open();
+                // then
+                assertEquals(reads, f.bytes.reads); assertEquals(writes, f.bytes.writes);
                 var selected = working.get(source.id()); assertSame(selected, working.get(source.id()));
                 assertEquals(Set.of(source.id()), new HashSet<>(checked));
                 selected.markCatchingUp();
@@ -262,6 +285,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void actualSourceParentCrossOpenSharesViewsWithoutReadingUnrelatedSessionsOrWriting() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick")); f.retain(source);
@@ -273,8 +297,11 @@ final class StoredDocumentIndexesTest {
             Set<String> unrelated = new HashSet<>(); Set<String> sessionAddresses = new HashSet<>();
             for (var entry : stored.sessions().entries()) {
                 sessionAddresses.add(entry.getValue().address());
-                if (!Set.of(source.id(), parent.id()).contains(entry.getKey())) unrelated.add(entry.getValue().address());
+                if (!Set.of(source.id(), parent.id()).contains(entry.getKey()))
+                // when
+                unrelated.add(entry.getValue().address());
             }
+            // then
             assertEquals(8, sessionAddresses.size()); assertEquals(6, unrelated.size());
             var expectedSessionReads = Map.of(stored.sessions().get(source.id()).address(), 1,
                     stored.sessions().get(parent.id()).address(), 1);
@@ -308,6 +335,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void exactSameEpochRebindMutatesStoredIndexesWithResidentShapeAndCounters() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml") + """
                   emitUnmatched:
@@ -333,7 +361,9 @@ final class StoredDocumentIndexesTest {
             for (int i = 0; i < 2; i++) {
                 long expectedGeneration = residentGenerations.require(parent.id());
                 f.process(parent, f.append(source, "rcp2/source", "emitUnmatched"));
+                // when
                 var changed = f.engine.documents().require(parent.id());
+                // then
                 assertEquals(0L, changed.epoch()); assertEquals(1, changed.revisions().size());
                 residentLineages = residentLineages.withComponentRepresentationRebound(changed);
                 storedLineages = storedLineages.withComponentRepresentationRebound(changed);
@@ -360,6 +390,7 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void owningAttemptReusesItsMutatedSessionWithoutReplacingPinnedAuthority() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var pinned = retain(storage, state(f));
@@ -371,7 +402,10 @@ final class StoredDocumentIndexesTest {
                 f.process(source, f.append(source, "rcp2/source", "tick"));
                 var next = f.engine.documents().require(source.id()); var complete = next.storedState();
                 var newReceipts = new HashSet<>(complete.transitionReceipts());
-                newReceipts.removeAll(original.transitionReceipts()); assertEquals(1, newReceipts.size());
+                // when
+                newReceipts.removeAll(original.transitionReceipts());
+                // then
+                assertEquals(1, newReceipts.size());
                 working.commit(next.revisions().get(1), complete.layout(), next.readyThrough(),
                         next.activeSubscriptions(), newReceipts.iterator().next());
                 working.retainRootedView(next.rootedView()); working.markGraphPublished(); working.markReady(next.readyThrough());
@@ -411,13 +445,16 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void mixedMissingWrongOwnerAndChangedAddressSelectionsFailNoncommitting() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var storage = indexes(f.bytes); var before = retain(storage, state(f));
             try (var owner = storage.openOwner(2)) {
                 select(owner, before, source.id());
                 f.process(source, f.append(source, "rcp2/source", "tick"));
+                // when
                 var after = retain(storage, state(f));
+                // then
                 assertPhysical(() -> select(owner, after, source.id()));
                 try (var fresh = storage.openOwner(2)) {
                     assertPhysical(() -> fresh.find(before.sessions(), after.lineages(), after.generations(), source.id()));
@@ -451,11 +488,14 @@ final class StoredDocumentIndexesTest {
     }
 
     @Test void malformedLineageRowsAndPhysicalFailuresDoNotBecomeValidAbsence() throws Exception {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var codecs = new StoreIndexCodecs(bytes, MAP);
         var id = DocumentId.of("selected");
         var zero = new ManagedLineageIndex.RetainedState(id, 0, "x");
         var two = new ManagedLineageIndex.RetainedState(id, 2, "x");
+        // when
         var gap = new ManagedLineageIndex.Lineage(id, "authored", "x", 2, "x", List.of(zero, two), -1);
+        // then
         assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(codecs.lineages.prepareForStorage(gap))));
         var wrongInitial = new ManagedLineageIndex.Lineage(id, "authored", "wrong", 0, "x", List.of(zero), -1);
         assertPhysical(() -> codecs.lineages.decode(codecs.lineages.encode(codecs.lineages.prepareForStorage(wrongInitial))));

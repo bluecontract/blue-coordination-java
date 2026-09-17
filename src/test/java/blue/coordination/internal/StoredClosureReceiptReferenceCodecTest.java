@@ -31,6 +31,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     private static List<ContractsClosurePublicationReceipt> receipts;
 
     @Test void controlledWarmReferenceUsesOwnerAuthenticatedCertificateWithoutReadingPayloadAgain() {
+        // given
         try (var binding = new Binding(new Bytes()); var cache = new RootedStorageCache(256L * 1024 * 1024, 8, 256L * 1024 * 1024)) {
             String family = "test/complete-publication/" + MAX;
             int[] decodes = {0};
@@ -56,8 +57,10 @@ final class StoredClosureReceiptReferenceCodecTest {
             try (var references = new StoredClosureReceiptReferenceCodec(controlled, MAX, payloads, proof)) {
                 descriptor = references.prepareEncoding(receipts.get(0)).consume(references);
                 var first = references.decode(descriptor); int reads = binding.bytes.reads.size();
+                // when
                 int coldDecodes = decodes[0];
                 for (int n = 0; n < 100; n++) {
+                    // then
                     assertSame(first, references.decode(descriptor));
                     assertArrayEquals(descriptor, references.encode(first));
                 }
@@ -101,10 +104,14 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void rebranchAndRotationsCopySmallReferencesNotLargeUnchangedReceipts() throws Exception {
+        // given
         var bytes = new Bytes(); byte[] root;
         try (var binding = new Binding(bytes)) {
             var map = binding.indexes.openClosures(null);
-            for (var receipt : receipts) map = map.put(receipt.publicationIdentity(), receipt).map();
+            for (var receipt : receipts)
+            // when
+            map = map.put(receipt.publicationIdentity(), receipt).map();
+            // then
             assertEquals(receipts.size(), map.size());
             var retained = bytes.receiptWrites();
             assertEquals(receipts.size(), retained.size());
@@ -136,12 +143,15 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void descriptorAndColdCanonicalReadsKeepExactReceiptAndPerformNoWrites() {
+        // given
         var bytes = new Bytes(); byte[] descriptor, payload;
         var original = receipts.get(0);
         try (var binding = new Binding(bytes)) {
             binding.references.prepareForStorage(original);
             descriptor = binding.references.encode(original);
+            // when
             payload = binding.legacy.encode(original);
+            // then
             assertTrue(descriptor.length < 256);
             assertTrue(bytes.records.containsKey(PersistentMapStorage.digest(payload)));
             int before = bytes.writes;
@@ -160,14 +170,17 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void missingCorruptAndWrongLengthPayloadsFailBeforeReturningAReceipt() {
+        // given
         var bytes = new Bytes(); byte[] descriptor;
         try (var binding = new Binding(bytes)) {
             binding.references.prepareForStorage(receipts.get(0));
             descriptor = binding.references.encode(receipts.get(0));
         }
         var reference = reference(descriptor);
+        // when
         byte[] original = bytes.records.remove(reference.address());
         try (var cold = new Binding(bytes)) {
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> cold.references.decode(descriptor));
             bytes.records.put(reference.address(), original.clone());
             bytes.records.get(reference.address())[0] ^= 1;
@@ -180,15 +193,18 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void malformedForeignOrOversizedReferencesFailAndDoNotWrite() {
+        // given
         var bytes = new Bytes(); byte[] original;
         try (var binding = new Binding(bytes)) {
             binding.references.prepareForStorage(receipts.get(0));
             original = binding.references.encode(receipts.get(0));
             var reference = reference(original);
+            // when
             int before = bytes.writes;
             for (byte[] value : List.of(Arrays.copyOf(original, original.length - 1), Arrays.copyOf(original, original.length + 1),
                     descriptor(reference.address(), 0, REFERENCE), descriptor(reference.address(), -1, REFERENCE),
                     descriptor(reference.address(), MAX + 1, REFERENCE), descriptor(reference.address(), reference.length(), "foreign"))) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> binding.references.decode(value));
             }
             assertThrows(CoordinationObjectStorageException.class, () -> binding.references.decode(new byte[257]));
@@ -201,6 +217,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void selectedReceiptReadChecksOriginalPayloadBoundNotOnlySmallDescriptor() {
+        // given
         var bytes = new Bytes(); byte[] descriptor;
         try (var original = new Binding(bytes)) {
             original.references.prepareForStorage(receipts.get(0));
@@ -208,7 +225,9 @@ final class StoredClosureReceiptReferenceCodecTest {
         }
         int length = reference(descriptor).length();
         try (var binding = new Binding(bytes); var bounded = new StoredClosureReceiptReferenceCodec(bytes, length - 1, binding.legacy)) {
+            // when
             int reads = bytes.reads.size(), writes = bytes.writes;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> bounded.decode(descriptor));
             assertEquals(reads, bytes.reads.size(), "Reject forged/oversized row length before point materialization");
             assertThrows(CoordinationObjectStorageException.class, () -> bounded.encode(receipts.get(0)));
@@ -217,11 +236,14 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void payloadWriteFailureOrBadAcknowledgmentLeavesOriginalIndexRootUnchanged() {
+        // given
         var bytes = new Bytes();
         try (var binding = new Binding(bytes)) {
             var original = binding.indexes.openClosures(null).put(receipts.get(0).publicationIdentity(), receipts.get(0)).map();
             byte[] root = original.storedRootDescriptor();
+            // when
             bytes.failReceiptWrite = true;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> original.put(receipts.get(1).publicationIdentity(), receipts.get(1)));
             bytes.failReceiptWrite = false; bytes.badReceiptAcknowledgment = true;
             assertThrows(CoordinationObjectStorageException.class, () -> original.put(receipts.get(1).publicationIdentity(), receipts.get(1)));
@@ -236,6 +258,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void oldInlineClosureBindingRejectsExplicitlyWithoutPayloadConversion() {
+        // given
         var bytes = new Bytes(); byte[] oldRoot;
         try (var binding = new Binding(bytes)) {
             var codecs = new StoreIndexCodecs(bytes, MAP_LIMITS);
@@ -243,7 +266,9 @@ final class StoredClosureReceiptReferenceCodecTest {
             oldRoot = old.put(receipts.get(0).publicationIdentity(), receipts.get(0)).map().storedRootDescriptor();
         }
         try (var fresh = new Binding(bytes.copy())) {
+            // when
             int writes = fresh.bytes.writes;
+            // then
             var failure = assertThrows(CoordinationObjectStorageException.class, () -> fresh.indexes.openClosures(oldRoot));
             assertTrue(failure.getMessage().contains("Physical map binding mismatch"));
             assertEquals(writes, fresh.bytes.writes);
@@ -251,10 +276,13 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void descriptorCopiesAndClosedLifecycleDoNotLendWriteOrPublicationAuthority() {
+        // given
         var bytes = new Bytes();
         try (var binding = new Binding(bytes)) {
             var value = receipts.get(0);
+            // when
             byte[] unretained = binding.references.encode(value);
+            // then
             assertEquals(0, bytes.writes, "Pure encoding is not retention");
             assertThrows(CoordinationObjectStorageException.class, () -> binding.references.decode(unretained));
             binding.references.prepareForStorage(value);
@@ -273,6 +301,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void preparationDoesNotCertifyIdentityButCanonicalDecodeCanReuseItsOwnedDescriptor() {
+        // given
         var bytes = new Bytes();
         try (var binding = new Binding(bytes)) {
             int[] encodes = {0}; boolean[] rejectEncoding = {false};
@@ -290,7 +319,9 @@ final class StoredClosureReceiptReferenceCodecTest {
             };
             try (var references = new StoredClosureReceiptReferenceCodec(bytes, MAX, delegate)) {
                 var fresh = receipts.get(0);
+                // when
                 references.prepareForStorage(fresh);
+                // then
                 assertEquals(1, encodes[0]);
                 rejectEncoding[0] = true;
                 assertThrows(CoordinationObjectStorageException.class, () -> references.encode(fresh));
@@ -311,6 +342,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void oneShotMapInsertionEncodesFreshPayloadOnceAndMatchesTheFormerSplitPath() {
+        // given
         var fresh = receipts.get(0); byte[][] roots = new byte[2][], payloads = new byte[2][];
         for (int variant = 0; variant < 2; variant++) {
             try (var binding = new Binding(new Bytes())) {
@@ -338,7 +370,9 @@ final class StoredClosureReceiptReferenceCodecTest {
                     };
                     var codes = new StoreIndexCodecs(binding.bytes, MAP_LIMITS);
                     var map = codes.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codes.text, selected).open(null);
+                    // when
                     var stored = map.put(fresh.publicationIdentity(), fresh).map();
+                    // then
                     assertEquals(variant == 1 ? 1 : 2, freshEncodes[0], "Count the actual fresh payload encoder, not a cache wrapper");
                     assertEquals(1, binding.bytes.receiptWrites().size());
                     assertEquals(1, binding.bytes.receiptWrites().values().iterator().next().intValue());
@@ -357,6 +391,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void preparedReceiptFrameSurvivesLaterFreshEncoderChangesWithoutGrantingIdentityReuse() {
+        // given
         var fresh = receipts.get(0); boolean[] rejectFresh = {false};
         try (var binding = new Binding(new Bytes())) {
             var payloads = new PersistentMapCodec<ContractsClosurePublicationReceipt>() {
@@ -374,7 +409,9 @@ final class StoredClosureReceiptReferenceCodecTest {
                 var prepared = references.prepareEncoding(fresh);
                 rejectFresh[0] = true;
                 byte[] descriptor = prepared.consume(references);
+                // when
                 var restored = references.decode(descriptor);
+                // then
                 assertReceipt(fresh, restored, binding);
                 assertArrayEquals(descriptor, references.encode(restored));
                 int writes = binding.bytes.writes;
@@ -386,6 +423,7 @@ final class StoredClosureReceiptReferenceCodecTest {
     }
 
     @Test void productionPreparationEncodesTheCompletePublicationOnceRatherThanDiscardingItsFirstFrame() {
+        // given
         var fresh = receipts.get(0);
         byte[][] roots = new byte[2][], retainedPayloads = new byte[2][];
         for (int variant = 0; variant < 2; variant++) {
@@ -416,12 +454,14 @@ final class StoredClosureReceiptReferenceCodecTest {
                         var codecs = new StoreIndexCodecs(binding.bytes, MAP_LIMITS);
                         rows = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, references)
                                 .open(null).put(fresh.publicationIdentity(), fresh).map();
+                        // when
                         roots[variant] = rows.storedRootDescriptor();
                     }
                 } else {
                     rows = binding.indexes.openClosures(null).put(fresh.publicationIdentity(), fresh).map();
                     roots[variant] = rows.storedRootDescriptor();
                 }
+                // then
                 assertEquals(variant == 0 ? 2 : 1, fullPublicationEncodes[0],
                         "Count fresh-value publication encodes, including dependency preparation, not cold read checks");
                 assertEquals(1, binding.bytes.receiptWrites().size());

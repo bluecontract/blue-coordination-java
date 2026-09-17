@@ -44,6 +44,7 @@ final class RootedCoordinationStorageTest {
     }
 
     @Test void coldCounterReusesExactHistoryAndHandlesThenRunsTheSameSecondInvocation() throws Exception {
+        // given
         var objects = new Bytes();
         RootedCoordinationStorage.Selection selected; ColdStorageJournalFixture.Snapshot journalBytes;
         DocumentId id; DocumentHandle oldDocument; EntryHandle oldEntry;
@@ -64,7 +65,9 @@ final class RootedCoordinationStorageTest {
         try (var scope = RootedCoordinationStorage.open(coldObjects, LIMITS, selected, key -> {
             reads.incrementAndGet(); throw new AssertionError("Cold stored content must not be fetched: " + key);
         }, journal)) {
+            // when
             var blue = scope.coordination();
+            // then
             assertEquals(List.of(id), scope.documentIds());
             assertEquals(List.of("empty-agent", "rcp2/source"), scope.timelineIds());
             assertEquals(0, coldObjects.sessionBodyReads, "Identity inventories do not hydrate documents");
@@ -106,11 +109,14 @@ final class RootedCoordinationStorageTest {
     }
 
     @Test void missingEngineFamilyAndWrongActualConfigurationRejectBeforeAnySubmission() {
+        // given
         var objects = new Bytes(); RootedCoordinationStorage.Selection selected;
         try (var original = BlueCoordination.inMemory()) { selected = RootedCoordinationStorage.retainPartition(original, objects, LIMITS); }
         var omitted = new LinkedHashMap<>(selected.slots());
         omitted.remove(omitted.keySet().stream().filter(name -> name.startsWith("engine/")).findFirst().orElseThrow());
+        // when
         var journal = ColdStorageJournalFixture.empty();
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> RootedCoordinationStorage.open(objects.fresh(), LIMITS,
                 new RootedCoordinationStorage.Selection(omitted), ExactNodeProvider.empty(), journal));
         var transport = new SdkSelectionStorage(LIMITS.sdk().maximumCodecBytes()); var parts = transport.decode(selected.slots());
@@ -125,6 +131,7 @@ final class RootedCoordinationStorageTest {
     }
 
     @Test void coldStoppedParentAndCompletedSourceKeepOriginalEvidenceAcrossTwoOwners() throws Exception {
+        // given
         var objects = new Bytes(); RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journalBytes; SourceHistoryPrerequisite admission;
         DocumentId parentId; String parentHead, attachId, sourceEntryId; byte[] stoppedBytes;
@@ -139,7 +146,9 @@ final class RootedCoordinationStorageTest {
                     "counterValue: 5", false).blueId();
             var attach = original.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + authoredSource.blueId());
             attachId = attach.blueId();
+            // when
             var stopped = original.blue.processing().processNext(parent).entry(attach);
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, stopped.disposition()); stoppedBytes = CODEC.encode(stopped);
             admission = original.blue.advanced().sourceHistoryPrerequisites(parent).get(0); parentHead = parent.snapshot().blueId();
             selected = RootedCoordinationStorage.retainPartition(original.blue, objects, LIMITS);
@@ -204,13 +213,17 @@ final class RootedCoordinationStorageTest {
     }
 
     @Test void sdkOrScopeCloseRetiresTheEntireActualOwnerAndDoesNotPublish() {
+        // given
         for (boolean sdkFirst : List.of(true, false)) {
             var objects = new Bytes(); RootedCoordinationStorage.Selection selection;
             try (var original = BlueCoordination.inMemory()) { selection = RootedCoordinationStorage.retainPartition(original, objects, LIMITS); }
             var journal = ColdStorageJournalFixture.empty();
             var scope = RootedCoordinationStorage.open(objects.fresh(), LIMITS, selection, ExactNodeProvider.empty(), journal);
             var blue = scope.coordination();
-            if (sdkFirst) blue.close(); else scope.close();
+            if (sdkFirst)
+            // when
+            blue.close(); else scope.close();
+            // then
             assertThrows(NoncommittingExecutionException.class, scope::stage);
             assertThrows(NoncommittingExecutionException.class, () -> scope.documentHandle(new DocumentId("missing-document")));
             assertThrows(NoncommittingExecutionException.class, () -> scope.timelineHandle("missing-timeline"));
@@ -223,6 +236,7 @@ final class RootedCoordinationStorageTest {
     }
 
     @Test void coldReciprocalCycleMatchesFullFiniteAndSplitEvidenceAfterProducerCloses() throws Exception {
+        // given
         var objects = new Bytes(); RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journalBytes;
         DocumentId aId, bId; String connectId, finiteId; CycleEvidence finite, split;
@@ -234,7 +248,9 @@ final class RootedCoordinationStorageTest {
             var authoredA = blue.values().yaml(aYaml); original.exact.put(authoredA.blueId(), authoredA.json());
             var a = original.startYaml(aYaml, "rcp2/cycle"); aId = a.id();
             var connect = cycleAppend(blue, b, null, "connectA", 90, "a:\n  blueId: " + authoredA.blueId()); connectId = connect.blueId();
+            // when
             var join = blue.processing().processNext(b);
+            // then
             assertEquals(EntryDisposition.APPLIED, join.entry(connect).disposition()); assertFalse(join.quiescent());
             var joinTerminal = blue.advanced().closureExecution(join.entry(connect).closures().get(0).closureId()).orElseThrow();
             System.out.println("COLD_CYCLE_JOIN_COMPLETE_RESULT_BYTES="

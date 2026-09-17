@@ -17,6 +17,7 @@ final class WholeObjectExactValueReuseTest {
     private static final int DEPTH = 128;
 
     @Test void twoLanesAndNewReadersReuseTheSessionExactFrameWithoutCachingTheOuterEntry() {
+        // given
         var objects = new DocumentSessionStorageTest.Bytes();
         var value = ExactValue.verified(new Node().name("shared-exact"));
         var cold = new WholeObjectStorage(objects, MAX, DEPTH);
@@ -28,7 +29,9 @@ final class WholeObjectExactValueReuseTest {
             for (int i = 0; i < 2; i++) {
                 var reader = new WholeObjectStorage(objects, MAX, DEPTH, cache).open(index(refs));
                 var first = reader.find(value.blueId()).orElseThrow();
+                // when
                 var second = reader.find(value.blueId()).orElseThrow();
+                // then
                 assertNotSame(first, second, "Entry/purpose and physical selection are freshly read");
                 assertSame(warmed, first.canonical()); assertSame(warmed, first.provider());
                 assertSame(warmed, second.canonical()); assertEquals(1, cache.statistics().loads());
@@ -40,6 +43,7 @@ final class WholeObjectExactValueReuseTest {
     }
 
     @Test void warmValuesNeverHideMissingCorruptOrWrongIndexSelectedOuterBytes() {
+        // given
         var objects = new DocumentSessionStorageTest.Bytes(); var value = ExactValue.verified(new Node().name("selected"));
         var cold = new WholeObjectStorage(objects, MAX, DEPTH);
         var refs = cold.retain(changes(value, null, Map.of())); String address = refs.entries().get(value.blueId());
@@ -47,7 +51,9 @@ final class WholeObjectExactValueReuseTest {
         try (var cache = cache()) {
             var storage = new WholeObjectStorage(objects, MAX, DEPTH, cache); var reader = storage.open(index(refs));
             var warmed = reader.find(value.blueId()).orElseThrow().canonical();
+            // when
             objects.records.remove(address);
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> reader.find(value.blueId()));
             byte[] corrupt = stored.clone(); corrupt[0] ^= 1; objects.records.put(address, corrupt);
             assertThrows(CoordinationObjectStorageException.class, () -> reader.find(value.blueId()));
@@ -60,6 +66,7 @@ final class WholeObjectExactValueReuseTest {
     }
 
     @Test void cyclicWireBodiesAndCurrentProofRemainFreshOutsideTheValueCache() {
+        // given
         var objects = new DocumentSessionStorageTest.Bytes();
         var provider = new BasicNodeProvider(new Node().items(List.of(
                 new Node().name("cached-a").properties("peer", new Node().blueId("this#1")),
@@ -73,7 +80,9 @@ final class WholeObjectExactValueReuseTest {
             var store = new WholeObjectStore(new EngineMetrics(), backing);
             var warmed = store.require(id);
             backing.find(id).orElseThrow().cyclicProviderBody().name("caller mutation");
+            // when
             backing.proof(master).orElseThrow().declaredPlaceholderSet().get(0).name("caller proof mutation");
+            // then
             assertSame(warmed, store.require(id));
             assertEquals(value.blueId(), ExactValue.fromVerifiedProviderEvidence(id,
                     backing.find(id).orElseThrow().cyclicProviderBody(), backing.proof(master).orElseThrow()).blueId());
@@ -87,11 +96,14 @@ final class WholeObjectExactValueReuseTest {
     }
 
     @Test void changedProfileAndDisabledCacheUseOrdinaryExactValidation() {
+        // given
         var objects = new DocumentSessionStorageTest.Bytes(); var value = ExactValue.verified(new Node().name("bounded"));
         var refs = new WholeObjectStorage(objects, MAX, DEPTH).retain(changes(value, null, Map.of()));
         try (var cache = cache()) {
             var first = new WholeObjectStorage(objects, MAX, DEPTH, cache).open(index(refs)).find(value.blueId()).orElseThrow();
+            // when
             var different = new WholeObjectStorage(objects, MAX, DEPTH - 1, cache).open(index(refs)).find(value.blueId()).orElseThrow();
+            // then
             assertNotSame(first.canonical(), different.canonical()); assertEquals(2, cache.statistics().loads());
             assertThrows(RuntimeException.class, () -> new WholeObjectStorage(objects, 128, DEPTH, cache)
                     .open(index(refs)).find(value.blueId()));

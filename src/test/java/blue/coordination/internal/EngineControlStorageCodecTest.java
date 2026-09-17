@@ -27,13 +27,16 @@ final class EngineControlStorageCodecTest {
     @TempDir Path directory;
 
     @Test void actualRootedProcessingCapturesExactClocksRegistrationsAndTerminalProgress() throws Exception {
+        // given
         try (var blue = sdk(Map.of())) {
             var timeline = blue.timelines().register("rcp2/source", "alice");
             blue.timelines().register("empty-agent", "agent", TimelineActorKind.AGENT);
             var source = blue.documents().admitStaticProcessEmbedded(resource("source.yaml"),
                     ActivationPolicy.importFullHistory()).document("root");
+            // when
             var result = blue.operations().on(source).from(timeline).call("setCounter").through("owner")
                     .requestYaml("counterValue: 5").execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
             var before = engine.auditDocument(source.id());
@@ -53,6 +56,7 @@ final class EngineControlStorageCodecTest {
     }
 
     @Test void exactFairnessFrontiersAndArbitraryOrderKeysAreOwnedAndRestorable() {
+        // given
         var root = DocumentId.of("root");
         var order = ExternalOrderKey.of(List.of(BigInteger.ONE.shiftLeft(130), "\uD800-order"));
         var lane = ContractsRootFeederWindow.LaneId.publicRoots(List.of(root));
@@ -70,7 +74,10 @@ final class EngineControlStorageCodecTest {
         var state = new EngineControlStorageCodec.State(binding, Map.of("t", new Timeline("t", "actor\uDFFF")),
                 Map.of("t", "MyOS/Principal Actor"), 1_800_000_000_000_002L, 1_800_000_000_000_001L,
                 List.of(root), schedule, List.of(root), List.of(root), true, feeder, journal);
-        var codec = new EngineControlStorageCodec(MAX); var restored = codec.decode(codec.encode(state));
+        var codec = new EngineControlStorageCodec(MAX);
+        // when
+        var restored = codec.decode(codec.encode(state));
+        // then
         assertEquals(state, restored);
         assertEquals(schedule, RootedProcessingSchedule.fromStorage(restored.rootedSchedule()).storageState());
         assertEquals(feeder, ContractsRootFeederWindow.DurableState.fromStorage(restored.feeder()).storageState());
@@ -79,10 +86,14 @@ final class EngineControlStorageCodecTest {
     }
 
     @Test void malformedFramesAndInconsistentTerminalFrontierFailClosed() {
+        // given
         var codec = new EngineControlStorageCodec(MAX);
         try (var blue = sdk(Map.of())) {
             var state = ((DefaultCoordinationEngine) blue.advanced().rawEngine()).controlStateForStorage();
-            byte[] bytes = codec.encode(state); byte[] corrupt = bytes.clone(); corrupt[corrupt.length / 2] ^= 1;
+            byte[] bytes = codec.encode(state); byte[] corrupt = bytes.clone();
+            // when
+            corrupt[corrupt.length / 2] ^= 1;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(corrupt));
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(Arrays.copyOf(bytes, bytes.length - 1)));
             assertThrows(CoordinationObjectStorageException.class, () -> new EngineControlStorageCodec(bytes.length - 1).decode(bytes));
@@ -93,14 +104,17 @@ final class EngineControlStorageCodecTest {
     }
 
     @Test void genuinePendingSourceEvidenceCannotBeSilentlyOmitted() throws Exception {
+        // given
         Map<String,String> content = new LinkedHashMap<>();
         try (var blue = sdk(content)) {
             var timeline = blue.timelines().register("rcp2/parent", "alice");
             var parent = blue.documents().admitStaticProcessEmbedded(resource("parent.yaml"),
                     ActivationPolicy.importFullHistory()).document("root");
             var source = blue.values().yaml(resource("source.yaml")); content.put(source.blueId(), source.json());
+            // when
             var result = blue.operations().on(parent).from(timeline).call("attach").through("owner")
                     .requestYaml("child:\n  blueId: " + source.blueId()).execute();
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, result.disposition());
             var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
             var failure = assertThrows(CoordinationObjectStorageException.class, engine::controlStateForStorage);

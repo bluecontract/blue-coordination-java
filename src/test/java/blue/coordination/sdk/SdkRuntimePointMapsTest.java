@@ -30,8 +30,12 @@ final class SdkRuntimePointMapsTest {
             new SdkPointStorage.Limits(MAX, 128 * 1024, MAX, 100), 256 * 1024);
 
     @Test void genuineRowsColdOpenLazilyWithNewOwnerHandlesAndNoProcessingOrReadTimeWrites() throws Exception {
+        // given
         try (var original = new Fixture(); var receiver = new Fixture()) {
-            var first = original.execute(); var independent = receiver.execute();
+            var first = original.execute();
+            // when
+            var independent = receiver.execute();
+            // then
             assertEquals(first.entry().blueId(), independent.entry().blueId());
             var bytes = new Bytes();
             try (var retained = SdkRuntimePointMaps.retain(original.runtime, bytes, LIMITS)) {
@@ -61,9 +65,12 @@ final class SdkRuntimePointMapsTest {
     }
 
     @Test void installedMapsAcceptActualSdkAppendsAndPreserveInputAndResultOwnership() throws Exception {
+        // given
         try (var fixture = new Fixture(); var maps = SdkRuntimePointMaps.empty(fixture.runtime, new Bytes(), LIMITS)) {
             fixture.runtime.installPointMaps(maps.maps());
+            // when
             var result = fixture.execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             assertSame(result, maps.maps().results().get(result.entry().blueId()));
             assertEquals(1, maps.maps().entries().size()); assertEquals(1, maps.maps().intents().size());
@@ -75,13 +82,16 @@ final class SdkRuntimePointMapsTest {
     }
 
     @Test void sourceResultUsesTheCompletePrerequisiteKeyAndRetainsTheStoppedParent() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent");
             var source = f.runtime.exactValue(RootedSdkFixture.resource("source.yaml"));
             f.exact.put(source.blueId(), source.json()); f.timelines.put("rcp2/source", f.runtime.registerTimeline("rcp2/source", "alice"));
             var sourceEntry = f.append(source.blueId(), "rcp2/source", "setCounter", 15, "counterValue: 5");
             var attach = f.append(parent.snapshot().blueId(), "rcp2/parent", "attach", 20, "child:\n  blueId: " + source.blueId());
+            // when
             var stopped = f.runtime.processNextRoot(parent).entry(attach);
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, stopped.disposition());
             var admission = f.runtime.sourceHistoryPrerequisites(parent).get(0);
             assertTrue(f.runtime.processSourceHistoryPrerequisite(admission).admission().orElseThrow().published());
@@ -107,12 +117,15 @@ final class SdkRuntimePointMapsTest {
     }
 
     @Test void foreignOwnersMissingCoreAndMissingPhysicalPayloadsFailClosedWithoutFallback() throws Exception {
+        // given
         try (var original = new Fixture(); var receiver = new Fixture()) {
             var first = original.execute(); receiver.execute(); var objects = new Bytes();
             try (var stored = SdkRuntimePointMaps.retain(original.runtime, objects, LIMITS);
                  var empty = SdkRuntimePointMaps.empty(receiver.runtime, objects, LIMITS);
                  var cold = SdkRuntimePointMaps.open(receiver.runtime, objects.fresh(), LIMITS, stored.snapshot())) {
+                // when
                 var snapshot = cold.snapshot();
+                // then
                 assertThrows(NoncommittingExecutionException.class, () -> cold.maps().results().put(first.entry().blueId(), first));
                 assertThrows(NoncommittingExecutionException.class,
                         () -> cold.maps().timelines().put("rcp2/source", original.timelines.get("rcp2/source")));
@@ -133,9 +146,13 @@ final class SdkRuntimePointMapsTest {
     }
 
     @Test void mismatchedConfigurationAndClosedSdkRejectEvenWarmValues() throws Exception {
-        var f = new Fixture(); var objects = new Bytes(); f.execute();
+        // given
+        var f = new Fixture(); var objects = new Bytes();
+        // when
+        f.execute();
         try (var stored = SdkRuntimePointMaps.retain(f.runtime, objects, LIMITS);
              var wrong = new Fixture(ContractsExecutionPolicy.exactSharedGas(9000, "different"))) {
+            // then
             assertThrows(NoncommittingExecutionException.class, () -> SdkRuntimePointMaps.open(wrong.runtime, objects.fresh(), LIMITS, stored.snapshot()));
             var maps = stored.maps(); var value = maps.timelines().get("rcp2/source"); assertNotNull(value);
             var iterator = maps.timelines().keySet().iterator();
@@ -147,13 +164,16 @@ final class SdkRuntimePointMapsTest {
     }
 
     @Test void installedScopeAndSdkCloseInEitherOrderReleaseAllMapViews() throws Exception {
+        // given
         for (boolean scopeFirst : List.of(true, false)) {
             var fixture = new Fixture();
             try {
                 var stored = SdkRuntimePointMaps.empty(fixture.runtime, new Bytes(), LIMITS);
                 try {
                     var maps = stored.maps(); fixture.runtime.installPointMaps(maps);
+                    // when
                     fixture.runtime.registerTimeline("empty", "alice");
+                    // then
                     assertNotNull(maps.timelines().get("empty"));
                     if (scopeFirst) stored.close();
                     fixture.close(); // closes all five installed maps even after owner.closed becomes true

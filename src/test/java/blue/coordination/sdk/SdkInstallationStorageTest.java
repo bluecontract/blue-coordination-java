@@ -12,13 +12,17 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Exact owner/configuration constructor seam; complete physical engine qualification is separate. */
 final class SdkInstallationStorageTest {
     @Test void restoresTheSuppliedEngineAndNewOwnerWithoutReplayingRegistrations() {
+        // given
         var owner = new Object(); var calls = new AtomicInteger();
         var original = runtime(new Object());
-        var configuration = original.storageConfiguration(); original.close();
+        var configuration = original.storageConfiguration();
+        // when
+        original.close();
         try (var restored = SdkCoordinationRuntime.restore(owner, configuration, ExactNodeProvider.empty(), provider -> {
             calls.incrementAndGet();
             return DefaultCoordinationEngine.createContracts10Sdk(configuration.language(), configuration.contracts(), provider, configuration.policy());
         })) {
+            // then
             assertEquals(1, calls.get()); assertEquals(configuration, restored.storageConfiguration());
             var maps = new SdkCoordinationRuntime.StoredMaps(new LinkedHashMap<>(), new LinkedHashMap<>(),
                     new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
@@ -30,8 +34,11 @@ final class SdkInstallationStorageTest {
     }
 
     @Test void aDifferentActualCorePolicyCannotBeRelabeledByStoredSdkConfiguration() {
+        // given
         try (var original = runtime(new Object())) {
+            // when
             var configuration = original.storageConfiguration();
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> SdkCoordinationRuntime.restore(new Object(), configuration,
                     ExactNodeProvider.empty(), provider -> DefaultCoordinationEngine.createContracts10Sdk(configuration.language(),
                             configuration.contracts(), provider, ContractsExecutionPolicy.exactSharedGas(9_000, "not-the-stored-policy"))));

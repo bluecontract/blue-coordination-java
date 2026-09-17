@@ -41,10 +41,14 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void mutationsAndInsertionOrderMatchLinkedHashMapIncludingIdentity() {
+        // given
         var bytes = new Bytes(); var values = new Values(); var map = storage(bytes, values, LARGE).empty();
         var reference = new LinkedHashMap<String, Value>(); var random = new Random(104729L);
         for (int i = 0; i < 160; i++) {
-            String key = "key/" + random.nextInt(16); var value = new Value("value/" + i);
+            String key = "key/" + random.nextInt(16);
+            // when
+            var value = new Value("value/" + i);
+            // then
             switch (random.nextInt(4)) {
                 case 0 -> assertSame(reference.put(key, value), map.put(key, value));
                 case 1 -> assertSame(reference.putIfAbsent(key, value), map.putIfAbsent(key, value));
@@ -70,10 +74,13 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void coldOpenSizeKeyIterationAndPointReadNeverDecodeUnrelatedBodiesOrPrewrite() {
+        // given
         var bytes = new Bytes(); var map = storage(bytes, new Values(), LARGE).empty();
         for (int i = 0; i < 1023; i++) map.put("key/" + i, new Value("body/" + i));
         var coldBytes = bytes.fresh(); var values = new Values(); values.forbiddenPrepare = true;
+        // when
         var cold = storage(coldBytes, values, LARGE).open(map.snapshot());
+        // then
         assertEquals(0, values.decodes); assertEquals(0, cold.pinnedEntries());
         int openingReads = coldBytes.reads;
         assertEquals(1023, cold.size()); assertFalse(cold.isEmpty());
@@ -94,10 +101,14 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void scopePinsIdentityWithoutEvictionAndRejectsCapacityBeforePublication() {
+        // given
         var bytes = new Bytes(); var map = storage(bytes, new Values(), LARGE).empty();
         map.put("a", new Value("A")); map.put("b", new Value("B")); map.put("c", new Value("C"));
         var values = new Values(); var cold = storage(bytes.fresh(), values, limits(2, 10000)).open(map.snapshot());
-        Value a = cold.get("a"), b = cold.get("b"); var original = cold.snapshot();
+        Value a = cold.get("a"), b = cold.get("b");
+        // when
+        var original = cold.snapshot();
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> cold.get("c"));
         assertThrows(NoncommittingExecutionException.class, () -> cold.put("d", new Value("D")));
         same(original, cold.snapshot()); assertEquals(2, values.decodes);
@@ -112,13 +123,17 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void everyInsertionAndRemovalWriteFailureLeavesBothRootsCounterAndIdentityUnchanged() {
+        // given
         var bytes = new Bytes(); var base = storage(bytes, new Values(), LARGE).empty();
         for (String key : List.of("b", "d", "a", "c", "e")) base.put(key, new Value(key));
         var initial = base.snapshot();
         for (boolean insertion : List.of(true, false)) {
             var countingBytes = bytes.fresh(); var success = storage(countingBytes, new Values(), LARGE).open(initial);
             if (insertion) success.put("new", new Value("new")); else success.remove("b");
-            int writes = countingBytes.writes; assertTrue(writes >= 2);
+            // when
+            int writes = countingBytes.writes;
+            // then
+            assertTrue(writes >= 2);
             for (int failure = 1; failure <= writes; failure++) {
                 var physical = bytes.fresh(); var map = storage(physical, new Values(), LARGE).open(initial);
                 Value identity = map.get("b"); physical.failWriteAt = failure;
@@ -135,11 +150,15 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void missingCorruptedForeignAndNoncanonicalPayloadsFailOnlyWhenSelected() {
+        // given
         var bytes = new Bytes(); var original = storage(bytes, new Values(), LARGE).empty();
         original.put("a", new Value("A")); original.put("b", new Value("B")); var snapshot = original.snapshot();
         String bAddress = recordAddress(bytes, "b");
         var missing = bytes.fresh(); missing.values.remove(bAddress);
-        var values = new Values(); var cold = storage(missing, values, LARGE).open(snapshot);
+        var values = new Values();
+        // when
+        var cold = storage(missing, values, LARGE).open(snapshot);
+        // then
         assertEquals(2, cold.size()); assertEquals(List.of("a", "b"), new ArrayList<>(cold.keySet()));
         assertEquals("A", cold.get("a").body);
         assertThrows(NoncommittingExecutionException.class, () -> cold.get("b"));
@@ -158,10 +177,14 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void mixedRootsMissingOrderAndBackwardCounterAreNotAcceptedAsCompleteMaps() {
+        // given
         var bytes = new Bytes(); var storage = storage(bytes, new Values(), LARGE);
         var first = storage.empty(); first.put("a", new Value("A")); first.put("b", new Value("B"));
         var second = storage.empty(); second.put("b", new Value("B")); second.put("a", new Value("A"));
-        var a = first.snapshot(); var b = second.snapshot();
+        var a = first.snapshot();
+        // when
+        var b = second.snapshot();
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> storage.open(new StoredInsertionOrderedMap.Snapshot(a.keys(), a.order(), 0)));
         assertThrows(NoncommittingExecutionException.class, () -> storage.open(new StoredInsertionOrderedMap.Snapshot(a.keys(), storage.empty().snapshot().order(), 2)));
         var mixed = storage.open(new StoredInsertionOrderedMap.Snapshot(a.keys(), b.order(), 2));
@@ -172,10 +195,14 @@ final class StoredInsertionOrderedMapTest {
     }
 
     @Test void iteratorsReplacementReinsertionClearAndClosedScopesRetainMapContracts() {
+        // given
         var bytes = new Bytes(); var map = storage(bytes, new Values(), LARGE).empty();
         Value a = new Value("A"), b = new Value("B"); map.put("a", a); map.put("b", b);
         var iterator = map.entrySet().iterator(); var entry = iterator.next();
-        Value replaced = new Value("new A"); assertSame(a, entry.setValue(replaced));
+        // when
+        Value replaced = new Value("new A");
+        // then
+        assertSame(a, entry.setValue(replaced));
         assertSame(replaced, map.get("a")); assertEquals("b", iterator.next().getKey());
         iterator.remove(); assertEquals(List.of("a"), new ArrayList<>(map.keySet()));
         map.put("b", b); map.remove("a"); map.put("a", a);

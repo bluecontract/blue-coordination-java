@@ -47,10 +47,41 @@ final class RootedSessionHistoryAccessIntegrationTest {
             new RootedCoordinationStorage.SdkLimits(new InsertionOrderedStorage.Limits(512 * 1024, 64 * 1024,
                     64 * 1024, 8192, 32, 256 * 1024, 4L * MIB, 100), 32 * MIB, 128 * 1024, 32 * MIB, 100, 256 * 1024));
 
-    @Test void fiveNumberedEpochsColdPointReadsAndSuccessor() throws Exception { exercise(5, false); }
-    @Test void twentyNumberedEpochsColdPointReadsAndSuccessor() throws Exception { exercise(20, false); }
-    @Test void fiftyNumberedEpochsColdPointReadsAndSuccessor() throws Exception { exercise(50, false); }
-    @Test void fiveSameEpochPositionsColdPointReadAndSuccessor() throws Exception { exercise(5, true); }
+    @Test void fiveNumberedEpochsColdPointReadsAndSuccessor() throws Exception {
+        // given
+        int historySize = 5;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> exercise(historySize, false);
+        // then
+        assertDoesNotThrow(scenario);
+    }
+
+    @Test void twentyNumberedEpochsColdPointReadsAndSuccessor() throws Exception {
+        // given
+        int historySize = 20;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> exercise(historySize, false);
+        // then
+        assertDoesNotThrow(scenario);
+    }
+
+    @Test void fiftyNumberedEpochsColdPointReadsAndSuccessor() throws Exception {
+        // given
+        int historySize = 50;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> exercise(historySize, false);
+        // then
+        assertDoesNotThrow(scenario);
+    }
+
+    @Test void fiveSameEpochPositionsColdPointReadAndSuccessor() throws Exception {
+        // given
+        int historySize = 5;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> exercise(historySize, true);
+        // then
+        assertDoesNotThrow(scenario);
+    }
 
     private static void exercise(int historySize, boolean sameEpoch) throws Exception {
         Fixture f = construct(historySize, sameEpoch);

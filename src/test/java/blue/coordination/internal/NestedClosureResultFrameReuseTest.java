@@ -23,8 +23,11 @@ final class NestedClosureResultFrameReuseTest {
     private static final int DEPTH = 256;
 
     @Test void differentCausesShareTheirNestedResultWithoutInterningTheOuterCause() throws Exception {
+        // given
         var pair = pair(); var raw = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH);
+        // when
         byte[] a = raw.encodeProcessingCause(pair.first()), b = raw.encodeProcessingCause(pair.second());
+        // then
         assertFalse(Arrays.equals(a, b));
         var decodes = new AtomicInteger();
         try (var cache = cache(8)) {
@@ -43,10 +46,14 @@ final class NestedClosureResultFrameReuseTest {
     }
 
     @Test void actualWorkReadersReuseInnerResultButStillValidateTheirOwnCoordinates() throws Exception {
+        // given
         var pair = pair(); var raw = new ManagedWorkStorageCodec(MAX, DEPTH);
         var a = work(pair.first());
         var b = work(pair.second());
-        byte[] bytesA = raw.encode(a), bytesB = raw.encode(b); assertFalse(Arrays.equals(bytesA, bytesB));
+        // when
+        byte[] bytesA = raw.encode(a), bytesB = raw.encode(b);
+        // then
+        assertFalse(Arrays.equals(bytesA, bytesB));
         try (var cache = cache(8)) {
             var codec = new ManagedWorkStorageCodec(MAX, DEPTH, cache);
             var first = codec.decode(bytesA); var second = codec.decode(bytesB);
@@ -66,12 +73,16 @@ final class NestedClosureResultFrameReuseTest {
     }
 
     @Test void warmNestedResultDoesNotRelaxOuterCorruptionOrCodecProfiles() throws Exception {
+        // given
         var pair = pair(); byte[] frame = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH).encodeProcessingCause(pair.first());
         try (var cache = cache(8)) {
             var normal = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH,
                     new StoredClosureResultCodec(MAX, DEPTH, cache).configured());
             var first = (ManagedRepresentationCause) normal.decodeProcessingCause(frame);
-            byte[] corrupt = frame.clone(); corrupt[corrupt.length / 2] ^= 1;
+            byte[] corrupt = frame.clone();
+            // when
+            corrupt[corrupt.length / 2] ^= 1;
+            // then
             assertThrows(RuntimeException.class, () -> normal.decodeProcessingCause(corrupt));
             var narrower = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH - 1,
                     new StoredClosureResultCodec(MAX, DEPTH - 1, cache).configured());
@@ -84,6 +95,7 @@ final class NestedClosureResultFrameReuseTest {
     }
 
     @Test void parallelDifferentCausesShareOneCompleteResultColdLoad() throws Exception {
+        // given
         var pair = pair(); var raw = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH);
         byte[] a = raw.encodeProcessingCause(pair.first()), b = raw.encodeProcessingCause(pair.second());
         var pool = Executors.newFixedThreadPool(2); var decodes = new AtomicInteger();
@@ -91,7 +103,9 @@ final class NestedClosureResultFrameReuseTest {
             var codec = new ClosureExecutionEvidenceStorageCodec(MAX, DEPTH,
                     new StoredClosureResultCodec(MAX, DEPTH, cache, decodes::incrementAndGet, null).configured());
             var one = pool.submit(() -> (ManagedRepresentationCause) codec.decodeProcessingCause(a));
+            // when
             var two = pool.submit(() -> (ManagedRepresentationCause) codec.decodeProcessingCause(b));
+            // then
             assertSame(one.get(30, TimeUnit.SECONDS).transition().originalResult(),
                     two.get(30, TimeUnit.SECONDS).transition().originalResult());
             assertEquals(1, decodes.get());
@@ -99,12 +113,16 @@ final class NestedClosureResultFrameReuseTest {
     }
 
     @Test void opaqueFrameOwnBytesAreWeightedAndClearDropsItsEncodingIdentity() throws Exception {
+        // given
         var pair = pair(); byte[] frame = new ClosureProcessResultStorageCodec(MAX, DEPTH).encode(pair.result());
         long required = RootedStorageCache.estimatedWeight(frame.length, frame.length);
         try (var cache = new RootedStorageCache(required, 8, required)) {
             var encodes = new AtomicInteger();
             var codec = new StoredClosureResultCodec(MAX, DEPTH, cache, null, encodes::incrementAndGet);
-            var result = codec.decode(frame); assertEquals(required, cache.statistics().retainedWeightBytes());
+            // when
+            var result = codec.decode(frame);
+            // then
+            assertEquals(required, cache.statistics().retainedWeightBytes());
             codec.encode(result); assertEquals(0, encodes.get());
             cache.clear(); assertEquals(0, cache.statistics().retainedWeightBytes());
             codec.encode(result); assertEquals(1, encodes.get(), "No reverse identity survives clear");
@@ -117,6 +135,7 @@ final class NestedClosureResultFrameReuseTest {
     }
 
     @Test void actualSdkSelectedPendingRepresentationWorkSharesDirectResultEvidence() throws Exception {
+        // given
         var observed = new AtomicInteger();
         try (var graph = new HistoricalRepresentationApplicationIntegrationTest.Graph("A", "B"); var cache = cache(64)) {
             graph.representationObserver = work -> {
@@ -142,7 +161,9 @@ final class NestedClosureResultFrameReuseTest {
             graph.operation("B", "emit", "{to: A, next: stop}");
             graph.operation("A", "detach", "{edge: b}");
             graph.operation("B", "emit", "{to: A, next: stop}");
+            // when
             graph.attach("A", "b", "B");
+            // then
             assertTrue(observed.get() > 0, "SDK selected a real retained historical representation work item");
             assertEquals(3L, graph.observed("A"));
         }

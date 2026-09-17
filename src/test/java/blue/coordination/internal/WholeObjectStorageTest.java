@@ -23,12 +23,15 @@ final class WholeObjectStorageTest {
     private final WholeObjectStorageFixture fixture = new WholeObjectStorageFixture();
 
     @Test void freshReadLoadsSelectedObjectOnlyAndDoesNotBecomePendingMutation() throws Exception {
+        // given
         var writer = new WholeObjectStore(new EngineMetrics());
         for (int i = 0; i < 100; i++) writer.put(new Node().value("unrelated-" + i), "unrelated");
         ExactValue selected = writer.put(new Node().value("selected"), "selected");
         fixture.publish(writer.changes());
         var backing = fixture.view();
+        // when
         var restored = new WholeObjectStore(new EngineMetrics(), backing);
+        // then
         assertEquals(0, backing.reads);
         assertEquals(101, restored.size());
         assertEquals(0, backing.reads);
@@ -41,6 +44,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void canonicalAndProviderViewsStaySeparateAcrossColdPublicationAndRollback() throws Exception {
+        // given
         var writer = new WholeObjectStore(new EngineMetrics());
         ExactValue child = writer.put(new Node().properties("status", new Node().value("confirmed")), "child");
         ExactValue shell = writer.put(new Node().properties("child", child.referenceNode()), "shell");
@@ -50,7 +54,9 @@ final class WholeObjectStorageTest {
         var original = new WholeObjectStore(new EngineMetrics(), originalView);
         var attempt = new WholeObjectStore(new EngineMetrics(), fixture.view());
         var outer = attempt.mark();
+        // when
         attempt.preferCanonicalRepresentation(materialized.frozen(), "materialized");
+        // then
         assertExact(materialized, attempt.require(shell.blueId()));
         assertExact(shell, original.require(shell.blueId()));
         var inner = attempt.mark();
@@ -76,13 +82,16 @@ final class WholeObjectStorageTest {
     }
 
     @Test void referenceUpgradeRollbackRevealsPersistedReferenceWithoutDeletingIt() throws Exception {
+        // given
         ExactValue value = ExactValue.verified(new Node().value("complete"));
         var writer = new WholeObjectStore(new EngineMetrics());
         ExactValue reference = writer.put(value.referenceNode(), "reference");
         fixture.publish(writer.changes());
         var restored = new WholeObjectStore(new EngineMetrics(), fixture.view());
         var mark = restored.mark();
+        // when
         restored.put(value, "full");
+        // then
         assertExact(value, restored.require(value.blueId()));
         assertEquals(1, restored.size());
         restored.rollbackTo(mark);
@@ -92,6 +101,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void cyclicProviderBodiesAndCompleteProofRemainAvailableAfterColdRead() throws Exception {
+        // given
         var provider = new BasicNodeProvider(new Node().items(List.of(
                 new Node().name("cycle-a").properties("peer", new Node().blueId("this#1")),
                 new Node().name("cycle-b").properties("peer", new Node().blueId("this#0")))));
@@ -103,7 +113,9 @@ final class WholeObjectStorageTest {
         writer.putVerifiedProviderEvidence(value, raw, proof, "cyclic");
         fixture.publish(writer.changes());
         var backing = fixture.view();
+        // when
         var cold = new WholeObjectStore(new EngineMetrics(), backing);
+        // then
         assertExact(value, cold.require(id));
         assertTrue(cold.hasVerifiedContentForBlueId(id));
         assertExact(value, ExactValue.fromVerifiedProviderEvidence(id,
@@ -121,12 +133,15 @@ final class WholeObjectStorageTest {
     }
 
     @Test void corruptionAndPhysicalReadFailureRemainNoncommitting() throws Exception {
+        // given
         var writer = new WholeObjectStore(new EngineMetrics());
         ExactValue value = writer.put(new Node().value("value"), "test");
         fixture.publish(writer.changes());
         var backing = fixture.view();
         backing.corrupt(value.blueId());
+        // when
         var restored = new WholeObjectStore(new EngineMetrics(), backing);
+        // then
         assertInstanceOf(NoncommittingExecutionException.class,
                 assertThrows(CoordinationObjectStorageException.class, () -> restored.require(value.blueId())));
         assertThrows(CoordinationObjectStorageException.class, () -> restored.contains(value.blueId()));
@@ -143,6 +158,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void failedReferenceUpgradeReadLeavesNoPartialLocalChangeWithoutCallerMark() {
+        // given
         ExactValue value = ExactValue.verified(new Node().value("complete"));
         ExactValue reference = ExactValue.verified(value.referenceNode());
         var backing = new WholeObjectBacking() {
@@ -155,7 +171,9 @@ final class WholeObjectStorageTest {
             @Override public Iterable<String> cyclicMembers(String id) { return List.of(); }
             @Override public int size() { return 1; }
         };
+        // when
         var attempt = new WholeObjectStore(new EngineMetrics(), backing);
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> attempt.put(value, "upgrade"));
         assertTrue(attempt.changes().entries().isEmpty());
         assertExact(reference, attempt.require(value.blueId()));
@@ -163,6 +181,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void inconsistentPersistedCyclicBodyOrProofIsNeverSemanticProviderRejection() {
+        // given
         var provider = new BasicNodeProvider(new Node().items(List.of(
                 new Node().name("stored-cycle-a").properties("peer", new Node().blueId("this#1")),
                 new Node().name("stored-cycle-b").properties("peer", new Node().blueId("this#0")))));
@@ -186,7 +205,9 @@ final class WholeObjectStorageTest {
                 @Override public Iterable<String> cyclicMembers(String master) { return List.of(id); }
                 @Override public int size() { return 1; }
             };
+            // when
             var attempt = new WholeObjectStore(new EngineMetrics(), backing);
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> attempt.require(id), fault);
             assertThrows(CoordinationObjectStorageException.class, () -> attempt.requireProviderDocument(exact), fault);
             assertThrows(CoordinationObjectStorageException.class, () -> attempt.hasVerifiedContentForBlueId(id), fault);
@@ -198,6 +219,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void componentRetentionReadFailureRollsBackEarlierAttemptLocalMembers() {
+        // given
         DocumentId a = DocumentId.of("retention-a"), b = DocumentId.of("retention-b");
         try (var publicEngine = blue.coordination.api.CoordinationEngine.inMemoryContracts10(
                 BundledContracts10Release.configuration(Set.of(a, b)))) {
@@ -206,7 +228,9 @@ final class WholeObjectStorageTest {
                     .document(b, "name: Retention B\ncount: 0\n")
                     .publicRoot(a).publicRoot(b).expectedComponent(a).expectedComponent(b)
                     .admissionLabel("stored-retention-fault");
+            // when
             var result = scenario.admitTo(publicEngine).admissionReceipt().attempt().processResult();
+            // then
             assertEquals(2, result.resultingDocuments().size());
             String second = result.resultingDocuments().get(1).afterBlueId();
             var metrics = new EngineMetrics();
@@ -235,12 +259,15 @@ final class WholeObjectStorageTest {
 
 
     @Test void missingSelectedObjectAndProofFailClosedWhileUnrelatedCorruptionStaysUnread() {
+        // given
         var writer = new WholeObjectStore(new EngineMetrics());
         var selected = writer.put(new Node().value("selected"), "selected");
         var other = writer.put(new Node().value("other"), "other");
         fixture.publish(writer.changes());
         var view = fixture.view(); view.corrupt(other.blueId());
+        // when
         var cold = new WholeObjectStore(new EngineMetrics(), view);
+        // then
         assertExact(selected, cold.require(selected.blueId()));
         assertEquals(Set.of(selected.blueId()), view.readKeys);
         fixture.remove(selected.blueId());
@@ -261,6 +288,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void snapshotBearingExactValueRetainsActualResolverEvidenceWithoutProviderReplay() {
+        // given
         var provider = new BasicNodeProvider(new Node().name("PaymentInstruction")
                 .properties("reserved", new Node().value(true)));
         String typeId = provider.getBlueIdByName("PaymentInstruction");
@@ -272,7 +300,9 @@ final class WholeObjectStorageTest {
         var value = writer.put(snapshot, "snapshot");
         fixture.publish(writer.changes());
         var cold = new WholeObjectStore(new EngineMetrics(), fixture.view());
+        // when
         var restored = cold.require(value.blueId()).snapshot().orElseThrow();
+        // then
         assertNotSame(snapshot, restored);
         assertNotNull(restored.verifiedReferenceResolution());
         assertEquals(typeId, restored.canonicalTypeIdentities()
@@ -285,13 +315,16 @@ final class WholeObjectStorageTest {
     }
 
     @Test void rawResolvedMetadataAndSchemaKeywordNodesSurviveColdBodyRead() {
+        // given
         var raw = new Node().blueId(ExactValue.verified(new Node().value("identity")).blueId())
                 .description("resolved metadata \uD800")
                 .properties("nested", new Node().value(new java.math.BigDecimal("1.00")))
                 .schema(new blue.language.model.Schema().minLength(new Node().value(1).description("keyword metadata")));
         var frozen = blue.language.snapshot.FrozenNode.fromResolvedNode(raw);
         var codec = new blue.language.snapshot.FrozenNodeStorageCodec(1024 * 1024, 128);
+        // when
         var restored = codec.decode(codec.encode(frozen));
+        // then
         assertFalse(restored.isStrictCanonical());
         assertEquals(frozen.resolvedStructuralKey(), restored.resolvedStructuralKey());
         assertEquals(raw.getDescription(), restored.toNode().getDescription());
@@ -306,13 +339,16 @@ final class WholeObjectStorageTest {
     }
 
     @Test void bodyBudgetsAndUnsupportedRawValuesNeverSilentlyChangeRepresentation() {
+        // given
         var ordinary = blue.language.snapshot.FrozenNode.fromNode(new Node().value("value"));
         assertThrows(IllegalArgumentException.class, () -> new blue.language.snapshot.FrozenNodeStorageCodec(128, 128).encode(ordinary));
         var deep = new Node().value("leaf");
         for (int i = 0; i < 20; i++) deep = new Node().properties("next", deep);
         var frozen = blue.language.snapshot.FrozenNode.fromNode(deep);
         var generous = new blue.language.snapshot.FrozenNodeStorageCodec(1024 * 1024, 128);
+        // when
         var bounded = new blue.language.snapshot.FrozenNodeStorageCodec(1024 * 1024, 8);
+        // then
         assertThrows(IllegalArgumentException.class, () -> bounded.encode(frozen));
         assertThrows(IllegalArgumentException.class, () -> bounded.decode(generous.encode(frozen)));
         var raw = blue.language.snapshot.FrozenNode.fromResolvedNode(new Node().value(new int[]{1, 2}));
@@ -324,6 +360,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void coldExactBodyKeepsMixedFrozenConstructionModesAndSharedChildren() {
+        // given
         var strict = blue.language.snapshot.FrozenNode.fromNode(new Node().value("strict"));
         var resolved = blue.language.snapshot.FrozenNode.fromResolvedNode(new Node().value("resolved"));
         var mixed = blue.language.snapshot.FrozenNode.fromResolvedNode(blue.language.model.Nodes.emptyObject())
@@ -333,7 +370,9 @@ final class WholeObjectStorageTest {
         writer.put(original, "mixed");
         fixture.publish(writer.changes());
         var cold = new WholeObjectStore(new EngineMetrics(), fixture.view());
+        // when
         var restored = cold.require(original.blueId()).frozen();
+        // then
         assertEquals(mixed.resolvedStructuralKey(), restored.resolvedStructuralKey());
         assertFalse(restored.isStrictCanonical());
         assertTrue(restored.property("first").isStrictCanonical());
@@ -342,6 +381,7 @@ final class WholeObjectStorageTest {
     }
 
     @Test void coldBodyProviderPreservesActualRootedSdkResultAndGasBoundary() throws Exception {
+        // given
         ExactValue authored;
         try (var sdk = blue.coordination.sdk.BlueCoordination.inMemory()) {
             authored = ExactValue.verified(blue.language.codec.jackson.UncheckedObjectMapper.JSON_MAPPER.readValue(
@@ -349,7 +389,9 @@ final class WholeObjectStorageTest {
         }
         var resident = new WholeObjectStore(new EngineMetrics()); resident.put(authored, "authored-source");
         fixture.publish(resident.changes());
+        // when
         var calibration = calculate(resident, authored.blueId(), 100_000L);
+        // then
         assertEquals(blue.language.processor.ProcessorStatus.SUCCESS, calibration.status());
         assertTrue(calibration.totalGas() > 1);
         for (long limit : List.of(calibration.totalGas(), calibration.totalGas() - 1L)) {
@@ -381,12 +423,15 @@ final class WholeObjectStorageTest {
     }
 
     @Test void lyingImmutableAcknowledgementCannotProducePublishedReferences() {
+        // given
         var writer = new WholeObjectStore(new EngineMetrics()); writer.put(new Node().value("exact"), "test");
         var lying = new blue.coordination.api.storage.CoordinationImmutableObjectStore() {
             @Override public byte[] putIfAbsent(String address, byte[] bytes) { return new byte[]{1}; }
             @Override public Optional<byte[]> get(String address, int maximumBytes) { return Optional.empty(); }
         };
+        // when
         var storage = new WholeObjectStorage(lying, 1024 * 1024, 128);
+        // then
         var failure = assertThrows(CoordinationObjectStorageException.class, () -> storage.retain(writer.changes()));
         assertTrue(failure.getMessage().contains("acknowledgement"));
         assertEquals(1, writer.size());

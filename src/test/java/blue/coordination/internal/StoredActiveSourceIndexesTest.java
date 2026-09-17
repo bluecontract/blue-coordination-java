@@ -11,6 +11,7 @@ import static blue.coordination.internal.StoredRouteIndexesTest.*;
 
 final class StoredActiveSourceIndexesTest {
     @Test void coldDynamicAdmissionSharedMembershipRemovalAndCountersMatchResident() {
+        // given
         var bytes = new Bytes(); var storage = new StoredActiveSourceIndexes(bytes, LIMITS);
         var aMetrics = new EngineMetrics(); var bMetrics = new EngineMetrics();
         var a = new ContractsActiveSourceTimelineIndex(List.of(id(1)), aMetrics);
@@ -25,7 +26,10 @@ final class StoredActiveSourceIndexesTest {
         Set<String> oldSnapshot = b.timelineIds();
         a.addPublicRoots(List.of(id(2))); b.addPublicRoots(List.of(id(2)));
         inventory = inventory.replaceSources(List.of(id(2)), List.of(edge(2, 3))).inventory();
-        a.refresh(List.of(id(2)), inventory, timelines::get); b.refresh(List.of(id(2)), inventory, timelines::get);
+        a.refresh(List.of(id(2)), inventory, timelines::get);
+        // when
+        b.refresh(List.of(id(2)), inventory, timelines::get);
+        // then
         assertEquals(2L, b.storedIndexes().timelineReferences().get("timeline/shared"));
         assertEquals(a.timelineIds(), b.timelineIds());
         assertEquals(aMetrics.snapshot().counters(), bMetrics.snapshot().counters());
@@ -52,13 +56,17 @@ final class StoredActiveSourceIndexesTest {
     }
 
     @Test void coldOpenAndSelectedMembershipRefreshDoNotResolveOtherRoots() {
+        // given
         var bytes = new Bytes(); var storage = new StoredActiveSourceIndexes(bytes, LIMITS);
         var ids = new ArrayList<DocumentId>(); for (int i = 0; i < 127; i++) ids.add(id(i));
         var index = new ContractsActiveSourceTimelineIndex(ids);
         index.refresh(ids, ManagedOccurrenceInventory.empty(), document -> List.of("timeline/" + document.value()));
         var stored = storage.retainPartition(index, new EngineMetrics()); var roots = roots(storage, stored);
         var coldBytes = bytes.fresh(); var cold = new StoredActiveSourceIndexes(coldBytes, LIMITS);
-        var metrics = new EngineMetrics(); var opened = cold.open(roots::get, metrics);
+        var metrics = new EngineMetrics();
+        // when
+        var opened = cold.open(roots::get, metrics);
+        // then
         assertEquals(4, coldBytes.reads, "only the four root metadata nodes");
         assertTrue(opened.timelineIds().contains("timeline/document-63"));
         assertEquals(0, metrics.counter("sourceSurface.rootsResolved"));
@@ -77,13 +85,16 @@ final class StoredActiveSourceIndexesTest {
     }
 
     @Test void physicalFailureKeepsAllFourRootsAndPriorUnionUnchanged() {
+        // given
         var bytes = new Bytes(); var storage = new StoredActiveSourceIndexes(bytes, LIMITS);
         var index = new ContractsActiveSourceTimelineIndex(List.of(id(1), id(2)));
         var inventory = ManagedOccurrenceInventory.of(List.of(edge(1, 3), edge(2, 3)));
         index.refresh(List.of(id(1), id(2)), inventory, document -> List.of("timeline/" + document.value()));
         var stored = storage.retainPartition(index, new EngineMetrics()); var roots = roots(storage, stored);
         Set<String> previous = stored.timelineIds();
+        // when
         bytes.failWriteAt = bytes.writes + 3;
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> stored.refresh(List.of(id(3)), inventory,
                 document -> List.of("changed/" + document.value())));
         sameRoots(roots, roots(storage, stored)); assertEquals(previous, stored.timelineIds());
@@ -94,10 +105,14 @@ final class StoredActiveSourceIndexesTest {
     }
 
     @Test void missingWrongCorruptedRootsAndOversizedRowsCannotBecomeEmptyUnion() {
+        // given
         var bytes = new Bytes(); var storage = new StoredActiveSourceIndexes(bytes, LIMITS);
         var index = new ContractsActiveSourceTimelineIndex(List.of(id(1)));
         index.refresh(List.of(id(1)), ManagedOccurrenceInventory.empty(), ignored -> List.of("timeline/1"));
-        var stored = storage.retainPartition(index, new EngineMetrics()); var roots = roots(storage, stored);
+        var stored = storage.retainPartition(index, new EngineMetrics());
+        // when
+        var roots = roots(storage, stored);
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> storage.open(ignored -> null, new EngineMetrics()));
         assertThrows(NoncommittingExecutionException.class, () -> storage.open(ignored -> roots.get(StoredActiveSourceIndexes.Root.PUBLIC_ROOTS), new EngineMetrics()));
         var absent = new StoredActiveSourceIndexes(new Bytes(), LIMITS);

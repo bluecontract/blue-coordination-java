@@ -22,6 +22,7 @@ final class SdkStorageCodecTest {
     @TempDir Path directory;
 
     @Test void actualRootedCycleFailureSurvivesBytesWithNewHandlesAndNoProcessing() throws Exception {
+        // given
         var policy = ContractsExecutionPolicy.exactSharedGas(5_000, "sdk-storage-failure");
         try (var f = new RootedSdkFixture(policy)) {
             var b = f.start("cycle-b.yaml", "rcp2/cycle", Map.of());
@@ -29,7 +30,9 @@ final class SdkStorageCodecTest {
             var authored = f.blue.values().yaml(aYaml);
             f.exact.put(authored.blueId(), authored.json());
             var a = f.startYaml(aYaml, "rcp2/cycle");
+            // when
             var connect = appendCycle(f, b, "connectA", 90, "a:\n  blueId: " + authored.blueId());
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(b).entry(connect).disposition());
             assertTrue(f.blue.processing().processNext(b).quiescent());
             var entry = appendCycle(f, a, "startLoop", 100, "{}");
@@ -61,6 +64,7 @@ final class SdkStorageCodecTest {
     }
 
     @Test void actualSourceOwnedLiveResultAndStoppedParentRemainSeparate() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             var sourceInput = f.blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
@@ -68,7 +72,9 @@ final class SdkStorageCodecTest {
             f.timelines.put("rcp2/source", f.blue.timelines().register("rcp2/source", "alice"));
             var sourceEntry = f.appendReference(sourceInput.blueId(), "rcp2/source", "setCounter", 15, "counterValue: 5", false);
             var attach = f.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + sourceInput.blueId());
+            // when
             var stopped = f.blue.processing().processNext(parent).entry(attach);
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, stopped.disposition());
             var admission = f.blue.advanced().sourceHistoryPrerequisites(parent).get(0);
             assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, admission.kind());
@@ -95,11 +101,14 @@ final class SdkStorageCodecTest {
     }
 
     @Test void targetedIntentsActorKindAndRegisteredEmptyTimelinesRemainExact() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var emptyAgent = f.blue.timelines().register("empty-agent", "agent-account", TimelineActorKind.AGENT);
+            // when
             var result = f.blue.operations().on(source).from(f.timelines.get("rcp2/source"))
                     .call("setCounter").through("owner").requestYaml("counterValue: 5").execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, result.disposition());
             var stored = roundTrip(f.blue, new Object());
             var intent = stored.intents().get(result.entry().blueId());
@@ -116,10 +125,13 @@ final class SdkStorageCodecTest {
     }
 
     @Test void pristineInstallRejectsMismatchedConfigurationAndMissingEngineBeforeMutation() throws Exception {
+        // given
         var policy = ContractsExecutionPolicy.releaseDefault();
         try (var empty = runtime(new Object(), policy); var receiver = runtime(new Object(), policy)) {
             byte[] original = empty.storageMetadata(MAX);
+            // when
             receiver.installStorageMetadata(original, MAX);
+            // then
             assertArrayEquals(original, receiver.storageMetadata(MAX));
             try (var wrong = runtime(new Object(), ContractsExecutionPolicy.exactSharedGas(99_999, "other-policy"))) {
                 byte[] before = wrong.storageMetadata(MAX);
@@ -137,11 +149,15 @@ final class SdkStorageCodecTest {
     }
 
     @Test void malformedAndOversizeFramesFailWithoutChangingLiveMetadata() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             f.start("source.yaml", "rcp2/source", Map.of());
             byte[] bytes = f.blue.advanced().storageMetadata(MAX);
             var codec = new SdkStorageCodec(new Object(), MAX);
-            byte[] broken = bytes.clone(); broken[broken.length / 2] ^= 1;
+            byte[] broken = bytes.clone();
+            // when
+            broken[broken.length / 2] ^= 1;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(broken, SdkStorageCodec.Metadata.class));
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(Arrays.copyOf(bytes, bytes.length - 1), SdkStorageCodec.Metadata.class));
             assertThrows(CoordinationObjectStorageException.class, () -> new SdkStorageCodec(new Object(), bytes.length - 1)
@@ -151,12 +167,15 @@ final class SdkStorageCodecTest {
     }
 
     @Test void submittedIntentCannotLoseItsRequiredCoreEntry() throws Exception {
+        // given
         try (var f = new RootedSdkFixture(); var receiver = runtime(new Object(), ContractsExecutionPolicy.releaseDefault())) {
             var document = f.start("source.yaml", "rcp2/source", Map.of());
             f.blue.operations().on(document).from(f.timelines.get("rcp2/source"))
                     .call("setCounter").through("owner").requestYaml("counterValue: 5").execute();
             var codec = new SdkStorageCodec(new Object(), MAX);
+            // when
             var stored = codec.decode(f.blue.advanced().storageMetadata(MAX), SdkStorageCodec.Metadata.class);
+            // then
             assertFalse(stored.intents().isEmpty());
             var missing = new SdkStorageCodec.Metadata(stored.configuration(), stored.timelines(), stored.intents(),
                     stored.results(), Map.of(), stored.sourceResults());
@@ -171,6 +190,7 @@ final class SdkStorageCodecTest {
     @Test void completeSdkManagedFailureAndRepresentationDtoFieldsAreNotDefaulted() {
         // This is an SDK presentation DTO control, not a manufactured processor
         // receipt or a claim that these arbitrary fixture identities authenticate.
+        // given
         var source = blue.coordination.api.DocumentId.of("source");
         var consumer = blue.coordination.api.DocumentId.of("consumer");
         var before = new ManagedEpochApplicationWork.Position("anchor", "before", "after", Optional.empty());
@@ -199,7 +219,9 @@ final class SdkStorageCodecTest {
                 List.of(new DrainResult.RootedRetainedApplication(consumer, work, local)));
         var codec = new SdkStorageCodec(new Object(), MAX);
         byte[] bytes = codec.encode(drain);
+        // when
         var restored = codec.decode(bytes, DrainResult.class);
+        // then
         assertEquals(List.of(attempt), restored.managedEpochApplicationAttempts());
         assertEquals(List.of(failure), restored.managedEpochEvidenceFailures());
         assertEquals(drain.rootedRetainedApplications(), restored.rootedRetainedApplications());

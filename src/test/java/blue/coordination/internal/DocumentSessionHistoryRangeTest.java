@@ -41,11 +41,14 @@ final class DocumentSessionHistoryRangeTest {
     }
 
     @Test void appendAndDetachedRollbackKeepPreviouslyReturnedRangesFrozen() {
+        // given
         var session = history(3, 5);
         var prior = session.representationTransitionsAt(2);
         var original = session.storedState();
         var discarded = session.copyForAtomicPublication();
+        // when
         rebind(discarded, 5);
+        // then
         assertEquals(6, discarded.representationTransitionsAt(2).size());
         assertEquals(original, session.storedState(), "An unpublished copy cannot advance source indexes");
         assertEquals(5, prior.size());
@@ -62,12 +65,15 @@ final class DocumentSessionHistoryRangeTest {
     }
 
     @Test void returningToAnEarlierBlueIdRetainsEveryDistinctSameEpochPosition() {
+        // given
         var session = history(1, 5);
         var original = session.currentRevision().after();
         session.rebindComponentRepresentation(0, layout(original), List.of(), "return-receipt", "return-publication");
         rebind(session, 6);
         session.rebindComponentRepresentation(0, layout(original), List.of(), "second-return-receipt", "second-return-publication");
+        // when
         var rows = session.representationTransitionsAt(0);
+        // then
         assertEquals(8, rows.size());
         assertEquals(rows.get(5).afterBlueId(), rows.get(7).afterBlueId());
         assertNotEquals(rows.get(5).transitionReceiptIdentity(), rows.get(7).transitionReceiptIdentity());
@@ -75,12 +81,15 @@ final class DocumentSessionHistoryRangeTest {
     }
 
     @Test void publicationMembershipUsesRetainedObjectPositionAcrossAppendCopyAndRestore() throws Exception {
+        // given
         try (var fixture = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var original = fixture.engine.documents().require(fixture.parent.id());
             var positions = original.storedState().rootedViewPositions();
             var first = positions.get(0).view();
             var current = original.rootedView();
+            // when
             String currentInvocation = current.result().invocationIdentity();
+            // then
             assertFalse(original.rootedPublicationIncludes(first, currentInvocation));
             var selectedPrefix = original.rootedPublicationPrefix(first);
             var copy = original.copyForAtomicPublication();
@@ -122,6 +131,7 @@ final class DocumentSessionHistoryRangeTest {
     }
 
     @Test void failedAtomicPublicationDoesNotLeakNewMembershipBeforeSuccessfulRetry() throws Exception {
+        // given
         try (var fixture = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var documents = fixture.engine.documents();
             var before = documents.require(fixture.parent.id());
@@ -129,13 +139,16 @@ final class DocumentSessionHistoryRangeTest {
             var priorPrefix = before.rootedPublicationPrefix(priorView);
             fixture.append(300);
             var reached = new java.util.concurrent.atomic.AtomicBoolean();
+            // when
             fixture.engine.contractsClosureAdapter().onStoreFailurePoint(point -> {
                 if (point == MultiDocumentPublicationTransaction.FailurePoint.BEFORE_SWAP) {
                     reached.set(true);
                     throw new IllegalStateException("abort staged range indexes");
                 }
             });
-            try { assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(fixture.parent)); }
+            try {
+            // then
+            assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(fixture.parent)); }
             finally { fixture.engine.contractsClosureAdapter().onStoreFailurePoint(ignored -> { }); }
             assertTrue(reached.get());
             var aborted = documents.require(fixture.parent.id());

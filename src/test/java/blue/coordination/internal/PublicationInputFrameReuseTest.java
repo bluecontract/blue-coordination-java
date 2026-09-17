@@ -44,13 +44,16 @@ final class PublicationInputFrameReuseTest {
     }
 
     @Test void oneReceiptCaptureEncodesItsSharedInputOnceAndEqualDistinctInputsIndependently() {
+        // given
         var counts = new HashMap<String, Integer>();
         try (var cache = new RootedStorageCache(256L * 1024 * 1024, 1024, 128L * 1024 * 1024)) {
             var codec = measured(cache, counts);
             var storage = storage();
             for (var receipt : List.of(historical, live)) {
                 counts.clear();
+                // when
                 byte[] actual = codec.encodePublication(receipt, storage::retainView);
+                // then
                 assertEquals(1, counts.get("invocation-encode"));
                 // Equivalent separately decoded input must not hit the identity-only encoder scope.
                 var detached = detachedTerminalInput(receipt);
@@ -67,6 +70,7 @@ final class PublicationInputFrameReuseTest {
     }
 
     @Test void coldExactRepeatedFrameIsDecodedOnceWithoutSkippingEnvelopeValidation() {
+        // given
         var counts = new HashMap<String, Integer>();
         var codec = measured(null, counts);
         var storage = storage();
@@ -74,7 +78,9 @@ final class PublicationInputFrameReuseTest {
         try (var scope = storage.openScope()) {
             for (int call = 0; call < 2; call++) {
                 counts.clear();
+                // when
                 var restored = codec.decodePublication(bytes, scope);
+                // then
                 assertEquals(1, counts.get("invocation-decode"));
                 assertEquals(0, counts.getOrDefault("invocation-encode", 0),
                         "Complete envelope equality reuses invocation bytes already checked by its full decoder");
@@ -93,12 +99,15 @@ final class PublicationInputFrameReuseTest {
     }
 
     @Test void changedSecondInputIsNotAcceptedAsTheFirstVerifiedInput() {
+        // given
         var counts = new HashMap<String, Integer>();
         var codec = measured(null, counts);
         var storage = storage();
         byte[] bytes = codec.encodePublication(historical, storage::retainView);
         byte[] input = new ClosureExecutionEvidenceStorageCodec(MAX, 256).encodeInvocation(historical.rootedTerminalEvidence().input());
+        // when
         int first = indexOf(bytes, input, 0), second = indexOf(bytes, input, first + input.length);
+        // then
         assertTrue(first >= 0 && second > first);
         assertEquals(-1, indexOf(bytes, input, second + input.length));
         byte[] corrupt = bytes.clone(); corrupt[second] ^= 1;
@@ -113,9 +122,12 @@ final class PublicationInputFrameReuseTest {
     }
 
     @Test void failedCaptureAndTightEnvelopeBoundsDoNotRetainAnInputAcrossCalls() {
+        // given
         var counts = new HashMap<String, Integer>();
         var codec = measured(null, counts);
+        // when
         byte[] bytes = codec.encodePublication(historical, storage()::retainView);
+        // then
         assertEquals(1, counts.get("invocation-encode"));
         var bounded = new PublicationReceiptStorageCodec(bytes.length - 1, 256, null,
                 (kind, value) -> counts.merge(kind, 1, Integer::sum));

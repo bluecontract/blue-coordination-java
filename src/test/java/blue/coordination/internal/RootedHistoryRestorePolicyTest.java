@@ -33,13 +33,16 @@ final class RootedHistoryRestorePolicyTest {
                     64 * 1024, 8192, 32, 256 * 1024, 4L * MIB, 100), 32 * MIB, 128 * 1024, 32 * MIB, 100, 256 * 1024));
 
     @Test void strictAndControlledFreshOwnersPreserveCompleteHistoryAndSameEpochPositions() throws Exception {
+        // given
         Fixture f = fixture();
         for (boolean controlled : List.of(false, true)) {
             var bytes = f.bytes().copy(); var journal = ColdStorageJournalFixture.open(f.journal());
             try (var scope = controlled
                     ? RootedCoordinationStorage.controlledRepository(bytes).open(LIMITS, f.selection(), ExactNodeProvider.empty(), journal)
                     : RootedCoordinationStorage.open(bytes, LIMITS, f.selection(), ExactNodeProvider.empty(), journal)) {
+                // when
                 var session = engine(scope).documents().require(f.document());
+                // then
                 assertEquals(f.evidence(), evidence(session));
                 assertEquals(f.oldViewAddress(), PHYSICAL.viewAddress(session.rootedViewBefore(f.oldViewUpperBoundary())));
                 assertEquals(f.oldRevisionAddress(), digest(ROWS.encodeRevision(session.revision(f.oldEpoch()))));

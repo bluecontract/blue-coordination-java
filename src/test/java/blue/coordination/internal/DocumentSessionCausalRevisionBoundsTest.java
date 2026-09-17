@@ -27,8 +27,12 @@ final class DocumentSessionCausalRevisionBoundsTest {
     private static final ExternalOrderKey ORDER = ExternalOrderKey.of(List.of(BigInteger.ONE, "timeline", "entry"));
 
     @Test void noncontiguousCauseIncludesInitializationAndNoSourceEntryWithoutChangingCapturedCopies() {
+        // given
         var session = history(A, B, A, null, A);
-        assertTrue(session.revisions().stream().allMatch(revision -> revision.sourceEntry().isEmpty()));
+        // when
+        boolean allSourceEntriesEmpty = session.revisions().stream().allMatch(revision -> revision.sourceEntry().isEmpty());
+        // then
+        assertTrue(allSourceEntriesEmpty);
         assertTrue(session.indexedState().sourceEntryEpochs().isEmpty());
         assertTrue(session.revisionForEntry(A).isEmpty(), "Source-entry lookup is intentionally not causal lookup");
         var selected = session.causalRevisionEndpoints(A);
@@ -86,8 +90,11 @@ final class DocumentSessionCausalRevisionBoundsTest {
     }
 
     @Test void strictRestoreRejectsAnOmittedCauseAndIncompleteMatchingEndpoints() throws Exception {
+        // given
         var session = history(A, B, A, null, A);
+        // when
         var state = session.indexedState();
+        // then
         assertEquals(fullHistoryEndpoints(session, A), DocumentSession.restoreIndexed(state, null).causalRevisionEndpoints(A));
         var original = state.causalEntryBounds();
         var corruptions = List.of(original.remove(A).map(),
@@ -103,9 +110,12 @@ final class DocumentSessionCausalRevisionBoundsTest {
     }
 
     @Test void controlledSelectedEndpointsStillRejectACrossCauseLink() throws Exception {
+        // given
         var state = history(A, B, A, null, A).indexedState();
         var wrong = state.causalEntryBounds().put(A, new DocumentSession.CausalRevisionBounds(1, 4)).map();
+        // when
         var selected = DocumentSession.restoreControlledIndexed(withCausalBounds(state, wrong), null);
+        // then
         assertThrows(IllegalStateException.class, () -> selected.causalRevisionEndpoints(A));
     }
 

@@ -17,6 +17,7 @@ final class ColdStorageJournalFixtureTest {
     private static final Operation OPERATION = Operation.withoutRequest("touch", "owner");
 
     @Test void actualEngineRowsColdOpenFromOwnedBytesWithoutBodyReadsOrReappend() {
+        // given
         ColdStorageJournalFixture.Snapshot snapshot; TimelineEntry original;
         try (var blue = BlueCoordination.inMemory()) {
             var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
@@ -24,7 +25,9 @@ final class ColdStorageJournalFixtureTest {
             original = engine.appendAt(timeline, OPERATION, 10);
             snapshot = ColdStorageJournalFixture.retain(engine);
         }
+        // when
         var store = ColdStorageJournalFixture.open(snapshot);
+        // then
         assertEquals(0, store.bodyReads()); assertEquals(0, store.mutations());
         try (var view = store.openRead()) {
             assertEquals(new TimelineJournalStore.State(1, 1, 1, TimelineJournalStore.Availability.available()), view.state());
@@ -40,11 +43,14 @@ final class ColdStorageJournalFixtureTest {
     }
 
     @Test void actualAppendRollbackAvailabilityAndDuplicateSurviveAnotherColdCopy() {
+        // given
         var store = ColdStorageJournalFixture.empty(); TimelineEntry first;
         try (var context = new Context(store)) {
             first = context.journal.append(A, OPERATION, 10); var mark = context.journal.mark();
             context.journal.append(A, OPERATION, 20); context.journal.rollbackTo(mark);
+            // when
             context.journal.makeHistoricalUnavailable("retained maintenance");
+            // then
             assertEquals(3, context.journal.revision());
         }
         var copied = ColdStorageJournalFixture.open(ColdStorageJournalFixture.retain(store));
@@ -68,13 +74,16 @@ final class ColdStorageJournalFixtureTest {
     }
 
     @Test void physicalMissingCorruptionAndStateConflictsFailWithoutPartialMutation() {
+        // given
         var store = ColdStorageJournalFixture.empty(); TimelineEntry row;
         try (var context = new Context(store)) { row = context.journal.append(A, OPERATION, 10); }
         for (boolean missing : List.of(true, false)) {
             var bytes = new LinkedHashMap<>(store.snapshot().bytes());
             var key = bytes.keySet().stream().filter(name -> name.startsWith("body/")).findFirst().orElseThrow();
             if (missing) bytes.remove(key); else bytes.get(key)[0] ^= 1;
+            // when
             var cold = ColdStorageJournalFixture.open(new ColdStorageJournalFixture.Snapshot(bytes));
+            // then
             assertEquals(0, cold.bodyReads());
             try (var view = cold.openRead()) {
                 assertThrows(NoncommittingExecutionException.class, () -> view.byBlueId(row.blueId()));

@@ -22,6 +22,7 @@ final class StoredRouteIndexesTest {
     @TempDir Path temporary;
 
     @Test void coldRoutesPreserveExactShapeDeliveriesGenerationAndMutationCounters() {
+        // given
         var bytes = new Bytes(); var writer = new StoredRouteIndexes(bytes, LIMITS);
         var aMetrics = new EngineMetrics(); var bMetrics = new EngineMetrics();
         var a = new OperationRouteIndex(aMetrics); var b = new OperationRouteIndex(bMetrics);
@@ -30,7 +31,9 @@ final class StoredRouteIndexesTest {
         }
         b = writer.retainPartition(b, bMetrics, ignored -> null, ignored -> null);
         var roots = roots(writer, b); var cold = new StoredRouteIndexes(bytes.fresh(), LIMITS);
+        // when
         b = cold.open(roots::get, b.generation(), bMetrics, ignored -> null, ignored -> null);
+        // then
         assertEquals(a.generation(), b.generation());
         assertEquals(a.storedIndexes().rows().heightForTesting(), b.storedIndexes().rows().heightForTesting());
         for (int i : List.of(1, 2, 4, 7, 9, 13, 0)) {
@@ -58,6 +61,7 @@ final class StoredRouteIndexesTest {
     }
 
     @Test void openingAndOneRouteDoNotReplayOrResolveUnrelatedDocuments() {
+        // given
         var bytes = new Bytes(); var storage = new StoredRouteIndexes(bytes, LIMITS);
         var index = new OperationRouteIndex(new EngineMetrics());
         for (int i = 0; i < 255; i++) replace(index, i, "timeline/" + i);
@@ -65,8 +69,10 @@ final class StoredRouteIndexesTest {
                 ignored -> { throw new AssertionError("head scan"); });
         var roots = roots(storage, stored); var coldBytes = bytes.fresh(); var cold = new StoredRouteIndexes(coldBytes, LIMITS);
         var metrics = new EngineMetrics();
+        // when
         var opened = cold.open(roots::get, index.generation(), metrics, ignored -> { throw new AssertionError("session scan"); },
                 ignored -> { throw new AssertionError("head scan"); });
+        // then
         assertEquals(2, coldBytes.reads, "only the two selected root metadata nodes");
         assertEquals(new EngineMetrics().snapshot().counters(), metrics.snapshot().counters());
         assertEquals(List.of(id(127)), opened.route(entry("timeline/127")));
@@ -75,11 +81,14 @@ final class StoredRouteIndexesTest {
     }
 
     @Test void failedPreparationMissingBytesAndForeignRootsFailWithoutPublication() {
+        // given
         var bytes = new Bytes(); var storage = new StoredRouteIndexes(bytes, LIMITS);
         var resident = new OperationRouteIndex(new EngineMetrics()); replace(resident, 1, "timeline/1");
         var stored = storage.retainPartition(resident, new EngineMetrics(), ignored -> null, ignored -> null);
         var roots = roots(storage, stored); long generation = stored.generation();
+        // when
         bytes.failWriteAt = bytes.writes + 2;
+        // then
         assertThrows(NoncommittingExecutionException.class, () -> replace(stored, 1, "timeline/new"));
         sameRoots(roots, roots(storage, stored)); assertEquals(generation, stored.generation());
         bytes.failWriteAt = -1;
@@ -95,6 +104,7 @@ final class StoredRouteIndexesTest {
     }
 
     @Test void fileOnlyFreshJvmReopensBothFamiliesWithoutRebuild() throws Exception {
+        // given
         Path objects = temporary.resolve("objects");
         var bytes = new FileCoordinationObjectStore(objects, LIMITS.nodeBytes());
         var routes = new StoredRouteIndexes(bytes, LIMITS);
@@ -117,7 +127,10 @@ final class StoredRouteIndexesTest {
                 String.join(java.io.File.pathSeparator, classpath), Restart.class.getName(), temporary.toString())
                 .redirectErrorStream(true).redirectOutput(log.toFile()).start();
         boolean finished = child.waitFor(30L, java.util.concurrent.TimeUnit.SECONDS);
-        if (!finished) child.destroyForcibly();
+        if (!finished)
+        // when
+        child.destroyForcibly();
+        // then
         assertTrue(finished, "owned child did not complete");
         assertEquals(0, child.exitValue(), () -> { try { return Files.readString(log); } catch (Exception failure) { return failure.toString(); } });
         assertTrue(Files.readString(log).contains("COLD_ROUTES_OK"));

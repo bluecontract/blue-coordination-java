@@ -15,6 +15,7 @@ final class IndexedLineageBindingTest {
             new DocumentSessionStorage.Limits(40 * 1024 * 1024, 256, 512L * 1024 * 1024);
 
     @Test void sameHeaderAndEndpointsCannotBindADifferentMiddleMetadataRootToTheSelectedSession() throws Exception {
+        // given
         try (var f = scenario()) {
             for (boolean controlled : List.of(false, true)) {
                 var bytes = new RootedHistoryAccessObjects();
@@ -28,7 +29,9 @@ final class IndexedLineageBindingTest {
                 var history = RetainedStateHistory.indexed(original.documentId(), original.retainedStates());
                 var changedRoot = history.index().put(1L, new ManagedLineageIndex.RetainedState(original.documentId(), 1L,
                         history.get(0).blueId())).map();
+                // when
                 var changed = replaceHistory(original, new RetainedStateHistory(original.documentId(), changedRoot));
+                // then
                 assertEquals(original.currentEpoch(), changed.currentEpoch());
                 assertEquals(original.currentBlueId(), changed.currentBlueId());
                 assertEquals(original.lastAnchoredNonReplayableEpoch(), changed.lastAnchoredNonReplayableEpoch());
@@ -51,6 +54,7 @@ final class IndexedLineageBindingTest {
     }
 
     @Test void strictSelectionRejectsCorrectlyAddressedOmissionFromSecondaryRetainedIndex() throws Exception {
+        // given
         try (var f = scenario()) {
             var bytes = new RootedHistoryAccessObjects(); var storage = new StoredDocumentIndexes(bytes, MAP, SESSION);
             var state = f.engine.documents().storedState();
@@ -58,7 +62,9 @@ final class IndexedLineageBindingTest {
             var lineages = storage.retainLineagePartition(state.lineageIndex());
             var generations = storage.retainGenerationPartition(state.graphGenerations());
             var retained = lineages.storedState(); var lineage = retained.documents().get(f.parent.id());
+            // when
             String omitted = lineage.retainedStates().get(1).blueId();
+            // then
             assertNotNull(retained.retained().get(omitted));
             var missing = ManagedLineageIndex.restoreStored(new ManagedLineageIndex.StoredState(retained.documents(),
                     retained.authored(), retained.initialized(), retained.retained().remove(omitted).map(),
@@ -73,6 +79,7 @@ final class IndexedLineageBindingTest {
     }
 
     @Test void strictLineageCodecChecksInteriorOwnerAndControlledSelectionChecksTheRequestedRow() throws Exception {
+        // given
         try (var f = scenario()) {
             var bytes = new RootedHistoryAccessObjects();
             var controlled = new StoreIndexCodecs(RootedEngineStorage.controlledNamespace(bytes), MAP);
@@ -82,7 +89,9 @@ final class IndexedLineageBindingTest {
             var wrong = history.index().put(1L, new ManagedLineageIndex.RetainedState(DocumentId.of("foreign-owner"), 1L,
                     history.get(1).blueId())).map();
             var malformed = replaceHistory(lineage, new RetainedStateHistory(lineage.documentId(), wrong));
+            // when
             byte[] frame = controlled.lineages.encode(controlled.lineages.prepareForStorage(malformed));
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> strict.lineages.decode(frame));
             var selected = controlled.lineages.decode(frame);
             assertEquals(lineage.retainedStates().get(0), selected.retainedStates().get(0));

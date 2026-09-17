@@ -30,6 +30,7 @@ final class StoredTimelineJournalTest {
     private static final Operation VALUE = Operation.exact("touch", "ownerChannel", ExactValue.verified(new Node().value("value")));
 
     @Test void reopenedRowsPreserveAppendDuplicatePredecessorOrderWindowsAndRevisions() {
+        // given
         try (Context reference = new Context(null)) {
             List<TimelineEntry> expected = List.of(
                     reference.journal.append(A, ABSENT, 100),
@@ -39,8 +40,10 @@ final class StoredTimelineJournalTest {
             List<Operation> operations = List.of(ABSENT, EMPTY, VALUE);
             long[] timestamps = {100, 50, 200};
             for (int i = 0; i < 3; i++) {
+                // when
                 var store = new FileTimelineJournalStore(directory);
                 try (Context restarted = new Context(store)) {
+                    // then
                     assertEquals(0, store.bodyReads.get(), "opening must not restore all entries");
                     assertEquals(i, restarted.journal.size());
                     assertEquals(i, restarted.journal.revision());
@@ -77,11 +80,14 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void closedAvailabilitySurvivesRestartWithoutChangingRevision() {
+        // given
         try (Context context = new Context(new FileTimelineJournalStore(directory))) {
             context.journal.append(A, ABSENT, 100);
+            // when
             context.journal.makeHistoricalUnavailable("maintenance");
         }
         try (Context context = new Context(new FileTimelineJournalStore(directory))) {
+            // then
             assertEquals(1, context.journal.revision());
             assertEquals(new HistoricalStep.Unavailable("maintenance"), probe(context.journal, ignored -> true));
             context.journal.invalidateHistoricalEvidence("broken cursor");
@@ -96,12 +102,15 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void rootedOrderUsesTheCanonicalTimelineIdentityAcrossFreshReopen() {
+        // given
         TimelineEntry first;
         TimelineEntry second;
         try (Context reference = new Context(null, true);
              Context stored = new Context(new FileTimelineJournalStore(directory), true)) {
             first = reference.journal.append(A, ABSENT, 100);
+            // when
             second = reference.journal.append(B, VALUE, 100);
+            // then
             assertNotEquals(A.timelineId(), first.sourceOrderKey().components().get(1));
             assertEquals(first.exactEvent().canonicalAt("/timeline").blueId(),
                     first.sourceOrderKey().components().get(1));
@@ -126,11 +135,14 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void rootedBeginningKeepsProviderDispositionAndNonemptyAuthorityAcrossReopen() {
+        // given
         try (Context context = new Context(new FileTimelineJournalStore(directory), true)) {
             assertDoesNotThrow(() -> context.journal.requireBeginningAdmission(true));
+            // when
             context.journal.makeHistoricalUnavailable("provider unavailable");
         }
         try (Context context = new Context(new FileTimelineJournalStore(directory), true)) {
+            // then
             var unavailable = assertThrows(blue.coordination.api.CoordinationException.class,
                     () -> context.journal.requireBeginningAdmission(true));
             assertEquals(blue.coordination.api.CoordinationErrorCode.NEEDS_RESOURCES, unavailable.code());
@@ -152,10 +164,13 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void staleOwnerCannotAppendOrRollBackForeignRows() {
+        // given
         var store = new FileTimelineJournalStore(directory);
         try (Context first = new Context(store); Context second = new Context(new FileTimelineJournalStore(directory))) {
             var mark = first.journal.mark();
+            // when
             TimelineEntry foreign = second.journal.append(A, ABSENT, 100);
+            // then
             assertInstanceOf(NoncommittingExecutionException.class,
                     assertThrows(TimelineJournalStorageException.class, () -> first.journal.rollbackTo(mark)));
             assertThrows(TimelineJournalStorageException.class, () -> first.journal.append(B, ABSENT, 200));
@@ -169,10 +184,13 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void stateChangeBetweenPinnedReadAndPublishFailsTheAtomicFence() {
+        // given
         var store = new FileTimelineJournalStore(directory);
         var faults = new FaultStore(store);
         try (Context context = new Context(faults)) {
+            // when
             faults.phase = "conflict-apply";
+            // then
             assertThrows(TimelineJournalStorageException.class, () -> context.journal.append(A, ABSENT, 100));
             assertEquals(0, context.journal.size());
             assertEquals(0, context.journal.revision());
@@ -185,12 +203,15 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void inMemoryPhysicalViewCannotBeMutatedReentrantly() {
+        // given
         var store = new InMemoryTimelineJournalStore();
         try (var view = store.openRead()) {
             var pinned = view.state();
+            // when
             var replacement = new TimelineJournalStore.State(0, 0, 0,
                     new TimelineJournalStore.Availability(
                             TimelineJournalStore.AvailabilityKind.UNAVAILABLE, "changed"));
+            // then
             assertThrows(TimelineJournalStorageException.class,
                     () -> store.apply(pinned, new TimelineJournalStore.SetAvailability(replacement)));
             assertEquals(pinned, view.state());
@@ -199,11 +220,14 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void changedStoredMetadataIsNoncommittingEvenWhenExactEventIdentityIsValid() {
+        // given
         var store = new FileTimelineJournalStore(directory);
         String id;
         try (Context context = new Context(store)) { id = context.journal.append(A, VALUE, 100).blueId(); }
+        // when
         store.corruptOperation(id);
         try (Context context = new Context(new FileTimelineJournalStore(directory))) {
+            // then
             assertThrows(TimelineJournalStorageException.class, () -> context.journal.byBlueId(id));
             assertThrows(TimelineJournalStorageException.class, () -> context.journal.nextExternal(null, null));
             assertThrows(TimelineJournalStorageException.class, () -> probe(context.journal, ignored -> true));
@@ -213,12 +237,15 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void physicalReadWriteAndCloseFailuresDoNotBecomeCompleteHistoryOrSemanticRejection() {
+        // given
         var backing = new FileTimelineJournalStore(directory);
         var faults = new FaultStore(backing);
         try (Context context = new Context(faults)) {
             context.journal.append(A, ABSENT, 100);
             for (String phase : List.of("open", "read", "close", "state")) {
+                // when
                 faults.phase = phase;
+                // then
                 TimelineJournalStorageException error = assertThrows(TimelineJournalStorageException.class,
                         () -> probe(context.journal, ignored -> false), phase);
                 assertInstanceOf(IllegalArgumentException.class, error.getCause());
@@ -235,6 +262,7 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void journalOnlyEngineDoesNotClaimRestoredWholeObjectProviderEvidence() {
+        // given
         var backing = new FileTimelineJournalStore(directory);
         try (var writer = DefaultCoordinationEngine.createWithJournalStore(backing)) {
             Timeline timeline = writer.registerTimeline(A.timelineId(), A.actorId());
@@ -270,7 +298,9 @@ final class StoredTimelineJournalTest {
             reference.appendAt(timeline, ABSENT, 200);
             var id = blue.coordination.api.DocumentId.of("journal-counter");
             reference.startDocument(id, counter, blue.coordination.api.CoordinationEngine.AdmissionPolicy.FULL_HISTORY, null);
+            // when
             reference.drain();
+            // then
             assertEquals(new java.math.BigInteger("2"), reference.document(id).valueAt("/count").copyNode().getValue());
             var unavailable = assertThrows(blue.coordination.api.CoordinationException.class,
                     () -> restarted.startDocument(id, counter,
@@ -284,6 +314,7 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void existingCoordinatorDrainsReopenedJournalAndPreservesPhysicalControlExits() {
+        // given
         try (var writer = DefaultCoordinationEngine.createWithJournalStore(new FileTimelineJournalStore(directory))) {
             Timeline timeline = writer.registerTimeline(A.timelineId(), A.actorId());
             writer.appendAt(timeline, ABSENT, 100);
@@ -295,7 +326,9 @@ final class StoredTimelineJournalTest {
             Timeline timeline = reference.registerTimeline(A.timelineId(), A.actorId());
             reference.appendAt(timeline, ABSENT, 100);
             reference.appendAt(timeline, ABSENT, 200);
+            // when
             faults.phase = "read";
+            // then
             assertThrows(TimelineJournalStorageException.class, restarted::drain);
             assertThrows(TimelineJournalStorageException.class, () -> restarted.startDocument(
                     blue.coordination.api.DocumentId.of("not-admitted"), "name: Not admitted"));
@@ -312,12 +345,15 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void pointReadLoadsOnlySelectedBodiesAndReturnsDetachedExactValues() {
+        // given
         TimelineEntry last = null;
         try (Context context = new Context(new FileTimelineJournalStore(directory))) {
             for (int i = 1; i <= 16; i++) last = context.journal.append(A, VALUE, i * 100L);
         }
+        // when
         var store = new FileTimelineJournalStore(directory);
         try (Context context = new Context(store)) {
+            // then
             assertEquals(0, store.bodyReads.get());
             TimelineEntry restored = context.journal.byBlueId(last.blueId()).orElseThrow();
             assertTrue(store.bodyReads.get() <= 6, "point read must not load the full history");
@@ -327,6 +363,7 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void authoringPositionReopensColdAndDoesNotLoadTheJournalPrefix() {
+        // given
         TimelineEntry last;
         try (Context context = new Context(new FileTimelineJournalStore(directory))) {
             for (int i = 1; i <= 32; i++) context.journal.append(A, VALUE, i * 100L);
@@ -334,7 +371,9 @@ final class StoredTimelineJournalTest {
         }
         var store = new FileTimelineJournalStore(directory);
         try (Context reopened = new Context(store)) {
+            // when
             var position = reopened.journal.position(B.timelineId());
+            // then
             assertEntry(last, position.head().orElseThrow());
             assertEquals(3200, position.maximumTimestampMicros());
             assertEquals(33, position.journalRevision());
@@ -343,13 +382,16 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void authoringPositionRejectsBrokenSelectedIndexesAndPhysicalFailures() {
+        // given
         var faults = new FaultStore(new FileTimelineJournalStore(directory));
         try (Context context = new Context(faults)) {
             context.journal.append(A, ABSENT, 100);
             context.journal.append(A, VALUE, 200);
             for (String phase : List.of("open", "read", "close", "state", "changed-state", "wrong-selected-index",
                     "missing-index", "wrong-head", "missing-head", "missing-latest", "stale-latest")) {
+                // when
                 faults.phase = phase;
+                // then
                 assertThrows(TimelineJournalStorageException.class, () -> context.journal.position(A.timelineId()), phase);
                 faults.phase = "";
                 assertEquals(200, context.journal.position(A.timelineId()).maximumTimestampMicros());
@@ -358,12 +400,15 @@ final class StoredTimelineJournalTest {
     }
 
     @Test void indexAndPinnedStateTamperingNeverProduceCompleteHistory() {
+        // given
         var faults = new FaultStore(new FileTimelineJournalStore(directory));
         try (Context context = new Context(faults)) {
             context.journal.append(A, ABSENT, 100);
             context.journal.append(A, VALUE, 200);
             for (String phase : List.of("wrong-index", "missing-index", "null-read", "changed-state")) {
+                // when
                 faults.phase = phase;
+                // then
                 assertThrows(TimelineJournalStorageException.class,
                         () -> probe(context.journal, ignored -> false), phase);
                 faults.phase = "";

@@ -18,6 +18,7 @@ final class DocumentSessionStorageTest {
     private static final DocumentSessionStorage.Limits LIMITS = new DocumentSessionStorage.Limits(32 * 1024 * 1024, 256, 256L * 1024 * 1024);
 
     @Test void selectedViewIsFreshlyAuthenticatedWhileEveryCurrentSessionIsAcknowledged() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String original = f.storage.retain(f.engine.documents().require(handle.id()));
@@ -30,7 +31,9 @@ final class DocumentSessionStorageTest {
                     if (status == SessionStatus.CATCHING_UP) session.markCatchingUp();
                     if (status == SessionStatus.BLOCKED) session.markBlocked();
                     observed.clear();
+                    // when
                     String address = scope.retain(session);
+                    // then
                     assertEquals(List.of(revisionAddress(session.currentRevision()), view), observed.readKeys,
                             "Every retention rechecks the physical dependency, including repeated retention in one owner");
                     assertEquals(List.of(address), observed.writeKeys,
@@ -47,6 +50,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void missingCorruptAndUnavailableKnownViewsFailBeforeSessionPrewrites() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String original = f.storage.retain(f.engine.documents().require(handle.id()));
@@ -61,7 +65,10 @@ final class DocumentSessionStorageTest {
                     observed.clear();
                     if (fault.equals("missing")) f.bytes.records.remove(view);
                     if (fault.equals("corrupt")) f.bytes.records.get(view)[0] ^= 1;
-                    if (fault.equals("unavailable")) f.bytes.failRead = true;
+                    if (fault.equals("unavailable"))
+                    // when
+                    f.bytes.failRead = true;
+                    // then
                     assertThrows(CoordinationObjectStorageException.class, () -> scope.retain(session), fault);
                     assertEquals(fault.equals("unavailable") ? List.of(revisionAddress(session.currentRevision()))
                             : List.of(revisionAddress(session.currentRevision()), view), observed.readKeys, fault);
@@ -78,6 +85,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void authenticatedViewBytesStillCountTowardsRetentionScopeAndRecordBounds() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var session = f.engine.documents().require(handle.id());
@@ -88,7 +96,9 @@ final class DocumentSessionStorageTest {
             String revision = revisionAddress(session.currentRevision());
             int revisionBytes = f.bytes.records.get(revision).length;
             int maximumRecord = Math.max(1024, Math.max(revisionBytes, Math.max(viewBytes, sessionBytes)));
+            // when
             long total = (long) viewBytes + revisionBytes + sessionBytes;
+            // then
             assertTrue(total - 1 >= maximumRecord, "The fixture must exercise the combined scope bound");
             var observed = new ObservedBytes(f.bytes);
             var bounded = new DocumentSessionStorage(observed,
@@ -116,6 +126,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void failedFirstDependencyAcknowledgementNeverLendsEvidenceToRetryOrAnotherStage() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var session = f.engine.documents().require(handle.id());
@@ -127,7 +138,9 @@ final class DocumentSessionStorageTest {
             try (var scope = storage.openScope()) {
                 String address;
                 try (var stage = scope.openRetentionStage()) {
+                    // when
                     bytes.badAck = true;
+                    // then
                     assertThrows(CoordinationObjectStorageException.class, () -> stage.retain(session));
                     assertEquals(List.of(revision), observed.writeKeys); assertEquals(1, encodes.get());
                     bytes.badAck = false; bytes.failAtWrite = bytes.writes + 1; observed.clear();
@@ -157,10 +170,16 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void realExactHistoryColdSessionAndNextRootActionEqualUninterruptedExecution() throws Exception {
-        assertEquals(counterRun(false), counterRun(true));
+        // given
+        var uninterrupted = counterRun(false);
+        // when
+        var restored = counterRun(true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     @Test void originalEventFrozenEvidenceRestoresAfterTheProducingRuntimeCloses() throws Exception {
+        // given
         var results = new blue.language.processor.closure.ClosureProcessResultStorageCodec(LIMITS.maximumRecordBytes(), LIMITS.maximumDepth());
         byte[] originalResult;
         int eventCount;
@@ -172,7 +191,9 @@ final class DocumentSessionStorageTest {
             f.process(source, f.append(source, "rcp2/source", "tick"));
             var session = f.engine.documents().require(source.id());
             document = source.id();
+            // when
             eventCount = session.rootedView().result().publicEvents().size();
+            // then
             assertTrue(eventCount > 0, "The actual processor must have emitted retained event evidence");
             originalResult = results.encode(session.rootedView().result());
             address = f.storage.retain(session);
@@ -206,7 +227,12 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void twoSameEpochCheckpointRepresentationsKeepOriginalWitnessAndNextAction() throws Exception {
-        assertEquals(representationRun(false), representationRun(true));
+        // given
+        var uninterrupted = representationRun(false);
+        // when
+        var restored = representationRun(true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     private List<String> representationRun(boolean cold) throws Exception {
@@ -242,11 +268,21 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void staticAdmissionSourceAndItsSessionShareExactAddressAcrossEitherOpenOrder() throws Exception {
-        assertAdmissionSourceColdOpen(ActivationPolicy.fromNow(), "FROM_NOW");
+        // given
+        var policy = ActivationPolicy.fromNow();
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> assertAdmissionSourceColdOpen(policy, "FROM_NOW");
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void fullHistoryAdmissionKeepsTheExactLaterSourceEndpointAcrossColdOpen() throws Exception {
-        assertAdmissionSourceColdOpen(ActivationPolicy.importFullHistory(), "FULL_HISTORY");
+        // given
+        var policy = ActivationPolicy.importFullHistory();
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> assertAdmissionSourceColdOpen(policy, "FULL_HISTORY");
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     private void assertAdmissionSourceColdOpen(ActivationPolicy policy, String mode) throws Exception {
@@ -286,6 +322,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void catchingUpReadyLayoutAndAbsentPrepublicationFieldsAreNotRecomputed() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             DocumentSession current = f.engine.documents().require(handle.id());
@@ -298,7 +335,9 @@ final class DocumentSessionStorageTest {
                     "readyLayout", before, "readyEpoch", 0L, "status", SessionStatus.CATCHING_UP,
                     "graphPublishedEpoch", 0L, "readyEmbeddedChildren", state.readyEmbeddedChildren())));
             try (var scope = f.storage.openScope()) {
+                // when
                 var restored = scope.open(handle.id(), f.storage.retain(staged));
+                // then
                 assertEquals(1L, restored.epoch()); assertEquals(0L, restored.readyEpoch());
                 assertEquals(before.rootBlueId(), restored.readyRepresentation().blueId());
                 assertNotEquals(restored.readyRepresentation().blueId(), restored.currentRepresentation().blueId());
@@ -316,10 +355,13 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void storedAdmissionSourcesRejectMissingEarlierForeignAndUnpublishedPositions() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick"));
+            // when
             var view = f.engine.documents().require(source.id()).rootedView();
+            // then
             assertNotNull(view.logicalBoundary());
             assertThrows(IllegalArgumentException.class, () -> new RootedAdmissionSources(null, Map.of(source.id(), view)));
             var earlier = blue.language.processor.ExternalOrderKey.of(List.of(java.math.BigInteger.ZERO));
@@ -343,14 +385,17 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void invalidHistoryIndexesReadinessAndViewMembershipFailClosed() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(handle, f.append(handle, "rcp2/source", "tick"));
+            // when
             var state = f.engine.documents().require(handle.id()).storedState();
             for (Map<String, Object> corruption : List.<Map<String, Object>>of(
                     Map.of("epoch", 7L), Map.of("readyEpoch", 2L), Map.of("graphPublishedEpoch", 2L),
                     Map.of("stateEpochs", Map.of()), Map.of("terminalEntryBlueIds", Set.of()),
                     Map.of("transitionReceipts", Set.of()), Map.of("rootedViewPositions", List.of()))) {
+                // then
                 assertThrows(IllegalArgumentException.class, () -> DocumentSession.restoreStored(change(state, corruption)));
             }
             try (var scope = f.storage.openScope()) {
@@ -361,12 +406,15 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void missingCorruptUnavailableAckAndPhysicalLimitsNeverReturnPartialSession() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             DocumentSession session = f.engine.documents().require(handle.id());
             String address = f.storage.retain(session); var complete = f.bytes.copy();
             try (var scope = f.storage.openScope()) {
+                // when
                 f.bytes.records.remove(address);
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.open(handle.id(), address));
                 f.bytes.records.putAll(complete.copy().records); f.bytes.records.get(address)[0] ^= 1;
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.open(handle.id(), address));
@@ -387,6 +435,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void selectingOneSessionOpensOnlyItsAddressedViewsAndNoOtherSession() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var selected = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String address = f.storage.retain(f.engine.documents().require(selected.id()));
@@ -396,7 +445,9 @@ final class DocumentSessionStorageTest {
             }
             int reads = f.bytes.reads;
             try (var scope = f.storage.openScope()) {
+                // when
                 scope.open(selected.id(), address);
+                // then
                 assertEquals(3, f.bytes.reads - reads, "Exactly selected session, its revision and one rooted view");
                 scope.open(selected.id(), address);
                 assertEquals(5, f.bytes.reads - reads, "Second session copy reauthenticates its revision and shares the immutable view");
@@ -405,6 +456,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void verifiedNestedViewPayloadsKeepFullCrossLinksAndCanonicalEnvelopeChecks() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var before = f.engine.documents().require(source.id()).rootedView();
@@ -422,7 +474,9 @@ final class DocumentSessionStorageTest {
             var snapshots = new blue.language.processor.closure.AffectedClosureSnapshotStorageCodec(
                     LIMITS.maximumRecordBytes(), LIMITS.maximumDepth());
             byte[] retainedAfter = snapshots.encode(after.retainedSnapshot());
+            // when
             int retainedMember = complete.length - retainedAfter.length - 4;
+            // then
             assertEquals(retainedAfter.length, java.nio.ByteBuffer.wrap(complete, retainedMember, 4).getInt());
             byte[] mixedRetained = replaceViewMember(complete, retainedMember, snapshots.encode(before.retainedSnapshot()));
             byte[] damagedNested = complete.clone();
@@ -459,11 +513,14 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void failedLaterImmutablePrewriteDoesNotPublishANewSessionReference() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String published = f.storage.retain(f.engine.documents().require(source.id()));
             f.process(source, f.append(source, "rcp2/source", "tick"));
+            // when
             f.bytes.failAtWrite = f.bytes.writes + 2;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> f.storage.retain(f.engine.documents().require(source.id())));
             f.bytes.failAtWrite = -1;
             try (var scope = f.storage.openScope()) {
@@ -475,12 +532,15 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void coldComponentValuesMatchButChangedGenerationOrderAndCompleteProofDoNot() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow()); f.retain(source);
             var parent = f.start(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
             var view = f.engine.documents().require(parent.id()).rootedView(); var snapshot = view.retainedSnapshot();
+            // when
             var copies = snapshot.components().stream().map(component -> copyComponent(component, component.componentGeneration())).toList();
+            // then
             assertTrue(view.matchesCapture(snapshot.graphGeneration(), snapshot.managedDocuments(), snapshot.occurrences(), copies, snapshot.publicRootDocumentIds()));
             assertNotSame(snapshot.components().get(0), copies.get(0));
             var changed = new ArrayList<>(copies); changed.set(0, copyComponent(copies.get(0), copies.get(0).componentGeneration() + 1));
@@ -512,6 +572,7 @@ final class DocumentSessionStorageTest {
     }
 
     @Test void recurrentStateIndexAndAdvancedBoundaryAreRetainedWithoutInventingAnEpoch() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var x = blue.coordination.api.ExactValue.verified(new blue.language.model.Node().value("X"));
             var y = blue.coordination.api.ExactValue.verified(new blue.language.model.Node().value("Y"));
@@ -527,7 +588,9 @@ final class DocumentSessionStorageTest {
                 session.commit(revision, valueLayout(after), order, List.of(), "step-" + epoch);
             }
             try (var scope = f.storage.openScope()) {
+                // when
                 var restored = scope.open(id, f.storage.retain(session));
+                // then
                 assertThrows(IllegalStateException.class, () -> restored.resolveAdmissionEpoch(x.blueId(), null));
                 assertEquals(0, restored.resolveAdmissionEpoch(x.blueId(), 0L));
                 assertEquals(2, restored.resolveAdmissionEpoch(x.blueId(), 2L));

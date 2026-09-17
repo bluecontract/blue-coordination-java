@@ -37,3 +37,32 @@ initial 628-case run as a single green run.
 MyOS qualification uses the immutable runtime artifact from `a14721e6`:
 its production/build source is identical to this test-only follow-up. Language,
 BEX and Catalog manifests remain the same between both qualification runs.
+
+## Published RC12 preparation — 18 September 2026
+
+Language `3.1.0-rc.32` is published (release run `35283988316`). The RC12
+candidate replaces the six Language/Contracts RC27 coordinates with RC32;
+BEX RC6, Repository RC22 and all other locked dependencies are unchanged.
+Merged Coordination next remains `69cd6db2`. The feature branch keeps the
+preceding `.cz.toml` version; CI prepares and seals RC12 in its own checkout.
+
+Local Java 17 published-dependency preflight and all four suite compilations
+passed in 49 seconds. Release automation passed **33/33** Node tests. Production
+shape, both API boundaries, metadata, documentation, artifact contents, POM and
+published dependency isolation passed. The production inventory remains
+327 files, 87,765 lines and 96 public source types.
+
+The test-architecture check found 407 POC methods without the repository's
+required exact `given / when / then` sections. Add those phase annotations;
+retain every original assertion, fixture, input count and failure expectation.
+Delegating equality tests name their original expected/actual computations;
+void scenario delegates retain their internal assertions and are invoked once
+through JUnit `assertDoesNotThrow`. No acceptance outcome is relaxed. Javac AST
+comparison confirms 63 affected files are comment/formatting-only; the other
+12 contain those explicit phase extractions. All 75 files compile, and the
+unchanged test-architecture and documentation gates now pass.
+
+These are packaging/structural checks, not a full current-tuple test result.
+The PR's complete Java 17/21 `releaseCheck`, extracted-source build and RC12
+readiness are required before merge, followed by the normal publication gates.
+MyOS acceptance against the published tuple is a later, separate step.

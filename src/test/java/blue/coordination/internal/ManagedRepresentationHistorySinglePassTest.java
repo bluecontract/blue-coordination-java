@@ -23,6 +23,7 @@ final class ManagedRepresentationHistorySinglePassTest {
     private static final String WRONG = "sha256:" + "f".repeat(64);
 
     @Test void causeVerificationAuthenticatesTheFullChainOnceInBothBoundaryModes() throws Exception {
+        // given
         try (var f = new Fixture(); var reads = new PublicationReads(f)) {
             var before = f.scenario.state();
             var cause = f.cause(f.first(), f.last().positionIdentity(), null);
@@ -31,7 +32,9 @@ final class ManagedRepresentationHistorySinglePassTest {
                 for (boolean cold : List.of(false, true)) {
                     if (cold) f.scenario.engine.documents().clearRepresentationVerifications();
                     reads.reset();
+                    // when
                     f.verifyCause(cause, pending, rooted);
+                    // then
                     assertEquals(cold ? 4 : 2, reads.gets,
                             "Each row is selected once; a cold proof also rechecks current membership before retention");
                     reads.reset();
@@ -44,13 +47,16 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void successorVerificationReusesOneFullChainForPrefixAndSuppliedEvidenceChecks() throws Exception {
+        // given
         try (var f = new Fixture(); var reads = new PublicationReads(f)) {
             var before = f.scenario.state();
             var work = f.work(f.last().positionIdentity());
             for (boolean cold : List.of(false, true)) {
                 if (cold) f.scenario.engine.documents().clearRepresentationVerifications();
                 reads.reset();
+                // when
                 f.history.verifySuccessor(work, f.selected(f.last()), f.boundary());
+                // then
                 assertEquals(cold ? 4 : 2, reads.gets,
                         "Prefix and original-evidence checks share one fully authenticated chain");
                 reads.reset();
@@ -62,13 +68,16 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void aColdProofIsNotRetainedAfterPublicationOrMemoReplacement() throws Exception {
+        // given
         try (var f = new Fixture(); var reads = new PublicationReads(f)) {
             var documents = f.scenario.engine.documents();
             var position = f.first();
             var publication = f.scenario.publication(position);
+            // when
             var replacement = new ContractsClosurePublicationReceipt(publication.publicationIdentity(), publication.documentIds(),
                     publication.attempt(), publication.automaticRetryCount(), publication.managedSurfaceEvidence(),
                     publication.rejectedDraftPlan(), publication.rootedTerminalEvidence());
+            // then
             assertEquals(publication, replacement);
             var before = f.scenario.state();
             for (String change : List.of("removed publication", "equal replacement", "cleared memo")) {
@@ -103,6 +112,7 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void aFrozenFirstPositionStillAuthenticatesMissingAndMalformedLaterSuffixes() throws Exception {
+        // given
         try (var f = new Fixture(); var reads = new PublicationReads(f)) {
             String target = f.first().positionIdentity();
             var cause = f.cause(f.first(), target, null);
@@ -115,8 +125,10 @@ final class ManagedRepresentationHistorySinglePassTest {
                     () -> f.history.verifySuccessor(work, selected, f.boundary()));
             checks.forEach(Runnable::run);
             var later = f.scenario.publication(f.last());
+            // when
             reads.rows.remove(later.publicationIdentity());
             for (var check : checks) {
+                // then
                 assertThrows(IllegalArgumentException.class, check::run,
                         "Even a warmed target before the missing suffix requires the complete history");
             }
@@ -133,15 +145,18 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void causeVerificationStillRejectsSkippedPositionsAndChangedTargetOrNextReceipt() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var before = f.scenario.state();
             var pending = f.pending(f.last().positionIdentity());
+            // when
             var malformed = List.of(
                     f.cause(f.last(), f.last().positionIdentity(), null),
                     f.cause(f.first(), WRONG, null),
                     f.cause(f.first(), f.last().positionIdentity(), WRONG));
             for (boolean rooted : List.of(false, true)) {
                 for (var cause : malformed) {
+                    // then
                     assertThrows(IllegalArgumentException.class, () -> f.verifyCause(cause, pending, rooted));
                 }
                 var active = ManagedOccurrenceBinding.derived(pending.bindingPolicyIdentity(), pending.sourceDocumentId(),
@@ -154,8 +169,11 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void successorAndStandaloneSuppliedVerificationKeepTheirIndependentGuards() throws Exception {
+        // given
         try (var f = new Fixture(); var reads = new PublicationReads(f)) {
+            // when
             var before = f.scenario.state();
+            // then
             assertThrows(IllegalArgumentException.class,
                     () -> f.history.verifySuccessor(f.work(WRONG), f.selected(f.last()), f.boundary()));
             assertThrows(IllegalArgumentException.class,
@@ -174,9 +192,11 @@ final class ManagedRepresentationHistorySinglePassTest {
     }
 
     @Test void privateSuppliedEvidenceCheckRejectsAChainForAnotherDocumentOrEpoch() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var verify = ManagedRepresentationHistory.class.getDeclaredMethod("verifySupplied",
                     ManagedRepresentationTransition.class, ManagedRepresentationHistory.Chain.class);
+            // when
             verify.setAccessible(true);
             for (var foreign : List.of(
                     new ManagedRepresentationHistory.Chain(DocumentId.of("foreign-source"), f.chain.epoch(),
@@ -184,6 +204,7 @@ final class ManagedRepresentationHistorySinglePassTest {
                     new ManagedRepresentationHistory.Chain(f.chain.documentId(), f.chain.epoch() + 1,
                             f.chain.anchor(), f.chain.transitions(), f.chain.targetPositionIdentity(), null))) {
                 // Even copied exact positions cannot substitute for the helper's matching subject.
+                // then
                 var failure = assertThrows(InvocationTargetException.class, () -> verify.invoke(null, f.first(), foreign));
                 assertInstanceOf(IllegalArgumentException.class, failure.getCause());
                 assertEquals("Supplied representation belongs to another source history", failure.getCause().getMessage());

@@ -16,10 +16,13 @@ final class StoredStructuralIndexesTest {
     private static final DocumentSessionStorage.Limits SESSION = new DocumentSessionStorage.Limits(32 * 1024 * 1024, 256, 256L * 1024 * 1024);
 
     @Test void actualPendingJoinOriginalResultRoundTripsWithoutSessionOrIndexRestoration() throws Exception {
+        // given
         try (var f = new RootedJoinEligibilityTest.Fixture()) {
             var a = f.start("A"); var b = f.start("B");
             f.attach(a, "b", b); f.settle(a); f.attach(b, "a", a);
+            // when
             var result = f.engine.documents().require(b.id()).rootedView().result();
+            // then
             assertTrue(result.commits()); assertNotNull(result.rootedProjection());
             var codec = new blue.language.processor.closure.ClosureProcessResultStorageCodec(32 * 1024 * 1024, 256);
             byte[] bytes = codec.encode(result);
@@ -30,10 +33,14 @@ final class StoredStructuralIndexesTest {
     }
 
     @Test void actualPendingJoinOpensBothDirectionsFromExactColdSessionsThenRetiresWithoutChangingOldRoots() throws Exception {
+        // given
         try (var f = new RootedJoinEligibilityTest.Fixture()) {
             var a = f.start("A"); var b = f.start("B"); var unrelated = f.start("Unrelated");
             f.attach(a, "b", b); f.settle(a); f.attach(b, "a", a);
-            var before = state(f.engine); assertTrue(before.componentIndex().hasRootedViews());
+            // when
+            var before = state(f.engine);
+            // then
+            assertTrue(before.componentIndex().hasRootedViews());
             assertEquals(List.of(b.id()), before.componentIndex().pendingJoinRootsFor(a.id()));
             var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredTopologyIndexes(bytes, LIMITS);
             var stored = storage.retainPartition(before.componentIndex()); var sessions = new DocumentSessionStorage(bytes, SESSION);
@@ -64,9 +71,13 @@ final class StoredStructuralIndexesTest {
     }
 
     @Test void actualCyclicProofBytesRemainBoundToOriginalPublicationAndRejectAlteredProofOrMissingMembership() throws Exception {
+        // given
         try (var f = new RootedJoinEligibilityTest.Fixture()) {
             var a = f.start("A"); var b = f.start("B"); f.attach(a, "b", b); f.settle(a); f.attach(b, "a", a); f.settle(b);
-            var current = state(f.engine); var original = current.componentStateInventory().forDocument(a.id());
+            var current = state(f.engine);
+            // when
+            var original = current.componentStateInventory().forDocument(a.id());
+            // then
             assertEquals(ComponentKind.CYCLIC, original.kind()); assertNotNull(original.completeCyclicProof());
             var authority = f.engine.documents().require(a.id()).rootedView().result().resultingComponents();
             var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredComponentStateIndexes(bytes, LIMITS, 256);
@@ -87,6 +98,7 @@ final class StoredStructuralIndexesTest {
     }
 
     @Test void actualSameEpochRepresentationPreservesStoredSubscriptionMutationCountersAndCompleteRows() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml") + """
                   emitUnmatched:
@@ -104,7 +116,10 @@ final class StoredStructuralIndexesTest {
             var parent = f.start(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n", "rcp2/parent", ActivationPolicy.importFullHistory());
             var before = state(f.engine); var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredSubscriptionIndexes(bytes, LIMITS);
             var stored = storage.retainPartition(before.closureSubscriptions()); var coldBytes = bytes.copy();
-            var cold = new StoredSubscriptionIndexes(coldBytes, LIMITS); var reopened = open(cold, stored);
+            var cold = new StoredSubscriptionIndexes(coldBytes, LIMITS);
+            // when
+            var reopened = open(cold, stored);
+            // then
             assertFalse(cold.statesFor(reopened, parent.id()).isEmpty());
             assertSubscriptions(before.closureSubscriptions(), reopened, parent.id(), cold);
             assertDemands(before.closureSubscriptions().embeddedDemandsFor(parent.id()), cold.demandsFor(reopened, parent.id()));

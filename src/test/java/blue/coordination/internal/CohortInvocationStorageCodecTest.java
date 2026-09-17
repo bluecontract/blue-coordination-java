@@ -21,6 +21,7 @@ final class CohortInvocationStorageCodecTest {
     private static final ClosureProcessResultStorageCodec RESULTS = new ClosureProcessResultStorageCodec(MAX, 256);
 
     @Test void pairedRootSelectionReusesFencedCaptureAndPreservesExactProcessingAndNextHead() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var root = f.start("source.yaml", "rcp2/source", ActivationPolicy.importFullHistory());
             var entry = f.append(root, "rcp2/source", "tick", "{}");
@@ -30,7 +31,9 @@ final class CohortInvocationStorageCodecTest {
             var retainedCapture = adapter.captureRootedState(root.id());
             long before = documentOpens(f);
             var separateLocal = adapter.nextRootLocalHistory(root.id(), entries);
+            // when
             var separateLive = adapter.nextRootLiveInput(root.id(), entries).orElseThrow();
+            // then
             assertFalse(separateLocal.pending());
             assertEquals(0L, documentOpens(f) - before, "Separate reads reuse the same unchanged verified observation");
             before = documentOpens(f);
@@ -70,10 +73,13 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void pairedRootSelectionKeepsLazyLiveCutoffsWithoutCachingAFailedSelection() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var root = f.start("source.yaml", "rcp2/source", ActivationPolicy.importFullHistory());
             var adapter = f.engine.contractsClosureAdapter();
+            // when
             long before = documentOpens(f);
+            // then
             assertTrue(adapter.nextRootLiveInput(root.id(), List.of()).isEmpty());
             assertEquals(0L, documentOpens(f) - before, "Standalone empty LIVE search remains lazy");
             var empty = adapter.nextRootInputCandidates(root.id(), List.of(), () -> null);
@@ -107,6 +113,7 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void actualDeclaredBirthSuspensionAndConsumedExpansionSurviveProducerClose() throws Exception {
+        // given
         var bytes = new Bytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var codec = new CohortInvocationStorageCodec(MAX, 256);
         byte[] suspended, expandedBytes, expectedResult;
@@ -124,7 +131,9 @@ final class CohortInvocationStorageCodecTest {
             f.exact.put(exactRequest.blueId(), exactRequest.json());
             var captured = f.capture(parent, entry);
             var before = parent.snapshot().blueId(); var history = f.history(parent);
+            // when
             var attempt = f.process(captured);
+            // then
             assertFalse(attempt.isComplete());
             var demand = assertInstanceOf(ManagedOccurrenceEvidenceDemand.class, attempt.resourceDemands().get(0));
             int reads = f.providerReads.get();
@@ -187,12 +196,16 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void actualBareSourceDemandKeepsItsExactParentAttemptWithoutPublishingOrAcquiringSource() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", ActivationPolicy.importFullHistory());
             var source = f.blue.values().yaml(resource("source.yaml")); f.exact.put(source.blueId(), source.json());
             var entry = f.append(parent, "rcp2/parent", "attach", "child: {blueId: " + source.blueId() + "}");
             var captured = f.capture(parent, entry); var before = f.history(parent);
-            var attempt = f.process(captured); assertFalse(attempt.isComplete());
+            // when
+            var attempt = f.process(captured);
+            // then
+            assertFalse(attempt.isComplete());
             var selected = assertInstanceOf(ManagedOccurrenceEvidenceDemand.class, attempt.resourceDemands().get(0));
             var codec = new CohortInvocationStorageCodec(MAX, 256);
             var storage = new DocumentSessionStorage(new Bytes(), LIMITS);
@@ -218,6 +231,7 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void preparedHistoricalRetryKeepsOriginalCapturedBaseAndExactResolution() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start("source.yaml", "rcp2/source", ActivationPolicy.fromNow());
             String old = source.snapshot().blueId();
@@ -228,7 +242,10 @@ final class CohortInvocationStorageCodecTest {
                     + "\nchild: {blueId: " + previous.snapshot().blueId() + "}\nother: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
             var captured = f.capture(parent, f.append(parent, "rcp2/parent", "attach", "child: {blueId: " + old + "}"));
-            var attempt = f.process(captured); assertFalse(attempt.isComplete());
+            // when
+            var attempt = f.process(captured);
+            // then
+            assertFalse(attempt.isComplete());
             var demand = assertInstanceOf(ManagedOccurrenceEvidenceDemand.class, attempt.resourceDemands().get(0));
             assertEquals(old, demand.suppliedValueBlueId());
             assertEquals(source.snapshot().blueId(), captured.input().snapshot().managedDocument(ContractsClosureAdapter.closureId(source.id())).blueId());
@@ -256,13 +273,16 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void admissionSourceViewsShareTheSelectedSessionScopeAndUnrelatedCorruptionIsUnread() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start("source.yaml", "rcp2/source", ActivationPolicy.fromNow());
             f.apply(source, f.append(source, "rcp2/source", "tick", "{}")); f.retain(source);
             var parent = f.startYaml(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
             var entry = f.append(parent, "rcp2/parent", "attach", "child: {blueId: " + source.snapshot().blueId() + "}");
+            // when
             var captured = f.capture(parent, entry);
+            // then
             assertTrue(captured.rootedEvidence().histories().get(parent.id()).admissionSources().storedViews().containsKey(source.id()));
             var bytes = new Bytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
             var codec = new CohortInvocationStorageCodec(MAX, 256);
@@ -290,13 +310,16 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void malformedRowsAndChangedOriginalRootedAssociationFailClosed() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", ActivationPolicy.importFullHistory());
             var source = f.blue.values().yaml(resource("source.yaml")); f.exact.put(source.blueId(), source.json());
             var captured = f.capture(parent, f.append(parent, "rcp2/parent", "attach", "child: {blueId: " + source.blueId() + "}"));
             var codec = new CohortInvocationStorageCodec(MAX, 256); var storage = new DocumentSessionStorage(new Bytes(), LIMITS);
+            // when
             byte[] bytes = codec.encode(captured, storage::retainView);
             try (var scope = storage.openScope()) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(Arrays.copyOf(bytes, bytes.length - 1), scope));
                 assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(Arrays.copyOf(bytes, bytes.length + 1), scope));
                 assertThrows(CoordinationObjectStorageException.class, () -> new CohortInvocationStorageCodec(bytes.length - 1, 256).decode(bytes, scope));
@@ -315,6 +338,7 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void actualLocalHistoricalCohortKeepsOriginWorkAndIndependentSourceFences() throws Exception {
+        // given
         try (var f = new Fixture()) {
             String template = resource("node-graph.template.json");
             var roots = new LinkedHashMap<String, DocumentHandle>();
@@ -331,7 +355,9 @@ final class CohortInvocationStorageCodecTest {
             var attachment = f.append(b, "cohort-storage/all", "attach", "edge: c\nsource: {blueId: " + originals.get("C") + "}");
             f.apply(b, attachment); f.settle(b);
             f.apply(a, attachment);
+            // when
             var selected = f.engine.contractsClosureAdapter().nextRootLocalHistory(a.id(), f.engine.auditTimelineEntries());
+            // then
             assertTrue(selected.pending()); assertNotNull(selected.step());
             var captured = selected.step().invocation();
             var adapter = f.engine.contractsClosureAdapter();
@@ -399,6 +425,7 @@ final class CohortInvocationStorageCodecTest {
     }
 
     @Test void actualSameEpochTransitionRetainsSeparateRepresentationAndFutureSuccessorWorkDomains() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.startYaml(resource("source.yaml") + """
                       emitUnmatched:
@@ -416,7 +443,9 @@ final class CohortInvocationStorageCodecTest {
                     "rcp2/source", ActivationPolicy.fromNow());
             var parent = f.startYaml(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
+            // when
             var anchor = f.engine.documents().managedEpochEvidence(parent.id(), 0).transitionReceipt();
+            // then
             assertNotNull(anchor);
             var entry = f.append(source, "rcp2/source", "emitUnmatched", "{}");
             var captured = f.capture(parent, entry); var attempt = f.process(captured);

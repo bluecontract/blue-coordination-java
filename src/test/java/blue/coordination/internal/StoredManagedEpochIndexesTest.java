@@ -19,6 +19,7 @@ final class StoredManagedEpochIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(MAX, 4096, MAX - 8192, 8192, 32);
 
     @Test void actualEventsAndCompleteReceiptEvidenceSurviveProducerClosure() throws Exception {
+        // given
         DocumentSessionStorageTest.Bytes bytes; Map<StoredManagedEpochIndexes.Root, byte[]> roots;
         DocumentId sourceId; List<byte[]> expected = new ArrayList<>(); int comparisons; int copies;
         var execution = new ClosureExecutionEvidenceStorageCodec(MAX, 128);
@@ -27,7 +28,10 @@ final class StoredManagedEpochIndexesTest {
             f.process(source, f.append(source, "rcp2/source", "tick"));
             f.process(source, f.append(source, "rcp2/source", "tick"));
             var resident = state(f).managedEpochReceipts();
-            for (long epoch = 0; epoch <= 2; epoch++) expected.add(execution.encodeTransitionReceipt(resident.exactTransition(sourceId, epoch).transitionReceipt()));
+            for (long epoch = 0; epoch <= 2; epoch++)
+            // when
+            expected.add(execution.encodeTransitionReceipt(resident.exactTransition(sourceId, epoch).transitionReceipt()));
+            // then
             assertFalse(resident.exactTransition(sourceId, 1).transitionReceipt().emittedRootEvents().isEmpty());
             var storage = storage(f.bytes); var retained = storage.retainPartition(resident);
             roots = roots(storage, retained); bytes = f.bytes.copy(); comparisons = resident.storedState().comparisons(); copies = resident.storedState().copiedNodes();
@@ -48,6 +52,7 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void runtimeCacheDecodesEachCompleteReceiptOnceAcrossIndexesAndFreshStorageOwners() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(source, f.append(source, "rcp2/source", "tick"));
@@ -62,7 +67,9 @@ final class StoredManagedEpochIndexesTest {
                 var opened = storage.open(descriptors::get, original.storedState().comparisons(), original.storedState().copiedNodes());
                 for (long epoch = 0; epoch <= 2; epoch++) {
                     var read = storage.exact(opened, source.id(), epoch);
+                    // when
                     var expected = original.exactEvidence(source.id(), epoch);
+                    // then
                     assertArrayEquals(execution.encodeTransitionReceipt(expected.transitionReceipt()),
                             execution.encodeTransitionReceipt(read.transitionReceipt()));
                     assertEquals(expected.receipt().sourceOrder(), read.receipt().sourceOrder());
@@ -85,6 +92,7 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void warmCacheDoesNotAuthorizeMissingIdentitySwappedReceiptWrongOwnerOrInteriorHole() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(source, f.append(source, "rcp2/source", "tick")); f.process(source, f.append(source, "rcp2/source", "tick"));
@@ -94,8 +102,10 @@ final class StoredManagedEpochIndexesTest {
             storage.exact(opened, source.id(), 2);
             var s = opened.storedState(); var h = s.documents().get(source.id()).storedState();
             String identity = good.receipt().receiptIdentity();
+            // when
             var missing = ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(s.documents(),
                     s.identities().remove(identity).map(), s.comparisons(), s.copiedNodes()));
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> storage.exact(missing, source.id(), 1));
             var swapped = ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(s.documents(),
                     s.identities().put(identity, h.receipts().get(2L)).map(), s.comparisons(), s.copiedNodes()));
@@ -126,11 +136,15 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void invalidFramesAreNotRetainedAndProfilesDoNotShareValidation() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             var storage = new StoredManagedEpochIndexes(f.bytes, LIMITS, cache); var codec = receiptCodec(storage);
             var row = state(f).managedEpochReceipts().storedState().documents().get(source.id()).storedState().receipts().get(0L);
-            byte[] encoded = codec.encode(row); var verified = codec.decode(encoded);
+            byte[] encoded = codec.encode(row);
+            // when
+            var verified = codec.decode(encoded);
+            // then
             assertSame(row, verified, "A successful complete cold roundtrip preserves the immutable producer receipt");
             assertSame(verified, codec.decode(encoded)); assertEquals(1, cache.statistics().loads());
             int retained = cache.statistics().retainedEntries();
@@ -149,6 +163,7 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void receiptEvictionAndDisabledCacheChangeReconstructionCountNotEvidence() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(source, f.append(source, "rcp2/source", "tick"));
@@ -157,7 +172,10 @@ final class StoredManagedEpochIndexesTest {
             byte[] second = plain.encode(history.receipts().get(1L));
             try (var cache = new RootedStorageCache(512L * 1024 * 1024, 1, 512L * 1024 * 1024)) {
                 var codec = receiptCodec(new StoredManagedEpochIndexes(f.bytes, LIMITS, cache));
-                var original = codec.decode(first); codec.decode(second); var reloaded = codec.decode(first);
+                var original = codec.decode(first); codec.decode(second);
+                // when
+                var reloaded = codec.decode(first);
+                // then
                 assertNotSame(original, reloaded); assertArrayEquals(first, codec.encode(reloaded));
                 assertEquals(3, cache.statistics().loads()); assertEquals(2, cache.statistics().evictions());
             }
@@ -171,12 +189,15 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void actualCyclicReceiptReusesItsCompleteVerifiedProofAcrossOwners() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var b = f.start(resource("cycle-b.yaml"), "rcp2/cycle", ActivationPolicy.importFullHistory());
             String yaml = resource("cycle-a.yaml") + "\npeer: {blueId: " + b.snapshot().blueId() + "}\n";
             var authored = f.blue.values().yaml(yaml); f.exact.put(authored.blueId(), authored.json());
             var a = f.start(yaml, "rcp2/cycle", ActivationPolicy.importFullHistory());
+            // when
             var connect = appendCycle(f, b, "connectA", 90, "a: {blueId: " + authored.blueId() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(b).entry(connect).disposition());
             assertTrue(f.blue.processing().processNext(b).quiescent());
             var finite = appendCycle(f, a, "startFinite", 100, "{}");
@@ -199,10 +220,16 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void replacingOnlyReceiptIndexesPreservesTheNextActualProcessorResult() throws Exception {
-        assertEquals(next(false), next(true));
+        // given
+        var uninterrupted = next(false);
+        // when
+        var restored = next(true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     @Test void selectedReceiptDoesNotHydrateUnrelatedNestedHistoriesOnItsOuterSearchPath() throws Exception {
+        // given
         DocumentSessionStorageTest.Bytes bytes; Map<StoredManagedEpochIndexes.Root, byte[]> descriptors;
         DocumentId selected; Set<String> denied = new HashSet<>();
         try (var f = new DocumentSessionStorageTest.Fixture()) {
@@ -210,7 +237,10 @@ final class StoredManagedEpochIndexesTest {
             for (int i = 0; i < 7; i++) ids.add(f.start(resource("source.yaml").replace("rcp2/source", "rcp2/independent-" + i),
                     "rcp2/independent-" + i, ActivationPolicy.importFullHistory()).id());
             ids.sort(EmbeddingBinding.DOCUMENT_ORDER); selected = ids.get(0);
-            var storage = storage(f.bytes); var retained = storage.retainPartition(state(f).managedEpochReceipts());
+            var storage = storage(f.bytes);
+            // when
+            var retained = storage.retainPartition(state(f).managedEpochReceipts());
+            // then
             assertTrue(retained.storedState().documents().read(selected).comparisons() > 1,
                     "The selected lookup must traverse at least one unrelated outer node");
             descriptors = roots(storage, retained); bytes = f.bytes.copy();
@@ -260,11 +290,22 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void sameEpochRepresentationIsNotMistakenForTheLastNumberedReceipt() throws Exception {
-        sameEpochRepresentation(null);
+        // given
+        RootedStorageCache cache = null;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> sameEpochRepresentation(cache);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void warmNumberedReceiptDoesNotReplaceTheCurrentSameEpochRepresentation() throws Exception {
-        try (var cache = cache()) { sameEpochRepresentation(cache); }
+        // given
+        try (var cache = cache()) {
+            // when
+            org.junit.jupiter.api.function.Executable scenario = () -> sameEpochRepresentation(cache);
+            // then
+            assertDoesNotThrow(scenario);
+        }
     }
 
     private void sameEpochRepresentation(RootedStorageCache cache) throws Exception {
@@ -307,12 +348,15 @@ final class StoredManagedEpochIndexesTest {
     }
 
     @Test void missingOrSwappedSelectedIndexesFailClosed() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             var storage = storage(f.bytes); var retained = storage.retainPartition(state(f).managedEpochReceipts());
             var s = retained.storedState();
+            // when
             var withoutIdentity = ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(s.documents(),
                     s.identities().remove(retained.exact(source.id(), 0).receipt().receiptIdentity()).map(), s.comparisons(), s.copiedNodes()));
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> storage.exact(withoutIdentity, source.id(), 0));
             var wrongOwner = DocumentId.of("wrong-owner");
             var swapped = ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(

@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class ReadyRevisionPointAuditTest {
     @Test void pointReadMatchesPublicHistoryAndDoesNotAdvanceProcessing() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             for (int i = 1; i <= 5; i++) {
+                // when
                 var input = f.append(source, "rcp2/source", "tick", i * 100L, "{}");
+                // then
                 assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(source, input).entry(input).disposition());
             }
             var before = f.history(source);
@@ -27,6 +30,7 @@ final class ReadyRevisionPointAuditTest {
     }
 
     @Test void managedProgressDoesNotExposeARevisionBeyondTheReadyBoundary() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var source = f.start("source.yaml", "rcp2/source", Map.of());
             var original = f.retain(source);
@@ -35,7 +39,9 @@ final class ReadyRevisionPointAuditTest {
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             var attach = f.append(parent, "rcp2/parent", "attach", 200, "child: {blueId: " + original + "}");
             f.blue.advanced().drainJournalThrough(attach, DrainBudget.unlimited());
+            // when
             long ready = parent.snapshot().epoch();
+            // then
             assertTrue(f.blue.advanced().auditReadyRevision(parent.id(), ready).isPresent());
             assertTrue(f.blue.advanced().auditReadyRevision(parent.id(), ready + 1).isEmpty());
             assertEquals(parent.history().size(), ready + 1);

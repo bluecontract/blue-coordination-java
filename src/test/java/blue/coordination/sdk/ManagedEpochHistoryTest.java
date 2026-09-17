@@ -54,10 +54,13 @@ final class ManagedEpochHistoryTest {
     }
 
     @Test void equalLogicalReceiptsDoNotBorrowAnotherObjectProofAndForeignDomainsAreCold() {
+        // given
         var projects = new AtomicInteger();
         var original = receipts(SOURCE, 3);
         var first = capture(SOURCE, CONFIG, original, null, projects);
+        // when
         var reconstructed = receipts(SOURCE, 3);
+        // then
         assertEquals(first.receipts().stream().map(ManagedEpochReceipt::receiptIdentity).toList(),
                 reconstructed.stream().map(blue.coordination.api.ManagedEpochReceipt::receiptIdentity).toList());
         assertEquals(0, capture(SOURCE, CONFIG, reconstructed, first, projects).retainedPrefixLength());
@@ -70,14 +73,17 @@ final class ManagedEpochHistoryTest {
     }
 
     @Test void laterMalformedOwnerGapAndOrderRejectBeforeIssuingAnyPartialArtifact() {
+        // given
         var projects = new AtomicInteger();
         var selected = receipts(SOURCE, 3);
         var prefix = capture(SOURCE, CONFIG, selected, null, projects);
+        // when
         projects.set(0);
         for (var malformed : List.of(
                 List.of(selected.get(0), selected.get(2)),
                 List.of(selected.get(0), selected.get(2), selected.get(1)),
                 List.of(selected.get(0), receipt(DocumentId.of("foreign"), 1)))) {
+            // then
             assertThrows(IllegalArgumentException.class, () -> capture(SOURCE, CONFIG, malformed, prefix, projects));
             assertEquals(0, projects.get());
         }
@@ -88,6 +94,7 @@ final class ManagedEpochHistoryTest {
     }
 
     @Test void duplicateEventsGasAndDetachedValueCopiesArePreserved() {
+        // given
         var event = ExactValue.verified(new Node().value("same event"));
         var first = blue.coordination.api.ManagedEventOccurrence.identified(0, 3, SOURCE, hash(30), event, true);
         var second = blue.coordination.api.ManagedEventOccurrence.identified(1, 4, SOURCE, hash(31), event, false);
@@ -96,7 +103,9 @@ final class ManagedEpochHistoryTest {
                 ExactValue.verified(new Node().value("state")), hash(1), null, null,
                 hash(2), hash(3), List.of(first, second), 47);
         var artifact = capture(SOURCE, CONFIG, List.of(initial), null, new AtomicInteger());
+        // when
         var receipt = artifact.receipts().get(0);
+        // then
         assertEquals(47, receipt.processingGas());
         assertEquals(List.of(first.managedEventIdentity(), second.managedEventIdentity()),
                 receipt.emittedEvents().stream().map(ManagedEventOccurrence::managedEventIdentity).toList());
@@ -108,12 +117,15 @@ final class ManagedEpochHistoryTest {
     }
 
     @Test void freshOwnersReuseVerifiedReceiptFramesButColdAndFailedPhysicalReadsDoNot() throws Exception {
+        // given
         var objects = new Bytes(); RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journal; DocumentId document;
         try (var original = new RootedSdkFixture()) {
             var source = original.start("source.yaml", "rcp2/source", Map.of()); document = source.id();
+            // when
             var applied = original.blue.operations().on(source).from(original.timelines.get("rcp2/source"))
                     .call("setCounter").through("owner").requestYaml("counterValue: 5").execute();
+            // then
             assertEquals(EntryDisposition.APPLIED, applied.disposition());
             selected = RootedCoordinationStorage.retainPartition(original.blue, objects, limits());
             journal = ColdStorageJournalFixture.retain((DefaultCoordinationEngine) original.blue.advanced().rawEngine());
@@ -175,8 +187,13 @@ final class ManagedEpochHistoryTest {
     }
 
     @Test void noPublicConstructorCanForgeAHistoryCapability() {
-        assertTrue(Arrays.stream(ManagedEpochHistory.class.getDeclaredConstructors())
-                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers())));
+        // given
+        var constructors = ManagedEpochHistory.class.getDeclaredConstructors();
+        // when
+        boolean allPrivate = Arrays.stream(constructors)
+                .allMatch(constructor -> Modifier.isPrivate(constructor.getModifiers()));
+        // then
+        assertTrue(allPrivate);
     }
 
     private static ManagedEpochHistory capture(DocumentId document, SdkStorageCodec.Configuration config,

@@ -12,12 +12,15 @@ import static blue.coordination.internal.SourceDiscoveryStorageCodecTest.coordin
 
 final class SourcePrerequisiteResultStorageValidationTest {
     @Test void actualAdmissionCannotBeReplacedByAnotherPublishedAdmission() throws Exception {
+        // given
         try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false)) {
             var d = scenario.selection(); var selected = scenario.coordinator().requireSelection(d);
             var response = scenario.f.blue.advanced().processSourceHistoryPrerequisite(d);
             validateWithoutWork(scenario.f, scenario.parent, selected, response);
+            // when
             var other = scenario.f.engine.documents().publicationSnapshot().admissionReceipts().values().stream()
                     .filter(r -> r.documentIds().contains(scenario.parent.id())).findFirst().orElseThrow();
+            // then
             assertNotEquals(response.admission().orElseThrow().publicationIdentity(), other.publicationIdentity());
             assertThrows(IllegalArgumentException.class, () -> validate(scenario.f, selected,
                     new SourceHistoryPrerequisiteResult(d, Optional.of(other), Optional.empty(), false)));
@@ -32,6 +35,7 @@ final class SourcePrerequisiteResultStorageValidationTest {
     }
 
     @Test void actualLiveCannotBeReplacedByAnotherEntryOrRelabelledTerminalResult() throws Exception {
+        // given
         try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(true)) {
             var d = scenario.selection(); var selected = scenario.coordinator().requireSelection(d);
             var response = scenario.f.blue.advanced().processSourceHistoryPrerequisite(d);
@@ -46,18 +50,23 @@ final class SourcePrerequisiteResultStorageValidationTest {
                     Map.of(d.entryBlueId(), List.of(relabelled)), expected.processedThrough().orElseThrow(),
                     expected.quiescent(), expected.paused(), other.committedProcessTransitions(), other.elapsedNanos());
             rejectsProcessing(scenario.f, selected, counterfeit);
+            // when
             var replay = scenario.f.blue.advanced().processSourceHistoryPrerequisite(d);
+            // then
             assertTrue(replay.replayed()); validateWithoutWork(scenario.f, scenario.parent, selected, replay);
         }
     }
 
     @Test void actualManagedHistoryBindsTheOriginalWorkAndCannotAcceptAnOrdinaryDrain() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var leaf = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(leaf, f.append(leaf, "rcp2/source", "tick"));
             var source = f.start(resource("parent.yaml").replace("rcp2/parent", "rcp2/middle"),
                     "rcp2/middle", ActivationPolicy.importFullHistory());
+            // when
             var attachLeaf = attach(f, source, "rcp2/middle", 120, "child: {blueId: " + leaf.id().value() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(source).entry(attachLeaf).disposition());
             var parent = f.start(resource("parent.yaml"), "rcp2/parent", ActivationPolicy.importFullHistory());
             var attachSource = attach(f, parent, "rcp2/parent", 200, "child: {blueId: " + source.id().value() + "}");
@@ -67,6 +76,7 @@ final class SourcePrerequisiteResultStorageValidationTest {
     }
 
     @Test void actualRootLocalHistoryBindsItsOriginalRootWorkAndTerminalPublication() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var nodes = new java.util.LinkedHashMap<String, DocumentHandle>();
             for (String name : List.of("A", "B", "C")) {
@@ -76,7 +86,9 @@ final class SourcePrerequisiteResultStorageValidationTest {
                 nodes.put(name, f.start(yaml, "stored-source/" + name, ActivationPolicy.importFullHistory()));
             }
             var a = nodes.get("A"); var b = nodes.get("B"); var c = nodes.get("C");
+            // when
             var ab = attach(f, a, "stored-source/A", 10, "edge: b\nsource: {blueId: " + b.id().value() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(a).entry(ab).disposition());
             assertEquals(1, f.blue.processing().processNext(a).managedEpochApplications().size());
             var bc = attach(f, b, "stored-source/B", 12, "edge: c\nsource: {blueId: " + c.id().value() + "}");
@@ -129,6 +141,7 @@ final class SourcePrerequisiteResultStorageValidationTest {
     }
 
     @Test void actualAutomaticallyExpandedAdmissionUsesItsIndependentOriginalLedgerAfterColdDecode() throws Exception {
+        // given
         String source = resource("source.yaml").replace("contracts:", """
                 child:
                   name: source-admission-child
@@ -143,7 +156,10 @@ final class SourcePrerequisiteResultStorageValidationTest {
         byte[] preparedBytes; byte[] responseBytes; byte[] ledgerBytes;
         SourceHistoryPrerequisite descriptor; DocumentSessionStorageTest.Bytes objects;
         try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false, source)) {
-            descriptor = scenario.selection(); assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, descriptor.kind());
+            // when
+            descriptor = scenario.selection();
+            // then
+            assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, descriptor.kind());
             var selected = scenario.coordinator().requireSelection(descriptor);
             assertEquals(1, selected.admission().invocation().snapshot().managedDocuments().size());
             var before = scenario.f.completeEvidence(scenario.parent.id());

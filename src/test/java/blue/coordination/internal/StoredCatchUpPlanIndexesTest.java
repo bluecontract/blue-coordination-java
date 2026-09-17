@@ -14,6 +14,7 @@ final class StoredCatchUpPlanIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(65536, 4096, 32768, 2048, 8);
 
     @Test void actualSourceParentAdmissionRowsRemainExactAfterProducerClosure() throws Exception {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         EnumMap<StoredCatchUpPlanIndexes.Root, byte[]> roots;
         byte[] barrierRoot; DocumentId parentId; DocumentId sourceId;
@@ -26,7 +27,9 @@ final class StoredCatchUpPlanIndexesTest {
                     "rcp2/parent", ActivationPolicy.fromNow());
             parentId = parent.id(); sourceId = source.id();
             var original = f.engine.documents().catchUpPlansSnapshot();
+            // when
             var selected = original.plansForConsumer(parentId).plans();
+            // then
             assertFalse(selected.isEmpty(), "The actual rooted admission must create retained catch-up evidence");
             assertTrue(selected.stream().allMatch(p -> p.sourceDocumentId().equals(sourceId)));
             expectedPlans = selected.stream().map(storage.planCodec::encode).toList();
@@ -50,10 +53,13 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void exactPlanAndBarrierRowsKeepAllProgressStatusesAndMixedLogicalOrderComponents() {
+        // given
         var storage = storage(new DocumentSessionStorageTest.Bytes());
         for (var status : ManagedCatchUpStatus.values()) {
             var f = fixture(1, DocumentId.of("consumer"), DocumentId.of("source"));
+            // when
             var row = progress(f.plan, status);
+            // then
             assertArrayEquals(storage.planCodec.encode(row), storage.planCodec.encode(storage.planCodec.decode(storage.planCodec.encode(row))));
             var initial = ManagedCatchUpPlanIndex.empty().withPlan(f.plan, false);
             var index = status == ManagedCatchUpStatus.COMPLETE ? complete(initial, f.plan) : initial.withPlan(row, false);
@@ -67,6 +73,7 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void coldIndexesPreserveCanonicalBucketsMutationShapeCountersAndOldRoots() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         var resident = ManagedCatchUpPlanIndex.empty(); var rows = new ArrayList<Fixture>();
         for (int i = 1; i <= 48; i++) {
@@ -75,7 +82,9 @@ final class StoredCatchUpPlanIndexesTest {
         }
         var retained = storage.retainPartition(resident); var roots = roots(storage, retained);
         var coldBytes = bytes.copy(); var coldStorage = storage(coldBytes);
+        // when
         var cold = coldStorage.open(roots::get, retained.lastMutationComparisons(), retained.lastMutationNodeCopies());
+        // then
         assertEquals(resident.lastMutationComparisons(), cold.lastMutationComparisons());
         assertEquals(resident.lastMutationNodeCopies(), cold.lastMutationNodeCopies());
         int writes = coldBytes.writes;
@@ -102,12 +111,15 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void mixedFamilyRootsMissingMembersAndFalseActiveCountsRejectSelectedAuthority() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         var f = fixture(10, DocumentId.of("c"), DocumentId.of("s"));
         var retained = storage.retainPartition(ManagedCatchUpPlanIndex.empty().withPlan(f.plan, false)); var roots = roots(storage, retained);
         for (var missing : List.of(StoredCatchUpPlanIndexes.Root.CONSUMER, StoredCatchUpPlanIndexes.Root.SOURCE,
                 StoredCatchUpPlanIndexes.Root.OCCURRENCE, StoredCatchUpPlanIndexes.Root.BARRIER, StoredCatchUpPlanIndexes.Root.ACTIVE_SOURCE)) {
+            // when
             var mixed = storage.open(r -> r == missing ? null : roots.get(r), 0, 0);
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> storage.exact(mixed, f.plan.planIdentity()), missing.name());
         }
         var s = retained.storedIndexes();
@@ -120,12 +132,15 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void barrierSnapshotRequiresEveryExactMemberAndCurrentCanonicalStatusWithoutReexecutingWork() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         var f = fixture(21, DocumentId.of("consumer"), DocumentId.of("source"));
         var store = CatchUpPlanStore.empty().withPlan(f.plan).withBarrier(f.barrier);
         var plans = storage.retainPartition(store.storedPlans()); var barrierRows = storage.retainBarriers(store.storedBarriers());
         var coldStorage = storage(bytes.copy()); var cold = coldStorage.open(roots(storage, plans)::get, 0, 0);
+        // when
         var coldBarriers = coldStorage.openBarriers(barrierRows.storedRootDescriptor());
+        // then
         assertArrayEquals(storage.barrierCodec.encode(f.barrier), coldStorage.barrierCodec.encode(coldStorage.barrier(cold, coldBarriers, f.barrier.barrierIdentity())));
         var changedStore = store.withWaitingForHistory(f.plan.planIdentity(), "EXACT_HISTORY_MISSING", "keep exact waiting message");
         var changedPlans = cold.withPlan(changedStore.plan(f.plan.planIdentity()).plan(), false);
@@ -139,9 +154,13 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void unavailableOrCorruptSelectedBytesNeverBecomeAbsentAndFailedStagingKeepsPriorRoots() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
         var f = fixture(30, DocumentId.of("c"), DocumentId.of("s"));
-        var retained = storage.retainPartition(ManagedCatchUpPlanIndex.empty().withPlan(f.plan, false)); var roots = roots(storage, retained);
+        var retained = storage.retainPartition(ManagedCatchUpPlanIndex.empty().withPlan(f.plan, false));
+        // when
+        var roots = roots(storage, retained);
+        // then
         assertFalse(storage.exact(retained, hash(999)).found());
         bytes.failRead = true;
         assertThrows(CoordinationObjectStorageException.class, () -> storage.open(roots::get, 0, 0));
@@ -156,6 +175,7 @@ final class StoredCatchUpPlanIndexesTest {
     }
 
     @Test void blockedCanonicalStatusDoesNotHideAnotherMembersMismatchedOwner() {
+        // given
         var storage = storage(new DocumentSessionStorageTest.Bytes());
         var f = fixture(71, DocumentId.of("consumer"), DocumentId.of("source"));
         var blocked = progress(f.plan, ManagedCatchUpStatus.BLOCKED);
@@ -163,8 +183,11 @@ final class StoredCatchUpPlanIndexesTest {
         for (int seed = 72; seed < 1000; seed++) {
             var candidate = ManagedOccurrenceCatchUpPlan.identified(f.plan.barrierIdentity(), DocumentId.of("other-consumer"), hash(seed), "/other", 1,
                     f.plan.sourceDocumentId(), -1, f.plan.admittedSourceBlueId(), 0, 2, f.plan.causedByIdentity(), ManagedCatchUpStatus.PENDING, null, null);
-            if (candidate.planIdentity().compareTo(blocked.planIdentity()) > 0) { wrong = candidate; break; }
+            if (candidate.planIdentity().compareTo(blocked.planIdentity()) > 0) { wrong = candidate;
+            // when
+            break; }
         }
+        // then
         assertNotNull(wrong, "Fixture must put the malformed member after the blocking member");
         var index = ManagedCatchUpPlanIndex.empty().withPlan(f.plan, false).withPlan(blocked, false).withPlan(wrong, false);
         var barrier = ManagedCatchUpBarrier.identified(f.plan.consumerDocumentId(), f.plan.causedByIdentity(), f.barrier.causeOrder(),

@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Constructor integration, not a claim of complete physical StoreState transport. */
 final class EngineInstallationStorageTest {
     @Test void completeEmptyRootedInstallationPreservesRegistrationsWithoutReplayOrJournalScan() {
+        // given
         DefaultCoordinationEngine.StoredParts parts;
         byte[] expected;
         var control = new EngineControlStorageCodec(4 * 1024 * 1024);
@@ -43,8 +44,10 @@ final class EngineInstallationStorageTest {
             }
             public void apply(State expected, Mutation mutation) { fail("Restoration must not append or rewrite a Timeline"); }
         };
+        // when
         ExactNodeProvider unavailableProvider = id -> { fail("Restoration must not ask for application content"); return java.util.Optional.empty(); };
         try (var restored = DefaultCoordinationEngine.restoreRooted(parts, unavailableProvider, metadataOnlyJournal)) {
+            // then
             assertArrayEquals(expected, control.encode(restored.controlStateForStorage()));
             assertEquals(1, reads.get(), "The existing journal constructor validates its one retained STATE row");
             assertEquals("alice", restored.auditRegisteredTimeline("one").orElseThrow().actorId());
@@ -54,9 +57,12 @@ final class EngineInstallationStorageTest {
     }
 
     @Test void pristineEngineCannotTreatAnAbsentRequiredFamilyAsAnEmptyOne() {
+        // given
         try (var blue = BlueCoordination.inMemory()) {
             var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
+            // when
             var parts = engine.storedParts(WholeObjectBacking.EMPTY);
+            // then
             assertThrows(NullPointerException.class, () -> new DefaultCoordinationEngine.StoredParts(parts.control(), parts.objects(),
                     null, parts.routes(), parts.activeSources(), parts.plans(), parts.sources(), parts.feederMaps()));
             assertThrows(NullPointerException.class, () -> DefaultCoordinationEngine.restoreRooted(parts, ExactNodeProvider.empty(), null));

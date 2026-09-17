@@ -23,9 +23,13 @@ final class PersistentMinimumMapStorageTest {
     };
 
     @Test void coldMinimumSuccessorAndReadsPreserveExactResidentShapeAndDoNotWrite() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var resident = resident(1000);
         var stored = resident.storedCopy(BINDING, KEYS, VALUES, bytes, LIMITS); var copy = bytes.copy();
-        var cold = open(copy, stored.storedRootDescriptor()); copy.reads = 0; int writes = copy.writes;
+        var cold = open(copy, stored.storedRootDescriptor()); copy.reads = 0;
+        // when
+        int writes = copy.writes;
+        // then
         assertEquals(resident.minimum(), cold.minimum()); assertTrue(copy.reads < 32);
         copy.reads = 0; assertEquals(resident.higherThan(498), cold.higherThan(498)); assertTrue(copy.reads < 32);
         for (int key : List.of(-1, 0, 1, 251, 499, 998, 999, 1000)) {
@@ -36,6 +40,7 @@ final class PersistentMinimumMapStorageTest {
     }
 
     @Test void randomizedColdMutationsPreserveAllLogicalCountersAndOldForks() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var resident = resident(128);
         var stored = resident.storedCopy(BINDING, KEYS, VALUES, bytes, LIMITS); var originalRoot = stored.storedRootDescriptor();
         var original = resident; var random = new Random(7146);
@@ -43,7 +48,9 @@ final class PersistentMinimumMapStorageTest {
             stored = open(bytes, stored.storedRootDescriptor());
             int key = random.nextInt(192); boolean remove = random.nextBoolean();
             var expected = remove ? resident.remove(key) : resident.put(key, "value-" + step);
+            // when
             var actual = remove ? stored.remove(key) : stored.put(key, "value-" + step);
+            // then
             assertEquals(expected.changed(), actual.changed()); assertEquals(expected.comparisons(), actual.comparisons());
             assertEquals(expected.copiedNodes(), actual.copiedNodes());
             if (!actual.changed()) assertSame(stored, actual.map());
@@ -57,9 +64,13 @@ final class PersistentMinimumMapStorageTest {
     }
 
     @Test void missingSelectedSubtreeFailsWithoutHidingAvailableUnrelatedBranch() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var stored = resident(1000).storedCopy(BINDING, KEYS, VALUES, bytes, LIMITS);
         var traced = new TracedBytes(bytes.copy()); var cold = open(traced, stored.storedRootDescriptor());
-        traced.selected.clear(); assertEquals(0, cold.minimum().entry().getKey()); var left = new HashSet<>(traced.selected);
+        // when
+        traced.selected.clear();
+        // then
+        assertEquals(0, cold.minimum().entry().getKey()); var left = new HashSet<>(traced.selected);
         traced.selected.clear(); assertEquals("v999", cold.read(999).value()); left.removeAll(traced.selected);
         assertFalse(left.isEmpty(), "Fixture must identify a left-only addressed node");
         String missing = left.iterator().next(); byte[] original = traced.delegate.records.remove(missing);
@@ -72,9 +83,12 @@ final class PersistentMinimumMapStorageTest {
     }
 
     @Test void failedWritesWrongBindingAndPhysicalBoundsCannotReturnAnAcceptedNewRoot() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var stored = resident(100).storedCopy(BINDING, KEYS, VALUES, bytes, LIMITS);
         byte[] old = stored.storedRootDescriptor(); bytes.badAck = true;
+        // when
         var before = stored;
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> before.put(-1, "first"));
         bytes.badAck = false; assertArrayEquals(old, stored.storedRootDescriptor()); assertEquals(0, stored.minimum().entry().getKey());
         var changed = stored.put(-1, "first").map(); assertEquals(-1, changed.minimum().entry().getKey());

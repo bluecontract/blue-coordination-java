@@ -62,6 +62,7 @@ final class DocumentSessionRevisionStorageTest {
     }
 
     @Test void sameEpochRepresentationChangesOnlySessionMetadata() throws Exception {
+        // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var original = history("representation", 4);
         String prior = storage.retain(original);
@@ -70,7 +71,9 @@ final class DocumentSessionRevisionStorageTest {
             long epoch = selected.epoch();
             selected.rebindComponentRepresentation(epoch, layout(value("representation-change")), List.of(), "rebind", "publication");
             bytes.clear();
+            // when
             String address = owner.retain(selected);
+            // then
             assertEquals(addresses(original), bytes.reads);
             assertEquals(List.of(address), bytes.writes);
             try (var cold = storage.openScope()) {
@@ -85,6 +88,7 @@ final class DocumentSessionRevisionStorageTest {
 
     @SuppressWarnings("try") // Explicit early close is the lifecycle control; the final close remains idempotent.
     @Test void warmRevisionNeverHidesMissingCorruptOrUnavailableCurrentBytes() throws Exception {
+        // given
         var bytes = new ObservedBytes();
         try (var cache = new RootedStorageCache(32L * 1024 * 1024, 256, 8L * 1024 * 1024)) {
             var storage = new DocumentSessionStorage(bytes, LIMITS, cache);
@@ -97,7 +101,9 @@ final class DocumentSessionRevisionStorageTest {
                     if (fault.equals("missing")) bytes.delegate.records.remove(revision);
                     if (fault.equals("corrupt")) bytes.delegate.records.get(revision)[0] ^= 1;
                     if (fault.equals("unavailable")) bytes.delegate.failRead = true;
+                    // when
                     bytes.clear();
+                    // then
                     assertThrows(CoordinationObjectStorageException.class, () -> owner.retain(selected), fault);
                     assertTrue(bytes.writes.isEmpty(), "Every dependency is checked before any new prewrite");
                     assertThrows(CoordinationObjectStorageException.class, () -> owner.open(original.documentId(), address), fault);
@@ -117,6 +123,7 @@ final class DocumentSessionRevisionStorageTest {
     }
 
     @Test void allOldRevisionBytesCountTowardScopeEvenWhenNoOldRevisionIsWritten() throws Exception {
+        // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var original = history("bounds", 5); String address = storage.retain(original);
         long dependencies = addresses(original).stream().mapToLong(key -> bytes.delegate.records.get(key).length).sum();
@@ -124,7 +131,10 @@ final class DocumentSessionRevisionStorageTest {
         int maximum = bytes.delegate.records.values().stream().mapToInt(frame -> frame.length).max().orElseThrow();
         var bounded = new DocumentSessionStorage(bytes, new DocumentSessionStorage.Limits(maximum, 256, total - 1));
         try (var owner = bounded.openScope()) {
-            var selected = owner.open(original.documentId(), address); bytes.clear();
+            var selected = owner.open(original.documentId(), address);
+            // when
+            bytes.clear();
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> owner.retain(selected));
             assertTrue(bytes.writes.isEmpty());
             assertEquals(addresses(original), bytes.reads);
@@ -141,6 +151,7 @@ final class DocumentSessionRevisionStorageTest {
     }
 
     @Test void legacyInlineCanonicalRecordReadsAndMigratesWithoutChangingEvidence() throws Exception {
+        // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var original = history("legacy", 3);
         // The legacy writer is not a production entry point; reflection only creates a fixed-format reader control.
@@ -150,7 +161,9 @@ final class DocumentSessionRevisionStorageTest {
         byte[] legacy = (byte[]) encoder.invoke(storage, original.storedState(), noViews, null);
         String oldAddress = put(bytes, legacy);
         try (var owner = storage.openScope()) {
+            // when
             var restored = owner.open(original.documentId(), oldAddress);
+            // then
             assertEquivalent(original, restored);
             String upgraded = owner.retain(restored);
             assertNotEquals(oldAddress, upgraded);
@@ -163,6 +176,7 @@ final class DocumentSessionRevisionStorageTest {
     }
 
     @Test void correctlyAddressedInvalidOrMisorderedRevisionStillFailsFullSessionValidation() throws Exception {
+        // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var original = history("tamper", 3); String address = storage.retain(original);
         List<String> revisions = addresses(original);
@@ -174,8 +188,10 @@ final class DocumentSessionRevisionStorageTest {
         var foreign = history("foreign", 3); storage.retain(foreign);
         String foreignRow = put(bytes, replaceReference(metadata, revisions.get(1), addresses(foreign).get(1)));
         try (var owner = storage.openScope()) {
+            // when
             owner.open(original.documentId(), address);
             for (String invalid : List.of(malformed, repeated, foreignRow)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> owner.open(original.documentId(), invalid));
             }
             assertEquivalent(original, owner.open(original.documentId(), address));
@@ -183,12 +199,16 @@ final class DocumentSessionRevisionStorageTest {
     }
 
     @Test void failedMetadataWriteDoesNotLendNewRevisionEvidenceToRetry() throws Exception {
+        // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
         var original = history("retry", 3); String prior = storage.retain(original);
         try (var owner = storage.openScope(); var stage = owner.openRetentionStage()) {
             var next = owner.open(original.documentId(), prior); append(next);
             String revision = revisionAddress(next.currentRevision());
-            bytes.clear(); bytes.delegate.failAtWrite = bytes.delegate.writes + 2;
+            bytes.clear();
+            // when
+            bytes.delegate.failAtWrite = bytes.delegate.writes + 2;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> stage.retain(next));
             assertEquals(revision, bytes.writes.get(0)); assertEquals(2, bytes.writes.size());
             bytes.delegate.failAtWrite = -1; bytes.clear();

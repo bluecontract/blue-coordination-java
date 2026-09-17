@@ -24,6 +24,7 @@ final class PublicationReceiptStorageCodecTest {
     private static final DocumentSessionStorage.Limits LIMITS = new DocumentSessionStorage.Limits(MAX, 256, 256L * 1024 * 1024);
 
     @Test void actualPublishedAdmissionAndLiveResultKeepPrivateRowsAfterProducerClose() throws Exception {
+        // given
         var objects = new Bytes(); var storage = new DocumentSessionStorage(objects, LIMITS);
         var publications = new PublicationReceiptStorageCodec(MAX, 256); var core = new CoreReceiptStorageCodec(MAX, 256);
         var rowRefs = new ResultRowStorageCodec(MAX);
@@ -32,7 +33,9 @@ final class PublicationReceiptStorageCodecTest {
         try (var f = new Fixture()) {
             var source = f.start("source.yaml", "rcp2/source");
             var admitted = f.engine.documents().publicationSnapshot().admissionReceipts().values().iterator().next();
+            // when
             admission = core.encodeAdmission(admitted);
+            // then
             assertArrayEquals(admission, core.encodeAdmission(core.decodeAdmission(admission)));
             var entry = f.append(source, "rcp2/source", "tick", "{}");
             var raw = f.engine.processRootInput(source.id(), f.entry(entry));
@@ -199,13 +202,16 @@ final class PublicationReceiptStorageCodecTest {
     }
 
     @Test void rejectedTargetCanBeAnExactRetainedSameEpochRepresentation() throws Exception {
+        // given
         String operations = resource("rooted-managed-rejections", "host.yaml");
         String parent = "orders: {}\n" + resource("rooted", "parent.yaml")
                 .replace("    paths:\n", "    collectionPaths:\n    - /orders\n    paths:\n")
                 + operations.substring(operations.indexOf("  ownerChannel:")).replace("timelineId: rooted/rejected-birth", "timelineId: rcp2/parent");
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario(parent)) {
             var host = f.parent; var session = f.engine.documents().require(host.id());
+            // when
             var target = host.snapshot();
+            // then
             assertEquals(0L, target.epoch());
             assertNotEquals(session.revision(0).after().blueId(), target.blueId());
             assertTrue(session.retainsStoredPosition(0, target.blueId()));
@@ -241,10 +247,14 @@ final class PublicationReceiptStorageCodecTest {
     }
 
     @Test void actualSuspendedWrongBirthRetainsIssuedDemandAndSharedPlanWithoutContinuingParent() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var selected = f.rejection("wrongExactState"); var before = selected.host().exact().json();
             var outcome = f.engine.contractsClosureAdapter().processAndPublish(selected.batch()).get(0);
-            var original = outcome.rejectedBirth(); assertNotNull(original); assertFalse(outcome.attempt().isComplete());
+            // when
+            var original = outcome.rejectedBirth();
+            // then
+            assertNotNull(original); assertFalse(outcome.attempt().isComplete());
             var storage = new DocumentSessionStorage(new Bytes(), LIMITS); var codec = new PublicationReceiptStorageCodec(MAX, 256);
             byte[] bytes = codec.encodeRejection(original, storage::retainView); int reads = f.reads.get();
             try (var scope = storage.openScope()) {
@@ -281,10 +291,13 @@ final class PublicationReceiptStorageCodecTest {
     }
 
     @Test void actualTightGasRollbackRetainsOriginalRootedInputWithoutInventingProjection() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var source = f.start("source.yaml", "rcp2/source"); var entry = f.append(source, "rcp2/source", "tick", "{}");
             var captured = f.engine.contractsClosureAdapter().captureRoot(source.id(), f.entry(entry)).invocations().get(0);
+            // when
             var calculated = new BlueClosureContracts(f.engine.runtime().documentProcessor()).processClosure(captured.input()).processResult();
+            // then
             assertTrue(calculated.commits()); long budget = calculated.totalGas() - 1; assertTrue(budget > 0);
             var before = source.exact().json();
             var raw = f.engine.processRootInput(source.id(), f.entry(entry), ContractsExecutionPolicy.exactSharedGas(budget, "stored-terminal-tight"));

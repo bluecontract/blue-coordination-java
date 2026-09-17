@@ -19,6 +19,7 @@ final class RootedLocalStepStorageCodecTest {
     private static final String TIMELINE = "witness-forwarding/alice";
 
     @Test void coldTerminalRetainsOriginalCaptureAndSelectedPeerFencesWithoutInventingRoutes() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var roots = new LinkedHashMap<String, DocumentHandle>();
             var earlier = new LinkedHashMap<DocumentId, String>();
@@ -33,7 +34,9 @@ final class RootedLocalStepStorageCodecTest {
             prefix(f, d, "attach", 100, attachment("c", c)); prefix(f, b, "attach", 125, attachment("c", c));
             prefix(f, a, "attach", 150, attachment("b", b)); prefix(f, a, "attach", 175, attachment("d", d));
             prefix(f, a, "emit", 200, "to: C\nnext: B"); prefix(f, a, "emit", 210, "to: C\nnext: D");
+            // when
             prefix(f, a, "touch", 250, "{}");
+            // then
             assertEquals(List.of(11L, 2L, 2L, 0L), epochs(f, roots));
             var entry = append(f, c, "attach", 300, attachment("a", a));
             assertEquals("5G1qitMzxCuQ3UpCuJyh2fZimmbdRNwsthMYJUWZBjVL", entry.blueId());

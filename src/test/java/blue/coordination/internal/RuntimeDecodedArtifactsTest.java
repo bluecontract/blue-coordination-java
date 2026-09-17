@@ -22,6 +22,7 @@ final class RuntimeDecodedArtifactsTest {
             new PersistentMapStorage.Limits(40 * 1024 * 1024, 4096, MAX, 4096, 8);
 
     @Test void viewReuseSurvivesOwnerCloseButDoesNotReuseMutableSessionOrBypassSelectedBytes() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(handle, f.append(handle, "rcp2/source", "tick"));
@@ -35,7 +36,9 @@ final class RuntimeDecodedArtifactsTest {
                 first.markCatchingUp();
             }
             try (var owner = storage.openScope()) {
+                // when
                 var next = owner.open(handle.id(), address);
+                // then
                 assertNotSame(first, next);
                 assertSame(first.currentRevision().after(), next.currentRevision().after(),
                         "Complete inline exact frames may be shared, never mutable sessions");
@@ -67,10 +70,13 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void resultReuseReregistersOriginalMemberProvenanceInEveryOwner() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(handle, f.append(handle, "rcp2/source", "tick"));
+            // when
             var original = f.engine.documents().require(handle.id()).rootedView().result();
+            // then
             assertFalse(original.publicEvents().isEmpty()); assertFalse(original.checkpointWrites().isEmpty());
             String address; byte[] event, checkpoint;
             try (var writer = new StoredResultRows(f.bytes, LIMITS)) {
@@ -101,11 +107,14 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void completeResultFamilySharesCompatibleByteCapsButKeepsDepthAndRequestedBounds() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var root = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.process(root, f.append(root, "rcp2/source", "tick"));
             var original = f.engine.documents().require(root.id()).rootedView().result();
+            // when
             byte[] bytes = new ClosureProcessResultStorageCodec(MAX, 256).encode(original);
+            // then
             assertFalse(original.publicEvents().isEmpty()); assertFalse(original.checkpointWrites().isEmpty());
             int larger = 40 * 1024 * 1024;
             for (int[] caps : new int[][] {{MAX, larger}, {larger, MAX}, {bytes.length, larger}, {larger, bytes.length}}) {
@@ -140,6 +149,7 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void completeResultReuseCrossesViewsCoreReceiptsPublicationIndexesAndOriginalRows() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var root = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             var entry = f.append(root, "rcp2/source", "tick"); f.process(root, entry);
@@ -158,7 +168,9 @@ final class RuntimeDecodedArtifactsTest {
             var selected = SessionStorageWire.decode(attemptBytes, MAX, core::attempt).processResult();
             for (int i = 0; i < 2; i++) try (var owner = new Binding(f.bytes, cache, cache)) {
                 var view = owner.scope.open(root.id(), sessionAddress).rootedView();
+                // when
                 var publication = owner.indexes.openClosures(closureRoot).get(receipt.publicationIdentity());
+                // then
                 assertSame(selected, view.result(), "Distinct complete view frame shares the same verified result");
                 assertSame(selected, publication.attempt().processResult(), "Publication factory receives the same host cache");
                 assertSame(selected, owner.results.openResult(resultAddress));
@@ -180,6 +192,7 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void receiptReuseRebindsAllHistoryViewsAndStillChecksSelectedPublicationMembership() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.retain(source);
@@ -198,7 +211,9 @@ final class RuntimeDecodedArtifactsTest {
             }
             ContractsClosurePublicationReceipt first;
             try (var owner = new Binding(f.bytes, cache, cache)) {
+                // when
                 first = owner.indexes.openClosures(root).get(key);
+                // then
                 assertSame(owner.scope.open(source.id(), sourceAddress).rootedView(), sourceView(first, source.id()));
             }
             try (var owner = new Binding(f.bytes, cache, cache)) {
@@ -235,6 +250,7 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void viewManifestPreflightsWholeScopeBudgetBeforeBindingAnyReferences() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             var earlier = f.engine.documents().require(handle.id()).rootedView();
@@ -246,8 +262,10 @@ final class RuntimeDecodedArtifactsTest {
                 packet = origin.captureViews(() -> { origin.view(earlierAddress); return origin.view(laterAddress); });
             }
             int largest = Math.max(f.bytes.records.get(earlierAddress).length, f.bytes.records.get(laterAddress).length);
+            // when
             var tight = new DocumentSessionStorage(f.bytes, new DocumentSessionStorage.Limits(largest, 256, largest));
             try (var owner = tight.openScope()) {
+                // then
                 assertTrue(packet.views().encodedBytes() > largest);
                 assertThrows(CoordinationObjectStorageException.class, () -> owner.acceptViews(packet.views()));
                 assertThrows(CoordinationObjectStorageException.class, () -> owner.addressOf(packet.value()));
@@ -257,6 +275,7 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void canonicalPublicationEncodingSurvivesOwnerMemoMissWithoutSkippingPhysicalReads() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture(); var cache = cache()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             f.retain(source);
@@ -279,7 +298,10 @@ final class RuntimeDecodedArtifactsTest {
             // Zero owner capacity deterministically exercises the same miss as an oversized (>8 MiB) receipt.
             try (var owner = new Binding(f.bytes, cache, cache, new StoredPublicationReceiptReuse(0, 0), encodes::incrementAndGet)) {
                 var rows = owner.indexes.openClosures(root); int writes = f.bytes.writes;
-                byte[] coldPayload = f.bytes.records.get(address).clone(); f.bytes.records.get(address)[0] ^= 1;
+                byte[] coldPayload = f.bytes.records.get(address).clone();
+                // when
+                f.bytes.records.get(address)[0] ^= 1;
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> rows.get(key), "Cold physical corruption must still fail");
                 assertEquals(0, encodes.get()); f.bytes.records.put(address, coldPayload);
                 first = rows.get(key); assertEquals(0, encodes.get(), "Cold issuance reuses the decoder's canonical check, with no extra encode");
@@ -310,10 +332,14 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void completeRepresentationProofSurvivesZeroOwnerBudgetButNotProcessEvictionOrMissingMembership() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario(); var views = cache();
                 var receipts = new RootedStorageCache(1024L * 1024 * 1024, 1, 512L * 1024 * 1024)) {
             var bytes = new DocumentSessionStorageTest.Bytes(); var state = f.engine.documents().storedState();
-            var expected = f.chain().transitions().get(0); var original = f.publication(expected);
+            var expected = f.chain().transitions().get(0);
+            // when
+            var original = f.publication(expected);
+            // then
             assertTrue(expected.rootedCheckpointReferenceProofIdentity().isPresent());
             String key = original.publicationIdentity(), payloadAddress; byte[] root;
             try (var writer = new Binding(bytes, null, null)) {
@@ -371,6 +397,7 @@ final class RuntimeDecodedArtifactsTest {
     }
 
     @Test void retainedHistorySelectsEachPhysicalRowOnceUnlessAColdMemoInsertionNeedsReauthentication() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario(); var views = cache(); var receipts = cache()) {
             var bytes = new DocumentSessionStorageTest.Bytes();
             var state = f.engine.documents().storedState();
@@ -385,7 +412,9 @@ final class RuntimeDecodedArtifactsTest {
                     var selections = new AtomicInteger();
                     var documents = selectedDocuments(state, owner, root, state.publicationReceiptIndex(), selections::incrementAndGet);
                     var history = new ManagedRepresentationHistory(documents);
+                    // when
                     var first = history.at(f.parent.id(), 0);
+                    // then
                     assertEquals(processMemo ? 4 : 2, selections.get(),
                             "Two rows: one physical selection each, plus cold rechecks only when a memo can retain proof");
                     selections.set(0);

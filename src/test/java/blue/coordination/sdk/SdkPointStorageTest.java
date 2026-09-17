@@ -29,9 +29,12 @@ final class SdkPointStorageTest {
     @TempDir Path directory;
 
     @Test void actualTargetedRowsReopenInNewOwnerWithoutProcessingOrUnselectedReads() throws Exception {
+        // given
         try (var original = new RootedSdkFixture(); var receiver = new RootedSdkFixture()) {
             EntryResult first = execute(original);
+            // when
             EntryResult independent = execute(receiver);
+            // then
             assertEquals(first.entry().blueId(), independent.entry().blueId());
             var stored = new Stored(original.blue, directory);
             var freshObjects = new FilesStore(directory);
@@ -66,6 +69,7 @@ final class SdkPointStorageTest {
     }
 
     @Test void completeSourceKeyAndStoppedParentArePreservedWithoutImplicitContinuation() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var parent = f.start("parent.yaml", "rcp2/parent", Map.of());
             var source = f.blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
@@ -73,7 +77,9 @@ final class SdkPointStorageTest {
             f.timelines.put("rcp2/source", f.blue.timelines().register("rcp2/source", "alice"));
             var sourceEntry = f.appendReference(source.blueId(), "rcp2/source", "setCounter", 15, "counterValue: 5", false);
             var attach = f.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + source.blueId());
+            // when
             var stopped = f.blue.processing().processNext(parent).entry(attach);
+            // then
             assertEquals(EntryDisposition.NEEDS_RESOURCES, stopped.disposition());
             var admission = f.blue.advanced().sourceHistoryPrerequisites(parent).get(0);
             assertTrue(f.blue.advanced().processSourceHistoryPrerequisite(admission).admission().orElseThrow().published());
@@ -103,10 +109,13 @@ final class SdkPointStorageTest {
     }
 
     @Test void actualConfigurationAndRegisteredEmptyTimelineAreCheckedBeforeAuthorityIsReturned() throws Exception {
+        // given
         try (var f = new RootedSdkFixture(); var absent = new RootedSdkFixture()) {
             f.blue.timelines().register("empty-agent", "agent-account", TimelineActorKind.AGENT);
+            // when
             var stored = new Stored(f.blue, directory);
             try (var scope = absent.blue.advanced().openPointStorage(stored.storage, stored)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.timeline("empty-agent", stored.timelines.get("empty-agent")));
             }
             var config = stored.metadata.configuration();
@@ -132,12 +141,15 @@ final class SdkPointStorageTest {
     }
 
     @Test void intentRequiresExactJournalAndSelectedCoreRowWhileResultsNeedNotBeSdkSubmissions() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             var result = execute(f);
             String id = result.entry().blueId();
             var stored = new Stored(f.blue, directory);
+            // when
             var core = stored.entries.remove(id);
             try (var scope = f.blue.advanced().openPointStorage(stored.storage, stored)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.intent(id, stored.intents.get(id)));
                 assertNotNull(scope.entryResult(id, stored.results.get(id)), "Advanced result retention does not imply SDK submission membership");
             }
@@ -175,6 +187,7 @@ final class SdkPointStorageTest {
     }
 
     @Test void missingCorruptAndMisboundRowsNeverFallBackAndPhysicalFailureRemainsNoncommitting() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             f.blue.timelines().register("one", "alice"); f.blue.timelines().register("two", "bob");
             var stored = new Stored(f.blue, directory);
@@ -182,7 +195,9 @@ final class SdkPointStorageTest {
             byte[] bytes = Files.readAllBytes(directory.resolve(address(one)));
             try (var warm = f.blue.advanced().openPointStorage(stored.storage, stored)) {
                 var retained = warm.timeline("one", one);
+                // when
                 Files.delete(directory.resolve(address(one)));
+                // then
                 assertSame(retained, warm.timeline("one", one), "Immutable memo is not a continuous storage scrubber");
                 try (var cold = f.blue.advanced().openPointStorage(stored.storage, stored)) {
                     assertThrows(CoordinationObjectStorageException.class, () -> cold.timeline("one", one));
@@ -212,11 +227,15 @@ final class SdkPointStorageTest {
     }
 
     @Test void byteBoundsEvictionAndDescriptorOwnershipRemainExplicit() throws Exception {
+        // given
         try (var f = new RootedSdkFixture()) {
             f.blue.timelines().register("one", "alice"); f.blue.timelines().register("two", "bob");
             var stored = new Stored(f.blue, directory);
             var one = stored.timelines.get("one"); var two = stored.timelines.get("two");
-            byte[] copy = one.bytes(); var owned = stored.storage.descriptor(copy); copy[0] ^= 1;
+            byte[] copy = one.bytes(); var owned = stored.storage.descriptor(copy);
+            // when
+            copy[0] ^= 1;
+            // then
             assertEquals(one, owned);
             var single = new SdkPointStorage(stored.objects, new SdkPointStorage.Limits(MAX, 128 * 1024, MAX, 1), stored.metadata.configuration());
             try (var scope = f.blue.advanced().openPointStorage(single, stored)) {
@@ -249,6 +268,7 @@ final class SdkPointStorageTest {
     }
 
     @Test void concurrentSelectedReadsShareOnlyTheirOwnerScopeAndCloseReleasesMemo() throws Exception {
+        // given
         try (var f = new RootedSdkFixture(); var second = new RootedSdkFixture()) {
             f.blue.timelines().register("one", "alice"); second.blue.timelines().register("one", "alice");
             var stored = new Stored(f.blue, directory);
@@ -257,8 +277,11 @@ final class SdkPointStorageTest {
             try {
                 var tasks = new ArrayList<java.util.concurrent.Callable<TimelineHandle>>();
                 for (int i = 0; i < 12; i++) tasks.add(() -> scope.timeline("one", stored.timelines.get("one")));
+                // when
                 var values = pool.invokeAll(tasks);
-                for (var value : values) assertSame(values.get(0).get(), value.get());
+                for (var value : values)
+                // then
+                assertSame(values.get(0).get(), value.get());
                 assertEquals(1, stored.objects.reads.get());
                 try (var foreign = second.blue.advanced().openPointStorage(stored.storage, stored)) {
                     var handle = foreign.timeline("one", stored.timelines.get("one"));

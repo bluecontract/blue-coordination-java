@@ -26,8 +26,11 @@ final class RootedProviderFrontierStorageTest {
             new PersistentAppendLogStorage.Limits(40 * 1024 * 1024, MAX, 4096, 8);
 
     @Test void maximumAndEqualTimestampWitnessAreIndependentOfReceiptInsertionOrder() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
+            // when
             var entry = f.append(300);
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().process(f.parent, entry).entry(entry).disposition());
             // The parent has consumed 100/200 locally; the independent source still owns those inputs.
             for (int preceding = 0; preceding < 2; preceding++) {
@@ -63,6 +66,7 @@ final class RootedProviderFrontierStorageTest {
     }
 
     @Test void controlledColdGuardReadsOnlySelectedIndexPathsNotHistoricalReceiptOrSessionPayloads() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var equal = f.engine.auditTimelineEntry(f.previous).orElseThrow();
             var later = f.engine.auditTimelineEntry(f.append(300).blueId()).orElseThrow();
@@ -71,7 +75,9 @@ final class RootedProviderFrontierStorageTest {
             var selected = storage.retainPartition(f.engine.documents().storedState());
             try (var cold = storage.open(selected, 8, 256)) {
                 var documents = new InMemoryDocumentStore(new EngineMetrics(), cold.state());
+                // when
                 bytes.begin(Set.of());
+                // then
                 assertThrows(IllegalArgumentException.class, () -> documents.requireAfterRootedProviderFrontier(equal));
                 assertDoesNotThrow(() -> documents.requireAfterRootedProviderFrontier(later));
                 var measured = bytes.end(Set.of(), Set.of());
@@ -84,6 +90,7 @@ final class RootedProviderFrontierStorageTest {
     }
 
     @Test void strictColdUseRejectsHashCorrectOmissionAndNonmaximumProjection() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var state = f.engine.documents().storedState();
             var bytes = new RootedHistoryAccessObjects();
@@ -99,8 +106,10 @@ final class RootedProviderFrontierStorageTest {
             var omitted = state.rootedProviderFrontiers().rows().remove(SOURCE).map();
             var nonmaximum = state.rootedProviderFrontiers().rows().put(SOURCE, olderRow).map();
             for (var forged : List.of(omitted, nonmaximum)) {
+                // when
                 var changed = replace(selected, StoredDocumentStore.Root.PROVIDER_FRONTIERS, retainFrontiers(bytes, forged));
                 try (var opened = storage(bytes).open(changed, 8, 256)) {
+                    // then
                     assertThrows(CoordinationObjectStorageException.class,
                             () -> opened.state().rootedProviderFrontiers().rows(),
                             "A correctly addressed secondary index cannot establish its own completeness");
@@ -113,11 +122,14 @@ final class RootedProviderFrontierStorageTest {
     }
 
     @Test void selectedFrontierRequiresExactTimelineAndBothPublicationMemberships() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var state = f.engine.documents().storedState();
             var entry = f.engine.auditTimelineEntry(f.append(300).blueId()).orElseThrow();
             var frontiers = state.rootedProviderFrontiers();
+            // when
             var row = frontiers.rows().get(SOURCE);
+            // then
             assertNotNull(row);
             assertThrows(CoordinationObjectStorageException.class, () -> frontiers.requireAfter(entry,
                     state.publicationReceiptIndex().remove(row.publicationIdentity()).map(), state.closurePublicationReceiptIndex()));
@@ -132,17 +144,21 @@ final class RootedProviderFrontierStorageTest {
     }
 
     @Test void failedAtomicPublicationDoesNotAdvanceButGasTerminalAndExactReplayPreserveThePromise() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var before = f.engine.documents().storedState().rootedProviderFrontiers();
             var entry = f.append(300);
             var reached = new java.util.concurrent.atomic.AtomicBoolean();
+            // when
             f.engine.contractsClosureAdapter().onStoreFailurePoint(point -> {
                 if (point == MultiDocumentPublicationTransaction.FailurePoint.BEFORE_SWAP) {
                     reached.set(true);
                     throw new IllegalStateException("abort provider frontier publication");
                 }
             });
-            try { assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(f.parent)); }
+            try {
+            // then
+            assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(f.parent)); }
             finally { f.engine.contractsClosureAdapter().onStoreFailurePoint(ignored -> { }); }
             assertTrue(reached.get());
             assertSame(before, f.engine.documents().storedState().rootedProviderFrontiers());

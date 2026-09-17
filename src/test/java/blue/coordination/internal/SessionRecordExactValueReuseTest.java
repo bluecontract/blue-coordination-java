@@ -18,13 +18,16 @@ final class SessionRecordExactValueReuseTest {
     private static final String FORMAT = "blue-coordination/exact-value-storage/1";
 
     @Test void completeCyclicFrameIsVerifiedOnceAcrossRowsAndReturnedBytesAndBodiesAreDetached() {
+        // given
         try (var cache = cache(100)) {
             var cold = new SessionRecordCodec(MAX, DEPTH);
             var firstRows = new SessionRecordCodec(MAX, DEPTH, cache);
             var otherRows = new SessionRecordCodec(MAX, DEPTH, cache);
             ExactValue original = cyclic();
             byte[] frame = encode(cold, original);
+            // when
             ExactValue first = decode(firstRows, frame);
+            // then
             assertEquals(1, cache.statistics().loads());
             assertTrue(first.isCyclicMember());
             assertEquals(original.blueId(), first.blueId());
@@ -42,6 +45,7 @@ final class SessionRecordExactValueReuseTest {
     }
 
     @Test void completeSnapshotLaneRetainsResolutionEvidenceAcrossCodecOwners() {
+        // given
         var provider = new BasicNodeProvider(new Node().name("PaymentInstruction")
                 .properties("reserved", new Node().value(true)));
         ExactValue value;
@@ -53,7 +57,9 @@ final class SessionRecordExactValueReuseTest {
             var cold = new SessionRecordCodec(MAX, DEPTH);
             byte[] bytes = encode(cold, value);
             var first = decode(new SessionRecordCodec(MAX, DEPTH, cache), bytes);
+            // when
             var second = decode(new SessionRecordCodec(MAX, DEPTH, cache), bytes);
+            // then
             assertSame(first, second);
             assertNotNull(second.snapshot().orElseThrow().verifiedReferenceResolution());
             assertArrayEquals(bytes, encode(cold, second));
@@ -70,12 +76,16 @@ final class SessionRecordExactValueReuseTest {
     }
 
     @Test void warmCacheStillRejectsCorruptAndValidlyFramedWrongIdentityBytes() {
+        // given
         try (var cache = cache(100)) {
             var rows = new SessionRecordCodec(MAX, DEPTH, cache);
             ExactValue value = ExactValue.verified(new Node().name("expected"));
             byte[] good = encode(new SessionRecordCodec(MAX, DEPTH), value);
             ExactValue retained = decode(rows, good);
-            byte[] corrupt = good.clone(); corrupt[corrupt.length - 1] ^= 1;
+            byte[] corrupt = good.clone();
+            // when
+            corrupt[corrupt.length - 1] ^= 1;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> decode(rows, corrupt));
             String wrongId = ExactValue.verified(new Node().name("different")).blueId();
             byte[] incorrect = new ExactNodeStorageCodec(MAX, DEPTH).encodeEnvelope(FORMAT, out -> {
@@ -91,11 +101,14 @@ final class SessionRecordExactValueReuseTest {
     }
 
     @Test void codecProfilesAndRecordBoundsRemainIndependentOnWarmCache() {
+        // given
         try (var cache = cache(100)) {
             var cold = new SessionRecordCodec(MAX, DEPTH);
             byte[] bytes = encode(cold, ExactValue.verified(new Node().name("x".repeat(2048))));
             var first = decode(new SessionRecordCodec(MAX, DEPTH, cache), bytes);
+            // when
             var anotherDepth = decode(new SessionRecordCodec(MAX, DEPTH - 1, cache), bytes);
+            // then
             assertNotSame(first, anotherDepth);
             assertArrayEquals(encode(cold, first), encode(cold, anotherDepth));
             assertEquals(2, cache.statistics().loads());
@@ -107,13 +120,16 @@ final class SessionRecordExactValueReuseTest {
     }
 
     @Test void evictionAndDisabledCacheFallBackToCompleteOrdinaryVerification() {
+        // given
         var cold = new SessionRecordCodec(MAX, DEPTH);
         byte[] one = encode(cold, ExactValue.verified(new Node().name("one")));
         byte[] two = encode(cold, ExactValue.verified(new Node().name("two")));
         try (var cache = cache(1)) {
             var rows = new SessionRecordCodec(MAX, DEPTH, cache);
             var first = decode(rows, one);
+            // when
             decode(rows, two);
+            // then
             assertNotSame(first, decode(rows, one));
             assertEquals(3, cache.statistics().loads());
             assertEquals(2, cache.statistics().evictions());

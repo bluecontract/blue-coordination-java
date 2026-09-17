@@ -17,6 +17,7 @@ final class StoredPublicationIndexesTest {
     private static final PersistentMapStorage.Limits MAPS = new PersistentMapStorage.Limits(40 * 1024 * 1024, 4096, MAX, 4096, 8);
 
     @Test void coldSelectedPublicationAndOriginalRowsShareOneViewScopeWithoutWrites() throws Exception {
+        // given
         var bytes = new Bytes(); byte[] genericRoot, admissionRoot, closureRoot, event, checkpoint;
         String identity, admissionIdentity, sourceAddress, sourceViewAddress, rowIdentity; DocumentId sourceId;
         try (var f = new DocumentSessionStorageTest.Fixture(); var original = new Binding(bytes)) {
@@ -42,7 +43,10 @@ final class StoredPublicationIndexesTest {
                     .put(admissionIdentity, admission).map()).storedRootDescriptor();
             closureRoot = original.indexes.retainClosures(PersistentOrderedMap.<String, ContractsClosurePublicationReceipt>empty(EmbeddingBinding.TEXT_ORDER)
                     .put(identity, receipt).map().put(rowReceipt.publicationIdentity(), rowReceipt).map()).storedRootDescriptor();
-            var result = rowReceipt.attempt().processResult(); assertFalse(result.publicEvents().isEmpty()); assertFalse(result.checkpointWrites().isEmpty());
+            // when
+            var result = rowReceipt.attempt().processResult();
+            // then
+            assertFalse(result.publicEvents().isEmpty()); assertFalse(result.checkpointWrites().isEmpty());
             event = original.results.outboxCodec().encode(result.publicEvents().get(0));
             checkpoint = original.results.checkpointCodec().encode(result.checkpointWrites().get(0));
         }
@@ -80,12 +84,16 @@ final class StoredPublicationIndexesTest {
     }
 
     @Test void namedResultBoundsFailureCloseAndUnregisteredRowsFailBeforePublication() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("rooted", "source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick"));
             var result = f.engine.documents().require(source.id()).rootedView().result();
-            var bytes = new Bytes(); byte[] reference; String address;
+            var bytes = new Bytes(); byte[] reference;
+            // when
+            String address;
             try (var rows = new StoredResultRows(bytes, LIMITS)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> rows.outboxCodec().encode(result.publicEvents().get(0)));
                 address = rows.retain(result); int writes = bytes.writes; assertEquals(address, rows.retain(result)); assertEquals(writes, bytes.writes);
                 reference = rows.outboxCodec().encode(result.publicEvents().get(0));
@@ -113,6 +121,7 @@ final class StoredPublicationIndexesTest {
     }
 
     @Test void failedDependentStagingLeavesOriginalRootAndActualDeclaredRejectionIntact() throws Exception {
+        // given
         var bytes = new Bytes(); byte[] root; String identity;
         try (var blue = BlueCoordination.builder().build(); var original = new Binding(bytes)) {
             var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
@@ -124,7 +133,10 @@ final class StoredPublicationIndexesTest {
             var entry = blue.operations().on(host).from(timeline).call("wrongExactState").through("ownerChannel")
                     .request(request -> request.managed("order", child).exact("wrong", wrong)).expectOccurrence("/orders/expected", child).submit();
             var batch = engine.contractsClosureAdapter().captureRoot(host.id(), engine.auditTimelineEntry(entry.blueId()).orElseThrow());
-            var rejection = engine.contractsClosureAdapter().processAndPublish(batch).get(0).rejectedBirth(); assertNotNull(rejection);
+            // when
+            var rejection = engine.contractsClosureAdapter().processAndPublish(batch).get(0).rejectedBirth();
+            // then
+            assertNotNull(rejection);
             identity = rejection.terminalKey(); var empty = original.indexes.openRejections(null); byte[] emptyRoot = empty.storedRootDescriptor();
             bytes.failWrites = true;
             assertThrows(CoordinationObjectStorageException.class, () -> empty.put(identity, rejection));

@@ -10,10 +10,13 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Counts complete decoder calls for actual authenticated receipts, not an elapsed-time proxy. */
 final class StoredPublicationReceiptReuseTest {
     @Test void onlySuccessfulCanonicalDecodesAreReusedAndEncodeReturnsDetachedBytes() throws Exception {
+        // given
         try (var f = new Fixture(); var reuse = new StoredPublicationReceiptReuse()) {
             var supplied = f.encoded.get(0).clone();
             var first = reuse.decode(supplied, f::decode);
+            // when
             supplied[0] ^= 1;
+            // then
             assertSame(first, reuse.decode(f.encoded.get(0), f::decode));
             assertEquals(1, f.decodes.get());
             byte[] cached = reuse.encode(first, ignored -> { fail("Exact verified object should reuse canonical bytes"); return null; });
@@ -38,6 +41,7 @@ final class StoredPublicationReceiptReuseTest {
     }
 
     @Test void entryAndByteEvictionRetireDeepReceiptIdentityAndOversizeStillDecodes() throws Exception {
+        // given
         try (var f = new Fixture()) {
             long largest = Math.max(f.encoded.get(0).length, f.encoded.get(1).length);
             for (var reuse : List.of(new StoredPublicationReceiptReuse(1, Long.MAX_VALUE),
@@ -45,7 +49,9 @@ final class StoredPublicationReceiptReuseTest {
                 try (reuse) {
                     var first = reuse.decode(f.encoded.get(0), f::decode);
                     Object epoch = reuse.retentionEpoch();
+                    // when
                     var second = reuse.decode(f.encoded.get(1), f::decode);
+                    // then
                     assertNotSame(epoch, reuse.retentionEpoch());
                     assertFalse(reuse.contains(first)); assertTrue(reuse.contains(second));
                     assertEquals(1, reuse.retainedEntries());
@@ -67,10 +73,13 @@ final class StoredPublicationReceiptReuseTest {
     }
 
     @Test void closingScopeDropsAllRetainedStateAndCannotLeakIdentityIntoAnotherOwner() throws Exception {
+        // given
         try (var f = new Fixture()) {
             var original = new StoredPublicationReceiptReuse();
             var first = original.decode(f.encoded.get(0), f::decode); Object epoch = original.retentionEpoch();
+            // when
             original.close();
+            // then
             assertEquals(0, original.retainedEntries()); assertEquals(0, original.retainedEncodedBytes());
             assertNotSame(epoch, original.retentionEpoch()); assertFalse(original.contains(first));
             assertThrows(IllegalStateException.class, () -> original.decode(f.encoded.get(0), f::decode));

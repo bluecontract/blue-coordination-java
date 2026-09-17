@@ -22,10 +22,13 @@ final class ClosureResultFrameReuseTest {
     private static final ClosureProcessResultStorageCodec RAW = new ClosureProcessResultStorageCodec(MAX, 256);
 
     @Test void sameCompleteFrameSharesOnlyVerifiedResultAndEncodingAcrossCodecOwners() throws Exception {
+        // given
         var original = result(false); byte[] frame = RAW.encode(original);
         var decodes = new AtomicInteger(); var encodes = new AtomicInteger();
         try (var cache = cache(4)) {
+            // when
             var first = new StoredClosureResultCodec(MAX, 256, cache, decodes::incrementAndGet, encodes::incrementAndGet);
+            // then
             assertArrayEquals(frame, first.encode(original));
             assertEquals(0, cache.statistics().retainedEntries(), "Encoding processor output grants no certificate");
             var restored = first.decode(frame);
@@ -42,11 +45,14 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void bytesAndPublicDocumentAndEventCopiesCannotMutateTheRetainedResult() throws Exception {
+        // given
         byte[] frame = RAW.encode(result(false)); byte[] input = frame.clone();
         try (var cache = cache(4)) {
             var codec = new StoredClosureResultCodec(MAX, 256, cache); var restored = codec.decode(input);
             input[0] ^= 1; byte[] returned = codec.encode(restored); returned[0] ^= 1;
+            // when
             restored.resultingDocuments().get(0).document().name("caller body mutation");
+            // then
             assertFalse(restored.publicEvents().isEmpty()); restored.publicEvents().get(0).event().name("caller event mutation");
             assertSame(restored, codec.decode(frame)); assertArrayEquals(frame, codec.encode(restored));
             assertArrayEquals(frame, RAW.encode(restored), "Independent raw encoding still matches the certified frame");
@@ -54,11 +60,15 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void corruptFramesNeverPoisonTheWarmFamilyOrBorrowItsValidation() throws Exception {
+        // given
         byte[] frame = RAW.encode(result(false));
         try (var cache = cache(4)) {
             var codec = new StoredClosureResultCodec(MAX, 256, cache); var restored = codec.decode(frame);
-            byte[] corrupt = frame.clone(); corrupt[corrupt.length / 2] ^= 1;
+            byte[] corrupt = frame.clone();
+            // when
+            corrupt[corrupt.length / 2] ^= 1;
             for (byte[] bad : new byte[][]{corrupt, Arrays.copyOf(frame, frame.length - 1), Arrays.copyOf(frame, frame.length + 1)})
+                // then
                 assertThrows(RuntimeException.class, () -> codec.decode(bad));
             assertEquals(1, cache.statistics().retainedEntries());
             assertSame(restored, codec.decode(frame)); assertArrayEquals(frame, codec.encode(restored));
@@ -66,11 +76,14 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void byteAndDepthProfilesStaySeparateAfterWideProfileWarmsTheFrame() throws Exception {
+        // given
         byte[] frame = RAW.encode(result(false));
         try (var cache = cache(4)) {
             var wide = new StoredClosureResultCodec(MAX, 256, cache); var restored = wide.decode(frame);
             var encodes = new AtomicInteger();
+            // when
             var different = new StoredClosureResultCodec(MAX, 255, cache, null, encodes::incrementAndGet);
+            // then
             assertNotSame(restored, different.decode(frame)); int previous = encodes.get();
             assertArrayEquals(frame, different.encode(restored)); assertEquals(previous + 1, encodes.get(),
                     "Another profile's exact object must take the raw encoder");
@@ -82,7 +95,11 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void equalDocumentCounterDoesNotCollapseDifferentInvocationFrames() throws Exception {
-        var first = result(false, 100); var second = result(false, 200);
+        // given
+        var first = result(false, 100);
+        // when
+        var second = result(false, 200);
+        // then
         assertEquals(first.resultingDocuments().get(0).document().getProperties().get("counter").getValue(),
                 second.resultingDocuments().get(0).document().getProperties().get("counter").getValue());
         assertNotEquals(first.invocationIdentity(), second.invocationIdentity());
@@ -96,11 +113,14 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void failureInTheColdLoaderDoesNotPublishAResult() throws Exception {
+        // given
         byte[] frame = RAW.encode(result(false)); var decodes = new AtomicInteger(); var encodes = new AtomicInteger();
         try (var cache = cache(4)) {
+            // when
             var codec = new StoredClosureResultCodec(MAX, 256, cache, () -> {
                 if (decodes.incrementAndGet() == 1) throw new IllegalStateException("Injected cold loader failure");
             }, encodes::incrementAndGet);
+            // then
             assertThrows(IllegalStateException.class, () -> codec.decode(frame));
             assertEquals(0, cache.statistics().retainedEntries()); assertEquals(1, cache.statistics().failedLoads());
             var restored = codec.decode(frame); assertEquals(2, decodes.get()); assertEquals(0, encodes.get());
@@ -109,10 +129,13 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void disabledOversizeEvictedAndClearedFramesUseCompleteFallback() throws Exception {
+        // given
         byte[] frame = RAW.encode(result(false));
         for (var cache : new RootedStorageCache[]{new RootedStorageCache(0, 0, 0), new RootedStorageCache(1024, 4, 1)}) {
             try (cache) {
+                // when
                 var codec = new StoredClosureResultCodec(MAX, 256, cache);
+                // then
                 assertNotSame(codec.decode(frame), codec.decode(frame));
                 assertEquals(0, cache.statistics().retainedEntries());
             }
@@ -135,6 +158,7 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void cachedRollbackReceiptCannotBecomeOriginalPublishedRows() throws Exception {
+        // given
         var rollback = result(true); assertFalse(rollback.commits()); byte[] frame = RAW.encode(rollback);
         var objects = new DocumentSessionStorageTest.Bytes(); String address = digest(frame);
         objects.putIfAbsent(address, frame);
@@ -142,7 +166,9 @@ final class ClosureResultFrameReuseTest {
             var receipts = new CoreReceiptStorageCodec(MAX, 256, cache);
             byte[] attempt = SessionStorageWire.encode(MAX, out -> receipts.attempt(out,
                     blue.language.processor.closure.ClosureAttemptResult.complete(rollback)));
+            // when
             var restored = SessionStorageWire.decode(attempt, MAX, receipts::attempt).processResult();
+            // then
             assertFalse(restored.commits());
             assertSame(restored, new StoredClosureResultCodec(MAX, 256, cache).decode(frame));
             long hits = cache.statistics().hits();
@@ -155,6 +181,7 @@ final class ClosureResultFrameReuseTest {
     }
 
     @Test void twoOwnersStillAuthenticatePhysicalRowsAndRegisterTheirOriginalMembers() throws Exception {
+        // given
         var original = result(false); byte[] frame = RAW.encode(original);
         var objects = new DocumentSessionStorageTest.Bytes(); String address; byte[] event, checkpoint;
         try (var writer = new StoredResultRows(objects, LIMITS)) {
@@ -163,8 +190,11 @@ final class ClosureResultFrameReuseTest {
             checkpoint = writer.checkpointCodec().encode(original.checkpointWrites().get(0));
         }
         try (var cache = cache(4)) {
-            var common = new StoredClosureResultCodec(MAX, 256, cache); var restored = common.decode(frame);
+            var common = new StoredClosureResultCodec(MAX, 256, cache);
+            // when
+            var restored = common.decode(frame);
             for (int i = 0; i < 2; i++) try (var rows = new StoredResultRows(objects, LIMITS, cache)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> rows.outboxCodec().encode(restored.publicEvents().get(0)));
                 assertSame(restored, rows.openResult(address));
                 assertSame(restored.publicEvents().get(0), rows.outboxCodec().decode(event));

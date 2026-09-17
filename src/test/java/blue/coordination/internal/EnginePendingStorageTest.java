@@ -28,15 +28,30 @@ final class EnginePendingStorageTest {
     };
 
     @Test void coldAdmissionMapsPreserveDemandAndOriginalSubmittedSelection() throws Exception {
-        sourceRoundTrip(false, false);
+        // given
+        boolean live = false, committed = false;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> sourceRoundTrip(live, committed);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void actualCommittedAdmissionResponseSurvivesProducerClosure() throws Exception {
-        sourceRoundTrip(false, true);
+        // given
+        boolean live = false, committed = true;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> sourceRoundTrip(live, committed);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void actualCommittedLiveResponseSurvivesProducerClosure() throws Exception {
-        sourceRoundTrip(true, true);
+        // given
+        boolean live = true, committed = true;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> sourceRoundTrip(live, committed);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     private void sourceRoundTrip(boolean known, boolean publish) throws Exception {
@@ -85,6 +100,7 @@ final class EnginePendingStorageTest {
     }
 
     @Test void completedResponseCannotOutliveItsOriginalSubmittedRecordAndIncompleteRootSetIsRejected() throws Exception {
+        // given
         try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false)) {
             var descriptor = scenario.selection(); var c = scenario.coordinator();
             scenario.f.blue.advanced().processSourceHistoryPrerequisite(descriptor);
@@ -93,8 +109,10 @@ final class EnginePendingStorageTest {
                     var empty = storage(scenario.f.bytes, scenario.f.storage).empty(views, NO_WORK, NO_ADMISSION)) {
                 selected.retain(scenario.f.engine.contractsClosureAdapter().storedPlans(), c.storedMaps());
                 var roots = new EnumMap<EnginePendingStorage.Kind, StoredInsertionOrderedMap.Snapshot>(selected.snapshot().roots());
+                // when
                 roots.put(EnginePendingStorage.Kind.SOURCE_SUBMITTED, empty.snapshot().roots().get(EnginePendingStorage.Kind.SOURCE_SUBMITTED));
                 try (var corrupt = storage(scenario.f.bytes, scenario.f.storage).open(new EnginePendingStorage.Snapshot(roots), views, NO_WORK, NO_ADMISSION)) {
+                    // then
                     assertThrows(CoordinationObjectStorageException.class,
                             () -> corrupt.sources().completed().get(descriptor.selectionIdentity()));
                 }
@@ -106,6 +124,7 @@ final class EnginePendingStorageTest {
 
     @SuppressWarnings("try")
     @Test void actualDraftPreservesPutIfAbsentRollbackIdentityAndFailedWriteDoesNotReplaceIt() throws Exception {
+        // given
         var objects = new DocumentSessionStorageTest.Bytes(); var sessions = new DocumentSessionStorage(objects, SESSION);
         EnginePendingStorage.Snapshot snapshot; String key;
         try (var blue = BlueCoordination.builder().contentDerivedDocumentIds().build(); var views = sessions.openScope();
@@ -120,8 +139,10 @@ final class EnginePendingStorageTest {
             key = entry.blueId(); var engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
             selected.retain(engine.contractsClosureAdapter().storedPlans(), RootedSourceDiscoveryCoordinator.StoredMaps.empty());
             var original = selected.plans().drafts().get(key);
+            // when
             var copy = new OperationPlanStorageCodec(MAX, 128).decode(key, new OperationPlanStorageCodec(MAX, 128)
                     .encode(new OperationPlanStorageCodec.Plans(key, original, null))).draft();
+            // then
             assertNotSame(original, copy); assertSame(original, selected.plans().drafts().putIfAbsent(key, copy));
             assertFalse(selected.plans().drafts().remove(key, copy), "Failed caller cannot remove another retained plan instance");
             snapshot = selected.snapshot(); objects.failAtWrite = objects.writes + 1;

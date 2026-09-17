@@ -26,9 +26,12 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void repeatedCanonicalChecksAvoidBothFullDecodeAndFullEncode() {
+        // given
         try (var cache = cache(10)) {
             var raw = new CountingCodec(); var codec = codec(raw, cache);
+            // when
             var decoded = codec.decode(new byte[]{7});
+            // then
             assertEquals(1, raw.decodes.get()); assertEquals(1, raw.encodes.get());
             for (int i = 0; i < 10; i++) {
                 assertSame(decoded, codec.decode(new byte[]{7}));
@@ -41,6 +44,7 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void persistentMapReadKeepsCanonicalRoundTripWithoutRepeatingFullWork() {
+        // given
         try (var cache = cache(10)) {
             var raw = new CountingCodec(); var values = codec(raw, cache);
             var objects = new DocumentSessionStorageTest.Bytes();
@@ -52,8 +56,10 @@ class CanonicalStorageCodecTest {
             var selected = stored.get("a");
             int decodes = raw.decodes.get(), encodes = raw.encodes.get();
             for (int i = 0; i < 5; i++) {
+                // when
                 var reopened = PersistentOrderedMap.stored(String::compareTo, "canonical-value-test", keys, values,
                         objects, limits, descriptor);
+                // then
                 assertSame(selected, reopened.get("a"));
             }
             assertEquals(decodes, raw.decodes.get()); assertEquals(encodes, raw.encodes.get());
@@ -61,11 +67,15 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void genericDecodedEntryCannotCertifyCanonicalValueAndNoncanonicalFrameIsNeverRetained() {
+        // given
         try (var cache = cache(10)) {
             var raw = new CountingCodec(); var codec = codec(raw, cache);
             var value = new Value(7);
             cache.decode(raw.identity() + "/32/8/", new byte[]{7}, () -> value);
-            codec.encode(value); assertEquals(1, raw.encodes.get());
+            // when
+            codec.encode(value);
+            // then
+            assertEquals(1, raw.encodes.get());
             assertNotSame(value, codec.decode(new byte[]{7}));
             for (int i = 0; i < 2; i++) assertThrows(CoordinationObjectStorageException.class,
                     () -> codec.decode(new byte[]{7, 0}));
@@ -75,21 +85,29 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void framesAreOwnedOnInputAndEveryReturnedEncoding() {
+        // given
         try (var cache = cache(10)) {
             var raw = new CountingCodec(); var codec = codec(raw, cache);
             byte[] input = {7}; var value = codec.decode(input); input[0] = 8;
-            byte[] first = codec.encode(value); first[0] = 9;
+            byte[] first = codec.encode(value);
+            // when
+            first[0] = 9;
+            // then
             assertArrayEquals(new byte[]{7}, codec.encode(value));
             assertSame(value, codec.decode(new byte[]{7})); assertEquals(1, raw.encodes.get());
         }
     }
 
     @Test void allValidationProfilesAreIsolatedWithoutChangingWireIdentity() {
+        // given
         try (var cache = cache(10)) {
-            var raw = new CountingCodec(); var codec = codec(raw, cache); var value = codec.decode(new byte[]{7});
+            var raw = new CountingCodec(); var codec = codec(raw, cache);
+            // when
+            var value = codec.decode(new byte[]{7});
             for (var other : java.util.List.of(new CanonicalStorageCodec<>(raw, cache, 16, 8),
                     new CanonicalStorageCodec<>(raw, cache, 32, 4),
                     new CanonicalStorageCodec<>(raw, cache, 32, 8, "keyBytes=4"))) {
+                // then
                 assertEquals(codec.identity(), other.identity());
                 assertNotSame(value, other.decode(new byte[]{7}));
             }
@@ -100,11 +118,16 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void encodingAccessRefreshesLruAndEvictionClearRemoveReverseEvidence() {
+        // given
         try (var cache = cache(2)) {
             var raw = new CountingCodec(); var codec = codec(raw, cache);
             var one = codec.decode(new byte[]{1}); var two = codec.decode(new byte[]{2});
             codec.encode(one); codec.decode(new byte[]{3});
-            int before = raw.encodes.get(); codec.encode(one); assertEquals(before, raw.encodes.get());
+            int before = raw.encodes.get();
+            // when
+            codec.encode(one);
+            // then
+            assertEquals(before, raw.encodes.get());
             codec.encode(two); assertEquals(before + 1, raw.encodes.get());
             assertEquals(1, cache.statistics().evictions());
             cache.clear(); codec.encode(one); assertEquals(before + 2, raw.encodes.get());
@@ -113,11 +136,14 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void disabledAndOversizeEntriesAlwaysUseFullFallback() {
+        // given
         for (var cache : new RootedStorageCache[]{new RootedStorageCache(0, 0, 0),
                 new RootedStorageCache(10000, 10, 1)}) {
             try (cache) {
                 var raw = new CountingCodec(); var codec = codec(raw, cache);
+                // when
                 var first = codec.decode(new byte[]{7});
+                // then
                 assertNotSame(first, codec.decode(new byte[]{7}));
                 int before = raw.encodes.get(); codec.encode(first); assertEquals(before + 1, raw.encodes.get());
                 assertEquals(0, cache.statistics().retainedEntries());
@@ -126,12 +152,15 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void rawValidationMustFinishBeforeCanonicalEvidenceCanBeUsed() throws Exception {
+        // given
         var pool = Executors.newSingleThreadExecutor();
         try (var cache = cache(10)) {
             var value = new Value(7); var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+            // when
             var loaded = pool.submit(() -> cache.decodeCanonical("delayed", new byte[]{7}, bytes -> value, decoded -> {
                 entered.countDown(); await(release); return new byte[]{7};
             }));
+            // then
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             try { assertNull(cache.canonicalEncoding("delayed", value)); cache.clear(); }
             finally { release.countDown(); }
@@ -141,8 +170,12 @@ class CanonicalStorageCodecTest {
     }
 
     @Test void missingCacheKeepsTheExistingRawCodecPath() {
+        // given
         var raw = new CountingCodec(); var codec = codec(raw, null);
-        var value = codec.decode(new byte[]{7}); assertEquals(0, raw.encodes.get());
+        // when
+        var value = codec.decode(new byte[]{7});
+        // then
+        assertEquals(0, raw.encodes.get());
         assertArrayEquals(new byte[]{7}, codec.encode(value)); assertEquals(1, raw.encodes.get());
     }
 

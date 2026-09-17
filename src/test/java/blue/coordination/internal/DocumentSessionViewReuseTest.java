@@ -17,12 +17,15 @@ final class DocumentSessionViewReuseTest {
             new DocumentSessionStorage.Limits(32 * 1024 * 1024, 256, 256L * 1024 * 1024);
 
     @Test void oneStageReusesTheSameNewImmutableViewAcrossSourceAndParentWithoutGrantingDecodedAuthority() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var parent = f.start(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.fromNow());
             var s = f.engine.documents().require(source.id());
+            // when
             var p = f.engine.documents().require(parent.id());
+            // then
             assertSame(s.rootedView(), p.requireRootedHistory().admissionSources().storedViews().get(source.id()));
             var encodes = new AtomicInteger();
             var storage = new DocumentSessionStorage(f.bytes, LIMITS, encodes::incrementAndGet);
@@ -57,6 +60,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void stageLocalReuseAuthenticatesKnownBytesAndAcknowledgesEveryActualSessionWrite() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var session = f.engine.documents().require(handle.id());
@@ -66,8 +70,10 @@ final class DocumentSessionViewReuseTest {
             String view = storage.viewAddress(session.rootedView());
             byte[] valid = f.bytes.records.get(view).clone();
             try (var scope = storage.openScope()) {
+                // when
                 encodes.set(0);
                 try (var retained = scope.openRetentionStage()) {
+                    // then
                     assertEquals(expected, retained.retain(session)); assertEquals(1, encodes.get());
                     int writes = f.bytes.writes;
                     f.bytes.records.remove(view);
@@ -96,6 +102,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void failedFirstRetentionCannotLendStageEvidence() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var session = f.engine.documents().require(handle.id());
@@ -104,7 +111,9 @@ final class DocumentSessionViewReuseTest {
             try (var scope = storage.openScope()) {
                 var retained = scope.openRetentionStage();
                 try (retained) {
+                    // when
                     f.bytes.badAck = true;
+                    // then
                     assertThrows(CoordinationObjectStorageException.class, () -> retained.retain(session));
                     f.bytes.badAck = false;
                     retained.retain(session); assertEquals(2, encodes.get(),
@@ -117,10 +126,14 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void stageLocalReuseStillChargesTheWholeNextSessionBeforeAnyPrewrite() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var session = f.engine.documents().require(handle.id());
-            f.storage.retain(session); assertEquals(3, f.bytes.records.size(), "Revision, view and session metadata");
+            // when
+            f.storage.retain(session);
+            // then
+            assertEquals(3, f.bytes.records.size(), "Revision, view and session metadata");
             int maximum = f.bytes.records.values().stream().mapToInt(value -> value.length).max().orElseThrow();
             long total = f.bytes.records.values().stream().mapToLong(value -> value.length).sum();
             var encodes = new AtomicInteger();
@@ -142,6 +155,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void knownHistoryUsesZeroFullViewEncodesAndAcknowledgesOnlyTheCurrentSession() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(handle, f.append(handle, "rcp2/source", "tick"));
@@ -149,7 +163,9 @@ final class DocumentSessionViewReuseTest {
             var encodes = new AtomicInteger();
             var storage = new DocumentSessionStorage(f.bytes, LIMITS, encodes::incrementAndGet);
             String address = storage.retain(f.engine.documents().require(handle.id()));
+            // when
             int uniqueViews = encodes.get();
+            // then
             assertTrue(uniqueViews > 1, "The control must contain real earlier history views");
             var originalBytes = f.bytes.copy();
             try (var scope = storage.openScope()) {
@@ -174,6 +190,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void sharedAdmissionSourceAliasesAndWholeSessionBytesArePreserved() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick")); f.retain(source);
@@ -185,7 +202,9 @@ final class DocumentSessionViewReuseTest {
             String parentAddress = storage.retain(f.engine.documents().require(parent.id()));
             try (var scope = storage.openScope()) {
                 var p = scope.open(parent.id(), parentAddress);
+                // when
                 var s = scope.open(source.id(), sourceAddress);
+                // then
                 assertSame(s.rootedView(), p.requireRootedHistory().admissionSources().storedViews().get(source.id()));
                 encodes.set(0);
                 assertEquals(parentAddress, scope.retain(p)); assertEquals(sourceAddress, scope.retain(s));
@@ -202,6 +221,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void mutableSessionStatusReadinessAndLaterRealRevisionAreAlwaysSerialized() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var encodes = new AtomicInteger();
@@ -210,7 +230,9 @@ final class DocumentSessionViewReuseTest {
             try (var scope = storage.openScope()) {
                 var working = scope.open(handle.id(), initial);
                 working.markCatchingUp(); encodes.set(0);
+                // when
                 String catchingUp = scope.retain(working);
+                // then
                 assertEquals(0, encodes.get()); assertNotEquals(initial, catchingUp);
                 assertEquals(storage.retain(working), catchingUp);
                 try (var cold = storage.openScope()) {
@@ -241,6 +263,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void foreignAndDerivedIdentitiesFallBackAndClosedScopeCannotLendItsAuthority() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var encodes = new AtomicInteger();
@@ -249,7 +272,9 @@ final class DocumentSessionViewReuseTest {
             var origin = storage.openScope();
             var foreign = origin.open(handle.id(), address);
             origin.close();
+            // when
             int writes = f.bytes.writes, reads = f.bytes.reads;
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> origin.retain(foreign));
             assertEquals(writes, f.bytes.writes); assertEquals(reads, f.bytes.reads);
             try (var fresh = storage.openScope()) {
@@ -270,6 +295,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void missingCorruptOrUnavailableKnownBytesFailBeforeAnyPrewriteAndNeverFallBack() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var encodes = new AtomicInteger();
@@ -279,7 +305,9 @@ final class DocumentSessionViewReuseTest {
                 var session = scope.open(handle.id(), address);
                 String view = scope.addressOf(session.rootedView()); byte[] valid = f.bytes.records.get(view).clone();
                 int writes = f.bytes.writes; encodes.set(0);
+                // when
                 f.bytes.records.remove(view);
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.retain(session));
                 byte[] corrupt = valid.clone(); corrupt[0] ^= 1; f.bytes.records.put(view, corrupt);
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.retain(session));
@@ -294,9 +322,12 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void reusedRecordsStillCountTowardTheSameRetentionScopeBoundBeforeWriting() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
+            // when
             String address = f.storage.retain(f.engine.documents().require(handle.id()));
+            // then
             assertEquals(3, f.bytes.records.size(), "Revision, view and session metadata");
             int maximum = f.bytes.records.values().stream().mapToInt(value -> value.length).max().orElseThrow();
             long total = f.bytes.records.values().stream().mapToLong(value -> value.length).sum();
@@ -316,6 +347,7 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void knownReadRejectsOversizedBackingReturnAndKeepsPrivateByteOwnership() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String address = f.storage.retain(f.engine.documents().require(handle.id()));
@@ -335,7 +367,10 @@ final class DocumentSessionViewReuseTest {
             var storage = new DocumentSessionStorage(store, new DocumentSessionStorage.Limits(maximum, 256, total));
             try (var scope = storage.openScope()) {
                 var session = scope.open(handle.id(), address);
-                oversized.set(true); int writes = f.bytes.writes;
+                oversized.set(true);
+                // when
+                int writes = f.bytes.writes;
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.retain(session));
                 assertEquals(writes, f.bytes.writes);
                 oversized.set(false); assertEquals(address, scope.retain(session));
@@ -345,13 +380,16 @@ final class DocumentSessionViewReuseTest {
     }
 
     @Test void knownViewsAreReadWhileNewViewsAndEverySessionWriteStillRequireAcknowledgements() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var handle = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             String address = f.storage.retain(f.engine.documents().require(handle.id()));
             try (var scope = f.storage.openScope()) {
                 var session = scope.open(handle.id(), address); session.markCatchingUp();
                 int writes = f.bytes.writes;
+                // when
                 f.bytes.badAck = true;
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> scope.retain(session));
                 f.bytes.badAck = false;
                 assertEquals(writes + 1, f.bytes.writes, "Bad current-session acknowledgement is still rejected");

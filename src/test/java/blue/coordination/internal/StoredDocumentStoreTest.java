@@ -17,6 +17,7 @@ final class StoredDocumentStoreTest {
     private static final PersistentAppendLogStorage.Limits LOGS = new PersistentAppendLogStorage.Limits(40 * 1024 * 1024, MAX, 4096, 8);
 
     @Test void selectedAuthorityPreflightPrecedesReceiptPrewritesEvenForRemovedOrReplacedRows() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
@@ -26,7 +27,10 @@ final class StoredDocumentStoreTest {
             for (boolean remove : List.of(false, true)) {
                 try (var opened = storage.open(original, 4, 128)) {
                     var state = opened.state(); var selected = state.sessionIndex().get(source.id());
-                    var admission = state.admissionReceiptIndex().minimum().entry(); assertNotNull(admission);
+                    // when
+                    var admission = state.admissionReceiptIndex().minimum().entry();
+                    // then
+                    assertNotNull(admission);
                     var admissions = state.admissionReceiptIndex().put(admission.getKey(), admission.getValue()).map();
                     var sessions = remove ? state.sessionIndex().remove(source.id()).map()
                             : state.sessionIndex().put(source.id(), f.engine.documents().require(source.id())).map();
@@ -47,6 +51,7 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void receiptPrewriteFailureBeforeSessionStagingRetiresWorkingSelectionFacts() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);
@@ -55,7 +60,10 @@ final class StoredDocumentStoreTest {
             byte[] valid = bytes.records.get(reverse).clone();
             try (var opened = storage.open(original, 4, 128)) {
                 var state = opened.state(); var selected = state.sessionIndex().get(source.id());
-                var admission = state.admissionReceiptIndex().minimum().entry(); assertNotNull(admission);
+                // when
+                var admission = state.admissionReceiptIndex().minimum().entry();
+                // then
+                assertNotNull(admission);
                 var changed = withWorkingRows(state, state.sessionIndex(),
                         state.admissionReceiptIndex().put(admission.getKey(), admission.getValue()).map());
                 int writes = bytes.writes; bytes.failAtWrite = writes + 1;
@@ -79,14 +87,25 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void completeColdStoreContinuesTheActualRootedProcessorWithExactRowsRootsAndCounters() throws Exception {
-        assertEquals(next(false, false), next(true, false));
+        // given
+        var uninterrupted = next(false, false);
+        // when
+        var restored = next(true, false);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     @Test void sameEpochRepresentationsRemainSeparateFromNumberedHistoryAcrossCompleteStoreOpen() throws Exception {
-        assertEquals(next(false, true), next(true, true));
+        // given
+        var uninterrupted = next(false, true);
+        // when
+        var restored = next(true, true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     @Test void repeatedColdPublicationReadsReuseOnlyTheSameOwnersVerifiedReceiptAndProof() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var expectedState = f.state(); var expectedChain = f.chain();
             var original = f.publication(expectedChain.transitions().get(0));
@@ -100,7 +119,9 @@ final class StoredDocumentStoreTest {
                 var documents = new InMemoryDocumentStore(new EngineMetrics(), cold.state());
                 documents.bindStoredPublicationReuse(cold.publicationReuse());
                 first = documents.closurePublicationReceipt(original.publicationIdentity()).orElseThrow();
+                // when
                 var repeated = documents.closurePublicationReceipt(original.publicationIdentity()).orElseThrow();
+                // then
                 assertNotSame(original, first, "A new owner must not reuse the resident producer's object");
                 assertArrayEquals(publications.encodePublication(first, cold.viewScope()::addressOf),
                         publications.encodePublication(repeated, cold.viewScope()::addressOf));
@@ -212,6 +233,7 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void openDoesNotLoadAnySessionAndSelectedMissingAuthorityFailsInsteadOfBecomingAbsence() throws Exception {
+        // given
         StoredDocumentStore.Selection selection; DocumentId selected; Set<String> sessionAddresses = new HashSet<>();
         DocumentSessionStorageTest.Bytes bytes;
         try (var f = new DocumentSessionStorageTest.Fixture()) {
@@ -229,8 +251,10 @@ final class StoredDocumentStoreTest {
                 return retained.get(digest, bound);
             }
         };
+        // when
         var addressRows = new StoredDocumentIndexes(bytes, MAPS, SESSIONS).openSessions(selection.root(StoredDocumentStore.Root.SESSIONS));
         try (var opened = storage(guarded).open(selection, 2, 128)) {
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> opened.state().sessions().get(selected));
             permitted.add(addressRows.get(selected).address());
             assertEquals(selected, opened.state().sessions().get(selected).documentId());
@@ -245,6 +269,7 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void failedFinalStagingKeepsTheOriginalSelectionAndActualWorkingSessionForExactRetry() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick"));
@@ -254,7 +279,10 @@ final class StoredDocumentStoreTest {
                 install(f, opened.state());
                 f.process(source, f.append(source, "rcp2/source", "tick"));
                 var working = f.engine.documents().storedState(); var actual = working.sessions().get(source.id());
-                int writes = bytes.writes; bytes.failAtWrite = writes + 3;
+                int writes = bytes.writes;
+                // when
+                bytes.failAtWrite = writes + 3;
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> opened.stage(working));
                 assertEquals(writes + 3, bytes.writes, "The failure follows successful immutable prewrites");
                 bytes.failAtWrite = -1;
@@ -273,6 +301,7 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void selectedReceiptCrosslinksAndKnownRangeHolesFailBelowRawStoreSnapshotReads() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick"));
@@ -282,8 +311,10 @@ final class StoredDocumentStoreTest {
             var raw = receiptStorage.open(key -> selected.root(StoredDocumentStore.Root.valueOf("RECEIPT_" + key)), 0, 0);
             var s = raw.storedState(); var h = s.documents().get(source.id()).storedState();
             String receiptId = h.receipts().get(1L).publicReceipt().receiptIdentity();
+            // when
             var missingIdentity = replace(selected, StoredDocumentStore.Root.RECEIPT_IDENTITY, s.identities().remove(receiptId).map().storedRootDescriptor());
             try (var cold = storage(bytes).open(missingIdentity, 4, 128)) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> cold.state().managedEpochReceipts().exactEvidence(source.id(), 1));
                 assertTrue(cold.state().managedEpochReceipts().exactEvidence(source.id(), 2).found());
             }
@@ -305,12 +336,15 @@ final class StoredDocumentStoreTest {
     }
 
     @Test void keyOnlyPendingJoinLookupStillValidatesTheSelectedReverseBucket() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             var bytes = new DocumentSessionStorageTest.Bytes(); var selected = storage(bytes).retainPartition(f.engine.documents().storedState());
             var topology = new StoredTopologyIndexes(bytes, MAPS);
             var raw = topology.open(key -> selected.root(StoredDocumentStore.Root.valueOf("TOPOLOGY_" + key)), true);
+            // when
             var member = DocumentId.of("unrelated-member");
+            // then
             assertTrue(raw.pendingJoinRootsFor(member).isEmpty());
             var forgedBucket = PersistentOrderedMap.<DocumentId, Boolean>empty(EmbeddingBinding.DOCUMENT_ORDER).put(source.id(), true).map();
             var forged = raw.storedIndexes().joins().storedIndexes().roots().put(member, forgedBucket).map();

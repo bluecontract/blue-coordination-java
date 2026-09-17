@@ -12,10 +12,13 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Private append/index primitives: structural sharing is not permission to ignore selected records. */
 final class SessionHistoryCollectionsTest {
     @Test void listCopyAndIteratorKeepTheOldExactPrefixWhileOnlyTheNewCursorAppends() {
+        // given
         var original = SessionHistoryList.<String>empty();
         original.add("zero"); original.add("one"); original.add("two");
         var snapshot = original.copy(); var iterator = original.iterator();
+        // when
         var range = original.subList(1, 3);
+        // then
         assertSame(original.root(), snapshot.root(), "Copy shares the immutable root without enumerating its values");
         original.add("three"); snapshot.add("other-three");
         assertEquals(List.of("zero", "one", "two"), drain(iterator));
@@ -32,6 +35,7 @@ final class SessionHistoryCollectionsTest {
     }
 
     @Test void physicalProjectedListLoadsOnlyTheSelectedPointOrRangeAndCopyAppendDoNotLoadOldValues() {
+        // given
         var bytes = new RootedHistoryAccessObjects();
         var persisted = PersistentOrderedMap.stored(Long::compare, "test/history-ordinal/1", LONGS,
                 StoredMapFixtures.TEXT, bytes, StoredMapFixtures.LIMITS, null);
@@ -40,7 +44,9 @@ final class SessionHistoryCollectionsTest {
                 StoredMapFixtures.TEXT, bytes.detachedCopy(), StoredMapFixtures.LIMITS, persisted.storedRootDescriptor());
         var projected = new ArrayList<Long>();
         var projection = cold.projectValues((key, value) -> { projected.add(key); return value; });
+        // when
         var history = SessionHistoryList.fromRoot(projection.open());
+        // then
         assertEquals(50, history.size()); assertTrue(projected.isEmpty());
         assertEquals("v49", history.get(49)); assertEquals(List.of(49L), projected);
         projected.clear(); var copy = history.copy();
@@ -57,8 +63,11 @@ final class SessionHistoryCollectionsTest {
     }
 
     @Test void selectedListGapAndAppendCollisionFailWithoutReplacingTheRetainedRoot() {
+        // given
         var root = PersistentOrderedMap.<Long, String>empty(Long::compare).put(0L, "zero").map().put(2L, "two").map();
+        // when
         var invalid = SessionHistoryList.fromRoot(root);
+        // then
         assertEquals("zero", invalid.get(0));
         assertThrows(NullPointerException.class, () -> invalid.get(1));
         assertThrows(IllegalStateException.class, () -> invalid.subList(0, 2));
@@ -67,9 +76,13 @@ final class SessionHistoryCollectionsTest {
     }
 
     @Test void mapCopiesAndCapturedIterationPreserveInsertionOrderWhenAValueIsUpdated() {
+        // given
         var original = SessionHistoryMap.<String, Integer>empty(Comparator.naturalOrder());
         original.put("z", 1); original.put("a", 2); original.put("m", 3);
-        var copy = original.copy(); var iterator = original.entrySet().iterator();
+        var copy = original.copy();
+        // when
+        var iterator = original.entrySet().iterator();
+        // then
         assertSame(original.valuesRoot(), copy.valuesRoot()); assertSame(original.orderRoot(), copy.orderRoot());
         assertEquals(2, original.put("a", 20)); original.put("b", 4);
         assertEquals(List.of(Map.entry("z", 1), Map.entry("a", 2), Map.entry("m", 3)), drain(iterator));
@@ -83,8 +96,11 @@ final class SessionHistoryCollectionsTest {
     }
 
     @Test void mismatchedMapRootsAndMissingSelectedMapValueAreRejected() {
+        // given
         var values = PersistentOrderedMap.<String, Integer>empty(String::compareTo).put("present", 1).map();
+        // when
         var emptyOrder = PersistentOrderedMap.<Long, String>empty(Long::compare);
+        // then
         assertThrows(IllegalArgumentException.class, () -> SessionHistoryMap.fromRoots(values, emptyOrder));
         var wrongOrder = emptyOrder.put(0L, "absent").map();
         var invalid = SessionHistoryMap.fromRoots(values, wrongOrder);
@@ -92,8 +108,13 @@ final class SessionHistoryCollectionsTest {
     }
 
     @Test void setDeduplicationKeepsInsertionOrderAndDetachedCopy() {
+        // given
         var original = SessionHistorySet.<String>empty(Comparator.naturalOrder());
-        assertTrue(original.add("z")); assertTrue(original.add("a")); assertFalse(original.add("z"));
+        // when
+        boolean addedFirst = original.add("z");
+        // then
+        assertTrue(addedFirst);
+        assertTrue(original.add("a")); assertFalse(original.add("z"));
         var copy = original.copy(); var iterator = original.iterator();
         assertSame(original.map().valuesRoot(), copy.map().valuesRoot());
         assertTrue(original.add("m")); assertTrue(copy.add("x"));

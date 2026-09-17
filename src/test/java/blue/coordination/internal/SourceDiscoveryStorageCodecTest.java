@@ -16,10 +16,14 @@ final class SourceDiscoveryStorageCodecTest {
     private static final DocumentSessionStorage.Limits LIMITS = new DocumentSessionStorage.Limits(MAX, 128, 128L * 1024 * 1024);
 
     @Test void actualPendingAdmissionSurvivesProducerClosureWithoutProviderOrProcessing() throws Exception {
+        // given
         byte[] pendingBytes, preparedBytes; String key, selection;
         DocumentSessionStorageTest.Bytes objects;
         try (var scenario = new Scenario(false)) {
-            var descriptor = scenario.selection(); assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, descriptor.kind());
+            // when
+            var descriptor = scenario.selection();
+            // then
+            assertEquals(SourceHistoryPrerequisite.Kind.ADMISSION, descriptor.kind());
             var coordinator = scenario.coordinator(); var pending = coordinator.pendingForStorage(key(descriptor));
             var prepared = coordinator.requireSelection(descriptor);
             key = pending.key(); selection = descriptor.selectionIdentity();
@@ -44,8 +48,12 @@ final class SourceDiscoveryStorageCodecTest {
     }
 
     @Test void preparedLiveRetainsOriginalEntryCohortAndWindowWithoutReselectingHead() throws Exception {
+        // given
         try (var scenario = new Scenario(true)) {
-            var descriptor = scenario.selection(); assertEquals(SourceHistoryPrerequisite.Kind.LIVE, descriptor.kind());
+            // when
+            var descriptor = scenario.selection();
+            // then
+            assertEquals(SourceHistoryPrerequisite.Kind.LIVE, descriptor.kind());
             var prepared = scenario.coordinator().requireSelection(descriptor);
             var bytes = codec().encodePrepared(prepared, scenario.f.storage::retainView);
             int providerReads = scenario.f.providerReads.get();
@@ -63,12 +71,15 @@ final class SourceDiscoveryStorageCodecTest {
     }
 
     @Test void wrongKeysTruncationPhysicalBoundsAndChangedPhaseCannotBecomeAuthority() throws Exception {
+        // given
         try (var scenario = new Scenario(false)) {
             var descriptor = scenario.selection(); var pending = scenario.coordinator().pendingForStorage(key(descriptor));
             var prepared = scenario.coordinator().requireSelection(descriptor); var codec = codec();
             var pendingBytes = codec.encodePending(pending, scenario.f.storage::retainView);
+            // when
             var preparedBytes = codec.encodePrepared(prepared, scenario.f.storage::retainView);
             try (var scope = new DocumentSessionStorage(scenario.f.bytes.copy(), LIMITS).openScope()) {
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> codec.decodePending("another", pendingBytes, scope));
                 assertThrows(CoordinationObjectStorageException.class, () -> codec.decodePrepared("another", preparedBytes, scope));
                 assertThrows(CoordinationObjectStorageException.class, () -> codec.decodePending(pending.key(), Arrays.copyOf(pendingBytes, pendingBytes.length - 1), scope));
@@ -81,16 +92,24 @@ final class SourceDiscoveryStorageCodecTest {
     }
 
     @Test void coldPendingAndSubmittedRowsPreserveActualSourcePublicationAndLostResponseReconciliation() throws Exception {
-        assertEquals(publishAndReconcile(false), publishAndReconcile(true));
+        // given
+        var uninterrupted = publishAndReconcile(false);
+        // when
+        var restored = publishAndReconcile(true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     @Test void ordinaryHistoricalSourceWorkRetainsItsOwnOriginalOccurrenceAndPlan() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var leaf = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
             var tick = f.append(leaf, "rcp2/source", "tick"); f.process(leaf, tick);
             var source = f.start(resource("parent.yaml").replace("rcp2/parent", "rcp2/middle"),
                     "rcp2/middle", ActivationPolicy.importFullHistory());
+            // when
             var attachLeaf = attach(f, source, "rcp2/middle", 120, "child: {blueId: " + leaf.id().value() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(source).entry(attachLeaf).disposition());
             var parent = f.start(resource("parent.yaml"), "rcp2/parent", ActivationPolicy.importFullHistory());
             var attachSource = attach(f, parent, "rcp2/parent", 200, "child: {blueId: " + source.id().value() + "}");
@@ -100,6 +119,7 @@ final class SourceDiscoveryStorageCodecTest {
     }
 
     @Test void rootedRetainedSourceWorkKeepsItsCapturedHistoricalViewAndIsNotLiveWork() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var nodes = new java.util.LinkedHashMap<String, DocumentHandle>();
             for (String name : java.util.List.of("A", "B", "C")) {
@@ -109,7 +129,9 @@ final class SourceDiscoveryStorageCodecTest {
                 nodes.put(name, f.start(yaml, "stored-source/" + name, ActivationPolicy.importFullHistory()));
             }
             var a = nodes.get("A"); var b = nodes.get("B"); var c = nodes.get("C");
+            // when
             var ab = attach(f, a, "stored-source/A", 10, "edge: b\nsource: {blueId: " + b.id().value() + "}");
+            // then
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(a).entry(ab).disposition());
             assertEquals(1, f.blue.processing().processNext(a).managedEpochApplications().size());
             var bc = attach(f, b, "stored-source/B", 12, "edge: c\nsource: {blueId: " + c.id().value() + "}");

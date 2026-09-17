@@ -6,9 +6,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class StoredDocumentStoreSdkTest {
     @Test void actualSuccessorAndRepresentationApplicationsRemainExactInTheCompleteColdStore() throws Exception {
+        // given
         try (var scenario = new RootedTerminalTailSdkScenario(100_000L, false, 1)) {
             var storage = new DocumentStoreStorageFixture(scenario.f.blue.advanced().rawEngine());
-            var before = scenario.consumerProgress(); storage.verifyCurrent(false); assertEquals(before, scenario.consumerProgress());
+            var before = scenario.consumerProgress();
+            // when
+            storage.verifyCurrent(false);
+            // then
+            assertEquals(before, scenario.consumerProgress());
             scenario.finishExactlyTwoPositions();
             var complete = scenario.consumerProgress(); assertEquals(3, storage.verifyCurrent(true));
             assertEquals(complete, scenario.consumerProgress());

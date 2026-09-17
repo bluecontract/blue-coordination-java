@@ -21,6 +21,7 @@ final class SdkSelectionStorageTest {
             new SdkPointStorage.Limits(MAX, 64 * 1024, MAX, 32), MAX);
 
     @Test void allFiveFamiliesAndExactConfigurationRoundTripWithoutReadingBodies() {
+        // given
         try (var blue = BlueCoordination.inMemory()) {
             var objects = new Bytes();
             try (var maps = SdkRuntimePointMaps.empty(blue.runtimeForStorage(), objects, LIMITS)) {
@@ -28,7 +29,9 @@ final class SdkSelectionStorageTest {
                 var parts = new SdkSelectionStorage.Parts(blue.runtimeForStorage().storageConfiguration(),
                         maps.snapshot(), Map.of("control", new byte[] { 4, 5 }, "documents/rows", new byte[] { 6 }));
                 var selected = codec.encode(parts);
+                // when
                 var decoded = codec.decode(selected);
+                // then
                 assertEquals(parts.configuration(), decoded.configuration());
                 assertEquals(8, selected.size());
                 assertEquals(List.of("sdk/configuration", "sdk/TIMELINES", "sdk/INTENTS", "sdk/RESULTS",
@@ -41,9 +44,13 @@ final class SdkSelectionStorageTest {
     }
 
     @Test void missingForeignSwappedOrCorruptFamilyFramesNeverBecomeEmptyMaps() {
+        // given
         withSelection((codec, selected) -> {
             for (String missing : selected.keySet()) {
-                var copy = new LinkedHashMap<>(selected); copy.remove(missing);
+                var copy = new LinkedHashMap<>(selected);
+                // when
+                copy.remove(missing);
+                // then
                 assertThrows(NoncommittingExecutionException.class, () -> codec.decode(copy));
             }
             var foreign = new LinkedHashMap<>(selected); foreign.put("sdk/unknown", new byte[] { 1 });
@@ -59,12 +66,15 @@ final class SdkSelectionStorageTest {
     }
 
     @Test void rechecksummedNegativeSequenceAndForeignConfigurationFailClosed() {
+        // given
         withSelection((codec, selected) -> {
             var transport = new SdkStorageCodec(new Object(), MAX);
             List<?> decoded = transport.decode(selected.get("sdk/RESULTS"), List.class);
             var fields = new ArrayList<Object>(decoded);
+            // when
             fields.set(5, -1L);
             var negative = new LinkedHashMap<>(selected); negative.put("sdk/RESULTS", transport.encode(fields));
+            // then
             assertThrows(NoncommittingExecutionException.class, () -> codec.decode(negative));
             fields.set(5, 0L);
             var original = (SdkStorageCodec.Configuration) fields.get(2);
@@ -76,10 +86,13 @@ final class SdkSelectionStorageTest {
     }
 
     @Test void selectedAndDecodedDescriptorsOwnEveryByteArray() {
+        // given
         withSelection((codec, selected) -> {
             var original = new LinkedHashMap<String, byte[]>(); selected.forEach((k, v) -> original.put(k, v.clone()));
             var snapshot = new RootedCoordinationStorage.Selection(original);
+            // when
             original.values().forEach(bytes -> Arrays.fill(bytes, (byte) 0)); original.clear();
+            // then
             same(selected, snapshot.slots());
             var detached = snapshot.slots(); detached.values().forEach(bytes -> Arrays.fill(bytes, (byte) 0));
             same(selected, snapshot.slots());
@@ -91,11 +104,14 @@ final class SdkSelectionStorageTest {
     }
 
     @Test void eachDescriptorIsBoundedAndNoApplicationDefaultsAreInvented() {
+        // given
         withSelection((codec, selected) -> {
             assertThrows(NoncommittingExecutionException.class, () -> new SdkSelectionStorage(128).decode(selected));
             assertThrows(NoncommittingExecutionException.class, () -> new SdkSelectionStorage(128).encode(codec.decode(selected)));
         });
+        // when
         var maps = LIMITS.maps();
+        // then
         assertThrows(IllegalArgumentException.class, () -> new RootedCoordinationStorage.SdkLimits(maps, 0, 128, 0, 0, MAX));
         assertThrows(IllegalArgumentException.class, () -> new RootedCoordinationStorage.SdkLimits(maps, MAX, 128, -1, 0, MAX));
     }

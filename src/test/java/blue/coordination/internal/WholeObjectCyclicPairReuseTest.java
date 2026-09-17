@@ -24,12 +24,15 @@ final class WholeObjectCyclicPairReuseTest {
     private static final int DEPTH = 128;
 
     @Test void actualProviderReadsAcrossOwnersVerifyOnceButReadBothRowsAndDetachEachTime() {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             var first = f.store(cache, verified, MAX, DEPTH);
             int reads = f.bytes.reads;
             Node a = first.requireProviderDocument(f.a), b = first.requireProviderDocument(f.a);
+            // when
             Node c = f.store(cache, verified, MAX, DEPTH).requireProviderDocument(f.a);
+            // then
             assertEquals(1, verified.get(), "Three real provider calls perform one full pair verification");
             assertEquals(6, f.bytes.reads - reads, "Both physical rows are freshly read on every call");
             assertNotSame(a, b); assertNotSame(b, c);
@@ -41,12 +44,15 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void warmMemoDoesNotHideMissingCorruptOrWrongCurrentSelectedRows() {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             var store = f.store(cache, verified, MAX, DEPTH); store.requireProviderDocument(f.a);
             String bodyAddress = f.index.entries.get(f.a.blueId()), proofAddress = f.index.proofs.get(f.master);
             for (String address : List.of(bodyAddress, proofAddress)) {
+                // when
                 byte[] original = f.bytes.records.remove(address);
+                // then
                 assertThrows(CoordinationObjectStorageException.class, () -> store.requireProviderDocument(f.a));
                 byte[] corrupt = original.clone(); corrupt[0] ^= 1; f.bytes.records.put(address, corrupt);
                 assertThrows(CoordinationObjectStorageException.class, () -> store.requireProviderDocument(f.a));
@@ -66,14 +72,18 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void changedDigestValidBodyAndProofPairsFailRepeatedlyInsteadOfUsingWarmSuccess() {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             var store = f.store(cache, verified, MAX, DEPTH); store.requireProviderDocument(f.a);
             String bodyAddress = f.index.entries.get(f.a.blueId()), proofAddress = f.index.proofs.get(f.master);
             var changedBody = f.storage.retain(new WholeObjectBacking.Changes(Map.of(f.a.blueId(),
                     new WholeObjectBacking.Entry(f.a, f.a, f.wireA.clone().name("wrong body"), "changed")), Map.of()));
+            // when
             f.index.entries.put(f.a.blueId(), changedBody.entries().get(f.a.blueId()));
-            for (int i = 0; i < 2; i++) assertThrows(CoordinationObjectStorageException.class,
+            for (int i = 0; i < 2; i++)
+            // then
+            assertThrows(CoordinationObjectStorageException.class,
                     () -> store.requireProviderDocument(f.a), "An invalid pair is never retained");
             assertEquals(3, verified.get());
             f.index.entries.put(f.a.blueId(), bodyAddress);
@@ -89,9 +99,12 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void memberAndProfileBindTheMemoWhileClearForcesFreshVerification() {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
+            // when
             var store = f.store(cache, verified, MAX, DEPTH);
+            // then
             assertWire(f.wireA, store.requireProviderDocument(f.a));
             assertWire(f.wireB, store.requireProviderDocument(f.b)); assertEquals(2, verified.get());
             assertWire(f.wireA, f.store(cache, verified, MAX, DEPTH - 1).requireProviderDocument(f.a));
@@ -106,11 +119,15 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void disabledAndTinyRetentionBudgetsNeverChangeTheAcceptedProviderRead() {
+        // given
         var f = new Fixture();
         for (var cache : List.of(new RootedStorageCache(0, 0, 0),
                 new RootedStorageCache(1024, 4, 1024))) {
             try (cache) {
-                var verified = new AtomicInteger(); var store = f.store(cache, verified, MAX, DEPTH);
+                var verified = new AtomicInteger();
+                // when
+                var store = f.store(cache, verified, MAX, DEPTH);
+                // then
                 assertFalse(cache.canRetainEncodedBytes(Long.MAX_VALUE));
                 assertWire(f.wireA, store.requireProviderDocument(f.a));
                 assertWire(f.wireA, store.requireProviderDocument(f.a));
@@ -120,11 +137,14 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void validLocalOverlayAndRollbackKeepResidentProcessingOutsideTheMemo() {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             var store = f.store(cache, verified, MAX, DEPTH); store.requireProviderDocument(f.a);
             var mark = store.mark();
+            // when
             store.putVerifiedProviderEvidence(f.a, f.wireA, f.proof, "local-overlay");
+            // then
             assertWire(f.wireA, store.requireProviderDocument(f.a));
             assertEquals(1, verified.get(), "Only the previous persistent pair entered the memo");
             store.rollbackTo(mark);
@@ -133,10 +153,13 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void eitherLocalBodyOrLocalProofAlonePreventsStorageMemoAuthority() throws Exception {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             for (String field : List.of("cyclicProviderBodyByBlueId", "cyclicProofByMasterBlueId")) {
+                // when
                 var store = f.store(cache, verified, MAX, DEPTH);
+                // then
                 assertWire(f.wireA, store.requireProviderDocument(f.a));
                 var mapField = WholeObjectStore.class.getDeclaredField(field); mapField.setAccessible(true);
                 @SuppressWarnings("unchecked") Map<String, Object> overlay = (Map<String, Object>) mapField.get(store);
@@ -152,6 +175,7 @@ final class WholeObjectCyclicPairReuseTest {
     }
 
     @Test void concurrentIndependentOwnersShareOnlyTheSuccessfulPureVerification() throws Exception {
+        // given
         var f = new Fixture(); var verified = new AtomicInteger();
         try (var cache = cache()) {
             var pool = Executors.newFixedThreadPool(4); var start = new CountDownLatch(1);
@@ -163,7 +187,10 @@ final class WholeObjectCyclicPairReuseTest {
                 start.countDown();
                 Node prior = null;
                 for (var result : results) {
-                    Node current = result.get(30, TimeUnit.SECONDS); assertWire(f.wireA, current);
+                    // when
+                    Node current = result.get(30, TimeUnit.SECONDS);
+                    // then
+                    assertWire(f.wireA, current);
                     if (prior != null) assertNotSame(prior, current); prior = current;
                 }
                 assertEquals(1, verified.get());

@@ -18,7 +18,12 @@ final class RootedEngineStorageTest {
             40 * 1024 * 1024, MAX, 16);
 
     @Test void entirelyNewEngineContinuesIdenticalHistoryGasAndCheckpointAfterProducerCloses() throws Exception {
-        assertEquals(counter(false), counter(true));
+        // given
+        var uninterrupted = counter(false);
+        // when
+        var restored = counter(true);
+        // then
+        assertEquals(uninterrupted, restored);
     }
 
     private List<String> counter(boolean cold) throws Exception {
@@ -51,12 +56,21 @@ final class RootedEngineStorageTest {
     }
 
     @Test void coldSuspendedParentResumesItsExactSourceActionWithoutRestartingItsHistory() throws Exception {
-        sourceResumption(null);
+        // given
+        RootedEngineStorage.Cache cache = null;
+        // when
+        org.junit.jupiter.api.function.Executable scenario = () -> sourceResumption(cache);
+        // then
+        assertDoesNotThrow(scenario);
     }
 
     @Test void completedSourceAndAdmissionLedgerReuseTheSameResultAcrossFreshCachedEngineOwners() throws Exception {
+        // given
         try (var cache = new RootedEngineStorage.Cache(512L * 1024 * 1024, 4096, 256L * 1024 * 1024)) {
-            sourceResumption(cache);
+            // when
+            org.junit.jupiter.api.function.Executable scenario = () -> sourceResumption(cache);
+            // then
+            assertDoesNotThrow(scenario);
         }
     }
 
@@ -105,6 +119,7 @@ final class RootedEngineStorageTest {
     }
 
     @Test void targetedRootProcessingDoesNotMaterializeUnrelatedCatalogSessions() throws Exception {
+        // given
         RootedEngineStorage.Selection selected; ColdStorageJournalFixture.Snapshot journal; DocumentId root;
         var objects = new DocumentSessionStorageTest.Bytes(); var forbidden = new HashSet<String>();
         try (var f = new DocumentSessionStorageTest.Fixture()) {
@@ -115,14 +130,17 @@ final class RootedEngineStorageTest {
             var rows = new StoredDocumentIndexes(objects, LIMITS.indexes(), LIMITS.sessions()).openSessions(selected.slots().get("documents/SESSIONS"));
             for (var row : rows.entries()) if (!row.getKey().equals(root)) forbidden.add(row.getValue().address());
         }
+        // when
         forbidden.forEach(objects.records::remove);
         try (var opened = RootedEngineStorage.open(objects, LIMITS, selected, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journal))) {
+            // then
             assertEquals(1, opened.engine().processNextRoot(root).committedProcessTransitions());
             assertEquals(1, opened.engine().documents().require(root).epoch());
         }
     }
 
     @Test void partialPrewritesNeverAdvancePinnedStateAndWorkingResultCanBeStagedAgain() throws Exception {
+        // given
         RootedEngineStorage.Selection selected; ColdStorageJournalFixture.Snapshot journal; DocumentId root;
         var objects = new DocumentSessionStorageTest.Bytes();
         try (var f = new DocumentSessionStorageTest.Fixture()) {
@@ -132,7 +150,9 @@ final class RootedEngineStorageTest {
         }
         try (var opened = RootedEngineStorage.open(objects, LIMITS, selected, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journal))) {
             opened.engine().processNextRoot(root); var after = documentEvidence(opened.engine(), objects, root);
+            // when
             objects.failAtWrite = objects.writes + 3;
+            // then
             assertThrows(CoordinationObjectStorageException.class, opened::stage); objects.failAtWrite = -1;
             try (var old = RootedEngineStorage.open(objects.copy(), LIMITS, selected, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journal))) {
                 assertEquals(0, old.engine().documents().require(root).epoch());

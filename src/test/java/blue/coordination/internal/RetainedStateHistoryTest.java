@@ -11,13 +11,16 @@ final class RetainedStateHistoryTest {
             new PersistentMapStorage.Limits(1024 * 1024, 4096, 512 * 1024, 4096, 32);
 
     @Test void lineageDescriptorAndAppendDoNotCopyTheRetainedPrefix() {
+        // given
         int smallerDescriptorBytes = 0;
         for (int count : new int[] {64, 1024}) {
             var bytes = new DocumentSessionStorageTest.Bytes();
             var codecs = new StoreIndexCodecs(RootedEngineStorage.controlledNamespace(bytes), LIMITS);
             var stored = codecs.lineages.prepareForStorage(lineage(count));
             int writes = bytes.writes;
+            // when
             byte[] encoded = codecs.lineages.encode(stored);
+            // then
             assertEquals(writes, bytes.writes, "Canonical encoding must not retain physical dependencies");
             assertTrue(encoded.length < 2048, "Lineage is a bounded descriptor, not one row per epoch");
             if (smallerDescriptorBytes != 0)
@@ -49,15 +52,18 @@ final class RetainedStateHistoryTest {
     }
 
     @Test void identicalStoredBasisAndScalarMismatchNeedNoPrefixReads() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes();
         var codecs = new StoreIndexCodecs(RootedEngineStorage.controlledNamespace(bytes), LIMITS);
         byte[] encoded = codecs.lineages.encode(codecs.lineages.prepareForStorage(lineage(64)));
         var first = codecs.lineages.decode(encoded);
         var second = codecs.lineages.decode(encoded);
         var resident = lineage(64);
+        // when
         var flat = new ManagedLineageIndex.Lineage(resident.documentId(), resident.authoredInitialBlueId(),
                 resident.initializedBlueId(), resident.currentEpoch(), resident.currentBlueId(),
                 java.util.List.copyOf(resident.retainedStates()), resident.lastAnchoredNonReplayableEpoch());
+        // then
         assertEquals(resident, first); assertEquals(flat, first);
         var changedGap = new ManagedLineageIndex.Lineage(OWNER, "authored", "state-0", 63, "state-63",
                 second.retainedStates(), 12);

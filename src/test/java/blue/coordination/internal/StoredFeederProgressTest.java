@@ -18,6 +18,7 @@ final class StoredFeederProgressTest {
     private static final String RESOURCE = "4N8X8mM4K6cYz9V1j8Qv5A6C4a2Qj6C7v1G5d8E3r2P1";
 
     @Test void closedProducerColdPendingKeepsExactBarrierWhileAnotherLaneAdvances() {
+        // given
         var bytes = new Bytes(); StoredFeederProgress.Snapshot snapshot; StorageState control; AttemptTicket blocked;
         List<byte[]> demands;
         try (var f = ContractsRootFeederWindowTest.fixture(); var binding = new Binding(bytes)) {
@@ -28,7 +29,10 @@ final class StoredFeederProgressTest {
             // Preserve order and multiplicity, not just resource identifiers.
             window.recordNeedsResources(blocked, blocked.members(), List.of(first, second, first));
             window.recordTerminal(completed, completed.members(), true, true);
-            var state = window.durableState(); control = state.storageState(false);
+            var state = window.durableState();
+            // when
+            control = state.storageState(false);
+            // then
             assertThrows(NoncommittingExecutionException.class, state::storageState);
             demands = window.requiredResourcesByLane().get(blocked.lane()).stream().map(execution()::encodeResourceDemand).toList();
             try (var stored = binding.storage.empty(binding.views)) {
@@ -60,9 +64,13 @@ final class StoredFeederProgressTest {
     }
 
     @Test void actualBirthRejectionColdOpenRetainsOriginalAttemptAuthority() throws Exception {
+        // given
         var bytes = new Bytes(); StoredFeederProgress.Snapshot snapshot; String key, viewAddress; byte[] packet, demand;
         try (var f = new RootedDeclaredBirthRejectionTest.Scenario(); var binding = new Binding(bytes)) {
-            var outcome = f.adapter.executeAndPublish(f.batch, f.invocation); var rejection = outcome.rejectedBirth();
+            var outcome = f.adapter.executeAndPublish(f.batch, f.invocation);
+            // when
+            var rejection = outcome.rejectedBirth();
+            // then
             assertNotNull(rejection); key = rejection.terminalKey();
             viewAddress = binding.sessions.retainView(f.engine.documents().require(f.host.id()).rootedView());
             packet = new PublicationReceiptStorageCodec(MAX, 256).encodeRejection(rejection, binding.sessions::retainView);
@@ -100,12 +108,16 @@ final class StoredFeederProgressTest {
     }
 
     @Test void pendingRowsKeepInsertionOrderAndFailuresCannotPublishPartialRetain() {
+        // given
         var bytes = new Bytes();
         try (var f = ContractsRootFeederWindowTest.fixture(); var binding = new Binding(bytes);
                 var stored = binding.storage.empty(binding.views)) {
             var selected = new ContractsRootFeederWindow().select(f.adapter().capture(f.eventOne()));
             var a = pending(selected.get(0)); var b = pending(selected.get(1));
-            var map = stored.maps().pending(); map.put(b.ticket().lane(), b); map.put(a.ticket().lane(), a);
+            var map = stored.maps().pending(); map.put(b.ticket().lane(), b);
+            // when
+            map.put(a.ticket().lane(), a);
+            // then
             assertEquals(List.of(b.ticket().lane(), a.ticket().lane()), new ArrayList<>(map.keySet()));
             assertSame(b, map.putIfAbsent(b.ticket().lane(), b));
             assertSame(b, map.remove(b.ticket().lane())); map.put(b.ticket().lane(), b);
@@ -128,6 +140,7 @@ final class StoredFeederProgressTest {
     }
 
     @Test void openingDoesNotReadUnrelatedRowsAndRejectsSwappedRootsOrSelectedCorruption() {
+        // given
         var bytes = new Bytes(); StoredFeederProgress.Snapshot snapshot; LaneId lane;
         try (var f = ContractsRootFeederWindowTest.fixture(); var binding = new Binding(bytes);
                 var stored = binding.storage.empty(binding.views)) {
@@ -139,8 +152,10 @@ final class StoredFeederProgressTest {
         // Identify the wrapper via its length-delimited format prefix without decoding its value.
         byte[] prefix = SessionStorageWire.encode(4096, w -> w.text("blue-coordination/insertion-map/1"));
         var payload = corrupt.values.entrySet().stream().filter(row -> Arrays.equals(prefix, Arrays.copyOf(row.getValue(), prefix.length))).findFirst().orElseThrow();
+        // when
         payload.getValue()[payload.getValue().length - 1] ^= 1;
         try (var binding = new Binding(corrupt); var cold = binding.storage.open(snapshot, binding.views)) {
+            // then
             assertEquals(1, cold.maps().pending().size()); assertTrue(cold.maps().rejected().isEmpty());
             assertNull(cold.maps().rejected().get("unrelated"));
             assertThrows(NoncommittingExecutionException.class, () -> cold.maps().pending().get(lane));

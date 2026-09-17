@@ -11,9 +11,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Eager selected-state inventory checks; no alternate processing graph or execution against forged indexes. */
 final class InMemoryDocumentStoreStateTest {
     @Test void rootedInventoryKeepsCanonicalProofsAndAllOriginalReceiptHistory() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var state = f.engine.documents().storedState(); var before = f.state();
+            // when
             var proofs = state.componentStates();
+            // then
             assertTrue(state.componentIndex().hasRootedViews()); assertEquals(2, proofs.size());
             var firstMembers = proofs.stream().map(row -> DocumentId.of(row.orderedMemberDocumentIds().get(0).value())).toList();
             assertEquals(firstMembers.stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList(), firstMembers);
@@ -27,9 +30,13 @@ final class InMemoryDocumentStoreStateTest {
     }
 
     @Test void rootedInventoryRejectsReversedOrderAndForeignMemberAssociation() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var state = f.engine.documents().storedState(); var proofs = state.componentStates();
-            var reversed = new ArrayList<>(proofs); Collections.reverse(reversed);
+            var reversed = new ArrayList<>(proofs);
+            // when
+            Collections.reverse(reversed);
+            // then
             assertTrue(assertThrows(IllegalArgumentException.class, () -> copy(state, reversed, state.componentIndex()))
                     .getMessage().contains("first-member scalar order"));
             var indexes = state.componentIndex().storedIndexes();
@@ -45,12 +52,15 @@ final class InMemoryDocumentStoreStateTest {
     }
 
     @Test void legacyInventoryStillRequiresTargetBeforeSourceCondensationOrder() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var state = f.engine.documents().storedState();
             // Isolated legacy ordering control over this actual acyclic inventory;
             // the replacement is never installed in or used to execute a runtime.
+            // when
             var legacy = ProcessEmbeddedComponentIndex.fromDocumentsAndOccurrenceInventory(
                     state.sessions().keySet(), state.occurrenceInventory());
+            // then
             assertFalse(legacy.hasRootedViews());
             var ordered = legacy.components().stream()
                     .map(component -> state.componentStateInventory().forDocument(component.members().get(0))).toList();

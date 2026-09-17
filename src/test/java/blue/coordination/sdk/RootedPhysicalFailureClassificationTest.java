@@ -16,7 +16,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Genuine provider failure, not a private store-field injection. */
 final class RootedPhysicalFailureClassificationTest {
     @Test void typedProviderOutageCannotBecomeSemanticMissingOrInvalidContent() throws Exception {
-        assertEquals(run(false), run(true), "Same entry resumes to the exact no-outage semantic result");
+        // given
+        var uninterrupted = run(false);
+        // when
+        var recovered = run(true);
+        // then
+        assertEquals(uninterrupted, recovered, "Same entry resumes to the exact no-outage semantic result");
     }
 
     private Outcome run(boolean failFirstRead) throws Exception {

@@ -7,13 +7,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 final class RootedObservationReuseTest {
     @Test void identicalObservationReusesAndEveryChangedFenceRecomputes() {
+        // given
         var reuse = new RootedObservationReuse(); var loads = new AtomicInteger(); var hits = new AtomicInteger();
         Object[] fence = {new Object()};
         java.util.function.Supplier<Object> read = () -> reuse.read(fence[0], "root", () -> {
             loads.incrementAndGet(); return new Object();
         }, () -> fence[0], ignored -> true, hits::incrementAndGet);
+        // when
         Object first = read.get();
-        for (int n = 0; n < 100; n++) assertSame(first, read.get());
+        for (int n = 0; n < 100; n++)
+        // then
+        assertSame(first, read.get());
         assertEquals(1, loads.get()); assertEquals(100, hits.get());
         fence[0] = new Object(); Object changed = read.get();
         assertNotSame(first, changed); assertEquals(2, loads.get());
@@ -21,11 +25,15 @@ final class RootedObservationReuseTest {
     }
 
     @Test void unavailableAndFailedReadsNeverBecomeNegativeEvidence() {
+        // given
         var reuse = new RootedObservationReuse(); var loads = new AtomicInteger();
         Object fence = new Object();
-        for (int n = 0; n < 2; n++) reuse.read(fence, "blocked", () -> {
+        for (int n = 0; n < 2; n++)
+        // when
+        reuse.read(fence, "blocked", () -> {
             loads.incrementAndGet(); return new Object();
         }, () -> fence, ignored -> false, () -> fail("Blocked work cannot be reused"));
+        // then
         assertEquals(2, loads.get());
         assertThrows(IllegalStateException.class, () -> reuse.read(fence, "blocked", () -> {
             throw new IllegalStateException("missing immutable data");
@@ -34,8 +42,12 @@ final class RootedObservationReuseTest {
     }
 
     @Test void boundedKeysAndCaptureSideEffectsUseTheCompletedFence() {
+        // given
         var reuse = new RootedObservationReuse(); var strong = new ArrayList<Object>();
-        Object before = new Object(), after = new Object(); Object value = new Object();
+        Object before = new Object(), after = new Object();
+        // when
+        Object value = new Object();
+        // then
         assertSame(value, reuse.read(before, "first", () -> value, () -> after, ignored -> true, () -> fail()));
         assertSame(value, reuse.read(after, "first", () -> { fail(); return null; }, () -> after, ignored -> true, () -> {}));
         for (int n = 0; n < 33; n++) {

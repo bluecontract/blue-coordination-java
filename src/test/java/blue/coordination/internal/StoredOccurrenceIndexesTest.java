@@ -17,12 +17,15 @@ final class StoredOccurrenceIndexesTest {
     private static final String BLUE = "8M3d43KXskYr7rrdiaXPiPHmypFEjtU4uUyECtU7Tiyx";
 
     @Test void actualRootedAdmissionRowsReopenWithoutProviderOrOtherSessions() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(source, f.append(source, "rcp2/source", "tick")); f.retain(source);
             var parent = f.start(resource("parent.yaml") + "\nchild: {blueId: " + source.snapshot().blueId() + "}\n",
                     "rcp2/parent", ActivationPolicy.importFullHistory());
+            // when
             var actual = f.engine.documents().require(parent.id()).rootedView().snapshot().occurrences();
+            // then
             assertFalse(actual.isEmpty());
             assertTrue(actual.stream().anyMatch(row -> row.sourceDocumentId().value().equals(parent.id().value())
                     && row.targetDocumentId().value().equals(source.id().value())));
@@ -43,6 +46,7 @@ final class StoredOccurrenceIndexesTest {
     }
 
     @Test void rebranchPreservesAllCursorsOldRootsAndExactMutationCounters() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredOccurrenceIndexes(bytes, LIMITS);
         var rows = new ArrayList<ManagedOccurrenceBinding>();
         for (int i = 0; i < 48; i++) rows.add(row("source-" + i, "target-" + i, true, null));
@@ -50,7 +54,10 @@ final class StoredOccurrenceIndexesTest {
                 identity('a'), identity('b'), identity('c'), identity('d')));
         rows.add(representation);
         var resident = ManagedOccurrenceInventory.of(rows); var stored = storage.retainPartition(resident);
-        var cold = new StoredOccurrenceIndexes(bytes.copy(), LIMITS); var reopened = cold.open(root -> storage.root(stored, root));
+        var cold = new StoredOccurrenceIndexes(bytes.copy(), LIMITS);
+        // when
+        var reopened = cold.open(root -> storage.root(stored, root));
+        // then
         assertRows(List.of(representation), cold.sourceRows(reopened, DocumentId.of("representation"), false));
         var replacement = row("source-7", "target-7", false, -1L);
         var expected = resident.replaceSources(List.of(DocumentId.of("source-7")), List.of(replacement));
@@ -66,10 +73,13 @@ final class StoredOccurrenceIndexesTest {
     }
 
     @Test void selectedMixedIndexAndMalformedIdentityFailNoncommitting() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredOccurrenceIndexes(bytes, LIMITS);
         var original = row("a", "b", true, null); var input = storage.retainPartition(ManagedOccurrenceInventory.of(List.of(original)));
         var inactive = row("a", "b", false, 0L); var updated = storage.retainPartition(ManagedOccurrenceInventory.of(List.of(inactive)));
+        // when
         var mixed = storage.open(root -> storage.root(root == StoredOccurrenceIndexes.Root.SOURCE ? updated : input, root));
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> storage.sourceRows(mixed, DocumentId.of("a"), false));
         var missing = storage.retainPartition(ManagedOccurrenceInventory.empty());
         var hole = storage.open(root -> storage.root(root == StoredOccurrenceIndexes.Root.OCCURRENCE_ID ? missing : input, root));
@@ -82,10 +92,14 @@ final class StoredOccurrenceIndexesTest {
     }
 
     @Test void absentAndPhysicalFailureStayDistinctWithoutWriteOnRead() {
+        // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = new StoredOccurrenceIndexes(bytes, LIMITS);
         var selected = storage.retainPartition(ManagedOccurrenceInventory.of(List.of(row("a", "b", true, null))));
         var coldBytes = bytes.copy(); var cold = new StoredOccurrenceIndexes(coldBytes, LIMITS);
-        var reopened = cold.open(root -> storage.root(selected, root)); int retained = coldBytes.records.size();
+        var reopened = cold.open(root -> storage.root(selected, root));
+        // when
+        int retained = coldBytes.records.size();
+        // then
         assertTrue(cold.find(reopened, DocumentId.of("absent"), "/child").isEmpty());
         coldBytes.failRead = true;
         assertThrows(CoordinationObjectStorageException.class, () -> cold.find(reopened, DocumentId.of("a"), "/child"));

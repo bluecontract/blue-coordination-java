@@ -9,11 +9,14 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Membership needs the exact retained object, not materialization of its publication prefix. */
 final class RootedAdmissionMembershipTest {
     @Test void selectedAdmissionChecksExactMembershipWithoutReadingEarlierPositions() throws Exception {
+        // given
         try (var fixture = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var documents = fixture.engine.documents();
             var session = documents.require(fixture.parent.id());
             var current = session.rootedView();
+            // when
             var boundary = current.logicalBoundary();
+            // then
             assertNotNull(boundary);
             var positionField = DocumentSession.class.getDeclaredField("rootedViewPositions");
             positionField.setAccessible(true);

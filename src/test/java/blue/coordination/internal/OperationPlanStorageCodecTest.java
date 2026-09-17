@@ -19,6 +19,7 @@ final class OperationPlanStorageCodecTest {
     private static final int MAX = 8 * 1024 * 1024;
 
     @Test void actualSdkCreationPlanRetainsExactAuthoredEvidenceWithoutInitializingChild() throws Exception {
+        // given
         byte[] stored; String entryId; String childId;
         try (var blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
             var timeline = blue.timelines().register("rcp2/parent", "alice");
@@ -34,7 +35,9 @@ final class OperationPlanStorageCodecTest {
             var adapter = engine.contractsClosureAdapter(); var before = parent.snapshot().blueId();
             var plan = adapter.operationPlanForStorage(entryId).orElseThrow();
             var codec = new OperationPlanStorageCodec(MAX, 128); stored = codec.encode(plan);
+            // when
             var restored = codec.decode(entryId, stored);
+            // then
             assertEquals(plan.draft().targetDocumentId(), restored.draft().targetDocumentId());
             assertEquals(plan.draft().managedRequestFields(), restored.draft().managedRequestFields());
             assertEquals(plan.draft().expectedOccurrences(), restored.draft().expectedOccurrences());
@@ -53,6 +56,7 @@ final class OperationPlanStorageCodecTest {
     }
 
     @Test void actualSdkEpochSelectorRemainsBoundToItsOriginalPositionAndEntry() throws Exception {
+        // given
         try (var blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
             var timeline = blue.timelines().register("rcp2/parent", "alice");
             blue.timelines().register("rcp2/source", "alice");
@@ -64,8 +68,10 @@ final class OperationPlanStorageCodecTest {
             var entry = blue.operations().on(parent).from(timeline).call("attach").through("owner")
                     .requestYaml("child:\n  blueId: " + selected.blueId())
                     .selectManagedEpoch(new ManagedEpochSelector(source.id(), 0L, selected.blueId(), "/child")).submit();
+            // when
             var plan = ((DefaultCoordinationEngine) blue.advanced().rawEngine()).contractsClosureAdapter()
                     .operationPlanForStorage(entry.blueId()).orElseThrow();
+            // then
             assertNull(plan.draft());
             var codec = new OperationPlanStorageCodec(MAX, 128); byte[] bytes = codec.encode(plan);
             var restored = codec.decode(entry.blueId(), bytes);
@@ -79,6 +85,7 @@ final class OperationPlanStorageCodecTest {
     }
 
     @Test void malformedBoundedRowsAndConflictingCapturedTargetsFailClosed() {
+            // given
             var initial = ExactValue.verified(new blue.language.model.Node().name("authored"));
             var other = ExactValue.verified(new blue.language.model.Node().name("other"));
             var id = DocumentId.of(initial.blueId()); var child = DocumentId.of(other.blueId());
@@ -86,7 +93,9 @@ final class OperationPlanStorageCodecTest {
             var plan = new ContractsManagedDraftPlan(id, 2, initial.blueId(), Map.of(child, draft), Map.of("child", child),
                     List.of(new ContractsManagedDraftPlan.ExpectedOccurrence("/child", child, ActivationMode.BIRTH_AT_ATTACHMENT)));
             var codec = new OperationPlanStorageCodec(MAX, 128);
+            // when
             byte[] bytes = codec.encode(new OperationPlanStorageCodec.Plans(initial.blueId(), plan, null));
+            // then
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(initial.blueId(), Arrays.copyOf(bytes, bytes.length - 1)));
             assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(initial.blueId(), Arrays.copyOf(bytes, bytes.length + 1)));
             assertThrows(CoordinationObjectStorageException.class, () -> new OperationPlanStorageCodec(bytes.length - 1, 128).decode(initial.blueId(), bytes));

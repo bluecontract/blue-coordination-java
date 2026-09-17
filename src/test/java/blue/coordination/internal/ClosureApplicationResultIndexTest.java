@@ -19,6 +19,7 @@ final class ClosureApplicationResultIndexTest {
     private static final String HASH = "sha256:" + "f".repeat(64);
 
     @Test void coldPointLookupNeverReadsUnrelatedPublicationPayloadsAtFiveTwentyOrFiftyReceipts() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var target = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(target, f.append(target, "rcp2/source", "tick"));
@@ -32,7 +33,9 @@ final class ClosureApplicationResultIndexTest {
                 objects.begin(Set.of());
                 var actual = new InMemoryDocumentStore(new EngineMetrics(), cold.state())
                         .closureReceiptForApplication(application).orElseThrow();
+                // when
                 var measured = objects.end(Set.of(), Set.of());
+                // then
                 assertEquals(selected.publicationIdentity(), actual.publicationIdentity());
                 requiredPayloads = new LinkedHashSet<>();
                 measured.addresses().stream().filter(a -> a.operation().equals("GET") && !a.category().equals("index-node"))
@@ -75,6 +78,7 @@ final class ClosureApplicationResultIndexTest {
     }
 
     @Test void selectedBindingAndLegacyPrecedenceArePreservedAndAmbiguityNeverChoosesFirst() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var target = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(target, f.append(target, "rcp2/source", "tick"));
@@ -82,8 +86,10 @@ final class ClosureApplicationResultIndexTest {
             var selected = state.closurePublicationReceipts().values().iterator().next();
             var app = application(selected, HASH);
             String key = ClosureApplicationResultIndex.key(app.contractsResultIdentity(), app.commitCompanionIdentity());
+            // when
             var wrong = ClosureApplicationResultIndex.restoreStored(state.closureApplicationResults().rows().put(key,
                     new ClosureApplicationResultIndex.Publications(List.of("absent"))).map());
+            // then
             assertThrows(IllegalStateException.class, () -> documents(state, wrong).closureReceiptForApplication(app));
             var duplicate = ClosureApplicationResultIndex.restoreStored(state.closureApplicationResults().rows().put(key,
                     new ClosureApplicationResultIndex.Publications(List.of("first", "second"))).map());
@@ -98,6 +104,7 @@ final class ClosureApplicationResultIndexTest {
     }
 
     @Test void strictRawStorageRejectsOmittedAndMisboundRowsAndFailureDoesNotAuthorizeReuse() throws Exception {
+        // given
         try (var f = new DocumentSessionStorageTest.Fixture()) {
             var target = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.fromNow());
             f.process(target, f.append(target, "rcp2/source", "tick"));
@@ -105,8 +112,10 @@ final class ClosureApplicationResultIndexTest {
             var selected = state.closurePublicationReceipts().values().iterator().next();
             var app = application(selected, HASH);
             var bytes = new RootedHistoryAccessObjects(); var storage = storage(bytes);
+            // when
             var partition = storage.retainPartition(state);
             try (var valid = storage.open(partition, 8, 256)) {
+                // then
                 assertEquals(selected.publicationIdentity(), new InMemoryDocumentStore(new EngineMetrics(), valid.state())
                         .closureReceiptForApplication(app).orElseThrow().publicationIdentity());
             }
@@ -127,14 +136,18 @@ final class ClosureApplicationResultIndexTest {
     }
 
     @Test void indexPublicationIsAtomicAndDoesNotAdvanceAfterFailedStoreSwap() throws Exception {
+        // given
         try (var f = new ManagedRepresentationVerificationMemoTest.Scenario()) {
             var before = f.engine.documents().storedState().closureApplicationResults();
             var next = f.append(300);
+            // when
             f.engine.contractsClosureAdapter().onStoreFailurePoint(point -> {
                 if (point == MultiDocumentPublicationTransaction.FailurePoint.BEFORE_SWAP)
                     throw new IllegalStateException("abort application-result publication");
             });
-            try { assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(f.parent)); }
+            try {
+            // then
+            assertThrows(RuntimeException.class, () -> f.blue.processing().processNext(f.parent)); }
             finally { f.engine.contractsClosureAdapter().onStoreFailurePoint(ignored -> { }); }
             assertSame(before, f.engine.documents().storedState().closureApplicationResults());
             assertEquals(EntryDisposition.APPLIED, f.blue.processing().processNext(f.parent).entry(next).disposition());
@@ -145,9 +158,12 @@ final class ClosureApplicationResultIndexTest {
     }
 
     @Test void ambiguityWitnessesAreBoundedCanonicalAndDoNotForgetAnExistingDuplicate() {
+        // given
         var witnesses = new ClosureApplicationResultIndex.Publications(List.of("b"));
         assertEquals(List.of("b"), witnesses.with("b").identities());
+        // when
         witnesses = witnesses.with("c").with("a").with("d");
+        // then
         assertEquals(List.of("a", "b"), witnesses.identities());
         assertNotEquals(ClosureApplicationResultIndex.key("ab", "c"), ClosureApplicationResultIndex.key("a", "bc"));
     }
