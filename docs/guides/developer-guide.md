@@ -1,7 +1,7 @@
 # Blue Coordination SDK developer guide
 
 This is the canonical application-development guide for
-`blue.coordination:blue-coordination-java:3.0.0-rc.11`. It starts with authored Blue documents
+`blue.coordination:blue-coordination-java:3.0.0-rc.12`. It starts with authored Blue documents
 and follows them through admission, exact Timeline processing, managed embedded
 documents, cycles, later operations, topology expansion, retained managed-epoch
 catch-up, results, and failure handling.
@@ -32,7 +32,7 @@ explicit non-goals.
 
 ## Install and own the runtime
 
-Use Java 17 or newer. Resolve the rc.11 artifact only from Maven
+Use Java 17 or newer. Resolve the rc.12 artifact only from Maven
 Central:
 
 ```groovy
@@ -41,12 +41,12 @@ repositories {
 }
 
 dependencies {
-    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.11'
+    implementation 'blue.coordination:blue-coordination-java:3.0.0-rc.12'
 }
 ```
 
 The current candidate includes retained managed-epoch behavior and consumes published
-Language/Contracts `3.1.0-rc.27`. Release builds use the default
+Language/Contracts `3.1.0-rc.32`. Release builds use the default
 `published-artifact` lane:
 
 ```bash

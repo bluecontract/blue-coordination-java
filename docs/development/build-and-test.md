@@ -8,23 +8,23 @@ Java 21.
 
 ## Dependency graph
 
-`blueDependencyMode=published-artifact` is the rc.11 build and release default.
+`blueDependencyMode=published-artifact` is the rc.12 build and release default.
 It resolves exact Maven Central artifacts and rejects sibling composites,
 Maven Local, flat/unverified repositories, and mutable checkout substitution.
 
-| Modules | RC11 release lane |
+| Modules | RC12 release lane |
 | --- | --- |
-| `blue.language:*` | Maven Central `3.1.0-rc.27` |
+| `blue.language:*` | Maven Central `3.1.0-rc.32` |
 | `blue.bex:blue-bex-core`, `blue-bex-contracts` | Maven Central `1.1.0-rc.6` |
 | `blue.repo:blue-repo-java` | Maven Central `3.0.0-rc.22` |
 
-Coordination directly owns the complete Language rc.27 graph, retains the
+Coordination directly owns the complete Language rc.32 graph, retains the
 Repository and BEX transitive exclusions in its published POM, and locks the
 exact graph in `gradle/published-artifact.lockfile`.
 
 The `immutable-staged-contracts` and `immutable-development-contracts` lanes
 remain available only for non-published upstream handoffs. They are not public
-release authority for rc.11. The development lane is valid
+release authority for rc.12. The development lane is valid
 candidate-verification evidence when every input and the Coordination version
 are commit-bound. It can bind separate, immutable Language/Contracts and BEX
 repositories; it never obtains either dependency from a sibling checkout or
@@ -57,7 +57,7 @@ In staged mode, Gradle uses repository-exclusive content routing for the
 Gradle plugins, and third-party dependencies. There is no fallback if a staged
 Language artifact is absent or different.
 
-For rc.11, verify fresh remote availability and the
+For rc.12, verify fresh remote availability and the
 conflict-free Maven Central graph with:
 
 ```bash
@@ -102,7 +102,7 @@ dependency report is written to
 
 ## Verification
 
-RC11 uses the Maven-Central-only release gate:
+RC12 uses the Maven-Central-only release gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
@@ -110,7 +110,7 @@ RC11 uses the Maven-Central-only release gate:
 ```
 
 Repeat the command with `-PtestJavaVersion=21`. Passing these gates is required
-evidence, but does not itself publish rc.11 or make it production-ready.
+evidence, but does not itself publish rc.12 or make it production-ready.
 
 ### Parallel test execution
 
@@ -240,21 +240,21 @@ isolation, source-archive hygiene, and an extracted source-archive build.
 
 ## RC readiness
 
-`verifyRcReadiness` is the rc.11 release-readiness gate:
+`verifyRcReadiness` is the rc.12 release-readiness gate:
 
 ```bash
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 ```
 
-The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.11
+The task includes `releaseCheck` and `dependencyPreflight`, validates the rc.12
 release authority and explicit non-claims, then records the
 fresh artifact hashes in
-`build/reports/release/3.0.0-rc.11-readiness.json`. It validates version
-`3.0.0-rc.11`, the published-artifact lane, and the focused rc.11 capability
+`build/reports/release/3.0.0-rc.12-readiness.json`. It validates version
+`3.0.0-rc.12`, the published-artifact lane, and the focused rc.12 capability
 inventory in addition to the complete current suite.
 
-The Build workflow prepares and seals the exact rc.11 version in its isolated
+The Build workflow prepares and seals the exact rc.12 version in its isolated
 checkout before this gate. Keep the preceding released version in the feature
 branch's `.cz.toml`; the release workflow owns the final version commit. A
 local readiness run requires the same preparation in a validation checkout.
@@ -275,7 +275,7 @@ also contains the canonical Coordination specification candidate under
 file and byte-identical to the canonical source file before the isolated build
 starts.
 
-For a downstream development handoff after the rc.11 gates pass on a clean
+For a downstream development handoff after the rc.12 gates pass on a clean
 committed source tree, export a separate
 invocation-owned immutable Coordination repository with:
 
@@ -328,4 +328,4 @@ is not read by the build and is not release evidence.
 
 See [Test strategy](test-strategy.md),
 [Releasing](releasing.md), and the
-[3.0.0-rc.11 decision](../releases/3.0.0-rc.11.md).
+[3.0.0-rc.12 decision](../releases/3.0.0-rc.12.md).
