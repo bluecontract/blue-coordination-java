@@ -138,3 +138,40 @@ Existing receipt bad-ACK/failure/old-root and cold corruption controls now execu
 the new mutation path without changing their expected outcomes. No new tests or
 JVMs have been run for this follow-up. Its exact source inventory is 313 Java
 files / 85,332 lines, +41 lines in three existing private production files.
+
+## Complete dependency-preparation frame reuse (cost36 follow-up)
+
+The original 300-second ring gate still stopped at seven of fourteen authored
+operations after the receipt point-lookup and batch-selection changes. Its
+60-second JFR contained 310/767 worker execution samples inside snapshot
+verification: 175 encoding-only, 73 decoding-only, and 62 without a visible
+codec caller. These are inclusive samples, not operation counts or exclusive
+timings. Fresh result encoding remained a measured cost.
+
+One remaining duplicate was in the **payload preparation**, inside the previous
+one-shot descriptor optimization: `StoredPublicationIndexes` completely encoded
+the publication with `scope::retainView` to retain dependencies, discarded the
+frame, and `StoredClosureReceiptReferenceCodec` immediately encoded it again.
+The second pass could also re-encode historical views merely to derive addresses.
+
+The payload codec now supplies the first complete frame through the existing
+one-shot `PreparedEncoding`. The reference codec consumes that frame, bounds it,
+retains it and checks the exact acknowledgment as before. Result-row retention
+still completes before the payload is written. Explicit `prepareForStorage`
+keeps its existing equivalent-value behavior. Independent later encoding,
+selected physical reads, cold decoding and canonical checks are unchanged.
+
+The focused control
+`productionPreparationEncodesTheCompletePublicationOnceRatherThanDiscardingItsFirstFrame`
+compares the real previous split path with the production path: **two full
+publication encodes become one**, with identical receipt bytes and physical root.
+It then cold-opens both outputs, checks the complete result/receipt and asserts no
+read-time writes. Existing corruption, missing payload, bounds, bad acknowledgment,
+rollback and fresh-identity controls apply to the same path. Qualification and
+the next original-ring result are recorded separately; this is not an E2E claim.
+
+No persistent fresh-result identity cache is added. Public result constructors
+can retain `Node` subclasses through a virtual `clone()` method; a successful
+encode alone must not become indefinite deep-immutability or decoded-result
+authority. One-shot owned bytes avoid that assumption. No Language/BEX change,
+new storage format, public policy or logical processing rule is involved.

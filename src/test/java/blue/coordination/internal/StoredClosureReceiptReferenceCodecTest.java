@@ -333,6 +333,59 @@ final class StoredClosureReceiptReferenceCodecTest {
         }
     }
 
+    @Test void productionPreparationEncodesTheCompletePublicationOnceRatherThanDiscardingItsFirstFrame() {
+        var fresh = receipts.get(0);
+        byte[][] roots = new byte[2][], retainedPayloads = new byte[2][];
+        for (int variant = 0; variant < 2; variant++) {
+            int[] fullPublicationEncodes = {0};
+            try (var binding = new Binding(new Bytes(), () -> fullPublicationEncodes[0]++)) {
+                PersistentOrderedMap<String, ContractsClosurePublicationReceipt> rows;
+                if (variant == 0) {
+                    // Previous production behavior: dependency preparation completely serializes
+                    // the receipt, discards the bytes, and the reference layer serializes it again.
+                    var codec = new PublicationReceiptStorageCodec(MAX, 256);
+                    var split = new PersistentMapCodec<ContractsClosurePublicationReceipt>() {
+                        public String identity() { return binding.legacy.identity(); }
+                        public ContractsClosurePublicationReceipt prepareForStorage(ContractsClosurePublicationReceipt value) {
+                            fullPublicationEncodes[0]++;
+                            codec.encodePublication(value, binding.scope::retainView);
+                            if (value.commits()) binding.results.retain(value.attempt().processResult());
+                            return value;
+                        }
+                        public byte[] encode(ContractsClosurePublicationReceipt value) {
+                            if (value == fresh) fullPublicationEncodes[0]++;
+                            return codec.encodePublication(value, binding.sessions::viewAddress);
+                        }
+                        public ContractsClosurePublicationReceipt decode(byte[] bytes) {
+                            return codec.decodePublication(bytes, binding.scope);
+                        }
+                    };
+                    try (var references = new StoredClosureReceiptReferenceCodec(binding.bytes, MAX, split)) {
+                        var codecs = new StoreIndexCodecs(binding.bytes, MAP_LIMITS);
+                        rows = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, references)
+                                .open(null).put(fresh.publicationIdentity(), fresh).map();
+                        roots[variant] = rows.storedRootDescriptor();
+                    }
+                } else {
+                    rows = binding.indexes.openClosures(null).put(fresh.publicationIdentity(), fresh).map();
+                    roots[variant] = rows.storedRootDescriptor();
+                }
+                assertEquals(variant == 0 ? 2 : 1, fullPublicationEncodes[0],
+                        "Count fresh-value publication encodes, including dependency preparation, not cold read checks");
+                assertEquals(1, binding.bytes.receiptWrites().size());
+                String address = binding.bytes.receiptWrites().keySet().iterator().next();
+                retainedPayloads[variant] = binding.bytes.records.get(address).clone();
+                int writes = binding.bytes.writes;
+                try (var cold = new Binding(binding.bytes)) {
+                    assertReceipt(fresh, cold.indexes.openClosures(roots[variant]).get(fresh.publicationIdentity()), cold);
+                }
+                assertEquals(writes, binding.bytes.writes, "Cold canonical validation remains read-only");
+            }
+        }
+        assertArrayEquals(retainedPayloads[0], retainedPayloads[1], "Exact original result/evidence bytes are unchanged");
+        assertArrayEquals(roots[0], roots[1], "Physical references and tree identities are unchanged");
+    }
+
     private static void assertReceipt(ContractsClosurePublicationReceipt expected, ContractsClosurePublicationReceipt actual, Binding binding) {
         assertNotNull(actual);
         assertEquals(expected.publicationIdentity(), actual.publicationIdentity());
@@ -388,11 +441,13 @@ final class StoredClosureReceiptReferenceCodecTest {
         final StoredPublicationIndexes indexes;
         final PersistentMapCodec<ContractsClosurePublicationReceipt> legacy;
         final StoredClosureReceiptReferenceCodec references;
-        Binding(Bytes bytes) {
+        Binding(Bytes bytes) { this(bytes, null); }
+        Binding(Bytes bytes, Runnable enclosingEncodeObserver) {
             this.bytes = bytes;
             sessions = new DocumentSessionStorage(bytes, SESSION_LIMITS); scope = sessions.openScope();
             results = new StoredResultRows(bytes, SESSION_LIMITS);
-            indexes = new StoredPublicationIndexes(bytes, MAP_LIMITS, sessions, scope, results, 256);
+            indexes = new StoredPublicationIndexes(bytes, MAP_LIMITS, sessions, scope, results, 256, null,
+                    new StoredPublicationReceiptReuse(), enclosingEncodeObserver);
             var codec = new PublicationReceiptStorageCodec(MAX, 256);
             legacy = new PersistentMapCodec<>() {
                 public String identity() { return "blue-coordination/publication-index-row/closure/1"; }

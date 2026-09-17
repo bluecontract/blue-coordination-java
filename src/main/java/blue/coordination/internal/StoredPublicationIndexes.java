@@ -61,11 +61,15 @@ final class StoredPublicationIndexes implements AutoCloseable {
                             "Only newly published admission receipts are durable");
                     resultRows.retain(value.attempt().processResult()); return value;
                 }, core::encodeAdmission, core::decodeAdmission));
+        Function<ContractsClosurePublicationReceipt, byte[]> prepareClosure = value -> {
+            if (enclosingEncodeObserver != null) enclosingEncodeObserver.run();
+            byte[] encoded = receipts.encodePublication(value, scope::retainView);
+            if (value.commits()) resultRows.retain(value.attempt().processResult());
+            return encoded;
+        };
         closureValues = new StoredClosureReceiptReferenceCodec(objects, limits.valueBytes(),
-                codec("closure", value -> {
-                    receipts.encodePublication(value, scope::retainView);
-                    if (value.commits()) resultRows.retain(value.attempt().processResult()); return value;
-                }, value -> closureReuse.encode(value, selected -> {
+                codec("closure", value -> { prepareClosure.apply(value); return value; },
+                value -> closureReuse.encode(value, selected -> {
                     byte[] canonical = cache == null ? null : cache.canonicalEncoding(publicationFamily, selected);
                     if (canonical != null) return canonical;
                     if (enclosingEncodeObserver != null) enclosingEncodeObserver.run();
@@ -79,7 +83,7 @@ final class StoredPublicationIndexes implements AutoCloseable {
                             value -> Math.addExact(value.decoded().views().encodedBytes(), PROOF_DEPENDENCY_BYTES),
                             value -> scope.acceptViews(value.decoded().views()));
                     return decoded.decoded().value();
-                })));
+                }), prepareClosure));
         closures = codecs.binding("publication/closure", EmbeddingBinding.TEXT_ORDER, codecs.text, closureValues);
         frontiers = codecs.binding("publication/provider-frontier", EmbeddingBinding.TEXT_ORDER, codecs.text,
                 codec("provider-frontier", UnaryOperator.identity(), value -> SessionStorageWire.encode(limits.valueBytes(), out -> {
@@ -137,9 +141,18 @@ final class StoredPublicationIndexes implements AutoCloseable {
 
     private static <T> PersistentMapCodec<T> codec(String name, UnaryOperator<T> prepare,
             Function<T, byte[]> encode, Function<byte[], T> decode) {
+        return codec(name, prepare, encode, decode, null);
+    }
+
+    private static <T> PersistentMapCodec<T> codec(String name, UnaryOperator<T> prepare,
+            Function<T, byte[]> encode, Function<byte[], T> decode, Function<T, byte[]> prepareAndEncode) {
         return new PersistentMapCodec<>() {
             public String identity() { return "blue-coordination/publication-index-row/" + name + "/1"; }
             public T prepareForStorage(T value) { return physical(() -> prepare.apply(value)); }
+            public PreparedEncoding<T> prepareEncoding(T value) {
+                return prepareAndEncode == null ? PersistentMapCodec.super.prepareEncoding(value)
+                        : physical(() -> PreparedEncoding.encoded(prepareAndEncode.apply(value)));
+            }
             public byte[] encode(T value) { return encode.apply(value); }
             public T decode(byte[] bytes) { return decode.apply(bytes); }
         };

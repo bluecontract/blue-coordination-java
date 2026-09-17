@@ -39,20 +39,30 @@ final class StoredClosureReceiptReferenceCodec
     /** Capture once for this mutation; later encode(value) receives no fresh-identity privilege. */
     @Override public synchronized PreparedEncoding<ContractsClosurePublicationReceipt> prepareEncoding(
             ContractsClosurePublicationReceipt value) {
-        return PreparedEncoding.encoded(retain(value).descriptor());
+        return physical(() -> {
+            requireOpen();
+            // The payload may already have encoded itself while preparing embedded views.
+            // Consume that exact one-shot frame instead of serializing its result/snapshots again.
+            byte[] bytes = payloads.prepareEncoding(Objects.requireNonNull(value)).consume(payloads);
+            return PreparedEncoding.encoded(retainPayload(bytes));
+        });
     }
 
     private PreparedReceipt retain(ContractsClosurePublicationReceipt value) {
         return physical(() -> {
             requireOpen();
             var prepared = Objects.requireNonNull(payloads.prepareForStorage(Objects.requireNonNull(value)));
-            byte[] bytes = payload(payloads.encode(prepared));
-            String address = PersistentMapStorage.digest(bytes);
-            byte[] selected = descriptor(address, bytes.length); // Bound before any receipt write.
-            byte[] acknowledged = payload(objects.putIfAbsent(address, bytes.clone()));
-            require(Arrays.equals(bytes, acknowledged), "Closure receipt retention acknowledgment differs");
-            return new PreparedReceipt(prepared, selected);
+            return new PreparedReceipt(prepared, retainPayload(payloads.encode(prepared)));
         });
+    }
+
+    private byte[] retainPayload(byte[] encoded) {
+        byte[] bytes = payload(encoded);
+        String address = PersistentMapStorage.digest(bytes);
+        byte[] selected = descriptor(address, bytes.length); // Bound before any receipt write.
+        byte[] acknowledged = payload(objects.putIfAbsent(address, bytes.clone()));
+        require(Arrays.equals(bytes, acknowledged), "Closure receipt retention acknowledgment differs");
+        return selected;
     }
 
     /** Pure canonical encoding; an address does not acknowledge retention or publication. */
