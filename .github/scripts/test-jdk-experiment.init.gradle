@@ -1,0 +1,45 @@
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated {
+    def project = gradle.rootProject
+    def proof = project.tasks.register('assertBenchmarkRuntime') {
+        mustRunAfter project.tasks.named('clean')
+        doLast {
+            def selected = project.providers.gradleProperty('testJavaVersion').get().toInteger()
+            assert selected in [17, 25]
+            assert JavaVersion.current() == JavaVersion.VERSION_17
+            assert gradle.startParameter.maxWorkerCount == 4
+            assert !gradle.startParameter.parallelProjectExecutionEnabled
+            def compilers = project.tasks.withType(JavaCompile).collect { task ->
+                def version = task.javaCompiler.get().metadata.languageVersion.asInt()
+                assert version == 17
+                assert task.options.release.get() == 17
+                [task: task.path, compiler: version, release: task.options.release.get()]
+            }
+            def tests = project.tasks.withType(Test).collect { task ->
+                def metadata = task.javaLauncher.get().metadata
+                assert metadata.languageVersion.asInt() == selected
+                assert task.maxParallelForks == 2
+                assert task.maxHeapSize == '2g'
+                def prefix = 'junit.jupiter.execution.parallel.'
+                [enabled: 'true', 'mode.default': 'concurrent', 'mode.classes.default': 'concurrent',
+                 'config.strategy': 'fixed', 'config.fixed.parallelism': '2',
+                 'config.fixed.max-pool-size': '2', 'config.fixed.saturate': 'true'].each { key, value ->
+                    assert task.systemProperties[prefix + key].toString() == value
+                }
+                [task: task.path, java: metadata.languageVersion.asInt(), runtime: metadata.javaRuntimeVersion,
+                 forks: task.maxParallelForks, heap: task.maxHeapSize]
+            }
+            assert tests*.task.sort() == [':consumerTest', ':integrationTest', ':playgroundSmokeTest', ':scenarioTest', ':test']
+            def javaExec = project.tasks.withType(JavaExec).collect { task ->
+                [task: task.path, java: task.javaLauncher.get().metadata.languageVersion.asInt()]
+            }
+            def output = project.file('benchmark-output/runtime.json')
+            output.parentFile.mkdirs()
+            output.text = JsonOutput.prettyPrint(JsonOutput.toJson([
+                daemon: System.getProperty('java.runtime.version'), compilerTarget: 17,
+                selectedTestJava: selected, workers: 4, compilers: compilers, tests: tests, javaExec: javaExec]))
+        }
+    }
+    project.tasks.named('verifyReleaseTestExecutionScope') { dependsOn proof }
+}
