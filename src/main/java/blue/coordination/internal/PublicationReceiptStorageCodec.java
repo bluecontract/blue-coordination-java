@@ -2,12 +2,15 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.language.processor.closure.ClosureExecutionEvidenceStorageCodec;
+import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureResourceDemand;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.BiConsumer;
 import static blue.coordination.internal.SessionRecordCodec.*;
 import static blue.coordination.internal.SessionStorageWire.*;
 
@@ -22,12 +25,19 @@ final class PublicationReceiptStorageCodec {
     private final OperationPlanStorageCodec plans;
     private final ManagedWorkStorageCodec works;
     private final ClosureExecutionEvidenceStorageCodec evidence;
+    private final BiConsumer<String, Object> frameEncoded;
 
     PublicationReceiptStorageCodec(int maximumBytes, int maximumDepth) {
         this(maximumBytes, maximumDepth, null);
     }
 
     PublicationReceiptStorageCodec(int maximumBytes, int maximumDepth, RootedStorageCache cache) {
+        this(maximumBytes, maximumDepth, cache, (kind, value) -> { });
+    }
+
+    /** Package-local measurement of actual full frames, not nested result/snapshot counts. */
+    PublicationReceiptStorageCodec(int maximumBytes, int maximumDepth, RootedStorageCache cache,
+            BiConsumer<String, Object> frameEncoded) {
         this.maximumBytes = maximumBytes;
         rows = new SessionRecordCodec(maximumBytes, maximumDepth);
         core = new CoreReceiptStorageCodec(maximumBytes, maximumDepth, cache);
@@ -36,13 +46,15 @@ final class PublicationReceiptStorageCodec {
         works = new ManagedWorkStorageCodec(maximumBytes, maximumDepth, cache);
         evidence = new ClosureExecutionEvidenceStorageCodec(maximumBytes, maximumDepth,
                 new StoredClosureResultCodec(maximumBytes, maximumDepth, cache).configured());
+        this.frameEncoded = Objects.requireNonNull(frameEncoded);
     }
 
     byte[] encodePublication(ContractsClosurePublicationReceipt value, Function<RootedDocumentView, String> retainView) {
+        var frames = new PublicationFrames();
         return SessionStorageWire.encode(maximumBytes, out -> {
             out.text(PUBLICATION); out.text(value.publicationIdentity()); list(out, value.documentIds(), (w, id) -> w.text(id.value()));
-            core.attempt(out, value.attempt()); out.longValue(value.automaticRetryCount()); surface(out, value.managedSurfaceEvidence());
-            optional(out, value.rootedTerminalEvidence(), (w, terminal) -> terminal(w, terminal, retainView));
+            core.attempt(out, value.attempt()); out.longValue(value.automaticRetryCount()); surface(out, value.managedSurfaceEvidence(), frames);
+            optional(out, value.rootedTerminalEvidence(), (w, terminal) -> terminal(w, terminal, retainView, frames));
             out.bool(value.rejectedDraftPlan() != null);
             if (value.rejectedDraftPlan() != null) {
                 if (value.rootedTerminalEvidence() == null) plans.draftPlan(out, value.rejectedDraftPlan());
@@ -54,11 +66,12 @@ final class PublicationReceiptStorageCodec {
 
     ContractsClosurePublicationReceipt decodePublication(byte[] bytes, DocumentSessionStorage.OpenScope scope) {
         return physical(() -> {
+            var frames = new PublicationInputs();
             var value = SessionStorageWire.decode(bytes, maximumBytes, in -> {
                 require(PUBLICATION.equals(text(in)), "Wrong publication receipt format");
                 String identity = text(in); var members = list(in, r -> DocumentId.of(text(r)));
-                var attempt = core.attempt(in); long retries = in.longValue(); var surface = surface(in);
-                var terminal = optional(in, r -> terminal(r, scope));
+                var attempt = core.attempt(in); long retries = in.longValue(); var surface = surface(in, frames);
+                var terminal = optional(in, r -> terminal(r, scope, frames));
                 var rejected = in.bool() ? terminal == null ? plans.draftPlan(in) : terminal.storedState().managedDraftPlan() : null;
                 return new ContractsClosurePublicationReceipt(identity, members, attempt, retries, surface, rejected, terminal);
             });
@@ -119,31 +132,64 @@ final class PublicationReceiptStorageCodec {
         require(position >= 0 && position < demands.size(), "Rejected issue points outside its original attempt"); return demands.get(position);
     }
 
-    private void terminal(Writer out, RootedTerminalEvidence value, Function<RootedDocumentView, String> retainView) {
-        var state = value.storedState(); out.bytes(evidence.encodeInvocation(state.input()));
+    private void terminal(Writer out, RootedTerminalEvidence value, Function<RootedDocumentView, String> retainView,
+            PublicationFrames frames) {
+        var state = value.storedState(); out.bytes(frames.invocation(state.input()));
         optional(out, state.managedDraftPlan(), plans::draftPlan); cohorts.rooted(out, state.rooted(), retainView);
         out.text(state.executedInvocationIdentity()); out.nullableText(state.historicalWorkIdentity());
         optional(out, state.historicalWork(), works::work); strings(out, new TreeSet<>(state.requiredTimelineIds()));
     }
-    private RootedTerminalEvidence terminal(Reader in, DocumentSessionStorage.OpenScope scope) {
-        var input = evidence.decodeInvocation(in.bytes(maximumBytes)); var plan = optional(in, plans::draftPlan);
+    private RootedTerminalEvidence terminal(Reader in, DocumentSessionStorage.OpenScope scope, PublicationInputs frames) {
+        var input = frames.invocation(in.bytes(maximumBytes)); var plan = optional(in, plans::draftPlan);
         var rooted = cohorts.rooted(in, input, scope::view);
         return RootedTerminalEvidence.restoreStored(new RootedTerminalEvidence.StoredState(input, plan, rooted,
                 text(in), nullableText(in), optional(in, works::work), stringSet(in)));
     }
 
-    private void surface(Writer out, ManagedSurfacePublicationEvidence value) {
+    private void surface(Writer out, ManagedSurfacePublicationEvidence value, PublicationFrames frames) {
         list(out, value.resolvedOccurrences(), (w, row) -> {
             w.text(row.demandIdentity()); StoreIndexCodecs.occurrence(w, row.occurrence()); w.text(row.targetKind().name());
             optional(w, row.authoredInitial(), rows::exact);
         });
         list(out, value.inputComponents(), rows::component); list(out, value.operationRouteChanges(), this::routeChange);
-        optional(out, value.originalInvocation(), (w, input) -> w.bytes(evidence.encodeInvocation(input)));
+        optional(out, value.originalInvocation(), (w, input) -> w.bytes(frames.invocation(input)));
     }
-    private ManagedSurfacePublicationEvidence surface(Reader in) {
+
+    /**
+     * One synchronous envelope capture only: the same original input appears in
+     * multiple receipt roles. Keep its first complete frame, never a proof or an object
+     * identity cache across calls. Equal-but-distinct evidence is encoded independently;
+     * cold readers still validate every occurrence and the complete canonical envelope.
+     */
+    private final class PublicationFrames {
+        private final IdentityHashMap<ClosureInvocationInput, byte[]> inputs = new IdentityHashMap<>();
+
+        byte[] invocation(ClosureInvocationInput input) {
+            return inputs.computeIfAbsent(input, value -> {
+                byte[] bytes = evidence.encodeInvocation(value);
+                frameEncoded.accept("invocation-encode", value);
+                return bytes;
+            });
+        }
+    }
+    /** Exact packet bytes only; the first decoder still verifies its complete private input. */
+    private final class PublicationInputs {
+        private byte[] firstFrame;
+        private ClosureInvocationInput firstInput;
+
+        ClosureInvocationInput invocation(byte[] bytes) {
+            if (firstFrame != null && Arrays.equals(firstFrame, bytes)) return firstInput;
+            var input = evidence.decodeInvocation(bytes);
+            frameEncoded.accept("invocation-decode", input);
+            if (firstFrame == null) { firstFrame = bytes; firstInput = input; }
+            return input;
+        }
+    }
+
+    private ManagedSurfacePublicationEvidence surface(Reader in, PublicationInputs frames) {
         return new ManagedSurfacePublicationEvidence(list(in, r -> new ManagedSurfacePublicationEvidence.ResolvedOccurrence(
                 text(r), StoreIndexCodecs.occurrence(r), ManagedOccurrenceResolver.TargetKind.valueOf(text(r)), optional(r, rows::exact))),
-                list(in, rows::component), list(in, this::routeChange), optional(in, r -> evidence.decodeInvocation(r.bytes(maximumBytes))));
+                list(in, rows::component), list(in, this::routeChange), optional(in, r -> frames.invocation(r.bytes(maximumBytes))));
     }
 
     private void routeChange(Writer out, OperationRouteIndex.OperationRouteChange value) {

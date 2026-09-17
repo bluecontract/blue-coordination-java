@@ -175,3 +175,44 @@ can retain `Node` subclasses through a virtual `clone()` method; a successful
 encode alone must not become indefinite deep-immutability or decoded-result
 authority. One-shot owned bytes avoid that assumption. No Language/BEX change,
 new storage format, public policy or logical processing rule is involved.
+
+## Packet-local invocation-frame reuse (cost36 follow-up)
+
+**Problem / example.** A genuine rooted historical-representation publication
+stores the same original invocation twice: once in its managed-surface evidence
+and once in its terminal evidence. The `RootedTerminalTailSdkScenario` probe
+produced a 1,397,258-byte receipt. With the production `RootedStorageCache` enabled,
+instrumentation delegated every existing cache lookup and counted only actual
+Language full-encoder fallbacks: four result encodes, one for the new result and
+three for the retained source result. Two source-result encodes came from those
+identical invocation slots. No duplicated historical-work slot was observed in
+that receipt, so this patch does not add a work-encoding memo.
+
+**Correction.** During one receipt encode, the first successful invocation frame
+is reused only for the same Java input object. Equal but distinct inputs each
+take the normal encoder path. During one receipt decode, the first fully decoded
+invocation is reused only for byte-for-byte identical second input frames.
+Neither scope survives the call or a failure. This eliminates one invocation
+encode/decode; the same production-cache probe confirmed full result encodes
+decreased from four to three with the same 1,397,258-byte frame. A warm result cache may already avoid some
+nested result encoding; it does not itself avoid the invocation snapshot work.
+
+**Safety.** These two receipt slots are read/written before any retained-view
+callback. Terminal binding/result checks and complete-envelope canonical byte
+equality still run. Changed second-frame bytes take their own full decoder path;
+an equal hash, logical identity, or host assertion is insufficient. The restored
+alias matches the original live receipt, whose two roles already share the input.
+The ordinary outer byte/depth limits and every selected-view authority check
+remain unchanged. No global object cache, fresh-result certificate, public API,
+physical format, gas or scheduling change is introduced.
+
+`PublicationInputFrameReuseTest` uses real SDK LIVE and historical publications
+to measure shared versus equal-distinct inputs, preserve exact receipt bytes,
+check cold canonical round trips, distinguish changed second frames, and check
+failure/retry and tight envelope bounds. The new four-test owner passed in
+`cost36/check07`; the 27 existing receipt/reference controls passed in `check06`.
+The initial new failure test expected a view-retention callback that this fixture
+does not need; it was corrected to exercise an actual late outer-frame size
+failure and retry. Production code did not change after `check06`. This is narrow
+qualification, not full-graph performance or whole-POC acceptance. Diagnostic evidence lives at
+`processing-measurement13/cost36/receipt-encode-probe01` in the POC evidence root.
