@@ -27,5 +27,13 @@ The five failures expose stale test mechanisms left by earlier POC optimizations
 
 Only tests and this note change in Coordination. No runtime, wire format,
 public API, logical gas or publication boundary is changed by this refresh.
-Targeted requalification is pending; the failed initial run is not presented
-as a green full run.
+Targeted requalification (`cost41/coordination-controls02`, source
+`30a049fed27df46bbf79babfdb979347199f6632`) passed **27/27**, zero
+failures/errors/skips, across all four previously failing owners plus the
+observation-cache owner. Javadoc, shape and both API gates also passed; source
+unchanged. This completes the five fixture failures but does not relabel the
+initial 628-case run as a single green run.
+
+MyOS qualification uses the immutable runtime artifact from `a14721e6`:
+its production/build source is identical to this test-only follow-up. Language,
+BEX and Catalog manifests remain the same between both qualification runs.
