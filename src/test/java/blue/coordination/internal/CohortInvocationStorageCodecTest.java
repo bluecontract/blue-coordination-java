@@ -20,20 +20,23 @@ final class CohortInvocationStorageCodecTest {
     private static final ClosureExecutionEvidenceStorageCodec LANGUAGE = new ClosureExecutionEvidenceStorageCodec(MAX, 256);
     private static final ClosureProcessResultStorageCodec RESULTS = new ClosureProcessResultStorageCodec(MAX, 256);
 
-    @Test void pairedRootSelectionReusesOneCaptureAndPreservesExactProcessingAndNextHead() throws Exception {
+    @Test void pairedRootSelectionReusesFencedCaptureAndPreservesExactProcessingAndNextHead() throws Exception {
         try (var f = new Fixture()) {
             var root = f.start("source.yaml", "rcp2/source", ActivationPolicy.importFullHistory());
             var entry = f.append(root, "rcp2/source", "tick", "{}");
             var adapter = f.engine.contractsClosureAdapter();
             var entries = f.engine.auditTimelineEntries();
+            // Keep the opportunistic weak observation alive while measuring reuse.
+            var retainedCapture = adapter.captureRootedState(root.id());
             long before = documentOpens(f);
             var separateLocal = adapter.nextRootLocalHistory(root.id(), entries);
             var separateLive = adapter.nextRootLiveInput(root.id(), entries).orElseThrow();
             assertFalse(separateLocal.pending());
-            assertEquals(2L, documentOpens(f) - before, "Separate paths really capture the one owner twice");
+            assertEquals(0L, documentOpens(f) - before, "Separate reads reuse the same unchanged verified observation");
             before = documentOpens(f);
             var paired = adapter.nextRootInputCandidates(root.id(), entries, () -> null);
-            assertEquals(1L, documentOpens(f) - before);
+            assertEquals(0L, documentOpens(f) - before);
+            assertSame(retainedCapture, adapter.captureRootedState(root.id()));
             assertFalse(paired.local().pending());
             var actualInput = paired.live().orElseThrow().invocations().get(0);
             var referenceInput = separateLive.invocations().get(0);
@@ -66,7 +69,7 @@ final class CohortInvocationStorageCodecTest {
         }
     }
 
-    @Test void pairedRootSelectionKeepsLazyLiveCutoffsAndDropsFailedDecisionCapture() throws Exception {
+    @Test void pairedRootSelectionKeepsLazyLiveCutoffsWithoutCachingAFailedSelection() throws Exception {
         try (var f = new Fixture()) {
             var root = f.start("source.yaml", "rcp2/source", ActivationPolicy.importFullHistory());
             var adapter = f.engine.contractsClosureAdapter();
@@ -85,14 +88,17 @@ final class CohortInvocationStorageCodecTest {
             assertTrue(adapter.nextRootInputCandidates(root.id(), entries, () -> order).live().isEmpty());
             assertEquals(1L, documentOpens(f) - before);
 
+            var retainedCapture = adapter.captureRootedState(root.id());
             var marker = new IllegalStateException("registered evidence unavailable");
             before = documentOpens(f);
             assertSame(marker, assertThrows(IllegalStateException.class,
                     () -> adapter.nextRootInputCandidates(root.id(), entries, () -> { throw marker; })));
-            assertEquals(1L, documentOpens(f) - before);
+            assertEquals(0L, documentOpens(f) - before, "A cutoff lookup failure does not invalidate an already verified capture");
             before = documentOpens(f);
             assertTrue(adapter.nextRootInputCandidates(root.id(), entries, () -> null).live().isPresent());
-            assertEquals(1L, documentOpens(f) - before, "A failed decision does not publish a reusable capture");
+            assertEquals(0L, documentOpens(f) - before);
+            assertSame(retainedCapture, adapter.captureRootedState(root.id()),
+                    "The capture remains valid; the failed selection itself was not retained as negative evidence");
         }
     }
 

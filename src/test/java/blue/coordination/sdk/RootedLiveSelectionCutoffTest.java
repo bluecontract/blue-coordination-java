@@ -153,9 +153,12 @@ final class RootedLiveSelectionCutoffTest {
                 // not an unproved same-root LIVE/history coexistence state.
                 long before = surfaceCompilations(f);
                 assertTrue(f.control.nextLiveInputBefore(independent.id(), sourceEntry.blueId()).isEmpty());
-                // Prior completed source10 is before the bound, so one root
-                // capture is legitimate. The first-entry test proves zero capture.
-                assertEquals(before + 1L, surfaceCompilations(f));
+                // Prior completed source10 is before the bound, so one cold
+                // capture is legitimate; an unchanged fenced observation can be
+                // reused instead. The first-entry test still proves zero capture.
+                long after = surfaceCompilations(f);
+                assertTrue(after == before || after == before + 1L,
+                        "The bounded search compiles at most one selected surface");
                 assertEquals(live.blueId(), f.control.nextLiveInput(independent.id()).orElseThrow());
             }
             independentHistory = f.history(independent);
