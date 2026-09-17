@@ -86,6 +86,16 @@ class ConsumeProductionProofTests(unittest.TestCase):
                 verification.consume('25',str(archive),'3.0.0-rc.11')
                 self.assertEqual(timing.read(installed),proof)
                 installed.unlink()
+                timing.write(folder/'timing.json',dict(receipt,attempt='2'))
+                with self.assertRaisesRegex(ValueError,'attempt'):
+                    verification.consume('25',str(archive),'3.0.0-rc.11')
+                self.assertFalse(installed.exists())
+                timing.write(folder/'timing.json',receipt)
+                archive.write_bytes(b'changed archive bytes')
+                with self.assertRaisesRegex(ValueError,'archiveSha256'):
+                    verification.consume('25',str(archive),'3.0.0-rc.11')
+                self.assertFalse(installed.exists())
+                archive.write_bytes(b'verified source bytes')
                 timing.write(folder/'archive.json',dict(proof,java='17'))
                 with self.assertRaisesRegex(ValueError,'corrupted'):
                     verification.consume('25',str(archive),'3.0.0-rc.11')

@@ -8,7 +8,7 @@ gradle.projectsEvaluated {
         throw new GradleException('Archive handoff requires a bound CI verification scope')
     }
     if (!gradle.startParameter.excludedTaskNames.empty) {
-        throw new GradleException('The experiment must not exclude verification tasks')
+        throw new GradleException('Delegated verification must not exclude verification tasks')
     }
     def archive = root.tasks.named('coordinationSourceArchive').get()
     def smoke = root.tasks.named('verifyExtractedSourceArchive').get()

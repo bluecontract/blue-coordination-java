@@ -29,7 +29,11 @@ jobs:
         with:
           node-version: '22'
       - name: Verify release automation
-        run: node --test .github/scripts/*.test.js
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          node --test .github/scripts/*.test.js
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Seal prepared verification worktree
         run: |
           set -euo pipefail

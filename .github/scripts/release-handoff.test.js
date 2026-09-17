@@ -271,7 +271,7 @@ test('CI uses only Java 25 while published bytecode remains Java 17', () => {
     const script = fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
     assert.doesNotMatch(script, /JavaLanguageVersion.of\((17|21)\)|getOrElse\('(17|21)'\)/);
   }
-  for (const file of ['../actions/setup-release/action.yml', '../workflows/ci-release-experiment.yml']) {
+  for (const file of ['../actions/setup-release/action.yml']) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
     assert.match(text, /java-version: '25'/);
     assert.doesNotMatch(text, /JAVA_HOME_(17|21)_X64|java-version: '(17|21)/);
@@ -288,10 +288,6 @@ test('production verification runs full core and archive independently and check
   assert.match(shared, /ci-verification.py run archive/);
   assert.match(shared, /release-handoff.js seal/);
   assert.match(shared, /coordination-archive-\$\{\{ inputs.scope \}\}-\$\{\{ github.run_attempt \}\}/);
-  const topology = fs.readFileSync(path.join(__dirname, '../workflows/verify-production-topology.yml'), 'utf8');
-  assert.match(topology, /needs: \[prepare, verify\]/);
-  assert.match(topology, /release-handoff.js verify/);
-  assert.doesNotMatch(topology, /secrets\.|git push|git tag|jreleaserDeploy/);
   const build = fs.readFileSync(path.join(__dirname, '../workflows/build.yml'), 'utf8');
   assert.match(build, /prepare-verification-source.yml/);
   assert.match(build, /uses: .\/.github\/workflows\/verification.yml/);

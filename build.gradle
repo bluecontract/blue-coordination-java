@@ -655,6 +655,9 @@ if (System.getenv('CI') != null) {
                         url = 'https://central.sonatype.com/api/v1/publisher'
                         applyMavenCentralRules = true
                         snapshotSupported = false
+                        // CI confirms PUBLISHED in a separately visible, status-only step.
+                        skipPublicationCheck = providers.gradleProperty(
+                                'mavenCentralSeparateWait').getOrElse('false').toBoolean()
                         stagingRepository('build/staging-deploy')
                     }
                 }

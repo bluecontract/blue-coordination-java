@@ -3,7 +3,7 @@
 import importlib.util
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location('timing', Path(__file__).with_name('ci-release-experiment.py'))
+spec = importlib.util.spec_from_file_location('timing', Path(__file__).with_name('ci-verification-support.py'))
 timing = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(timing)
 
@@ -31,9 +31,7 @@ def identity():
 
 
 def commands(lane, java):
-    result = timing.commands(lane, java)
-    return [[arg.replace('ci-archive-receipt.init.gradle', 'ci-archive-handoff.init.gradle')
-             for arg in command] for command in result]
+    return timing.commands(lane, java)
 
 
 def validate_receipt(receipt, binding, lane, java):

@@ -51,7 +51,11 @@ jobs:
           node-version: '22'
 
       - name: Verify release automation
-        run: node --test .github/scripts/*.test.js
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          node --test .github/scripts/*.test.js
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Require release credentials
         shell: bash
@@ -174,7 +178,16 @@ jobs:
           JRELEASER_GPG_PUBLIC_KEY: ${{ secrets.GPG_PUBLIC_KEY }}
           JRELEASER_GPG_SECRET_KEY: ${{ secrets.GPG_SECRET_KEY }}
           JRELEASER_REPRODUCIBLE: true
-        run: ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25
+        run: |
+          rm -f build/jreleaser/output.properties build/jreleaser/maven-central-publication.json
+          ./gradlew --no-daemon --no-build-cache jreleaserDeploy -x stageRelease -PblueDependencyMode=published-artifact -PtestJavaVersion=25 -PmavenCentralSeparateWait=true
+
+      - name: Wait for Maven Central publication
+        timeout-minutes: 35
+        env:
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+        run: python3 .github/scripts/wait-maven-central.py build/jreleaser/output.properties --receipt build/jreleaser/maven-central-publication.json
 
       - name: Push published release tag
         if: ${{ inputs.channel == 'rc' }}

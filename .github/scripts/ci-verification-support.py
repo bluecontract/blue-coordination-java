@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Branch-only, non-publishing comparison of the complete RC verification gates."""
+"""Production verification receipts, archive validation and resource measurements."""
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
-import shutil
 import subprocess
-import sys
 import time
 
-BRANCH = 'refs/heads/codex/ci/coordination-release-experiment'
 SUITES = ['test', 'integrationTest', 'consumerTest', 'scenarioTest']
 ARCHIVE_SCHEMA = 'blue-coordination-contracts10-source-archive-verification-v3'
 ARCHIVE_STATUSES = ['extractedConfiguration', 'compileStatus', 'dependencyIsolationStatus', 'focusedTestsStatus']
@@ -42,28 +39,14 @@ def sha(path):
 
 
 def commands(lane, java):
-    require(lane in ['baseline', 'core', 'archive'] and java in ['25'], 'Invalid lane/JDK')
+    require(lane in ['core', 'archive'] and java in ['25'], 'Invalid lane/JDK')
     common = ['--no-daemon', '--no-build-cache', '--max-workers=4', '-PtestMaxParallelForks=4',
               '-PblueDependencyMode=published-artifact', '-PtestJavaVersion=' + java]
     preflight = common + ['dependencyPreflight']
     if lane == 'archive':
         return [preflight, common + ['clean', 'verifyExtractedSourceArchive']]
-    init = ['--init-script', '.github/scripts/ci-archive-receipt.init.gradle'] if lane == 'core' else []
+    init = ['--init-script', '.github/scripts/ci-archive-handoff.init.gradle'] if lane == 'core' else []
     return [preflight, common + init + ['clean', 'stageRelease']]
-
-
-def identity():
-    require(os.environ.get('GITHUB_REF') == BRANCH, 'Experiment branch required')
-    require(os.environ.get('GITHUB_REPOSITORY') == 'bluecontract/blue-coordination-java', 'Unexpected repository')
-    result = {'schema': 1}
-    for key, arg in [('sha', 'HEAD'), ('tree', 'HEAD^{tree}')]:
-        result[key] = subprocess.check_output(['git', 'rev-parse', arg], text=True).strip()
-    require(result['sha'] == os.environ.get('GITHUB_SHA'), 'Checkout differs from requested source')
-    subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--'], check=True)
-    for key, env in [('run', 'GITHUB_RUN_ID'), ('attempt', 'GITHUB_RUN_ATTEMPT')]:
-        result[key] = os.environ.get(env, '')
-        require(result[key].isdigit() and int(result[key]) > 0, 'Missing run binding')
-    return result
 
 
 def validate(receipt, binding, lane, java, command_factory=commands):
@@ -106,30 +89,6 @@ def inventory(proof):
     return sorted(result)
 
 
-def consume(java, archive_path, version):
-    binding = identity()
-    require(os.environ.get('EXPERIMENT_LANE') == 'core', 'Only core consumes receipts')
-    target = Path(os.environ['RUNNER_TEMP']) / ('coordination-archive-' + java + '-' + binding['attempt'])
-    deadline = time.monotonic() + 1800
-    while not (target / 'timing.json').is_file():
-        shutil.rmtree(target, ignore_errors=True)
-        downloaded = subprocess.run(['gh', 'run', 'download', binding['run'], '--repo',
-            os.environ['GITHUB_REPOSITORY'], '--name', 'coordination-timing-' + binding['attempt'] + '-archive-' + java,
-            '--dir', str(target)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        if downloaded.returncode == 0:
-            break
-        require(time.monotonic() < deadline, 'Archive receipt not available within30min')
-        print('Waiting for verified extracted-source archive job', flush=True)
-        time.sleep(15)
-    receipt = read(target / 'timing.json')
-    validate(receipt, binding, 'archive', java)
-    proof = read(target / 'archive.json')
-    require(sha(target / 'archive.json') == receipt['archiveProofSha256'], 'Archive proof corrupted')
-    validate_archive(proof, java, sha(archive_path), Path(archive_path).name, version)
-    write(ARCHIVE_REPORT, proof)
-    print('Verified actual extracted-source archive execution for Java' + java, flush=True)
-
-
 def sample_processes(root_pid, known, measurements):
     """Sample this command's process tree, retaining already observed detached daemons."""
     processes = {}
@@ -162,7 +121,7 @@ def sample_processes(root_pid, known, measurements):
     measurements['peakProcesses'] = max(measurements['peakProcesses'], len(selected))
 
 
-def measure(lane, java, output, binding_factory=identity, command_factory=commands, channel="rc"):
+def measure(lane, java, output, binding_factory, command_factory=commands, channel="rc"):
     out = Path(output)
     require(not out.exists(), 'Refuse reused output directory')
     out.mkdir(parents=True)
@@ -206,55 +165,3 @@ def measure(lane, java, output, binding_factory=identity, command_factory=comman
         measurements['averageSampledCores'] = measurements['sampledCpuSeconds'] / (receipt['finished'] - receipt['started'])
         receipt['processTreeSampling'] = measurements
         write(out / 'timing.json', receipt)
-
-
-def compare(directory):
-    binding = identity()
-    receipts = {}
-    root = Path(directory)
-    for lane in ['baseline', 'core', 'archive']:
-        for java in ['25']:
-            matches = list(root.glob('coordination-timing-' + binding['attempt'] + '-' + lane + '-' + java + '/timing.json'))
-            require(len(matches) == 1, 'Missing/duplicate job receipt: ' + lane + java)
-            receipt = read(matches[0]); validate(receipt, binding, lane, java)
-            receipt['_path'] = matches[0].parent
-            receipts[(lane, java)] = receipt
-    for java in ['25']:
-        baseline, core, archive = [receipts[(lane, java)] for lane in ['baseline', 'core', 'archive']]
-        for row in [baseline, core, archive]:
-            proof_path = row['_path'] / 'archive.json'
-            require(sha(proof_path) == row['archiveProofSha256'], 'Changed archive receipt')
-        require(read(baseline['_path'] / 'archive.json') == read(core['_path'] / 'archive.json')
-                == read(archive['_path'] / 'archive.json'), 'Archive verification differs between variants')
-        for row in [baseline, core]:
-            require(sha(row['_path'] / 'scope.json') == row['scopeProofSha256'], 'Changed scope proof')
-        require(inventory(read(baseline['_path'] / 'scope.json')) == inventory(read(core['_path'] / 'scope.json')),
-                'Test coverage differs between variants')
-        for row in [baseline, core]:
-            require(sha(row['_path'] / 'build.json') == row['buildProofSha256'], 'Changed build handoff')
-        require(read(baseline['_path'] / 'build.json') == read(core['_path'] / 'build.json'),
-                'Production release handoff differs between baseline and core')
-    baseline = [receipts[('baseline', java)] for java in ['25']]
-    parallel = [receipts[(lane, java)] for lane in ['core','archive'] for java in ['25']]
-    window = lambda rows: max(r['finished'] for r in rows) - min(r['started'] for r in rows)
-    before, after = window(baseline), window(parallel)
-    lines = ['## Complete RC verification, without publication', '',
-             f'Baseline Java 25 window: **{before:.1f}s**. Parallel archive window: **{after:.1f}s**.',
-             f'Observed change: **{(before-after)/before*100:.1f}% faster** (negative means slower).', '',
-             '| Lane | JDK | Command window(s) | Peak PSS(MiB) | Sampled cores |', '|---|---|---:|---:|---:|']
-    for (lane, java), row in receipts.items():
-        metrics = row['processTreeSampling']
-        lines.append(f"| {lane} | {java} | {row['finished']-row['started']:.1f} | {metrics['peakPssKiB']/1024:.1f} | {metrics['averageSampledCores']:.2f} |")
-    lines += ['', 'All full test inventories, topology gates, archive proofs and Java 25 staged bytes match.',
-              'Windows include receipt waits and staggered job starts; exclude setup/upload/final comparison.',
-              'Process-tree CPU/PSS sampling is approximate (short-lived processes can be missed).',
-              'No Maven publication or release executed; historical publication latency is not included.']
-    summary = '\n'.join(lines) + '\n'
-    print(summary)
-    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as handle:
-        handle.write(summary)
-
-
-if __name__ == '__main__':
-    action, *arguments = sys.argv[1:]
-    {'measure': measure, 'consume': consume, 'compare': compare}[action](*arguments)

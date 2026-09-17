@@ -18,6 +18,10 @@ function stepCommand(name) {
   const step = workflow.slice(start, end < 0 ? undefined : end);
   const command = step.match(/^        run: (.+)$/m)?.[1];
   assert.ok(command, `Expected a single command for ${name}`);
+  if (command === '|' || command === '|-') {
+    return step.split(`        run: ${command}\n`)[1].split('\n')
+      .filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n');
+  }
   return command;
 }
 
@@ -70,6 +74,7 @@ test('publishes the commit after the Java 25 gate and the tag after deployment',
     'Verify Java 25 gate and restore staged artifacts',
     'Push verified release commit',
     'Publish to Maven Central',
+    'Wait for Maven Central publication',
     'Push published release tag',
   ];
   const positions = names.map((name) => publisher.indexOf(`      - name: ${name}\n`));
@@ -104,4 +109,17 @@ test('a next update during deployment does not block the exact release tag', (t)
   assert.equal(f.git(f.remote, 'rev-parse', 'refs/heads/next'), newerCommit);
   assert.equal(f.git(f.remote, 'rev-parse', `${tag}^{commit}`), f.releaseCommit);
   assert.equal(f.git(f.remote, 'tag', '--list'), `v${version}`);
+});
+
+
+test('publication wait is status-only and default local deployment still waits', () => {
+  const deploy = stepCommand('Publish to Maven Central');
+  const wait = stepCommand('Wait for Maven Central publication');
+  assert.match(deploy, /rm -f build\/jreleaser\/output.properties build\/jreleaser\/maven-central-publication.json/);
+  assert.ok(deploy.indexOf('rm -f') < deploy.indexOf('./gradlew'));
+  assert.match(deploy, /-PmavenCentralSeparateWait=true/);
+  assert.match(wait, /python3 .github\/scripts\/wait-maven-central.py build\/jreleaser\/output.properties --receipt build\/jreleaser\/maven-central-publication.json/);
+  assert.doesNotMatch(wait, /gradlew|jreleaserDeploy|git push/);
+  const build = fs.readFileSync(path.join(__dirname, '../../build.gradle'), 'utf8');
+  assert.match(build, /skipPublicationCheck = providers.gradleProperty\(\s*'mavenCentralSeparateWait'\).getOrElse\('false'\).toBoolean\(\)/);
 });
