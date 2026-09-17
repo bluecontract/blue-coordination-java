@@ -690,9 +690,11 @@ def currentProductionShapeLimits = [
         // Measured source inventory; see docs/poc-indexed-session-history-plan.md.
         // Cost38: one private observation memo plus reviewed bounded artifact-read paths.
         // Public inventory and per-source limits are unchanged; see the Cost38 package note.
-        classes: 325,
-        lines: 87_659L,
-        publicApiTypes: 94,
+        // Cost39: two immutable core/SDK observation records and point-read adapters (+90 lines).
+        // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
+        classes: 327,
+        lines: 87_749L,
+        publicApiTypes: 96,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [

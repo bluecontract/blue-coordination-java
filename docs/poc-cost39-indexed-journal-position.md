@@ -16,6 +16,11 @@ policy or reaction boundary. Mini keeps the existing `maximum timestamp + 1` rul
 Explicit predecessor overrides and overflow behavior are preserved. The full
 audit APIs remain available; this indexed read does not audit unused old rows.
 
+The existing production-shape inventory is updated by exactly two source/public
+types and 90 production lines for the core/SDK immutable observations and adapters.
+Per-source and architectural prohibitions remain unchanged; this is not a runtime
+limit increase or a change to CI workflows.
+
 Rejected alternatives: last appended timestamp (incorrect with cross-Timeline
 out-of-order imports); a host-only cached maximum (requires additional durable
 authority/recovery); two unpinned reads (can combine different journal states).
