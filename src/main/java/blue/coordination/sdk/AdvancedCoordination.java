@@ -190,6 +190,15 @@ public final class AdvancedCoordination {
     }
 
     /**
+     * Reads one exact numbered revision from the current READY history without
+     * enumerating its prefix. Empty means the epoch is beyond the READY boundary;
+     * this is not a same-epoch representation cursor or a publication certificate.
+     */
+    public Optional<DocumentRevision> auditReadyRevision(DocumentId documentId, long epoch) {
+        return runtime.auditReadyRevision(Objects.requireNonNull(documentId, "documentId"), epoch);
+    }
+
+    /**
      * Reads current complete history and authenticates reusable immutable receipt prefix artifacts.
      * Current engine reads are never skipped. A foreign configuration/document, changed receipt
      * object or cold reconstruction cannot borrow the previous artifact's content validation.

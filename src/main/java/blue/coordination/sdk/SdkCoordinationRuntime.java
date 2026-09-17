@@ -1018,6 +1018,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 .toList();
     }
 
+    synchronized Optional<DocumentRevision> auditReadyRevision(DocumentId id, long epoch) {
+        ensureOpen();
+        if (epoch < 0) throw new IllegalArgumentException("Negative revision epoch");
+        long ready = engine.document(id).epoch();
+        return epoch > ready ? Optional.empty() : Optional.of(publicRevision(engine.revisionAt(id, epoch)));
+    }
+
     synchronized DocumentSnapshot snapshot(DocumentId id) {
         ensureOpen();
         blue.coordination.api.DocumentSnapshot snapshot =
