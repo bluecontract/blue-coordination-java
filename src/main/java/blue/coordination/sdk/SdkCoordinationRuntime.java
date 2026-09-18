@@ -877,15 +877,29 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
     }
 
-    synchronized ProcessingStageResult processRootStage(DocumentHandle root, EntryHandle input) {
+    private SelectedProcessingStage pendingStage;
+
+    synchronized SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
         requireStageRoot(root);
-        if (input.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");
-        return stageResult(engine.processRootInputStage(root.id(), requireCoreEntry(input), null));
+        if (input != null && input.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");
+        pendingStage = new SelectedProcessingStage(this, engine.selectRootStage(root.id(), input == null ? null : requireCoreEntry(input)));
+        return pendingStage;
+    }
+
+    synchronized ProcessingStageResult executeSelectedStage(SelectedProcessingStage stage) {
+        if (closed || pendingStage != stage || stage.runtime != this)
+            throw new IllegalStateException("Stage selection is retired or belongs to another runtime");
+        // The engine also checks thread affinity before consuming the frozen selection.
+        var receipt = stage.selected.execute(); pendingStage = null;
+        return stageResult(receipt, stage);
+    }
+
+    synchronized ProcessingStageResult processRootStage(DocumentHandle root, EntryHandle input) {
+        return selectStage(root, Objects.requireNonNull(input)).execute();
     }
 
     synchronized ProcessingStageResult processNextRootStage(DocumentHandle root) {
-        requireStageRoot(root);
-        return stageResult(engine.processNextRootStage(root.id(), null));
+        return selectStage(root, null).execute();
     }
 
     private void requireStageRoot(DocumentHandle root) {
@@ -895,7 +909,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         requireDocument(root.id());
     }
 
-    private ProcessingStageResult stageResult(ProcessingDrainReceipt receipt) {
+    private ProcessingStageResult stageResult(ProcessingDrainReceipt receipt, SelectedProcessingStage stage) {
         boolean failed = receipt.managedEpochApplicationAttempts().stream().anyMatch(a -> a.publicationFailure().isPresent())
                 || java.util.stream.Stream.concat(receipt.contractsAttemptsByEntry().values().stream().flatMap(List::stream),
                         receipt.rootedRetainedAttempts().stream().map(ProcessingDrainReceipt.RootedRetainedAttempt::attempt))
@@ -907,7 +921,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 : !receipt.quiescent() ? ProcessingStageResult.Disposition.WAITING
                 : selected ? ProcessingStageResult.Disposition.COMPLETED : ProcessingStageResult.Disposition.NO_WORK;
         if (!failed) retain(mapped);
-        return new ProcessingStageResult(disposition, mapped);
+        else close(); // A rejected publication cannot leave a stageable mutable owner.
+        return new ProcessingStageResult(disposition, mapped, stage.context(), stage.selected.resultOwners(receipt),
+                stage.selected.invalidatesSelection(receipt));
     }
 
     synchronized DrainResult drain() {
@@ -1602,6 +1618,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     private void ensureOpen() {
+        if (pendingStage != null) throw new IllegalStateException("Execute or discard the selected stage before other SDK work");
         if (closed) {
             throw new IllegalStateException("BlueCoordination is closed");
         }

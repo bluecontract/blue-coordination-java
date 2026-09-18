@@ -48,6 +48,16 @@ public final class ProcessingGateway {
         return runtime.processNextRootStage(Objects.requireNonNull(root, "root"));
     }
 
+    /** Freezes one root's next stage; acquire context entry owners before executing the returned token. */
+    public SelectedProcessingStage selectNextStage(DocumentHandle root) {
+        return runtime.selectStage(Objects.requireNonNull(root), null);
+    }
+
+    /** Freezes the supplied accepted input without appending or looking ahead. */
+    public SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
+        return runtime.selectStage(Objects.requireNonNull(root), Objects.requireNonNull(input));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

@@ -25,12 +25,14 @@ final class LogicalCoordinationStorageTest {
     @Test void completeLogicalOwnerMatchesResidentResultAndHistoryAcrossColdStages() throws Exception {
         // given
         byte[] expected; String head; List<String> history;
+        blue.coordination.api.ProcessingStageContext expectedSelection;
         RootedCoordinationStorage.Configuration configuration;
         try (var reference = new RootedSdkFixture()) {
             configuration = RootedCoordinationStorage.configuration(reference.blue, LIMITS);
             var root = reference.start("source.yaml", "rcp2/source", Map.of());
             var entry = reference.append(root, "rcp2/source", "setCounter", 10, "counterValue: 5");
-            expected = CODEC.encode(reference.blue.processing().processNextStage(root).entry(entry));
+            var selected = reference.blue.processing().processNextStage(root); expectedSelection = selected.selection();
+            expected = CODEC.encode(selected.entry(entry));
             head = root.snapshot().blueId(); history = reference.history(root);
         }
         var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
@@ -50,6 +52,7 @@ final class LogicalCoordinationStorageTest {
             var root = scope.documentHandle(rootId).orElseThrow();
             var stage = scope.coordination().processing().processNextStage(root);
             assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
+            assertEquals(expectedSelection, stage.selection(), "Cold selection binds the exact resident cause, owners and predecessor context");
             assertArrayEquals(expected, CODEC.encode(scope.coordination().runtimeForStorage().storedMaps().results().get(entryId)));
             // Retain all newly prewritten artifacts for the next owner.
             scope.stage(); assertTrue(records.publish(attempt.prepare("processed", List.of(), EVIDENCE)));

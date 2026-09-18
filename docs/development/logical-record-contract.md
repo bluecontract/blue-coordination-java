@@ -194,3 +194,32 @@ populates the missing Timeline index without changing accepted events.
 All complete cold SDK fixtures now publish journal/runtime changes together.
 The remaining legacy whole-journal drain/diagnostic gateways intentionally retain
 whole-journal conditions; the application must use the bounded stage gateways.
+
+## Frozen selection and detached completed evidence
+
+`processing().selectNextStage(root)` or `selectStage(root, acceptedInput)`
+returns a single-use, thread-affine `SelectedProcessingStage`. Its immutable
+`ProcessingStageContext` identifies the selected kind, exact journal/retained work
+causes, owner predecessors (head, epoch, history, graph generation and closure),
+and captured rooted invocation contexts. These are library-derived owners,
+separate from immutable downstream witnesses. SDK/engine operations are blocked
+until the token executes or the owning scope is discarded. No future selection
+is performed by `execute()`. Existing `process*Stage` methods wrap this boundary.
+
+The completed result carries that context, the complete entry/result owner union
+(including split members), and graph-change invalidation. The host must condition
+all owners; if the result expands authority it can discard the unpublished attempt,
+acquire the complete union and retry from fresh durable state. Selection is not a
+host claim, and the context does not grant publication rights. The named immutable
+context is the only new core type permitted in the three SDK stage facade signatures.
+
+`ProcessingStageStorage` canonically encodes/decodes detached exact SDK evidence
+and supplies a stable selected-transition identity that excludes elapsed time and
+host attempt counters. Decoding restores observations only; it does not manufacture
+a runtime, selection token or authority. A caller's physical byte bound applies.
+The continuation after publication is a fresh selection under the same root;
+completed evidence makes no future readiness or command-terminal promise.
+
+The direct/next-root boundary includes live, local retained, managed history and
+join work selected there. The separate source-prerequisite admission gateway and
+application command continuation integration still require host treatment.

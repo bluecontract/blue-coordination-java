@@ -1430,6 +1430,58 @@ public final class DefaultCoordinationEngine
         return processNextRoot(root, expectedLocalWork, true);
     }
 
+    private SelectedRootStage pendingRootStage;
+
+    /** Internal SDK bridge: freezes one exact stage before the host acquires known owners. */
+    public synchronized SelectedRootStage selectRootStage(DocumentId root, TimelineEntry input) {
+        ensureOpen(); Objects.requireNonNull(root);
+        RootedCheckpointDriver.Selection selected;
+        if (input != null) {
+            var entry = journal.requireCanonical(input);
+            selected = new RootedCheckpointDriver.Selection(contractsClosureAdapter.captureRoot(root, entry, null), null,
+                    CatchUpConsumerScope.owners(RootedStageCapture.owners(root, documents)), false);
+        } else {
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
+            selected = documents.storedState().sessionIndex().isLogical()
+                    ? driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal))
+                    : driver.select(root, journal.entries());
+        }
+        pendingRootStage = new SelectedRootStage(root, selected, RootedStageCapture.describe(root, selected, documents), input == null);
+        return pendingRootStage;
+    }
+
+    /** Single-use, thread-affine frozen selection. No other engine work may intervene. */
+    public final class SelectedRootStage {
+        private final Thread owner = Thread.currentThread();
+        private final DocumentId root;
+        private final RootedCheckpointDriver.Selection selected;
+        private final blue.coordination.api.ProcessingStageContext context;
+        private final boolean scheduled;
+        private SelectedRootStage(DocumentId root, RootedCheckpointDriver.Selection selected,
+                blue.coordination.api.ProcessingStageContext context, boolean scheduled) {
+            this.root = root; this.selected = selected; this.context = context; this.scheduled = scheduled;
+        }
+        public blue.coordination.api.ProcessingStageContext context() { return context; }
+        public ProcessingDrainReceipt execute() {
+            synchronized (DefaultCoordinationEngine.this) {
+                if (closed || pendingRootStage != this || owner != Thread.currentThread())
+                    throw new IllegalStateException("Stage selection is retired, used or belongs to another thread");
+                pendingRootStage = null;
+                try {
+                    var completed = executeRootSelection(selected, System.nanoTime());
+                    var anchor = selected.localHistorical() != null ? selected.localHistorical().root() : root;
+                    if (scheduled) contractsRecoveryState.rootedSchedule.completed(anchor, selected, completed);
+                    return completed;
+                } catch (RuntimeException | Error failure) {
+                    try { DefaultCoordinationEngine.this.close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+            }
+        }
+        public List<DocumentId> resultOwners(ProcessingDrainReceipt completed) { return RootedStageCapture.resultOwners(context, completed); }
+        public boolean invalidatesSelection(ProcessingDrainReceipt completed) { return RootedStageCapture.invalidatesSelection(completed); }
+    }
+
     /**
      * Executes one selected LIVE, retained-local or managed historical stage
      * without inspecting future readiness. This is an internal bridge for the
@@ -3173,6 +3225,7 @@ public final class DefaultCoordinationEngine
     }
 
     private void ensureOpen() {
+        if (pendingRootStage != null) throw new IllegalStateException("Execute or discard the frozen stage before other engine work");
         if (closed) {
             throw new IllegalStateException("DefaultCoordinationEngine is closed");
         }

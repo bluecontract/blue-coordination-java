@@ -1,6 +1,8 @@
 package blue.coordination.sdk;
 
 import java.util.List;
+import blue.coordination.api.DocumentId;
+import blue.coordination.api.ProcessingStageContext;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -24,9 +26,25 @@ public final class ProcessingStageResult {
 
     private final Disposition disposition;
     private final DrainResult evidence;
-    ProcessingStageResult(Disposition disposition, DrainResult evidence) {
+    private final ProcessingStageContext selection;
+    private final List<DocumentId> resultOwners;
+    private final boolean selectionInvalidated;
+    ProcessingStageResult(Disposition disposition, DrainResult evidence, ProcessingStageContext selection,
+            List<DocumentId> resultOwners, boolean selectionInvalidated) {
         this.disposition = Objects.requireNonNull(disposition); this.evidence = Objects.requireNonNull(evidence);
+        this.selection = Objects.requireNonNull(selection); this.resultOwners = List.copyOf(resultOwners);
+        this.selectionInvalidated = selectionInvalidated;
+        if (!this.resultOwners.equals(this.resultOwners.stream().distinct().sorted(java.util.Comparator.comparing(DocumentId::value)).toList())
+                || !this.resultOwners.containsAll(selection.entryOwners().stream().map(ProcessingStageContext.Owner::documentId).toList()))
+            throw new IllegalArgumentException("Result owners must contain the complete ordered entry-owner union");
     }
+    /** Exact pre-execution cause and authority; does not inspect the successor selection. */
+    public ProcessingStageContext selection() { return selection; }
+    /** Complete publication owner union, retaining split members through this publication. */
+    public List<DocumentId> resultOwners() { return resultOwners; }
+    /** Whether committed graph changes invalidate any prefetched aggregate selection. */
+    public boolean selectionInvalidated() { return selectionInvalidated; }
+    DrainResult evidence() { return evidence; }
     /** Current-stage disposition, not a READY-head or command-terminal indicator. */
     public Disposition disposition() { return disposition; }
     /** Exact entry outcomes materialized by this stage. */
