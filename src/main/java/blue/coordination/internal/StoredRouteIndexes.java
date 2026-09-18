@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.ExternalOrderKey;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,6 +17,7 @@ final class StoredRouteIndexes {
     enum Root { ROWS, DOCUMENT_KEYS }
     private final StoreIndexCodecs.Binding<OperationRouteIndex.RouteKey, List<OperationRouteIndex.RouteRow>> rows;
     private final StoreIndexCodecs.Binding<DocumentId, Set<OperationRouteIndex.RouteKey>> documents;
+    private final StoreIndexCodecs.Binding<DocumentId, List<OperationRouteIndex.RouteRow>> documentRows;
 
     StoredRouteIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
         var c = new StoreIndexCodecs(objects, limits);
@@ -58,8 +60,36 @@ final class StoredRouteIndexes {
             // Insertion order affects the exact mutation/comparison sequence.
             return Collections.unmodifiableSet(result);
         });
+        documentRows = c.binding("route/document-rows", EmbeddingBinding.DOCUMENT_ORDER, c.documents, values);
         rows = c.binding("route/rows", OperationRouteIndex.RouteKey.ORDER, keys, values);
         documents = c.binding("route/document-keys", EmbeddingBinding.DOCUMENT_ORDER, c.documents, sets);
+    }
+
+    OperationRouteIndex openLogical(LogicalRecordContext context, EngineMetrics metrics,
+            Function<DocumentId, DocumentSession> sessions, Function<DocumentId, String> selectedHeads) {
+        var members = documentRows.openLogicalBuckets(context, Family.ROUTE, LogicalRecordContext.runtimeScope(),
+                OperationRouteIndex.RouteKey.ORDER, orderedRouteKey(), OrderedRecordKey.document());
+        var logical = new LogicalRouteRows(context, members);
+        return OperationRouteIndex.restoreIndexes(new OperationRouteIndex.StoredIndexes(logical.all(),
+                documents.openLogical(context, Family.ROUTE_DOCUMENT, LogicalRecordContext.runtimeScope(), OrderedRecordKey.document()),
+                0, logical), metrics, sessions, selectedHeads);
+    }
+    static void selectLogical(OperationRouteIndex index) {
+        var state = index.storedIndexes();
+        java.util.Objects.requireNonNull(state.logicalRows(), "Not a logical route index").select();
+        state.keysByDocument().selectLogicalRecords();
+    }
+    private static OrderedRecordKey<OperationRouteIndex.RouteKey> orderedRouteKey() {
+        return new OrderedRecordKey<>() {
+            public String identity() { return "blue-coordination/ordered-key/route/1"; }
+            public byte[] encode(OperationRouteIndex.RouteKey key) {
+                var text = OrderedRecordKey.text(); return OrderedRecordKey.tuple(text.encode(key.operation()), text.encode(key.channel()), text.encode(key.subscriptionKey()));
+            }
+            public OperationRouteIndex.RouteKey decode(byte[] bytes) {
+                var parts = OrderedRecordKey.split(bytes, 3); var text = OrderedRecordKey.text();
+                return new OperationRouteIndex.RouteKey(text.decode(parts[0]), text.decode(parts[1]), text.decode(parts[2]));
+            }
+        };
     }
 
     OperationRouteIndex retainPartition(OperationRouteIndex value, EngineMetrics metrics,

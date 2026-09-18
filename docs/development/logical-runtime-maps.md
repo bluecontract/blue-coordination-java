@@ -88,3 +88,14 @@ Legacy descriptor histories retain their existing framing and behavior.
 
 These bindings remain part of the ongoing migration. They do not yet establish a
 complete engine publication or application stage execution path.
+
+Publication memberships, admissions, closures, provider frontiers, application
+results and declared rejection rows now have explicit typed logical bindings.
+Route rows are keyed by route plus document: replacement validates only that
+document's contribution, while selection validates complete relevant membership.
+Route generations remain attempt-local guards on the logical path. Active source
+Timelines use independent `(timeline, root)` membership records and derive counts
+only on query. Reverse document/root memberships likewise update individual
+members. Cold tests compare route deltas/results to the resident implementation,
+exercise both independent publication orders and reject new matching membership.
+The full engine/SDK assembly remains a separate required integration.

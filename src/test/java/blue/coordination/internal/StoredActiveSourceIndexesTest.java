@@ -10,6 +10,46 @@ import static org.junit.jupiter.api.Assertions.*;
 import static blue.coordination.internal.StoredRouteIndexesTest.*;
 
 final class StoredActiveSourceIndexesTest {
+    @Test void logicalSourceRootsShareTimelinesWithoutSharedCountersAndColdUnionIsComplete() {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
+        var storage = new StoredActiveSourceIndexes(bytes, LIMITS);
+        var packets = new ArrayList<blue.coordination.api.storage.CoordinationRecords.Publication>();
+        // when
+        for (int document : List.of(1, 2)) {
+            try (var attempt = records.attempt()) {
+                var context = new LogicalRecordContext(attempt); var index = storage.openLogical(context, new EngineMetrics());
+                index.addPublicRoots(List.of(id(document)));
+                index.refresh(List.of(id(document)), ManagedOccurrenceInventory.empty(), ignored -> List.of("shared"));
+                StoredActiveSourceIndexes.selectLogical(index); context.flush();
+                packets.add(attempt.prepare("source-" + document, List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1})));
+            }
+        }
+        // then
+        for (boolean reverse : List.of(false, true)) {
+            var target = new LogicalRecordMapTest.Store();
+            assertTrue(target.publish(packets.get(reverse ? 1 : 0))); assertTrue(target.publish(packets.get(reverse ? 0 : 1)));
+            try (var attempt = target.attempt()) {
+                var context = new LogicalRecordContext(attempt); var cold = storage.openLogical(context, new EngineMetrics());
+                assertEquals(Set.of("shared"), cold.timelineIds());
+                assertEquals(2L, cold.storedIndexes().timelineReferences().get("shared"));
+                cold.refresh(List.of(id(1)), ManagedOccurrenceInventory.empty(), ignored -> List.of());
+                assertEquals(Set.of("shared"), cold.timelineIds()); assertEquals(1L, cold.storedIndexes().timelineReferences().get("shared"));
+                StoredActiveSourceIndexes.selectLogical(cold); context.flush();
+                assertTrue(target.publish(attempt.prepare("remove-1", List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}))));
+            }
+            try (var attempt = target.attempt()) {
+                var cold = storage.openLogical(new LogicalRecordContext(attempt), new EngineMetrics());
+                assertEquals(Set.of("shared"), cold.timelineIds()); assertEquals(1L, cold.storedIndexes().timelineReferences().get("shared"));
+                assertNull(cold.storedIndexes().timelineReferences().get("absent"));
+            }
+        }
+        var timelineKeys = packets.stream().flatMap(packet -> packet.mutations().stream())
+                .filter(mutation -> mutation.key().family() == blue.coordination.api.storage.CoordinationRecords.Family.ACTIVE_TIMELINE)
+                .map(mutation -> mutation.key()).toList();
+        assertEquals(2, timelineKeys.size()); assertNotEquals(timelineKeys.get(0), timelineKeys.get(1));
+    }
+
     @Test void coldDynamicAdmissionSharedMembershipRemovalAndCountersMatchResident() {
         // given
         var bytes = new Bytes(); var storage = new StoredActiveSourceIndexes(bytes, LIMITS);

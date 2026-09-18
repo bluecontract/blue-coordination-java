@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
@@ -107,6 +108,25 @@ final class StoredPublicationIndexes implements AutoCloseable {
                 codec("declared-rejection", value -> {
                     receipts.encodeRejection(value, scope::retainView); return value;
                 }, value -> receipts.encodeRejection(value, sessions::viewAddress), bytes -> receipts.decodeRejection(bytes, scope)));
+    }
+
+    PersistentOrderedMap<String, Boolean> openLogicalGeneric(LogicalRecordContext context) {
+        return generic.openLogical(context, Family.PUBLICATION, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    PersistentOrderedMap<String, ContractsClosureAdmissionReceipt> openLogicalAdmissions(LogicalRecordContext context) {
+        return admissions.openLogical(context, Family.ADMISSION, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    PersistentOrderedMap<String, ContractsClosurePublicationReceipt> openLogicalClosures(LogicalRecordContext context) {
+        return closures.openLogical(context, Family.CLOSURE, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    PersistentOrderedMap<String, RootedProviderFrontiers.Frontier> openLogicalFrontiers(LogicalRecordContext context) {
+        return frontiers.openLogical(context, Family.PROVIDER_FRONTIER, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    PersistentOrderedMap<String, ClosureApplicationResultIndex.Publications> openLogicalApplicationResults(LogicalRecordContext context) {
+        return applicationResults.openLogical(context, Family.APPLICATION_RESULT, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    PersistentOrderedMap<String, RootedDeclaredBirthRejection> openLogicalRejections(LogicalRecordContext context) {
+        return rejections.openLogical(context, Family.FEEDER_REJECTED, new blue.coordination.api.storage.CoordinationRecords.Bytes(OrderedRecordKey.text().encode("runtime/1/declared-birth")), OrderedRecordKey.text());
     }
 
     PersistentOrderedMap<String, Boolean> openGeneric(byte[] root) { return generic.open(root); }

@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -52,6 +53,23 @@ final class StoredActiveSourceIndexes {
         surfaces = c.binding("active-source/surfaces", EmbeddingBinding.DOCUMENT_ORDER, c.documents, surfaceRows);
         memberships = c.binding("active-source/memberships", EmbeddingBinding.DOCUMENT_ORDER, c.documents, documentSets);
         timelines = c.binding("active-source/timelines", EmbeddingBinding.TEXT_ORDER, c.text, counts);
+    }
+
+    ContractsActiveSourceTimelineIndex openLogical(LogicalRecordContext context, EngineMetrics metrics) {
+        var scope = LogicalRecordContext.runtimeScope();
+        var logical = new LogicalActiveSources(
+                roots.openLogicalBuckets(context, Family.ACTIVE_MEMBERSHIP, scope, EmbeddingBinding.DOCUMENT_ORDER,
+                        OrderedRecordKey.document(), OrderedRecordKey.document()),
+                roots.openLogicalBuckets(context, Family.ACTIVE_TIMELINE, scope, EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), OrderedRecordKey.document()));
+        return ContractsActiveSourceTimelineIndex.restoreIndexes(new ContractsActiveSourceTimelineIndex.StoredIndexes(
+                roots.openLogical(context, Family.ACTIVE_ROOT, scope, OrderedRecordKey.document()),
+                surfaces.openLogical(context, Family.ACTIVE_SURFACE, scope, OrderedRecordKey.document()),
+                logical.memberships(), logical.counts(), logical), metrics);
+    }
+    static void selectLogical(ContractsActiveSourceTimelineIndex index) {
+        var state = index.storedIndexes(); state.publicRoots().selectLogicalRecords(); state.surfaces().selectLogicalRecords();
+        java.util.Objects.requireNonNull(state.logicalSources(), "Not a logical source index").select();
     }
 
     ContractsActiveSourceTimelineIndex retainPartition(ContractsActiveSourceTimelineIndex value, EngineMetrics metrics) {
