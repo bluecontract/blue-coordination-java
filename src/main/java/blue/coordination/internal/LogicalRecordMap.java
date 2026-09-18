@@ -204,6 +204,26 @@ final class LogicalRecordMap<K, V> {
         for (var row : changes.entries()) selection.accept(row.getKey(), row.getValue().value());
     }
 
+    LogicalRecordContext context() { context.checkOpen(); return context; }
+
+    <T> LogicalRecordMap<K, T> convert(java.util.function.Function<V, T> read,
+            java.util.function.Function<T, V> write, java.util.function.Predicate<T> present) {
+        var base = this;
+        Source<K, T> mapped = new Source<>() {
+            public T get(K key) { V value = base.get(key); return value == null ? null : Objects.requireNonNull(read.apply(value)); }
+            public boolean contains(K key) { return base.contains(key); }
+            private Map.Entry<K, T> map(Map.Entry<K, V> row) {
+                return row == null ? null : Map.entry(row.getKey(), Objects.requireNonNull(read.apply(row.getValue())));
+            }
+            public Map.Entry<K, T> first(K lower, boolean exclusive, K upper) { return map(base.first(lower, exclusive, upper)); }
+            public List<Map.Entry<K, T>> entries() { return base.entries().stream().map(this::map).toList(); }
+        };
+        return virtual(order, context, mapped, (key, value) -> {
+            if (value == null) base.remove(key).select();
+            else base.put(key, Objects.requireNonNull(write.apply(value))).select();
+        }, present);
+    }
+
     <T> LogicalRecordMap<K, T> project(BiFunction<K, V, T> mapping, Consumer<K> absent) {
         var base = this;
         Source<K, T> projected = new Source<>() {

@@ -62,6 +62,59 @@ interface OrderedRecordKey<K> extends PersistentMapCodec<K> {
         };
     }
 
+    static OrderedRecordKey<java.math.BigInteger> integer() {
+        return new OrderedRecordKey<>() {
+            public String identity() { return "blue-coordination/ordered-key/integer/1"; }
+            public byte[] encode(java.math.BigInteger value) {
+                int sign = value.signum(); if (sign == 0) return new byte[] {1};
+                byte[] magnitude = value.abs().toByteArray();
+                if (magnitude[0] == 0) magnitude = Arrays.copyOfRange(magnitude, 1, magnitude.length);
+                var bytes = ByteBuffer.allocate(5 + magnitude.length).put((byte) (sign < 0 ? 0 : 2))
+                        .putInt(sign < 0 ? ~magnitude.length : magnitude.length).put(magnitude).array();
+                if (sign < 0) for (int i = 5; i < bytes.length; i++) bytes[i] = (byte) ~bytes[i];
+                return bytes;
+            }
+            public java.math.BigInteger decode(byte[] bytes) {
+                if (bytes.length == 1 && bytes[0] == 1) return java.math.BigInteger.ZERO;
+                if (bytes.length < 6 || (bytes[0] != 0 && bytes[0] != 2)) throw new IllegalArgumentException("Invalid integer key");
+                boolean negative = bytes[0] == 0; int length = ByteBuffer.wrap(bytes, 1, 4).getInt();
+                if (negative) length = ~length;
+                if (length != bytes.length - 5) throw new IllegalArgumentException("Invalid integer magnitude length");
+                byte[] magnitude = Arrays.copyOfRange(bytes, 5, bytes.length);
+                if (negative) for (int i = 0; i < magnitude.length; i++) magnitude[i] = (byte) ~magnitude[i];
+                var value = new java.math.BigInteger(negative ? -1 : 1, magnitude);
+                if (!Arrays.equals(bytes, encode(value))) throw new IllegalArgumentException("Noncanonical integer key");
+                return value;
+            }
+        };
+    }
+
+    static OrderedRecordKey<blue.language.processor.ExternalOrderKey> externalOrder() {
+        return new OrderedRecordKey<>() {
+            public String identity() { return "blue-coordination/ordered-key/external-order/1"; }
+            public byte[] encode(blue.language.processor.ExternalOrderKey value) {
+                var components = new java.util.ArrayList<byte[]>();
+                for (Object component : value.components()) {
+                    boolean numeric = component instanceof java.math.BigInteger;
+                    byte[] scalar = numeric ? integer().encode((java.math.BigInteger) component) : text().encode((String) component);
+                    byte[] tagged = new byte[scalar.length + 1]; tagged[0] = (byte) (numeric ? 0 : 1);
+                    System.arraycopy(scalar, 0, tagged, 1, scalar.length); components.add(tagged);
+                }
+                return tuple(components.toArray(byte[][]::new));
+            }
+            public blue.language.processor.ExternalOrderKey decode(byte[] bytes) {
+                var result = new java.util.ArrayList<Object>();
+                for (byte[] component : splitAll(bytes)) {
+                    if (component.length == 0 || (component[0] != 0 && component[0] != 1))
+                        throw new IllegalArgumentException("Invalid external-order scalar kind");
+                    byte[] scalar = Arrays.copyOfRange(component, 1, component.length);
+                    result.add(component[0] == 0 ? integer().decode(scalar) : text().decode(scalar));
+                }
+                return blue.language.processor.ExternalOrderKey.of(result);
+            }
+        };
+    }
+
     /** Zero escaping plus a two-zero terminator preserves scalar and tuple prefix ordering. */
     static byte[] tuple(byte[]... components) {
         var out = new ByteArrayOutputStream();
@@ -76,18 +129,24 @@ interface OrderedRecordKey<K> extends PersistentMapCodec<K> {
     }
 
     static byte[][] split(byte[] encoded, int count) {
-        var result = new byte[count][]; var part = new ByteArrayOutputStream(); int index = 0;
+        byte[][] parts = splitAll(encoded);
+        if (parts.length != count) throw new IllegalArgumentException("Wrong tuple arity");
+        return parts;
+    }
+
+    static byte[][] splitAll(byte[] encoded) {
+        var result = new java.util.ArrayList<byte[]>(); var part = new ByteArrayOutputStream();
         for (int offset = 0; offset < encoded.length; offset++) {
             int value = Byte.toUnsignedInt(encoded[offset]);
             if (value != 0) { part.write(value); continue; }
             if (++offset >= encoded.length) throw new IllegalArgumentException("Truncated tuple key");
             int escape = Byte.toUnsignedInt(encoded[offset]);
             if (escape == 255) { part.write(0); continue; }
-            if (escape != 0 || index == count) throw new IllegalArgumentException("Invalid tuple key");
-            result[index++] = part.toByteArray(); part.reset();
+            if (escape != 0) throw new IllegalArgumentException("Invalid tuple key");
+            result.add(part.toByteArray()); part.reset();
         }
-        if (index != count || part.size() != 0 || !Arrays.equals(tuple(result), encoded))
-            throw new IllegalArgumentException("Noncanonical tuple key");
-        return result;
+        byte[][] parts = result.toArray(byte[][]::new);
+        if (part.size() != 0 || !Arrays.equals(tuple(parts), encoded)) throw new IllegalArgumentException("Noncanonical tuple key");
+        return parts;
     }
 }

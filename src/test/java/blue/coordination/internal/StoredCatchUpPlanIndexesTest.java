@@ -13,6 +13,63 @@ import static org.junit.jupiter.api.Assertions.*;
 final class StoredCatchUpPlanIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(65536, 4096, 32768, 2048, 8);
 
+    @Test void logicalPlansSharingOneSourceDoNotWriteASharedCounterOrBucket() {
+        // given
+        for (boolean reverse : List.of(false, true)) {
+            var store = new LogicalRecordMapTest.Store(); var storage = storage(new DocumentSessionStorageTest.Bytes());
+            var left = fixture(1, DocumentId.of("left"), DocumentId.of("shared"));
+            var right = fixture(2, DocumentId.of("right"), DocumentId.of("shared"));
+            var a = store.attempt(); var b = store.attempt(); var ca = new LogicalRecordContext(a); var cb = new LogicalRecordContext(b);
+            // when
+            storage.selectLogical(storage.openLogical(ca).withPlan(left.plan, false));
+            storage.selectLogical(storage.openLogical(cb).withPlan(right.plan, false));
+            storage.openLogicalBarriers(ca).put(left.barrier.barrierIdentity(), left.barrier).map().selectLogicalRecords();
+            storage.openLogicalBarriers(cb).put(right.barrier.barrierIdentity(), right.barrier).map().selectLogicalRecords();
+            ca.flush(); cb.flush(); var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+            var pa = a.prepare("a", List.of(), evidence); var pb = b.prepare("b", List.of(), evidence);
+            // then
+            assertTrue(pa.mutations().stream().noneMatch(m -> m.key().family() == blue.coordination.api.storage.CoordinationRecords.Family.PLAN_ACTIVE_SOURCE));
+            assertTrue(store.publish(reverse ? pb : pa)); assertTrue(store.publish(reverse ? pa : pb));
+            try (var cold = store.attempt()) {
+                var context = new LogicalRecordContext(cold); var restored = storage.openLogical(context);
+                assertEquals(2, restored.storedIndexes().activeSources().get(DocumentId.of("shared")));
+                assertEquals(2, storage.forSource(restored, DocumentId.of("shared")).plans().size());
+                assertArrayEquals(storage.planCodec.encode(left.plan), storage.planCodec.encode(storage.exact(restored, left.plan.planIdentity()).plan()));
+                assertArrayEquals(storage.barrierCodec.encode(right.barrier), storage.barrierCodec.encode(
+                        storage.barrier(restored, storage.openLogicalBarriers(context), right.barrier.barrierIdentity())));
+                var completed = complete(restored, left.plan);
+                assertEquals(1, completed.storedIndexes().activeSources().get(DocumentId.of("shared")));
+                storage.selectLogical(completed); context.flush();
+                assertTrue(store.publish(cold.prepare("complete", List.of(), evidence)));
+            }
+            try (var cold = store.attempt()) {
+                var restored = storage.openLogical(new LogicalRecordContext(cold));
+                assertEquals(1, restored.storedIndexes().activeSources().get(DocumentId.of("shared")));
+                assertEquals(ManagedCatchUpStatus.COMPLETE, storage.exact(restored, left.plan.planIdentity()).plan().status());
+            }
+        }
+    }
+
+    @Test void exactLogicalPlanValidationDoesNotReadAnotherConsumerPlan() {
+        // given
+        var store = new LogicalRecordMapTest.Store(); var storage = storage(new DocumentSessionStorageTest.Bytes());
+        var left = fixture(1, DocumentId.of("left"), DocumentId.of("shared"));
+        var right = fixture(2, DocumentId.of("right"), DocumentId.of("shared"));
+        var seed = store.attempt(); var sc = new LogicalRecordContext(seed);
+        storage.selectLogical(storage.openLogical(sc).withPlan(left.plan, false).withPlan(right.plan, false)); sc.flush();
+        var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+        assertTrue(store.publish(seed.prepare("seed", List.of(), evidence)));
+        var a = store.attempt(); var b = store.attempt(); var ca = new LogicalRecordContext(a); var cb = new LogicalRecordContext(b);
+        // when
+        var selected = storage.exact(storage.openLogical(ca), left.plan.planIdentity());
+        storage.selectLogical(complete(storage.openLogical(cb), right.plan));
+        ca.flush(); cb.flush(); var pa = a.prepare("read", List.of(), evidence); var pb = b.prepare("complete", List.of(), evidence);
+        // then
+        assertEquals(left.plan.planIdentity(), selected.plan().planIdentity());
+        assertTrue(store.publish(pb)); assertTrue(store.publish(pa));
+        assertTrue(pa.queries().isEmpty(), "Exact plan crosslinks do not enumerate another source's member plans");
+    }
+
     @Test void actualSourceParentAdmissionRowsRemainExactAfterProducerClosure() throws Exception {
         // given
         var bytes = new DocumentSessionStorageTest.Bytes(); var storage = storage(bytes);

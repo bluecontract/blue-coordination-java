@@ -497,6 +497,7 @@ final class ManagedEpochReceiptStore {
     }
 
     static final class DocumentHistory {
+        private final java.util.function.Supplier<Head> logicalHead;
         private final DocumentId documentId;
         private final PersistentOrderedMap<Long, StoredReceipt> receipts;
         private final long latestEpoch;
@@ -511,21 +512,48 @@ final class ManagedEpochReceiptStore {
                 String currentRepresentationBlueId,
                 int lastMutationComparisons,
                 int lastMutationNodeCopies) {
+            this(documentId, receipts, latestEpoch, currentRepresentationBlueId, lastMutationComparisons, lastMutationNodeCopies, null);
+        }
+
+        private DocumentHistory(DocumentId documentId, PersistentOrderedMap<Long, StoredReceipt> receipts,
+                long latestEpoch, String currentRepresentationBlueId, int comparisons, int copies,
+                java.util.function.Supplier<Head> logicalHead) {
+            this.logicalHead = logicalHead;
             this.documentId = Objects.requireNonNull(documentId, "documentId");
             this.receipts = Objects.requireNonNull(receipts, "receipts");
             this.latestEpoch = latestEpoch;
             this.currentRepresentationBlueId = Objects.requireNonNull(
                     currentRepresentationBlueId,
                     "currentRepresentationBlueId");
-            this.lastMutationComparisons = lastMutationComparisons;
-            this.lastMutationNodeCopies = lastMutationNodeCopies;
+            this.lastMutationComparisons = comparisons;
+            this.lastMutationNodeCopies = copies;
+        }
+
+        record Head(long epoch, String representation) {
+            Head {
+                if (epoch < 0) throw new IllegalArgumentException("Negative receipt head epoch");
+                blue.language.identity.BlueIds.requireBlueIdOrCyclicMember(representation, "receipt head representation");
+            }
+        }
+        static DocumentHistory logical(DocumentId owner, PersistentOrderedMap<Long, StoredReceipt> receipts,
+                java.util.function.Supplier<Head> head) {
+            return new DocumentHistory(owner, receipts, -1, "", 0, 0, Objects.requireNonNull(head));
+        }
+        DocumentId documentId() { return documentId; }
+        PersistentOrderedMap<Long, StoredReceipt> receiptMap() { return receipts; }
+        DocumentHistory withReceipts(PersistentOrderedMap<Long, StoredReceipt> selected) {
+            return new DocumentHistory(documentId, selected, latestEpoch, currentRepresentationBlueId,
+                    lastMutationComparisons, lastMutationNodeCopies, logicalHead);
+        }
+        private String currentRepresentation() {
+            return logicalHead == null ? currentRepresentationBlueId : Objects.requireNonNull(logicalHead.get()).representation();
         }
 
         record StoredState(DocumentId document, PersistentOrderedMap<Long, StoredReceipt> receipts,
                 long latestEpoch, String currentRepresentation, int comparisons, int copiedNodes) { }
 
         StoredState storedState() {
-            return new StoredState(documentId, receipts, latestEpoch, currentRepresentationBlueId,
+            return new StoredState(documentId, receipts, latestEpoch(), currentRepresentation(),
                     lastMutationComparisons, lastMutationNodeCopies);
         }
 
@@ -561,14 +589,14 @@ final class ManagedEpochReceiptStore {
                 throw new IllegalArgumentException(
                         "Managed receipt changed source document");
             }
-            long expectedEpoch = Math.addExact(latestEpoch, 1L);
+            long expectedEpoch = Math.addExact(latestEpoch(), 1L);
             if (receipt.epoch() != expectedEpoch) {
                 throw new IllegalArgumentException(
                         "Managed receipt epochs must be contiguous: expected "
                                 + expectedEpoch + ", actual " + receipt.epoch());
             }
             if (receipt.beforeBlueId().isEmpty()
-                    || !currentRepresentationBlueId.equals(
+                    || !currentRepresentation().equals(
                             receipt.beforeBlueId().get())) {
                 throw new IllegalArgumentException(
                     "Managed receipt before BlueId does not continue the "
@@ -589,8 +617,8 @@ final class ManagedEpochReceiptStore {
                 long epoch,
                 String beforeBlueId,
                 String afterBlueId) {
-            if (epoch != latestEpoch
-                    || !currentRepresentationBlueId.equals(beforeBlueId)
+            if (epoch != latestEpoch()
+                    || !currentRepresentation().equals(beforeBlueId)
                     || beforeBlueId.equals(afterBlueId)) {
                 throw new IllegalArgumentException(
                         "Component representation does not continue the exact "
@@ -599,7 +627,7 @@ final class ManagedEpochReceiptStore {
             return new DocumentHistory(
                     documentId,
                     receipts,
-                    latestEpoch,
+                    latestEpoch(),
                     afterBlueId,
                     0,
                     0);
@@ -630,7 +658,7 @@ final class ManagedEpochReceiptStore {
         DocumentHistory replacing(StoredReceipt stored) {
             ManagedEpochReceipt receipt = stored.publicReceipt();
             if (!documentId.equals(receipt.documentId())
-                    || receipt.epoch() > latestEpoch
+                    || receipt.epoch() > latestEpoch()
                     || receipts.get(receipt.epoch()) == null) {
                 throw new IllegalArgumentException(
                         "Cannot enrich an unknown managed epoch receipt");
@@ -640,8 +668,8 @@ final class ManagedEpochReceiptStore {
             return new DocumentHistory(
                     documentId,
                     mutation.map(),
-                    latestEpoch,
-                    currentRepresentationBlueId,
+                    latestEpoch(),
+                    currentRepresentation(),
                     mutation.comparisons(),
                     mutation.copiedNodes());
         }
@@ -671,7 +699,7 @@ final class ManagedEpochReceiptStore {
         }
 
         long latestEpoch() {
-            return latestEpoch;
+            return logicalHead == null ? latestEpoch : Objects.requireNonNull(logicalHead.get()).epoch();
         }
 
         int lastMutationComparisons() {

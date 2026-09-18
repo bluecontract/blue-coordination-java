@@ -6,6 +6,7 @@ import blue.coordination.api.ManagedCatchUpBarrierStatus;
 import blue.coordination.api.ManagedCatchUpStatus;
 import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
@@ -18,6 +19,7 @@ final class StoredCatchUpPlanIndexes {
     enum Root { IDENTITY, CONSUMER, SOURCE, OCCURRENCE, BARRIER, ACTIVE_SOURCE }
 
     private final PersistentMapStorage.Limits limits;
+    private final StoreIndexCodecs.Binding<String, Boolean> members;
     private final StoreIndexCodecs.Binding<String, ManagedOccurrenceCatchUpPlan> identities;
     private final StoreIndexCodecs.Binding<DocumentId, ManagedCatchUpPlanIndex.IdBucket> consumers, sources;
     private final StoreIndexCodecs.Binding<String, ManagedCatchUpPlanIndex.IdBucket> occurrences, planBarriers;
@@ -49,7 +51,7 @@ final class StoredCatchUpPlanIndexes {
         var membership = codec("membership", Writer::bool, r -> {
             require(r.bool(), "Stored plan membership must be true"); return Boolean.TRUE;
         });
-        var members = c.binding("catch-up-plan/members", EmbeddingBinding.TEXT_ORDER, c.text, membership);
+        members = c.binding("catch-up-plan/members", EmbeddingBinding.TEXT_ORDER, c.text, membership);
         var bucket = new PersistentMapCodec<ManagedCatchUpPlanIndex.IdBucket>() {
             public String identity() { return "blue-coordination/catch-up-plan-bucket/1"; }
             public ManagedCatchUpPlanIndex.IdBucket prepareForStorage(ManagedCatchUpPlanIndex.IdBucket value) {
@@ -77,6 +79,33 @@ final class StoredCatchUpPlanIndexes {
         planBarriers = c.binding("catch-up-plan/barrier", EmbeddingBinding.TEXT_ORDER, c.text, bucket);
         activeSources = c.binding("catch-up-plan/active-source", EmbeddingBinding.DOCUMENT_ORDER, c.documents, count);
         barriers = c.binding("catch-up-barrier/identity", EmbeddingBinding.TEXT_ORDER, c.text, barrierCodec);
+    }
+
+    ManagedCatchUpPlanIndex openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        return ManagedCatchUpPlanIndex.restoreIndexes(new ManagedCatchUpPlanIndex.StoredIndexes(
+                identities.openLogical(context, Family.PLAN_IDENTITY, scope, OrderedRecordKey.text()),
+                logicalBuckets(context, Family.PLAN_CONSUMER, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document()),
+                logicalBuckets(context, Family.PLAN_SOURCE, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document()),
+                logicalBuckets(context, Family.PLAN_OCCURRENCE, EmbeddingBinding.TEXT_ORDER, OrderedRecordKey.text()),
+                logicalBuckets(context, Family.PLAN_BARRIER, EmbeddingBinding.TEXT_ORDER, OrderedRecordKey.text()),
+                activeSources.openLogical(context, Family.PLAN_ACTIVE_SOURCE, scope, OrderedRecordKey.document()), 0, 0));
+    }
+
+    private <K> PersistentOrderedMap<K, ManagedCatchUpPlanIndex.IdBucket> logicalBuckets(LogicalRecordContext context,
+            Family family, java.util.Comparator<? super K> order, OrderedRecordKey<K> keys) {
+        return members.openLogicalBuckets(context, family, LogicalRecordContext.runtimeScope(), order, keys, OrderedRecordKey.text())
+                .logicalValues(map -> ManagedCatchUpPlanIndex.IdBucket.restoreStored(map, 0, 0),
+                        ManagedCatchUpPlanIndex.IdBucket::storedIdentities, value -> !value.storedIdentities().isEmpty());
+    }
+
+    PersistentOrderedMap<String, ManagedCatchUpBarrier> openLogicalBarriers(LogicalRecordContext context) {
+        return barriers.openLogical(context, Family.BARRIER, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
+    }
+    void selectLogical(ManagedCatchUpPlanIndex index) {
+        var s = index.storedIndexes(); s.identities().selectLogicalRecords(); s.consumers().selectLogicalRecords();
+        s.sources().selectLogicalRecords(); s.occurrences().selectLogicalRecords(); s.barriers().selectLogicalRecords();
+        s.activeSources().selectLogicalRecords();
     }
 
     /** Explicit resident partition conversion; not an automatic whole-catalog startup operation. */
@@ -172,8 +201,10 @@ final class StoredCatchUpPlanIndexes {
                 && contains(s.sources().get(p.sourceDocumentId()), p.planIdentity())
                 && contains(s.occurrences().get(p.targetOccurrenceIdentity()), p.planIdentity())
                 && contains(s.barriers().get(p.barrierIdentity()), p.planIdentity()), "Stored plan is missing an exact reverse membership");
-        Integer count = s.activeSources().get(p.sourceDocumentId());
-        require(!active(p) || count != null && count > 0, "Active plan is absent from its source count");
+        if (!s.activeSources().isLogical()) {
+            Integer count = s.activeSources().get(p.sourceDocumentId());
+            require(!active(p) || count != null && count > 0, "Active plan is absent from its source count");
+        } // Logical counts are derived from these verified member/primary rows, not another authority record.
     }
 
     private static boolean contains(ManagedCatchUpPlanIndex.IdBucket bucket, String id) {

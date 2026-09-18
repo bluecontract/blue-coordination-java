@@ -53,8 +53,10 @@ final class ManagedCatchUpPlanIndex {
         this.byOccurrence = Objects.requireNonNull(
                 byOccurrence, "byOccurrence");
         this.byBarrier = Objects.requireNonNull(byBarrier, "byBarrier");
-        this.activePlanCountBySource = Objects.requireNonNull(
-                activePlanCountBySource, "activePlanCountBySource");
+        Objects.requireNonNull(activePlanCountBySource, "activePlanCountBySource");
+        this.activePlanCountBySource = activePlanCountBySource.isLogical()
+                ? LogicalPlanCounts.open(activePlanCountBySource.logicalContext(), this.byIdentity, this.bySource)
+                : activePlanCountBySource;
         this.lastMutationComparisons = lastMutationComparisons;
         this.lastMutationNodeCopies = lastMutationNodeCopies;
     }
@@ -248,6 +250,7 @@ final class ManagedCatchUpPlanIndex {
             PersistentOrderedMap<DocumentId, Integer> index,
             ManagedOccurrenceCatchUpPlan before,
             ManagedOccurrenceCatchUpPlan after) {
+        if (index.isLogical()) return new ActiveSourceMutation(index, 0, 0);
         boolean wasActive = before != null && belongsToActiveBarrier(before);
         boolean isActive = after != null && belongsToActiveBarrier(after);
         if (wasActive == isActive) {

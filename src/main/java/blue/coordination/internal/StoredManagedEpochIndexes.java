@@ -3,6 +3,7 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.closure.ClosureExecutionEvidenceStorageCodec;
 import java.util.Arrays;
 import java.util.function.BiConsumer;
@@ -14,6 +15,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 final class StoredManagedEpochIndexes {
     enum Root { DOCUMENT, IDENTITY }
     private final PersistentMapStorage.Limits limits;
+    private final CoordinationImmutableObjectStore objectsForLogical;
     private final SessionRecordCodec rows;
     private final ClosureExecutionEvidenceStorageCodec execution;
     private final PersistentMapCodec<ManagedEpochReceiptStore.StoredReceipt> receipts;
@@ -27,7 +29,7 @@ final class StoredManagedEpochIndexes {
 
     StoredManagedEpochIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits,
             RootedStorageCache cache) {
-        this.limits = limits;
+        this.limits = limits; this.objectsForLogical = objects;
         rows = new SessionRecordCodec(limits.valueBytes(), 128);
         execution = new ClosureExecutionEvidenceStorageCodec(limits.valueBytes(), 128,
                 new StoredClosureResultCodec(limits.valueBytes(), 128, cache).configured());
@@ -72,6 +74,15 @@ final class StoredManagedEpochIndexes {
         identities = codecs.binding("managed-receipts/identities", EmbeddingBinding.TEXT_ORDER, codecs.text, receipts);
     }
 
+    ManagedEpochReceiptStore openLogical(LogicalRecordContext context) {
+        return ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(
+                new LogicalReceiptHistories(context, epochs, objectsForLogical, limits).open(),
+                identities.openLogical(context, Family.RECEIPT_IDENTITY, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text()), 0, 0));
+    }
+    void selectLogical(ManagedEpochReceiptStore store) {
+        store.storedState().documents().selectLogicalRecords(); store.storedState().identities().selectLogicalRecords();
+    }
+
     ManagedEpochReceiptStore retainPartition(ManagedEpochReceiptStore store) {
         return physical(() -> {
             var s = store.storedState();
@@ -94,10 +105,10 @@ final class StoredManagedEpochIndexes {
     ManagedEpochReceiptStore.EvidenceRead exact(ManagedEpochReceiptStore store, DocumentId document, long epoch) {
         return physical(() -> {
             var history = store.storedState().documents().get(document);
-            if (history != null) require(document.equals(history.storedState().document()), "Receipt document index has another owner");
+            if (history != null) require(document.equals(history.documentId()), "Receipt document index has another owner");
             var selected = store.exactEvidence(document, epoch);
             if (!selected.found()) {
-                require(history == null || epoch < 0 || epoch > history.storedState().latestEpoch(), "Missing in-range retained receipt");
+                require(history == null || epoch < 0 || epoch > history.latestEpoch(), "Missing in-range retained receipt");
                 return selected;
             }
             require(selected.receipt().documentId().equals(document) && selected.receipt().epoch() == epoch, "Selected receipt key differs");

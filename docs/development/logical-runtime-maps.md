@@ -63,3 +63,28 @@ claim the remainder of the family inventory is migrated. The tests include two
 writers inserting into the same previously absent bucket, last-member removal
 versus insertion, precise query conflicts, foreign bucket rejection, shared-target
 occurrence memberships, and cold exact results from actual rooted execution.
+
+## Catch-up and receipt evidence
+
+Catch-up plan membership is flattened through the existing `IdBucket` facade.
+The active-source count is a derived view of current source memberships and plan
+statuses: independent consumers do not update a shared counter. Exact plan
+crosslink validation checks the individual memberships; only a query that needs
+a source count reads the complete source bucket.
+
+Due-work keys preserve the published Language `ExternalOrderKey` comparator,
+including arbitrary signed integers, text, mixed scalar kinds and tuple prefixes.
+`PersistentMinimumMap` uses the tracked logical map for cold points and selective
+minimum/successor reads. Completing a later work item does not fence an earlier
+selected minimum.
+
+Logical receipt storage separates numbered `(document, epoch)` evidence from the
+mutable `(document)` head cursor. A lazy `DocumentHistory` loads the cursor only
+when a query or mutation requires it. Exact historical evidence validates the
+numbered row and receipt identity without reading the current source head.
+Selected document read checks preserve this lazy boundary. Appending, rebinding
+or validating a missing in-range receipt still reads the appropriate head.
+Legacy descriptor histories retain their existing framing and behavior.
+
+These bindings remain part of the ongoing migration. They do not yet establish a
+complete engine publication or application stage execution path.

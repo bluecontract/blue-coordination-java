@@ -160,6 +160,30 @@ final class LogicalRecordMapTest {
         assertThrows(IllegalArgumentException.class, () -> OrderedRecordKey.split(new byte[] {0, 1}, 1));
     }
 
+    @Test void externalOrderEncodingMatchesThePublishedLanguageComparator() {
+        // given
+        var integers = List.of(java.math.BigInteger.ONE.shiftLeft(257).negate(), java.math.BigInteger.valueOf(-256),
+                java.math.BigInteger.valueOf(-1), java.math.BigInteger.ZERO, java.math.BigInteger.ONE,
+                java.math.BigInteger.valueOf(255), java.math.BigInteger.ONE.shiftLeft(258));
+        var tuples = new ArrayList<blue.language.processor.ExternalOrderKey>();
+        tuples.add(blue.language.processor.ExternalOrderKey.of(List.of()));
+        for (var integer : integers) {
+            tuples.add(blue.language.processor.ExternalOrderKey.of(List.of(integer)));
+            tuples.add(blue.language.processor.ExternalOrderKey.of(List.of(integer, "\u0000")));
+            tuples.add(blue.language.processor.ExternalOrderKey.of(List.of(integer, "suffix", integer)));
+        }
+        for (String text : List.of("", "\u0000", "a", "\ue000", "\ud800\udc00"))
+            tuples.add(blue.language.processor.ExternalOrderKey.of(List.of(text)));
+        var codec = OrderedRecordKey.externalOrder();
+        // when
+        for (var tuple : tuples) assertEquals(tuple, codec.decode(codec.encode(tuple)));
+        // then
+        for (var left : tuples) for (var right : tuples)
+            assertEquals(Integer.signum(left.compareTo(right)), Integer.signum(new Bytes(codec.encode(left)).compareTo(new Bytes(codec.encode(right)))));
+        assertThrows(IllegalArgumentException.class, () -> OrderedRecordKey.integer().decode(new byte[] {2, 0, 0, 0, 1, 0}));
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(OrderedRecordKey.tuple(new byte[] {2})));
+    }
+
     private static PersistentOrderedMap<String, String> map(LogicalRecordContext context) {
         return PersistentOrderedMap.logical(EmbeddingBinding.TEXT_ORDER, context, Family.SESSION, SCOPE,
                 OrderedRecordKey.text(), OrderedRecordKey.text(), 1024, 4096);

@@ -80,6 +80,16 @@ final class PersistentOrderedMap<K, V> {
         return records != null && records.bindingIs(context, family, scope, lower);
     }
 
+    LogicalRecordContext logicalContext() {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return records.context();
+    }
+    <T> PersistentOrderedMap<K, T> logicalValues(java.util.function.Function<V, T> read,
+            java.util.function.Function<T, V> write, java.util.function.Predicate<T> present) {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return logical(order, records.convert(read, write, present));
+    }
+
     void selectLogicalRecords() {
         if (records == null) throw new IllegalStateException("Not a logical-record map");
         records.select();
