@@ -54,6 +54,12 @@ if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
 def declaredProjectVersion = versionMatches.group(1)
+def coordinationCandidateCommit = providers.gradleProperty('coordinationCandidateCommit').orNull
+def localCoordinationCandidate = coordinationCandidateCommit != null
+if (localCoordinationCandidate && (dependencyMode != 'published-artifact'
+        || !(coordinationCandidateCommit ==~ /[0-9a-f]{40}/))) {
+    throw new GradleException('coordinationCandidateCommit requires an exact commit and published lower-layer dependencies')
+}
 def developmentProjectVersion = providers.gradleProperty(
         'blueDevelopmentVersion').orNull
 if (immutableDevelopmentContracts
@@ -68,7 +74,8 @@ if (!immutableDevelopmentContracts && developmentProjectVersion != null) {
     throw new GradleException(
             'blueDevelopmentVersion is only valid with immutable-development-contracts')
 }
-version = developmentProjectVersion ?: declaredProjectVersion
+version = localCoordinationCandidate ? '3.0.0-dev.' + coordinationCandidateCommit
+        : developmentProjectVersion ?: declaredProjectVersion
 if (immutableDevelopmentContracts
         && !((localRc ? immutableStagedLanguageVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : immutableStagedLanguageVersion
         ==~ /3\.1\.0-dev\.[0-9a-f]{40}/))) {
@@ -2229,7 +2236,7 @@ def verifyReleaseVersionPolicy = tasks.register(
         }
         def failures = releaseVersionPolicyFailures(
                 candidate,
-                immutableDevelopmentContracts,
+                immutableDevelopmentContracts || localCoordinationCandidate,
                 headCommit,
                 cleanWorktree)
         if (!failures.empty) {
@@ -5567,5 +5574,6 @@ tasks.named('check') {
 }
 
 apply from: 'gradle/coordination-staging.gradle'
+apply from: 'gradle/coordination-candidate.gradle'
 apply from: 'gradle/test-execution-scope.gradle'
 apply from: 'gradle/topology-test-evidence.gradle'
