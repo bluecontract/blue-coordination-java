@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       channel:
-        default: rc
+        default: build
         type: string
       release-source:
         default: false
@@ -157,6 +157,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: coordination-release-java17
+          overwrite: true
           path: ${{ runner.temp }}/java17.tar.gz
           if-no-files-found: error
           compression-level: 0

@@ -75,7 +75,7 @@ function restore(root, directory, expected) {
 
 function identity(root, env) {
   clean(root);
-  assert.ok(['rc', 'stable'].includes(env.RELEASE_CHANNEL), 'Invalid release channel');
+  assert.ok(['build', 'rc', 'stable'].includes(env.RELEASE_CHANNEL), 'Invalid release channel');
   assert.match(env.GITHUB_RUN_ID || '', /^\d+$/, 'Missing workflow run identity');
   const commit = git(root, 'rev-parse', 'HEAD');
   assert.equal(commit, env.RELEASE_COMMIT, 'Wrong source commit');
@@ -97,7 +97,8 @@ function inspectBuild(build, binding, java) {
   assert.equal(scope.topologyEvidenceVerified, true, 'Topology comparison did not pass');
   const delegated = scope.delegatedTestEvidence;
   if (delegated) {
-    execFileSync('python3', [path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
+    // Validation must not create __pycache__ in the clean release checkout.
+    execFileSync('python3', ['-B', path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
     assert.deepEqual(delegated, json(path.join(build, 'reports/ci-test-shards/delegated.json')));
     assert.equal(delegated.version, binding.version, 'Delegated version mismatch');
     assert.equal(delegated.java, java, 'Delegated JDK mismatch');
@@ -205,6 +206,7 @@ function seal(root, output, java, env) {
 }
 
 function verify(root, directory, expectedHashes, env) {
+  assert.notEqual(env.RELEASE_CHANNEL, 'build', 'Build evidence cannot authorize publication');
   const binding = identity(root, env);
   const receipts = {};
   for (const java of ['17']) {

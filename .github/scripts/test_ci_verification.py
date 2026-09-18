@@ -59,6 +59,14 @@ class ProductionContractTests(unittest.TestCase):
             verification.run('core','output')
             self.assertEqual(measure.call_args.args[-1], 'stable')
 
+class BuildChannelTests(unittest.TestCase):
+    def test_build_channel_reaches_artifact_inspection(self):
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ, {'RELEASE_CHANNEL': 'build'}), patch.object(verification.timing, 'measure') as measure:
+            verification.run('core', 'output')
+            self.assertEqual(measure.call_args.args[-1], 'build')
+
 class ConsumeProductionProofTests(unittest.TestCase):
     def test_consumes_exact_archive_and_rejects_corruption(self):
         import os

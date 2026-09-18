@@ -15,7 +15,7 @@ runs:
       uses: actions/setup-java@v5
       with:
         distribution: temurin
-        java-version: '17'
+        java-version: '17.0.19+10'
         architecture: x64
         check-latest: false
 

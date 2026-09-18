@@ -273,7 +273,7 @@ test('CI uses only Java 17 while published bytecode remains Java 17', () => {
   }
   for (const file of ['../actions/setup-release/action.yml']) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    assert.match(text, /java-version: '17'/);
+    assert.match(text, /java-version: '17\.0\.19\+10'/);
     assert.doesNotMatch(text, /JAVA_HOME_(21|25)_X64|java-version: '(21|25)/);
   }
 });
@@ -313,4 +313,56 @@ test('prepared verification source restores without creating or requiring a rele
   });
   assert.equal(f.git(f.checkouts.publish, 'rev-parse', 'HEAD'), source.commit);
   assert.equal(f.git(f.checkouts.publish, 'tag', '--list'), '');
+});
+
+test('ordinary stable build seals without RC readiness but cannot authorize publication', (t) => {
+  const f = fixture(t, 'stable');
+  f.env.RELEASE_CHANNEL = 'build';
+  assert.doesNotThrow(() => f.sealGate());
+  assert.throws(() => f.publish(), /Build evidence cannot authorize publication/);
+  f.env.RELEASE_CHANNEL = 'stable';
+  assert.throws(() => f.publish(), /candidate\/run mismatch/);
+});
+
+test('RC still requires readiness evidence', (t) => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.builds['17'], `reports/release/${f.version}-readiness.json`));
+  assert.throws(() => f.sealGate(), /ENOENT/);
+});
+
+test('ordinary workflow selects build channel and handoff upload supports retry', () => {
+  const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  assert.match(read('workflows/build.yml'), /channel: build/);
+  assert.match(read('workflows/verification.yml'), /channel:\n        default: build/);
+  const handoff = read('workflows/verification.yml').split('name: coordination-release-java17')[1].split('- uses:')[0];
+  assert.match(handoff, /overwrite: true/);
+  assert.match(read('actions/setup-release/action.yml'), /java-version: '17\.0\.19\+10'/);
+});
+
+test('delegated evidence inspection does not create Python cache without workflow env', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coordination-readonly-attest-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, '.github/scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  for (const name of ['release-handoff.js', 'ci-test-shards.py', 'ci-verification.py', 'ci-verification-support.py']) {
+    fs.copyFileSync(path.join(__dirname, name), path.join(scripts, name));
+  }
+  write(root, 'build/reports/test-execution-scope/verifyReleaseTestExecutionScope.json', {
+    status: 'PASS', coordinationVersion: '3.0.0-rc.13', javaVersion: '17',
+    topologyEvidenceVerified: true, delegatedTestEvidence: { schema: 1 },
+  });
+  const env = { ...process.env };
+  delete env.PYTHONDONTWRITEBYTECODE;
+  delete env.PYTHONPYCACHEPREFIX;
+  // Actual Python imports execute before rejecting the deliberately incomplete receipt.
+  // Validation must remain read-only even on this failure path.
+  const run = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { inspectBuild } = require('./.github/scripts/release-handoff.js');
+    assert.throws(() => inspectBuild('build', {version:'3.0.0-rc.13',channel:'rc'}, '17'),
+      /delegated.json/);
+  `], { cwd: root, env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fs.existsSync(path.join(scripts, '__pycache__')), false,
+    'Python attestation dirtied the release checkout');
 });

@@ -34,3 +34,4 @@ jobs:
       bundle-sha: ${{ needs.prepare.outputs.bundle-sha }}
       source-artifact: coordination-verification-source
       scope: build
+      channel: build
