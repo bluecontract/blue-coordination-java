@@ -25,6 +25,29 @@ public final class ProcessingGateway {
         return runtime.processNextRoot(Objects.requireNonNull(root, "root"));
     }
 
+    /**
+     * Executes the supplied accepted input and materializes its current result,
+     * without selecting later work. Requires a caller-established ordered window.
+     * No input is appended by this call. Host preparation/publication is separate.
+     * @param root authoritative root in this runtime
+     * @param input exact already accepted input in this runtime
+     * @return current-stage evidence without a quiescence/command-completion claim
+     */
+    public ProcessingStageResult processStage(DocumentHandle root, EntryHandle input) {
+        return runtime.processRootStage(Objects.requireNonNull(root, "root"), Objects.requireNonNull(input, "input"));
+    }
+
+    /**
+     * Selects and executes one earliest LIVE, retained-local or managed stage.
+     * Materializes and retains its result before returning, with no readiness
+     * lookahead. A throwing invocation requires discarding its mutable owner.
+     * @param root authoritative root in this runtime
+     * @return current-stage evidence, still subject to host publication
+     */
+    public ProcessingStageResult processNextStage(DocumentHandle root) {
+        return runtime.processNextRootStage(Objects.requireNonNull(root, "root"));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

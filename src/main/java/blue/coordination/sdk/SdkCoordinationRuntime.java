@@ -877,6 +877,39 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
     }
 
+    synchronized ProcessingStageResult processRootStage(DocumentHandle root, EntryHandle input) {
+        requireStageRoot(root);
+        if (input.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");
+        return stageResult(engine.processRootInputStage(root.id(), requireCoreEntry(input), null));
+    }
+
+    synchronized ProcessingStageResult processNextRootStage(DocumentHandle root) {
+        requireStageRoot(root);
+        return stageResult(engine.processNextRootStage(root.id(), null));
+    }
+
+    private void requireStageRoot(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this)
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        requireDocument(root.id());
+    }
+
+    private ProcessingStageResult stageResult(ProcessingDrainReceipt receipt) {
+        boolean failed = receipt.managedEpochApplicationAttempts().stream().anyMatch(a -> a.publicationFailure().isPresent())
+                || java.util.stream.Stream.concat(receipt.contractsAttemptsByEntry().values().stream().flatMap(List::stream),
+                        receipt.rootedRetainedAttempts().stream().map(ProcessingDrainReceipt.RootedRetainedAttempt::attempt))
+                .anyMatch(a -> a.attempt().isComplete() && a.attempt().processResult().commits() && !a.published());
+        var mapped = mapper.map(receipt);
+        boolean selected = !mapped.entries().isEmpty() || !mapped.rootedRetainedApplications().isEmpty()
+                || !mapped.managedEpochApplicationAttempts().isEmpty() || !mapped.managedEpochEvidenceFailures().isEmpty();
+        var disposition = failed ? ProcessingStageResult.Disposition.NONCOMMITTING
+                : !receipt.quiescent() ? ProcessingStageResult.Disposition.WAITING
+                : selected ? ProcessingStageResult.Disposition.COMPLETED : ProcessingStageResult.Disposition.NO_WORK;
+        if (!failed) retain(mapped);
+        return new ProcessingStageResult(disposition, mapped);
+    }
+
     synchronized DrainResult drain() {
         ensureOpen();
         return retain(mapper.map(engine.drain()));

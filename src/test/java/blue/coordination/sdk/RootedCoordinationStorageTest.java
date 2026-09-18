@@ -38,16 +38,19 @@ final class RootedCoordinationStorageTest {
         var objects = new Bytes();
         RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journalBytes;
-        DocumentId id; byte[] expectedHistory; String expectedHead;
+        DocumentId id; byte[] expectedHistory, expectedResult; String expectedHead, entryId;
         try (var original = new RootedSdkFixture()) {
             var document = original.start("source.yaml", "rcp2/source", Map.of());
             id = document.id();
-            original.append(document, "rcp2/source", "setCounter", 10, "counterValue: 5");
+            var entry = original.append(document, "rcp2/source", "setCounter", 10, "counterValue: 5");
+            entryId = entry.blueId();
             var engine = (DefaultCoordinationEngine) original.blue.advanced().rawEngine();
             var control = CoordinationTestControl.attach(engine);
             control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
-            var stage = engine.processNextRootStage(id, null);
-            assertEquals(1, stage.committedProcessTransitions());
+            var stage = original.blue.processing().processNextStage(document);
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
+            assertEquals(1, stage.stats().committedTransitions());
+            expectedResult = CODEC.encode(stage.entry(entry));
             expectedHistory = history(document); expectedHead = document.snapshot().blueId();
             selected = RootedCoordinationStorage.retainPartition(original.blue, objects, LIMITS);
             journalBytes = ColdStorageJournalFixture.retain(engine);
@@ -62,6 +65,7 @@ final class RootedCoordinationStorageTest {
             assertEquals(expectedHead, document.snapshot().blueId());
             assertArrayEquals(expectedHistory, history(document));
             assertEquals(5, document.snapshot().longAt("/counter"));
+            assertArrayEquals(expectedResult, CODEC.encode(scope.coordination().runtimeForStorage().storedMaps().results().get(entryId)));
             var next = scope.coordination().processing().processNext(document);
             assertEquals(0, next.stats().committedTransitions());
             assertArrayEquals(expectedHistory, history(document));

@@ -8,6 +8,64 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Real selection/execution with an independently armed optional-readiness fault. */
 final class RootedCompletedStageBoundaryTest {
+    @Test void waitingConsumerAndSeparateSourceAdmissionAndLiveStageAvoidReadiness() throws Exception {
+        try (var fixture = new RootedSdkFixture()) {
+            var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
+            var originalParent = parent.snapshot().blueId();
+            var sourceBody = fixture.blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
+            fixture.exact.put(sourceBody.blueId(), sourceBody.json());
+            fixture.timelines.put("rcp2/source", fixture.blue.timelines().register("rcp2/source", "alice"));
+            fixture.appendReference(sourceBody.blueId(), "rcp2/source", "setCounter", 10, "counterValue: 19", false);
+            var attachment = fixture.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + sourceBody.blueId());
+            var control = CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
+            control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            var waiting = fixture.blue.processing().processNextStage(parent);
+            assertEquals(ProcessingStageResult.Disposition.WAITING, waiting.disposition());
+            assertEquals(EntryDisposition.NEEDS_RESOURCES, waiting.entry(attachment).disposition());
+            var admission = fixture.blue.advanced().sourceHistoryPrerequisites(parent).get(0);
+            assertEquals(blue.coordination.api.SourceHistoryPrerequisite.Kind.ADMISSION, admission.kind());
+            assertTrue(fixture.blue.advanced().processSourceHistoryPrerequisite(admission).admission().orElseThrow().published());
+            var live = fixture.blue.advanced().sourceHistoryPrerequisites(parent).get(0);
+            var completed = fixture.blue.advanced().processSourceHistoryPrerequisite(live).processing().orElseThrow();
+            assertEquals(1, completed.committedProcessTransitions());
+            assertEquals(originalParent, parent.snapshot().blueId(), "Separate source work never resumes the waiting consumer");
+            var source = fixture.blue.documents().require(live.sourceDocumentId());
+            assertEquals(19, source.snapshot().longAt("/counter"));
+            var fault = assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(source));
+            assertTrue(control.isInjectedFailure(fault), "Both source stages must leave optional readiness untouched");
+        }
+    }
+
+    @Test void publicStageRetainsExactResultWithoutReportingFutureQuiescence() throws Exception {
+        try (var fixture = new RootedSdkFixture()) {
+            var document = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var entry = fixture.append(document, "rcp2/source", "setCounter", 10, "counterValue: 13");
+            var control = CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
+            control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            var result = fixture.blue.processing().processStage(document, entry);
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, result.disposition());
+            assertTrue(result.entry(entry).applied());
+            assertEquals(result.entry(entry), fixture.blue.runtimeForStorage().storedMaps().results().get(entry.blueId()));
+            assertEquals(13, document.snapshot().longAt("/counter"));
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK, fixture.blue.processing().processNextStage(document).disposition());
+            var fault = assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(document));
+            assertTrue(control.isInjectedFailure(fault));
+            assertFalse(java.util.Arrays.stream(ProcessingStageResult.class.getMethods()).anyMatch(m -> m.getName().equals("quiescent")));
+        }
+    }
+
+    @Test void publicStageRejectsForeignAndClosedOwners() throws Exception {
+        try (var owner = new RootedSdkFixture(); var foreign = new RootedSdkFixture()) {
+            var document = owner.start("source.yaml", "rcp2/source", Map.of());
+            var other = foreign.start("source.yaml", "rcp2/source", Map.of());
+            var entry = foreign.append(other, "rcp2/source", "setCounter", 10, "counterValue: 17");
+            assertThrows(IllegalArgumentException.class, () -> owner.blue.processing().processStage(document, entry));
+            assertThrows(IllegalArgumentException.class, () -> owner.blue.processing().processNextStage(other));
+            owner.blue.close();
+            assertThrows(IllegalStateException.class, () -> owner.blue.processing().processNextStage(document));
+        }
+    }
+
     @Test void incompleteStageFailureDoesNotReturnCompletedEvidence() throws Exception {
         try (var fixture = new RootedSdkFixture()) {
             var document = fixture.start("source.yaml", "rcp2/source", Map.of());
