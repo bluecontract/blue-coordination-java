@@ -720,12 +720,12 @@ def currentProductionShapeLimits = [
         // Public inventory and per-source limits are unchanged; see the Cost38 package note.
         // Cost39: two immutable core/SDK observation records and point-read adapters (+90 lines).
         // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
-        classes: 327,
+        classes: 330,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
-        // Completed-stage internal bridges and an optional-readiness fault boundary (+39 lines).
-        // No new source/public boundary type; see docs/development/completed-stage-boundary.md.
-        lines: 87_802L,
-        publicApiTypes: 96,
+        // Completed-stage bridges plus three logical-record contract/tracking types.
+        // Measured count; see docs/development/logical-record-contract.md.
+        lines: 88_370L,
+        publicApiTypes: 99,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
