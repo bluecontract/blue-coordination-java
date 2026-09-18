@@ -19,6 +19,12 @@ private AVL frames or merge stale family descriptors.
 range queries. A bounded query that cannot complete throws; it cannot return a
 partial page or claim absence. `CoordinationRecordAttempt` tracks the original
 point and predicate observations and overlays its own pending mutations.
+Its `first(range)` uses a coherent first-row hint followed by a complete
+prefix condition through the selected key. It verifies the hint against that
+prefix, incorporates pending insertions/deletions, and conditions the full range
+only when no live member exists. Later members do not become decision-relevant
+conditions merely because they share an index. PostgreSQL overrides the default
+exhaustive hint with an indexed first-row query.
 Point absence has revision zero only when a key has never existed. Deleted keys
 retain increasing tombstone revisions, preventing delete/recreate ABA.
 

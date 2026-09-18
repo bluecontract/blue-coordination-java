@@ -130,6 +130,26 @@ final class CoordinationRecordContractTest {
         assertThrows(IllegalArgumentException.class, () -> new Address("\ud800", "instance"));
     }
 
+    @Test void firstSelectionGuardsOnlyItsCompletePrefixAndIncludesPendingChanges() {
+        var scope = new FixtureScope();
+        scope.values.put(A, new Value(1, bytes("a"))); scope.values.put(B, new Value(1, bytes("b")));
+        try (var attempt = new CoordinationRecordAttempt(scope)) {
+            assertEquals(A, attempt.first(ALL).orElseThrow().key());
+            var packet = attempt.prepare("first", List.of(), bytes("e"));
+            assertEquals(List.of(new Row(A, new Value(1, bytes("a")))), packet.queries().get(0).expected());
+            assertFalse(packet.queries().get(0).range().contains(B), "Later work must not become a publication precondition");
+        }
+        var changed = new FixtureScope(); changed.values.putAll(scope.values);
+        try (var attempt = new CoordinationRecordAttempt(changed)) {
+            attempt.delete(A);
+            assertEquals(B, attempt.first(ALL).orElseThrow().key());
+            var earlier = key("0"); attempt.put(earlier, bytes("new"));
+            assertEquals(earlier, attempt.first(ALL).orElseThrow().key());
+            var packet = attempt.prepare("overlay-first", List.of(), bytes("e"));
+            assertEquals(2, packet.queries().size());
+        }
+    }
+
     private static final class FixtureScope implements CoordinationRecordStore.ReadScope {
         final Map<Key, Value> values = new TreeMap<>();
         boolean closed, fail; int queryCalls, readCalls;

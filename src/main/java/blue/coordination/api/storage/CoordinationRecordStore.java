@@ -1,6 +1,7 @@
 package blue.coordination.api.storage;
 
 import java.util.List;
+import java.util.Optional;
 import blue.coordination.api.storage.CoordinationRecords.*;
 
 /**
@@ -64,6 +65,16 @@ public interface CoordinationRecordStore {
          * @return detached ordered rows from the same snapshot as point reads
          */
         List<Row> query(Range range);
+        /**
+         * Finds the first live row in a range from the same coherent snapshot.
+         * This is a selection hint, not a complete range condition. Tracked
+         * callers must subsequently validate the complete prefix through that
+         * row (or the full empty range). Implementations should use an indexed
+         * first-row query; the default is a correct exhaustive fallback.
+         * @param range exact candidate range
+         * @return first member, or absence when the entire range is empty
+         */
+        default Optional<Row> first(Range range) { return query(range).stream().findFirst(); }
         /** Releases snapshot resources; idempotent on the owning thread. */
         @Override void close();
     }

@@ -59,6 +59,51 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
         return List.copyOf(rows.values());
     }
 
+    /**
+     * Selects the earliest live member while tracking only the complete prefix
+     * through that member. Later unrelated insertions do not invalidate it.
+     * Pending deletions are skipped; pending insertions compete in key order.
+     * An empty selection tracks the whole requested empty range.
+     */
+    public Optional<Row> first(Range range) {
+        ensureOpen(); Objects.requireNonNull(range);
+        try {
+            Range remaining = range;
+            Optional<Row> selected;
+            while (true) {
+                selected = Objects.requireNonNull(scope.first(remaining));
+                if (selected.isEmpty()) break;
+                var row = selected.orElseThrow();
+                if (!remaining.contains(row.key())) throw new IllegalArgumentException("First row is outside its predicate");
+                var pending = writes.get(row.key());
+                if (pending == null || pending.content() != null) break;
+                var next = after(row.key().key());
+                if (range.upper() != null && next.compareTo(range.upper()) >= 0) { selected = Optional.empty(); break; }
+                remaining = new Range(range.family(), range.scope(), next, range.upper());
+            }
+            Key candidate = selected.map(Row::key).orElse(null);
+            for (var pending : writes.values()) if (pending.content() != null && range.contains(pending.key())
+                    && (candidate == null || pending.key().compareTo(candidate) < 0)) candidate = pending.key();
+            var prefix = candidate == null ? range : new Range(range.family(), range.scope(), range.lower(), after(candidate.key()));
+            var observedPrefix = query(prefix);
+            if (candidate == null) {
+                if (!observedPrefix.isEmpty()) throw new IllegalArgumentException("First-row absence contradicts its complete predicate");
+                return Optional.empty();
+            }
+            if (observedPrefix.isEmpty() || !observedPrefix.get(0).key().equals(candidate))
+                throw new IllegalArgumentException("First-row response contradicts its complete prefix");
+            var result = observedPrefix.get(0);
+            if (selected.isPresent() && selected.orElseThrow().key().equals(candidate) && !writes.containsKey(candidate)
+                    && !selected.orElseThrow().equals(result)) throw new IllegalArgumentException("First-row value changed within its snapshot");
+            return Optional.of(result);
+        } catch (RuntimeException | Error failure) { throw retire(failure); }
+    }
+
+    private static Bytes after(Bytes key) {
+        byte[] original = key.copy();
+        return new Bytes(Arrays.copyOf(original, Math.addExact(original.length, 1)));
+    }
+
     /** Installs a pending replacement and automatically captures its point condition. */
     public void put(Key key, Bytes content) {
         ensureOpen(); Objects.requireNonNull(key); Objects.requireNonNull(content);
