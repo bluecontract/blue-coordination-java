@@ -249,6 +249,7 @@ final class LogicalCoordinationStorageTest {
                 parentHead = parent.snapshot().blueId();
                 history = left.coordination().advanced().auditManagedEpochs(parentId).stream().map(ManagedEpochReceipt::receiptIdentity).toList();
                 left.stage(); right.stage(); var pa = a.prepare("parent", List.of(), EVIDENCE); var pb = b.prepare("other", List.of(), EVIDENCE);
+                assertFalse(pa.artifacts().isEmpty()); assertFalse(pb.artifacts().isEmpty());
                 // then
                 assertTrue(pa.queries().stream().noneMatch(q -> q.range().family() == Family.WORK_DUE), "No global due prefix in a root stage");
                 assertTrue(records.publish(reverse ? pb : pa)); assertTrue(records.publish(reverse ? pa : pb));

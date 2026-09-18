@@ -17,6 +17,29 @@ final class LogicalPointStorageTest {
         public String decode(byte[] bytes) { return new String(bytes, StandardCharsets.UTF_8); }
     };
 
+    @Test void artifactsAreBoundAutomaticallyAndChangedAcknowledgementsFailClosed() {
+        // given
+        var attempt = new LogicalRecordMapTest.Store().attempt(); var binding = new LogicalPointStorage(attempt);
+        var bytes = new DocumentSessionStorageTest.Bytes();
+        var tracked = binding.trackArtifacts(RootedEngineStorage.controlledNamespace(bytes));
+        byte[] body = new byte[] {1, 2, 3};
+        var digest = blue.coordination.api.storage.CoordinationRecords.sha256(new Bytes(body));
+        // when
+        tracked.putIfAbsent(digest.hex(), body); tracked.get(digest.hex(), 3).orElseThrow()[0] = 9;
+        binding.stage(); var packet = attempt.prepare("artifacts", List.of(), EVIDENCE);
+        // then
+        assertEquals(List.of(new Artifact(digest, 3)), packet.artifacts());
+        assertTrue(RootedEngineStorage.isControlledNamespace(tracked));
+        assertThrows(IllegalStateException.class, () -> tracked.get(digest.hex(), 3));
+        var failed = new LogicalRecordMapTest.Store().attempt(); var broken = new LogicalPointStorage(failed)
+                .trackArtifacts(new blue.coordination.api.storage.CoordinationImmutableObjectStore() {
+                    public byte[] putIfAbsent(String id, byte[] input) { return new byte[] {7}; }
+                    public Optional<byte[]> get(String id, int maximum) { return Optional.of(new byte[] {7}); }
+                });
+        assertThrows(IllegalArgumentException.class, () -> broken.putIfAbsent(digest.hex(), body));
+        assertThrows(IllegalStateException.class, () -> failed.prepare("wrong", List.of(), EVIDENCE));
+    }
+
     @Test void completeMembershipDetectsPhantomsWhileUnobservedKeysStayIndependent() {
         // given
         var store = new LogicalRecordMapTest.Store();

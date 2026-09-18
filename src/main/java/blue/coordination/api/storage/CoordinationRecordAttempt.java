@@ -18,6 +18,7 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
     private final Map<Range, Query> predicates = new LinkedHashMap<>();
     private final Map<Key, Mutation> writes = new TreeMap<>();
     private final Map<Key, ImmutableFact> facts = new TreeMap<>();
+    private final Map<Bytes, Artifact> requiredArtifacts = new TreeMap<>();
     private State state = State.OPEN;
 
     /** Takes exclusive ownership of a new coherent host scope. */
@@ -174,6 +175,21 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
     }
 
     /**
+     * Binds a required immutable dependency before preparation. Repeated identical
+     * requirements coalesce; a different length under the same digest retires the attempt.
+     * The caller cannot omit these dependencies from the eventual packet.
+     * @param artifact authenticated physical object digest and length
+     */
+    public void requireArtifact(Artifact artifact) {
+        ensureOpen();
+        try {
+            Objects.requireNonNull(artifact);
+            var prior = requiredArtifacts.putIfAbsent(artifact.sha256(), artifact);
+            if (prior != null && !prior.equals(artifact)) throw new IllegalArgumentException("Conflicting artifact requirement");
+        } catch (RuntimeException | Error failure) { throw retire(failure); }
+    }
+
+    /**
      * Detaches the closed packet after all current-stage materialization completes.
      * Must not be called after a failed semantic invocation. No SDK handle belongs
      * in the evidence; the caller must encode it before calling this method.
@@ -183,8 +199,13 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
     public Publication prepare(String publicationId, Collection<Artifact> artifacts, Bytes evidence) {
         ensureOpen();
         try {
+            var supplied = new HashSet<Bytes>();
+            for (var artifact : Objects.requireNonNull(artifacts)) {
+                if (!supplied.add(artifact.sha256())) throw new IllegalArgumentException("Duplicate supplied artifact");
+                requireArtifact(artifact);
+            }
             var points = observed.entrySet().stream().map(e -> new Point(e.getKey(), e.getValue())).toList();
-            var packet = new Publication(address, publicationId, points, predicates.values(), writes.values(), facts.values(), artifacts, evidence);
+            var packet = new Publication(address, publicationId, points, predicates.values(), writes.values(), facts.values(), requiredArtifacts.values(), evidence);
             state = State.PREPARED;
             scope.close();
             return packet;

@@ -27,6 +27,8 @@ final class LogicalRecordContext {
                 ? attempt.firstImmutableFact(range) : attempt.first(range);
     }
 
+    void requireArtifact(Artifact artifact) { open(); attempt.requireArtifact(artifact); }
+
     void select(Key key, Bytes content) {
         open();
         var mutation = new Mutation(key, content);

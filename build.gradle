@@ -734,7 +734,7 @@ def currentProductionShapeLimits = [
         // Closed cross-package logical SDK point-map bridge and five family bindings.
         // Pending/source and feeder point bindings with requesting-root membership predicates.
         // Complete lazy engine/SDK assembly and owner-local control records.
-        lines: 90_999L,
+        lines: 91_056L,
         publicApiTypes: 100,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

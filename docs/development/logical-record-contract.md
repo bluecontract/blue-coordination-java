@@ -149,3 +149,12 @@ logical buckets too; capacity exhaustion still retires an attempt. These tests
 use the separately coherent host journal fixture. A library-owned logical
 journal, owner/topology stage envelope and real Mini executor/finalizer remain
 required before any S2/D2/H application acceptance claim.
+
+Logical SDK opening wraps the immutable store in an attempt-confined dependency
+tracker. Every consumed or retained object is digest/length checked and becomes
+a mandatory artifact in the prepared packet, including when the caller passes
+an empty artifact list to `prepare`. The existing controlled-writer capability
+is preserved through this wrapper. `CoordinationRecordAttempt.requireArtifact`
+coalesces identical requirements and retires an attempt on conflicting lengths.
+The publisher must validate these artifacts atomically with the record packet;
+missing bytes must not become a successful publication with dangling references.

@@ -14,6 +14,25 @@ final class CoordinationRecordContractTest {
     private static final Range ALL = new Range(Family.SESSION, SCOPE, null, null);
     private static final DecodeLimits LIMITS = new DecodeLimits(1_000_000, 1_000, 100_000);
 
+    @Test void requiredArtifactsCannotBeOmittedAndConflictingRequirementsRetireTheAttempt() {
+        // given
+        var scope = new FixtureScope(); var attempt = new CoordinationRecordAttempt(scope);
+        var artifact = new Artifact(sha256(bytes("body")), 4);
+        // when
+        attempt.requireArtifact(artifact); attempt.requireArtifact(artifact);
+        var packet = attempt.prepare("required", List.of(), bytes("result"));
+        // then
+        assertEquals(List.of(artifact), packet.artifacts()); assertTrue(scope.closed);
+        assertEquals(packet.digest(), decodePublication(packet.canonicalBytes(), LIMITS).digest());
+        var otherScope = new FixtureScope(); var other = new CoordinationRecordAttempt(otherScope);
+        other.requireArtifact(artifact);
+        assertThrows(IllegalArgumentException.class, () -> other.requireArtifact(new Artifact(artifact.sha256(), 5)));
+        assertTrue(otherScope.closed);
+        assertThrows(IllegalStateException.class, () -> other.prepare("invalid", List.of(), bytes("result")));
+        var explicit = new CoordinationRecordAttempt(new FixtureScope()); explicit.requireArtifact(artifact);
+        assertEquals(List.of(artifact), explicit.prepare("same", List.of(artifact), bytes("result")).artifacts());
+    }
+
     @Test void payloadIsDetachedCanonicalAndCoversHostAuthorityAndEvidence() {
         // given
         byte[] content = { 1, 2, 3 };

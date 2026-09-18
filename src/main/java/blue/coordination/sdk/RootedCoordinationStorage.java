@@ -410,6 +410,7 @@ public final class RootedCoordinationStorage {
         Objects.requireNonNull(attempt); var records = new LogicalPointStorage(attempt);
         var opening = new LogicalOpening();
         try {
+            var trackedObjects = records.trackArtifacts(objects);
             var codec = new SdkStorageCodec(new Object(), limits.sdk().maximumCodecBytes());
             var selected = codec.decode(configuration.bytes(), SdkStorageCodec.Configuration.class);
             if (!java.util.Arrays.equals(configuration.bytes(), codec.encode(selected)))
@@ -422,12 +423,12 @@ public final class RootedCoordinationStorage {
             else if (!prior.equals(expected)) throw new CoordinationObjectStorageException("Logical SDK configuration changed");
             var coordination = new BlueCoordination(owner -> {
                 opening.runtime = SdkCoordinationRuntime.restore(owner, selected, provider, scopedProvider -> {
-                    opening.engine = RootedEngineStorage.openLogical(objects, limits.engine(), records,
+                    opening.engine = RootedEngineStorage.openLogical(trackedObjects, limits.engine(), records,
                             new DefaultCoordinationEngine.ContractsRuntimeBinding(selected.language(), selected.contracts(), selected.policy()),
                             scopedProvider, journal);
                     return opening.engine.engine();
                 });
-                opening.maps = SdkRuntimePointMaps.openLogical(opening.runtime, objects, limits.sdk().maps(), records);
+                opening.maps = SdkRuntimePointMaps.openLogical(opening.runtime, trackedObjects, limits.sdk().maps(), records);
                 opening.runtime.installPointMaps(opening.maps.maps()); return opening.runtime;
             });
             return new LogicalScope(coordination, opening, records, attempt);

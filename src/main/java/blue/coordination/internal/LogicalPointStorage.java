@@ -1,6 +1,8 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.storage.CoordinationRecordAttempt;
+import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords;
 import blue.coordination.api.storage.CoordinationRecords.*;
 import java.util.*;
 
@@ -14,6 +16,37 @@ public final class LogicalPointStorage {
     /** Binds the caller-owned attempt; creating a binding performs no reads. @param attempt owned attempt */
     public LogicalPointStorage(CoordinationRecordAttempt attempt) { context = new LogicalRecordContext(attempt); }
     LogicalRecordContext context() { return context; }
+
+    /**
+     * Tracks immutable bytes consumed or retained by this owner as required packet dependencies.
+     * @param objects host-owned immutable store
+     * @return an attempt-confined view retaining the existing controlled-writer capability
+     */
+    public CoordinationImmutableObjectStore trackArtifacts(CoordinationImmutableObjectStore objects) {
+        context.checkOpen(); Objects.requireNonNull(objects);
+        CoordinationImmutableObjectStore tracked = new CoordinationImmutableObjectStore() {
+            private byte[] checked(String address, byte[] bytes) {
+                var digest = CoordinationRecords.sha256(new Bytes(bytes));
+                if (!digest.hex().equals(address)) throw new IllegalArgumentException("Immutable object address differs from bytes");
+                context.requireArtifact(new Artifact(digest, bytes.length)); return bytes;
+            }
+            public byte[] putIfAbsent(String address, byte[] bytes) {
+                return context.protect(() -> {
+                    byte[] expected = Objects.requireNonNull(bytes).clone();
+                    var retained = Objects.requireNonNull(objects.putIfAbsent(address, expected.clone()));
+                    if (!Arrays.equals(expected, retained)) throw new IllegalArgumentException("Immutable retention acknowledged different bytes");
+                    return checked(address, retained).clone();
+                });
+            }
+            public Optional<byte[]> get(String address, int maximumBytes) {
+                return context.protect(() -> Objects.requireNonNull(objects.get(address, maximumBytes)).map(bytes -> {
+                    if (bytes.length > maximumBytes) throw new IllegalArgumentException("Immutable object exceeds selected read capacity");
+                    return checked(address, bytes).clone();
+                }));
+            }
+        };
+        return RootedEngineStorage.isControlledNamespace(objects) ? RootedEngineStorage.controlledNamespace(tracked) : tracked;
+    }
 
     /**
      * Opens a closed family in canonical encoded-key order. Enumeration is an explicit complete predicate;
