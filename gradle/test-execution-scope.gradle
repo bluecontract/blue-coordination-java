@@ -133,8 +133,21 @@ def registerScope = { String name, List<String> selected ->
                         && task.includes.empty && task.excludes.empty
                         && task.options.includeTags.empty && task.options.excludeTags.empty
                         && task.options.includeEngines.empty && task.options.excludeEngines.empty
-                results[suiteName] = inspectScope(expected, cases, fullTask) + [
-                        maxParallelForks: task.maxParallelForks, testCases: cases]
+                boolean delegated = project.ext.has('ciDelegatedTestEvidence')
+                if (delegated) {
+                    def plan = new groovy.json.JsonSlurper().parse(
+                            file('build/reports/ci-test-shards/0/plan.json'))
+                    if (plan.discovered[suiteName].sort() != expected.sort())
+                        throw new GradleException('Delegated class discovery differs from current compiled source')
+                }
+                results[suiteName] = inspectScope(expected, cases, fullTask || delegated) + [
+                        fullTask: fullTask, executionMode: delegated ? 'delegated' : 'local',
+                        maxParallelForks: task.maxParallelForks,
+                        junitParallelism: task.systemProperties.findAll { key, value ->
+                            key.startsWith('junit.jupiter.execution.parallel.')
+                        }.collectEntries { key, value ->
+                            [(key.substring('junit.jupiter.execution.parallel.'.length())): value.toString()]
+                        }, testCases: cases]
             }
             // The exporter case collects during a full run. Its exact runtime
             // comparison must also have executed successfully in this graph;
@@ -150,6 +163,8 @@ def registerScope = { String name, List<String> selected ->
                     schemaId: 'blue-coordination-test-execution-scope-v1',
                     status: passed ? 'PASS' : 'FAIL', coordinationVersion: project.version.toString(),
                     javaVersion: providers.gradleProperty('testJavaVersion').getOrElse('17'),
+                    delegatedTestEvidence: project.ext.has('ciDelegatedTestEvidence')
+                            ? project.ext.ciDelegatedTestEvidence : null,
                     topologyEvidenceVerified: topologyVerified,
                     suites: results])) + '\n', 'UTF-8')
             if (!passed) {

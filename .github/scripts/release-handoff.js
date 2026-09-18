@@ -89,18 +89,35 @@ function identity(root, env) {
 }
 
 function inspectBuild(build, binding, java) {
-  assert.ok(['17', '21'].includes(java), 'Invalid verification JDK');
+  assert.ok(['17'].includes(java), 'Invalid verification JDK');
   const scope = json(path.join(build, 'reports/test-execution-scope/verifyReleaseTestExecutionScope.json'));
   assert.equal(scope.status, 'PASS', 'Release execution scope did not pass');
   assert.equal(scope.coordinationVersion, binding.version, 'Scope version mismatch');
   assert.equal(scope.javaVersion, java, 'Scope JDK mismatch');
   assert.equal(scope.topologyEvidenceVerified, true, 'Topology comparison did not pass');
+  const delegated = scope.delegatedTestEvidence;
+  if (delegated) {
+    execFileSync('python3', [path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
+    assert.deepEqual(delegated, json(path.join(build, 'reports/ci-test-shards/delegated.json')));
+    assert.equal(delegated.version, binding.version, 'Delegated version mismatch');
+    assert.equal(delegated.java, java, 'Delegated JDK mismatch');
+    if (process.env.GITHUB_RUN_ATTEMPT)
+      assert.equal(delegated.attempt, process.env.GITHUB_RUN_ATTEMPT, 'Delegated attempt mismatch');
+    if (process.env.VERIFICATION_SCOPE)
+      assert.equal(delegated.scope, process.env.VERIFICATION_SCOPE, 'Delegated scope mismatch');
+    if (binding.commit) {
+      assert.equal(delegated.sha, binding.commit, 'Delegated source mismatch');
+      assert.equal(delegated.tree, binding.tree, 'Delegated tree mismatch');
+      assert.equal(delegated.run, binding.runId, 'Delegated run mismatch');
+    }
+  }
   assert.deepEqual(Object.keys(scope.suites).sort(), [...SUITES].sort(), 'Missing release suite');
   const testInventory = {};
   for (const suite of SUITES) {
     const result = scope.suites[suite];
     assert.equal(result.passed, true, `${suite} did not pass`);
-    assert.equal(result.fullTask, true, `${suite} was filtered or excluded`);
+    assert.ok(result.fullTask === true || (delegated && result.fullTask === false
+      && result.executionMode === 'delegated'), `${suite} was filtered or excluded`);
     assert.equal(result.failures, 0, `${suite} failed`);
     assert.equal(result.skipped, 0, `${suite} skipped tests`);
     assert.ok(result.testCases.length > 0, `${suite} has no tests`);
@@ -190,7 +207,7 @@ function seal(root, output, java, env) {
 function verify(root, directory, expectedHashes, env) {
   const binding = identity(root, env);
   const receipts = {};
-  for (const java of ['17', '21']) {
+  for (const java of ['17']) {
     const archive = path.join(directory, `java${java}.tar.gz`);
     assert.match(expectedHashes[java] || '', /^[0-9a-f]{64}$/, `Missing Java ${java} job SHA`);
     assert.equal(sha(archive), expectedHashes[java], `Java ${java} handoff SHA mismatch`);
@@ -203,9 +220,6 @@ function verify(root, directory, expectedHashes, env) {
     assert.deepEqual(receipt.binding, binding, `Java ${java} candidate/run mismatch`);
     assert.deepEqual(receipt, inspectBuild(build, binding, java), `Java ${java} evidence mismatch`);
     receipts[java] = receipt;
-  }
-  for (const field of ['artifacts', 'testInventory', 'focusedTests']) {
-    assert.deepEqual(receipts['17'][field], receipts['21'][field], `JDK gates differ: ${field}`);
   }
   assert.ok(!fs.existsSync(path.join(root, 'build')), 'Refusing to overwrite local build outputs');
   fs.cpSync(path.join(directory, 'java17/build'), path.join(root, 'build'), { recursive: true });
@@ -225,14 +239,15 @@ if (require.main === module) {
   const root = process.cwd();
   const env = process.env;
   let output;
-  if (command === 'candidate') output = candidate(root, location, env.RELEASE_CHANNEL);
-  else if (command === 'restore') restore(root, location, {
+  if (command === 'source') output = candidate(root, location, 'stable');
+  else if (command === 'candidate') output = candidate(root, location, env.RELEASE_CHANNEL);
+  else if (command === 'restore' || command === 'restore-source') restore(root, location, {
     bundleSha: env.RELEASE_BUNDLE_SHA, commit: env.RELEASE_COMMIT,
-    version: env.RELEASE_VERSION, channel: env.RELEASE_CHANNEL,
+    version: env.RELEASE_VERSION, channel: command === 'restore-source' ? 'build' : env.RELEASE_CHANNEL,
   });
   else if (command === 'seal') output = seal(root, location, java, env);
   else if (command === 'verify') output = verify(root, location, {
-    17: env.JAVA17_HANDOFF_SHA, 21: env.JAVA21_HANDOFF_SHA,
+    17: env.JAVA17_HANDOFF_SHA,
   }, env);
   else throw new Error(`Unknown release handoff command: ${command}`);
   if (output) {

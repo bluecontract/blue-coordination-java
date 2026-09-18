@@ -6,10 +6,10 @@ separate from Maven Central staging and is intentionally non-overwriting.
 
 ## Current decision
 
-`3.0.0-rc.12` is authorized as a bounded external-pilot release candidate
+`3.0.0-rc.13` is authorized as a bounded external-pilot release candidate
 only after all required gates pass on the exact published dependency tuple.
 It is not stable or production-ready. The exact scope and non-claims are in the
-[rc.12 release decision](../releases/3.0.0-rc.12.md).
+[rc.13 release decision](../releases/3.0.0-rc.13.md).
 
 The release consumes only Maven Central artifacts:
 
@@ -18,13 +18,13 @@ The release consumes only Maven Central artifacts:
 | Language | `3.1.0-rc.32` |
 | BEX core/contracts | `1.1.0-rc.6` |
 | Repository | `3.0.0-rc.22` |
-| Coordination | `3.0.0-rc.12` |
+| Coordination | `3.0.0-rc.13` |
 
 Coordination directly owns the complete Language rc.32 graph. BEX and
 Repository Language transitive edges remain excluded, and the generated POM
 publishes the same exclusions.
 
-The complete current release gate and focused rc.12 capability inventory are
+The complete current release gate and focused rc.13 capability inventory are
 the required semantic evidence for this release. Their documentation does not
 claim that they have passed. Historical rc.4, rc.5, and rc.6 receipts remain evidence
 for their original releases only.
@@ -33,19 +33,17 @@ for their original releases only.
 
 From a clean feature branch:
 
-Keep `.cz.toml` at the preceding released version in the feature PR. The Build
-workflow prepares rc.12 and seals a local verification commit before running
-these Gradle gates. For local `verifyRcReadiness`, reproduce that preparation
-in an isolated validation checkout; do not commit the prepared version to the
-feature branch. The release workflow owns the final version commit and tag.
+Keep `.cz.toml` at the authorized, not-yet-tagged candidate (`3.0.0-rc.13`)
+so PR Build also executes `verifyRcReadiness` during staging. Build seals a local
+verification commit without a release tag or publication. The release workflow
+owns the final version commit and tag; it retains RC13 while its tag is absent
+and rejects a later candidate until its release authority is explicitly updated.
 
 ```bash
 node --test .github/scripts/*.test.js
 ./gradlew --no-daemon dependencyPreflight --refresh-dependencies
 ./gradlew --no-daemon --no-build-cache clean releaseCheck \
   -PtestJavaVersion=17
-./gradlew --no-daemon --no-build-cache clean releaseCheck \
-  -PtestJavaVersion=21
 ./gradlew --no-daemon --no-build-cache verifyRcReadiness \
   -PtestJavaVersion=17
 git diff --check
@@ -63,63 +61,50 @@ job. RC and stable releases share `.github/workflows/release-candidate.yml`.
 The stable entry point remains restricted to `main` and a stable version.
 The shared workflow:
 
-1. checks out the complete history and tags;
-2. pins Temurin 17.0.19+10 for the canonical build and Temurin
-   21.0.11+10.0.LTS for compatibility verification;
-3. validates release credentials and the wrapper;
-4. for RCs, prepares the version authorized by `docs/releases/3.0.0-rc.12.md`;
-5. for RCs, creates the annotated tag locally and verifies push permissions;
-6. exports that exact commit and local RC tag in a Git bundle, with its SHA-256
-   passed as a preparation-job output;
-7. restores the candidate on two separate runners and resolves the exact
-   published dependency graph on each;
-8. runs the complete Java 21 `releaseCheck` and Java 17 `stageRelease`
-   concurrently; staging includes the complete release and rc.12 gates;
-9. seals each successful job's artifacts and evidence in an archive whose
-   SHA-256 is passed directly to the publication job;
-10. waits for both jobs to succeed, checks both archive hashes and their source
-    commit, source tree, version, workflow run, dependency lock, complete test
-    inventories, topology and extracted-source receipts, and identical JARs,
-    POM and source archive; it also checks Java 17 readiness and staged bytes;
-11. restores the verified Java 17 staging output and pushes the verified release
-    commit to `next` without publishing tags for RCs; a competing change to
-    `next` rejects this push before any external deployment;
-12. deploys the signed bundle to Maven Central;
-13. for RCs, pushes only the release tag after deployment succeeds;
-14. archives JARs, source distribution, reports, test results, staging output,
-    and JReleaser evidence.
+1. checks out complete history and tags and sets up Java 17;
+2. validates credentials and prepares the RC authorized by
+   `docs/releases/3.0.0-rc.13.md`, with a local verification commit and tag;
+3. exports and restores that exact source using a SHA-256-bound Git bundle;
+4. runs three groups of complete test classes and an independent extracted-source
+   check on separate Java 17 runners (two JVMs × two JUnit threads per test runner);
+5. requires all four jobs to succeed, validates complete test inventory, topology,
+   source/run/attempt-bound receipts and archive hashes, then runs the remaining
+   release and RC13 readiness gates and stages the Java 17 artifacts;
+6. seals the verified artifacts and checks the handoff in the publication job;
+7. atomically reserves the exact RC commit on `next` and its annotated tag;
+8. deploys the signed bundle, waits separately for Maven Central `PUBLISHED`,
+   and retains artifacts, reports and JReleaser diagnostics.
 
-The two verification jobs depend only on preparation. The publication job
-depends on preparation **and both JDK jobs**. A failed or cancelled gate cannot
-start publication. Each runner retains four independent test JVMs.
+A failed or cancelled verification cannot start publication. The publish job
+uses `jreleaserDeploy -x stageRelease` only after handoff validation, deploying
+the already verified bytes. Normal local Gradle commands retain the complete
+suite and normal deployment still depends on `stageRelease`. The CI shard
+aggregation does not rerun the tests and does not omit their evidence.
 
-The publish job uses `jreleaserDeploy -x stageRelease` only after the handoff
-verification succeeds: it deploys the already verified bytes rather than
-rebuilding on a fresh runner. Normal Gradle deployment still depends on
-`stageRelease`; there is no new global test-skip option. Gradle module metadata
-is generated and checked in Java 17 staging; Java 21 retains its original
-`releaseCheck` scope. The successful Java 17 and Java 21 handoff artifacts
-contain all their original reports, test results, gas evidence, source
-distributions, JARs and publication files. Failed or cancelled jobs upload
-their available diagnostic evidence separately.
+The remote RC tag reserves a verified version before upload; it is not proof
+that Maven Central publication succeeded. A failed verification gate creates no
+remote reservation. A failed deployment or publication wait leaves the reserved
+commit and tag in place, so a later preparation selects a higher RC instead of
+reusing a potentially uploaded version. The exact release-authority check still
+applies: a higher RC requires an explicitly updated release decision. Automation
+does not rewrite that authority or remove reservations to retry a used version.
+Automatic `chore: release ...` pushes enter a separate skip concurrency group;
+actual and manually dispatched RC runs retain the shared serialized queue.
 
-The tag is intentionally absent while Maven Central publication is pending.
-A failed gate or deployment leaves the remote tag untouched.
-The verified release commit is already on the remote before deployment starts.
-If `next` advances during deployment, the final tag-only push leaves the newer
-branch head in place and still identifies the exact published commit. A failed
-deployment can therefore leave a verified release commit on `next` without a
-published tag; the commit message alone is not evidence of publication.
+Core verification archives retain JUnit XML on both success and failure so
+individual test durations can be examined alongside aggregate timing receipts.
 
-The separate Build workflow independently repeats `releaseCheck` on Java 17
-and Java 21 and runs `verifyRcReadiness` on the canonical Java 17 lane.
+The separate Build workflow independently repeats `releaseCheck` and
+`verifyRcReadiness` on Java 17.
 
-All three workflows select four independent test JVMs, including the
-extracted-source smoke. The runtime matrix and all release gates remain in
-place. Test execution-scope receipts and rooted gas evidence are included in
-the uploaded evidence.
+The workflows run on Java 17 with two test JVMs and two concurrent test
+methods per JVM, including the extracted-source smoke. Test execution-scope
+receipts and rooted gas evidence are included in the uploaded evidence.
 
-### Repeated post-merge verification
+### Historical baseline: repeated post-merge verification
+
+The following measurements describe the earlier Java 17/21 workflow, not the
+current Java 17 configuration.
 
 The merge push still starts both the Build matrix and Release RC, and the
 release commit starts the Build matrix again. These independent Build runs
@@ -165,7 +150,7 @@ The host owns atomic persistence, fences, scheduling and durable work delivery;
 Coordination adds no database implementation. It does not provide an
 authoritative Timeline-provider completeness service, provider-backed Mandates,
 distributed scheduling, production MyOS operations, arbitrary-history resource
-bounds, or a stable latency SLA. See the RC12 decision for the exact storage
+bounds, or a stable latency SLA. See the RC13 decision for the exact storage
 contract and remaining exclusions.
 
 `verifyRcReadiness` proves the current semantic bounded-pilot profile and
@@ -173,5 +158,5 @@ produces fresh artifact hashes after executing the complete
 published-dependency build.
 
 The rc.1 Round 13 reports and schemas are immutable historical evidence. Their
-performance exception is rc.1-specific and is not part of rc.12 or any future
+performance exception is rc.1-specific and is not part of rc.13 or any future
 stable release.

@@ -18,11 +18,15 @@ function stepCommand(name) {
   const step = workflow.slice(start, end < 0 ? undefined : end);
   const command = step.match(/^        run: (.+)$/m)?.[1];
   assert.ok(command, `Expected a single command for ${name}`);
+  if (command === '|' || command === '|-') {
+    return step.split(`        run: ${command}\n`)[1].split('\n')
+      .filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n');
+  }
   return command;
 }
 
-const pushCommit = stepCommand('Push verified release commit');
-const pushTag = stepCommand('Push published release tag');
+const pushCommit = stepCommand('Reserve verified release commit and tag');
+const { nextVersionForCurrentRc, assertAuthorityRelease } = require('./prepare-rc-release.js');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coordination-rc-refs-'));
@@ -58,23 +62,24 @@ function fixture(t) {
   const releaseCommit = commit(publisher, `chore: release ${version}`);
   git(publisher, 'tag', '-a', `v${version}`, '-m', `Release ${version}`);
   git(publisher, 'tag', '-a', 'unrelated-local-tag', '-m', 'Not a release output');
-  // Even a configured follow-tags default must not publish either tag early.
+  // A configured follow-tags default must not include unrelated local tags.
   git(publisher, 'config', 'push.followTags', 'true');
   return { root, remote, publisher, contributor, git, shell, commit, releaseCommit };
 }
 
-test('publishes the commit after both gates and the tag after deployment', () => {
+test('reserves the verified commit and tag before deployment', () => {
   const publisher = workflow.slice(workflow.indexOf('\n  publish:\n'));
-  assert.match(publisher, /needs:\n      - prepare\n      - java17\n      - java21/);
+  assert.match(publisher, /needs:\n      - prepare\n      - java17/);
   const names = [
-    'Verify both gates and restore staged artifacts',
-    'Push verified release commit',
+    'Verify Java 17 gate and restore staged artifacts',
+    'Reserve verified release commit and tag',
     'Publish to Maven Central',
-    'Push published release tag',
+    'Wait for Maven Central publication',
   ];
   const positions = names.map((name) => publisher.indexOf(`      - name: ${name}\n`));
   assert.ok(positions.every((position, i) => position >= 0
     && (i === 0 || position > positions[i - 1])));
+  assert.doesNotMatch(publisher, /Push published release tag/);
 });
 
 test('a competing next update prevents deployment even after a successful dry run', (t) => {
@@ -90,18 +95,56 @@ test('a competing next update prevents deployment even after a successful dry ru
   assert.equal(f.git(f.remote, 'tag', '--list'), '');
 });
 
-test('a next update during deployment does not block the exact release tag', (t) => {
+test('post-upload failure cannot reuse the reserved version or bypass release authority', (t) => {
   const f = fixture(t);
   const reserve = f.shell(pushCommit);
   assert.equal(reserve.status, 0, reserve.stderr);
   assert.equal(f.git(f.remote, 'rev-parse', 'refs/heads/next'), f.releaseCommit);
-  assert.equal(f.git(f.remote, 'tag', '--list'), '');
+  assert.equal(f.git(f.remote, 'tag', '--list'), `v${version}`);
+  assert.equal(f.git(f.remote, 'rev-parse', `${tag}^{commit}`), f.releaseCommit);
+  // Simulate a deployment/finalization failure: no later workflow push occurs.
   f.git(f.contributor, 'pull', '--quiet', '--ff-only');
+  f.git(f.contributor, 'fetch', '--tags', 'origin');
+  const reserved = f.git(f.contributor, 'tag', '--list', 'v3.0.0-rc.*')
+    .split('\n').map((name) => Number(name.split('.').at(-1)));
+  const retry = nextVersionForCurrentRc(version, Math.max(...reserved));
+  assert.equal(retry, '3.0.0-rc.9');
+  assert.throws(() => assertAuthorityRelease(retry, `RC8_VERSION: ${version}\n`),
+    /does not match authorized release/);
   const newerCommit = f.commit(f.contributor, 'Concurrent merge during deployment');
   f.git(f.contributor, 'push', '--quiet', 'origin', 'HEAD:next');
-  const published = f.shell(pushTag);
-  assert.equal(published.status, 0, published.stderr);
   assert.equal(f.git(f.remote, 'rev-parse', 'refs/heads/next'), newerCommit);
   assert.equal(f.git(f.remote, 'rev-parse', `${tag}^{commit}`), f.releaseCommit);
-  assert.equal(f.git(f.remote, 'tag', '--list'), `v${version}`);
+});
+
+test('conflicting tag rejects the branch update atomically', (t) => {
+  const f = fixture(t);
+  const oldHead = f.git(f.remote, 'rev-parse', 'refs/heads/next');
+  f.git(f.contributor, 'tag', '-a', `v${version}`, '-m', 'Different source');
+  f.git(f.contributor, 'push', '--quiet', 'origin', tag);
+  const result = f.shell(`${pushCommit}\nprintf deployed > deployment-started`);
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.existsSync(path.join(f.publisher, 'deployment-started')), false);
+  assert.equal(f.git(f.remote, 'rev-parse', 'refs/heads/next'), oldHead);
+  assert.equal(f.git(f.remote, 'rev-parse', `${tag}^{commit}`), oldHead);
+});
+
+test('automatic release chores use a separate queue while real and manual RCs serialize', () => {
+  const entry = fs.readFileSync(path.join(__dirname, '../workflows/release-rc.yml'), 'utf8');
+  assert.ok(entry.includes("${{ github.event_name == 'push' && startsWith(github.event.head_commit.message || '', 'chore: release ') && format('coordination-release-rc-skip-{0}', github.run_id) || 'coordination-release-rc' }}"));
+  assert.match(entry, /cancel-in-progress: false/);
+  assert.match(entry, /!startsWith\(github.event.head_commit.message \|\| '', 'chore: release '\)/);
+});
+
+
+test('publication wait is status-only and default local deployment still waits', () => {
+  const deploy = stepCommand('Publish to Maven Central');
+  const wait = stepCommand('Wait for Maven Central publication');
+  assert.match(deploy, /rm -f build\/jreleaser\/output.properties build\/jreleaser\/maven-central-publication.json/);
+  assert.ok(deploy.indexOf('rm -f') < deploy.indexOf('./gradlew'));
+  assert.match(deploy, /-PmavenCentralSeparateWait=true/);
+  assert.match(wait, /python3 .github\/scripts\/wait-maven-central.py build\/jreleaser\/output.properties --receipt build\/jreleaser\/maven-central-publication.json/);
+  assert.doesNotMatch(wait, /gradlew|jreleaserDeploy|git push/);
+  const build = fs.readFileSync(path.join(__dirname, '../../build.gradle'), 'utf8');
+  assert.match(build, /skipPublicationCheck = providers.gradleProperty\(\s*'mavenCentralSeparateWait'\).getOrElse\('false'\).toBoolean\(\)/);
 });

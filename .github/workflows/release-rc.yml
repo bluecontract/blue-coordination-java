@@ -7,9 +7,11 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: coordination-release-rc
+  group: >-
+    ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message || '', 'chore: release ') && format('coordination-release-rc-skip-{0}', github.run_id) || 'coordination-release-rc' }}
   cancel-in-progress: false
 
 jobs:

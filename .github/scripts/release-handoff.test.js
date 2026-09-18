@@ -30,7 +30,7 @@ function fixture(t, channel = 'rc') {
   git(source, 'commit', '--quiet', '-m', 'Release source');
   // Downstream checkouts initially lack this unpushed release commit and tag.
   const checkouts = {};
-  for (const lane of ['17', '21', 'publish']) {
+  for (const lane of ['17', 'publish']) {
     const checkout = path.join(root, lane);
     git(root, 'clone', '--quiet', source, checkout);
     checkouts[lane] = checkout;
@@ -89,10 +89,10 @@ function fixture(t, channel = 'rc') {
     write(output, 'rooted-evidence/gas/example.json', { gas: 42 });
     return output;
   }
-  const builds = { 17: build('17'), 21: build('21') };
+  const builds = { 17: build('17') };
   const hashes = {};
-  function sealBoth() {
-    for (const java of ['17', '21']) {
+  function sealGate() {
+    for (const java of ['17']) {
       hashes[java] = seal(checkouts[java], path.join(handoffs, `java${java}.tar.gz`), java, env)['handoff-sha'];
     }
     return hashes;
@@ -103,13 +103,13 @@ function fixture(t, channel = 'rc') {
     write(builds[java], file, data);
   }
   return { root, git, source, directory, expected, checkouts, env, builds, version,
-    handoffs, hashes, sealBoth, mutate, publish: () => verify(checkouts.publish, handoffs, hashes, env) };
+    handoffs, hashes, sealGate, mutate, publish: () => verify(checkouts.publish, handoffs, hashes, env) };
 }
 
 for (const channel of ['rc', 'stable']) {
   test(`${channel} candidate survives separate checkouts and publishes the exact staged bytes`, (t) => {
     const f = fixture(t, channel);
-    f.sealBoth();
+    f.sealGate();
     assert.equal(f.publish().status, 'PASS');
     const relative = `staging-deploy/blue/coordination/blue-coordination-java/${f.version}/blue-coordination-java-${f.version}.jar`;
     assert.equal(sha(path.join(f.builds['17'], relative)), sha(path.join(f.checkouts.publish, 'build', relative)));
@@ -140,31 +140,31 @@ for (const [label, mutate] of [
   ['failed tests', (scope) => { scope.suites.test.failures = 1; }],
   ['filtered suite', (scope) => { scope.suites.test.fullTask = false; }],
   ['missing topology comparison', (scope) => { scope.topologyEvidenceVerified = false; }],
-  ['wrong JDK', (scope) => { scope.javaVersion = '17'; }],
+  ['wrong JDK', (scope) => { scope.javaVersion = '25'; }],
 ]) {
   test(`cannot seal ${label} as a passing gate`, (t) => {
     const f = fixture(t);
-    f.mutate('21', 'reports/test-execution-scope/verifyReleaseTestExecutionScope.json', mutate);
-    assert.throws(() => f.sealBoth());
+    f.mutate('17', 'reports/test-execution-scope/verifyReleaseTestExecutionScope.json', mutate);
+    assert.throws(() => f.sealGate());
   });
 }
 
 test('rejects failed extracted-source verification', (t) => {
   const f = fixture(t);
-  f.mutate('21', 'reports/contracts10/source-archive-verification.json', (data) => { data.focusedTestsStatus = 'FAIL'; });
-  assert.throws(() => f.sealBoth(), /focusedTestsStatus did not pass/);
+  f.mutate('17', 'reports/contracts10/source-archive-verification.json', (data) => { data.focusedTestsStatus = 'FAIL'; });
+  assert.throws(() => f.sealGate(), /focusedTestsStatus did not pass/);
 });
 
 test('rejects artifacts changed after staging', (t) => {
   const f = fixture(t);
   fs.appendFileSync(path.join(f.builds['17'], `staging-deploy/blue/coordination/blue-coordination-java/${f.version}/blue-coordination-java-${f.version}.jar`), 'changed');
-  assert.throws(() => f.sealBoth(), /Staged artifact differs/);
+  assert.throws(() => f.sealGate(), /Staged artifact differs/);
 });
 
 test('rejects a source archive changed after extracted-source verification', (t) => {
   const f = fixture(t);
-  fs.appendFileSync(path.join(f.builds['21'], `distributions/blue-coordination-java-${f.version}-source.zip`), 'changed');
-  assert.throws(() => f.sealBoth(), /Source archive changed after verification/);
+  fs.appendFileSync(path.join(f.builds['17'], `distributions/blue-coordination-java-${f.version}-source.zip`), 'changed');
+  assert.throws(() => f.sealGate(), /Source archive changed after verification/);
 });
 
 test('rejects stale RC readiness artifact hashes', (t) => {
@@ -172,68 +172,65 @@ test('rejects stale RC readiness artifact hashes', (t) => {
   f.mutate('17', `reports/release/${f.version}-readiness.json`, (data) => {
     data.artifacts.main.sha256 = '0'.repeat(64);
   });
-  assert.throws(() => f.sealBoth(), /Readiness artifact mismatch/);
+  assert.throws(() => f.sealGate(), /Readiness artifact mismatch/);
 });
 
 test('rejects a corrupt handoff before restoring any publication files', (t) => {
   const f = fixture(t);
-  f.sealBoth();
+  f.sealGate();
   fs.appendFileSync(path.join(f.handoffs, 'java17.tar.gz'), 'changed');
   assert.throws(() => f.publish(), /Java 17 handoff SHA mismatch/);
   assert.equal(fs.existsSync(path.join(f.checkouts.publish, 'build')), false);
 });
 
-test('requires both successful job outputs', (t) => {
+test('requires the successful Java 17 job output', (t) => {
   const f = fixture(t);
-  f.sealBoth();
-  delete f.hashes['21'];
-  assert.throws(() => f.publish(), /Missing Java 21 job SHA/);
+  f.sealGate();
+  delete f.hashes['17'];
+  assert.throws(() => f.publish(), /Missing Java 17 job SHA/);
   assert.equal(fs.existsSync(path.join(f.checkouts.publish, 'build')), false);
 });
 
 test('rejects evidence from a different workflow run', (t) => {
   const f = fixture(t);
-  f.sealBoth();
+  f.sealGate();
   f.env.GITHUB_RUN_ID = '54321';
   assert.throws(() => f.publish(), /candidate\/run mismatch/);
 });
 
 test('rejects evidence from a different source commit with the same version', (t) => {
   const f = fixture(t);
-  f.sealBoth();
+  f.sealGate();
   f.git(f.checkouts.publish, 'commit', '--quiet', '--allow-empty', '-m', 'Another candidate');
   f.env.RELEASE_COMMIT = f.git(f.checkouts.publish, 'rev-parse', 'HEAD');
   assert.throws(() => f.publish(), /candidate\/run mismatch/);
 });
 
-test('rejects divergent passing JDK test inventories', (t) => {
+test('rejects a Java 25 handoff', (t) => {
   const f = fixture(t);
-  f.mutate('21', 'reports/test-execution-scope/verifyReleaseTestExecutionScope.json', (data) => {
-    data.suites.test.testCases[0].name = 'differentEvidence()';
-  });
-  f.sealBoth();
-  assert.throws(() => f.publish(), /JDK gates differ: testInventory/);
+  assert.throws(() => seal(f.checkouts['17'], path.join(f.handoffs, 'old.tar.gz'), '25', f.env), /Invalid verification JDK/);
 });
 
-test('rejects different built artifacts across otherwise passing JDK gates', (t) => {
+test('requires Java 17 staged module metadata', (t) => {
   const f = fixture(t);
-  fs.appendFileSync(path.join(f.builds['21'], `libs/blue-coordination-java-${f.version}.jar`), 'different build');
-  f.sealBoth();
-  assert.throws(() => f.publish(), /JDK gates differ: artifacts/);
+  fs.unlinkSync(path.join(f.builds['17'], 'publications/mavenJava/module.json'));
+  assert.throws(() => f.sealGate());
 });
 
-test('JDK jobs depend only on preparation and publication waits for both', () => {
+test('Java 17 verification depends on preparation and publication waits for its handoff', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../workflows/release-candidate.yml'), 'utf8');
   const job = (name) => workflow.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\w+:|$(?![\\s\\S]))`, 'm'))?.[1];
-  for (const java of ['17', '21']) {
+  for (const java of ['17']) {
     const body = job(`java${java}`);
     assert.match(body, /    needs: prepare\n/);
     assert.doesNotMatch(body, /continue-on-error|--tests|\s-x\s/);
-    assert.match(body, new RegExp(`clean ${java === '17' ? 'stageRelease' : 'releaseCheck'} .*?-PtestJavaVersion=${java}`));
-    assert.match(body, /steps.handoff.outputs.handoff-sha/);
+    assert.match(body, /uses: .\/.github\/workflows\/verification.yml/);
+    assert.match(body, /release-source: true/);
   }
+  assert.equal(job('java25'), undefined);
+  assert.equal(job('java21'), undefined);
   const publish = job('publish');
-  assert.match(publish, /needs:\n      - prepare\n      - java17\n      - java21/);
+  assert.match(publish, /needs:\n      - prepare\n      - java17/);
   assert.doesNotMatch(publish.slice(0, publish.indexOf('    steps:')), /if:|continue-on-error/);
   assert.ok(publish.indexOf('release-handoff.js verify') < publish.indexOf('jreleaserDeploy -x stageRelease'));
   const rc = fs.readFileSync(path.join(__dirname, '../workflows/release-rc.yml'), 'utf8');
@@ -260,4 +257,60 @@ test('the shared preparation refuses feature branches and RC versions on stable'
   write(f.source, '.cz.toml', 'version = "3.0.0"\n');
   assert.equal(run('stable', 'refs/heads/main'), 0);
   assert.notEqual(run('unknown', 'refs/heads/next'), 0);
+});
+
+
+test('CI uses only Java 17 while published bytecode remains Java 17', () => {
+  const build = fs.readFileSync(path.join(__dirname, '../../build.gradle'), 'utf8');
+  assert.match(build, /toolchain \{ languageVersion = JavaLanguageVersion.of\(17\)/);
+  assert.match(build, /sourceCompatibility = JavaVersion.VERSION_17/);
+  assert.match(build, /targetCompatibility = JavaVersion.VERSION_17/);
+  assert.match(build, /options.release = 17/);
+  for (const file of ['build.gradle', 'gradle/test-execution-scope.gradle',
+    'gradle/topology-test-evidence.gradle', 'gradle/coordination-staging.gradle']) {
+    const script = fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
+    assert.doesNotMatch(script, /JavaLanguageVersion.of\((21|25)\)|getOrElse\('(21|25)'\)/);
+  }
+  for (const file of ['../actions/setup-release/action.yml']) {
+    const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.match(text, /java-version: '17'/);
+    assert.doesNotMatch(text, /JAVA_HOME_(21|25)_X64|java-version: '(21|25)/);
+  }
+});
+
+
+test('production verification runs full core and archive independently and checks the sealed handoff', () => {
+  const shared = fs.readFileSync(path.join(__dirname, '../workflows/verification.yml'), 'utf8');
+  assert.match(shared, /  archive:\n/);
+  assert.match(shared, /  core:\n/);
+  assert.match(shared, /needs: \[tests, archive\]/);
+  assert.match(shared, /shard: \[0, 1, 2\]/);
+  assert.doesNotMatch(shared, /continue-on-error|--tests|\s-x\s/);
+  assert.match(shared, /ci-verification.py run core/);
+  assert.match(shared, /ci-verification.py run archive/);
+  assert.match(shared, /release-handoff.js seal/);
+  assert.match(shared, /coordination-archive-\$\{\{ inputs.scope \}\}-\$\{\{ github.run_attempt \}\}/);
+  const build = fs.readFileSync(path.join(__dirname, '../workflows/build.yml'), 'utf8');
+  assert.match(build, /prepare-verification-source.yml/);
+  assert.match(build, /uses: .\/.github\/workflows\/verification.yml/);
+});
+
+test('prepared verification source restores without creating or requiring a release tag', (t) => {
+  const f = fixture(t, 'stable');
+  write(f.source, '.cz.toml', 'version = "3.0.0-rc.11"\n');
+  f.git(f.source, 'add', '.cz.toml');
+  f.git(f.source, 'commit', '--quiet', '-m', 'Prepared verification source');
+  const directory = path.join(f.root, 'verification-source');
+  const script = path.join(__dirname, 'release-handoff.js');
+  const source = JSON.parse(execFileSync(process.execPath, [script, 'source', directory], {
+    cwd:f.source, env:{...process.env, ...f.env}, encoding:'utf8',
+  }));
+  assert.equal(source.version, '3.0.0-rc.11');
+  assert.notEqual(source.commit, f.expected.commit);
+  execFileSync(process.execPath, [script, 'restore-source', directory], {
+    cwd:f.checkouts.publish, env:{...process.env, ...f.env, RELEASE_COMMIT:source.commit,
+      RELEASE_VERSION:source.version, RELEASE_BUNDLE_SHA:source['bundle-sha']}, encoding:'utf8',
+  });
+  assert.equal(f.git(f.checkouts.publish, 'rev-parse', 'HEAD'), source.commit);
+  assert.equal(f.git(f.checkouts.publish, 'tag', '--list'), '');
 });

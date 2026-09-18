@@ -216,6 +216,9 @@ repositories {
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(17) }
+    // The CI runtime changes to Java 17; published library compatibility stays 17.
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
     withSourcesJar()
     withJavadocJar()
 }
@@ -397,6 +400,14 @@ if (!(requestedTestForks ==~ /[1-9][0-9]*/) || new BigInteger(requestedTestForks
     throw new GradleException('testMaxParallelForks must be a positive integer')
 }
 def testForks = Math.min(requestedTestForks.toInteger(), gradle.startParameter.maxWorkerCount)
+def requestedTestMethods = providers.gradleProperty('testMethodParallelism').getOrElse('1')
+if (!(requestedTestMethods ==~ /[1-9][0-9]*/) || new BigInteger(requestedTestMethods) > Integer.MAX_VALUE) {
+    throw new GradleException('testMethodParallelism must be a positive integer')
+}
+def testMethodThreads = requestedTestMethods.toInteger()
+if (testForks.toLong() * testMethodThreads > gradle.startParameter.maxWorkerCount) {
+    throw new GradleException('Test forks * method parallelism must not exceed --max-workers')
+}
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
@@ -407,7 +418,14 @@ tasks.withType(Test).configureEach {
     }
     maxParallelForks = testForks
     inputs.property('testMaxParallelForks', testForks)
-    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    inputs.property('testMethodParallelism', testMethodThreads)
+    systemProperty('junit.jupiter.execution.parallel.enabled', (testMethodThreads > 1).toString())
+    systemProperty 'junit.jupiter.execution.parallel.mode.default', 'concurrent'
+    systemProperty 'junit.jupiter.execution.parallel.mode.classes.default', 'concurrent'
+    systemProperty 'junit.jupiter.execution.parallel.config.strategy', 'fixed'
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.parallelism', testMethodThreads.toString()
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.max-pool-size', testMethodThreads.toString()
+    systemProperty 'junit.jupiter.execution.parallel.config.fixed.saturate', 'true'
     maxHeapSize = '2g'
     reports {
         junitXml.required = true
@@ -652,6 +670,9 @@ if (System.getenv('CI') != null) {
                         url = 'https://central.sonatype.com/api/v1/publisher'
                         applyMavenCentralRules = true
                         snapshotSupported = false
+                        // CI confirms PUBLISHED in a separately visible, status-only step.
+                        skipPublicationCheck = providers.gradleProperty(
+                                'mavenCentralSeparateWait').getOrElse('false').toBoolean()
                         stagingRepository('build/staging-deploy')
                     }
                 }
@@ -2244,6 +2265,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.13.md',
                 'docs/releases/3.0.0-rc.12.md',
                 'docs/releases/3.0.0-rc.11.md',
                 'docs/releases/3.0.0-rc.10.md',
@@ -4326,6 +4348,8 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
     inputs.property('testJavaVersion', providers.gradleProperty(
             'testJavaVersion').getOrElse('17'))
     inputs.property('testMaxParallelForks', testForks)
+    inputs.property('testMethodParallelism', testMethodThreads)
+    inputs.property('testMaxWorkers', gradle.startParameter.maxWorkerCount)
     inputs.property('extractedSourceArchiveProjectProperties',
             extractedSourceArchiveProjectProperties)
     if (immutableContractsRepository) {
@@ -4430,8 +4454,10 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 'blue.coordination.sdk.RootedLocalHistoryRecoveryTest'
         ]
         command.addAll([
-                '--no-daemon', '--no-build-cache', '--max-workers=' + testForks,
-                '-PtestMaxParallelForks=' + testForks
+                '--no-daemon', '--no-build-cache', '--no-parallel',
+                '--max-workers=' + gradle.startParameter.maxWorkerCount,
+                '-PtestMaxParallelForks=' + testForks,
+                '-PtestMethodParallelism=' + testMethodThreads
         ])
         command.addAll(['clean', 'test'])
         focusedTests.each { focusedTest ->
@@ -4488,6 +4514,9 @@ def extractedSourceArchive = tasks.register('verifyExtractedSourceArchive') {
                 compileStatus: 'PASS',
                 dependencyIsolationStatus: 'PASS',
                 focusedTestsStatus: 'PASS',
+                testMaxParallelForks: testForks,
+                testMethodParallelism: testMethodThreads,
+                testMaxWorkers: gradle.startParameter.maxWorkerCount,
                 focusedTasks: focusedTasks,
                 focusedTests: focusedTests
         ]
@@ -5345,7 +5374,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'docs/releases/3.0.0-rc.12.md')
+            'docs/releases/3.0.0-rc.13.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -5363,12 +5392,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.12-readiness.json')
+            'reports/release/3.0.0-rc.13-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.12') {
-            failures << "release version is ${version}; expected 3.0.0-rc.12"
+        if (version.toString() != '3.0.0-rc.13') {
+            failures << "release version is ${version}; expected 3.0.0-rc.13"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -5417,20 +5446,20 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             if (!testSource.isFile()
                     || !(testSource.getText('UTF-8') =~
                             /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
-                failures << "required rc.12 capability evidence is missing ${source}"
+                failures << "required rc.13 capability evidence is missing ${source}"
             }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.12.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.13.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC12_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC13_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC12_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC13_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC12_PUBLIC_ARTIFACT_READY: true')
+                'RC13_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC12_PRODUCTION_READY: false')) {
-            failures << 'rc.12 release notes do not state the exact release tier'
+                'RC13_PRODUCTION_READY: false')) {
+            failures << 'rc.13 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -5478,7 +5507,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence: 'complete current releaseCheck plus '
-                                + 'the rc.12 capability test inventory',
+                                + 'the rc.13 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -5495,7 +5524,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.12'
+    dependsOn(version.toString() == '3.0.0-rc.13'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -5510,7 +5539,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.12'
+    dependsOn(version.toString() == '3.0.0-rc.13'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'
