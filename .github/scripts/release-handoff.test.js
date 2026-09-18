@@ -338,3 +338,31 @@ test('ordinary workflow selects build channel and handoff upload supports retry'
   assert.match(handoff, /overwrite: true/);
   assert.match(read('actions/setup-release/action.yml'), /java-version: '17\.0\.19\+10'/);
 });
+
+test('delegated evidence inspection does not create Python cache without workflow env', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'coordination-readonly-attest-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const scripts = path.join(root, '.github/scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  for (const name of ['release-handoff.js', 'ci-test-shards.py', 'ci-verification.py', 'ci-verification-support.py']) {
+    fs.copyFileSync(path.join(__dirname, name), path.join(scripts, name));
+  }
+  write(root, 'build/reports/test-execution-scope/verifyReleaseTestExecutionScope.json', {
+    status: 'PASS', coordinationVersion: '3.0.0-rc.13', javaVersion: '17',
+    topologyEvidenceVerified: true, delegatedTestEvidence: { schema: 1 },
+  });
+  const env = { ...process.env };
+  delete env.PYTHONDONTWRITEBYTECODE;
+  delete env.PYTHONPYCACHEPREFIX;
+  // Actual Python imports execute before rejecting the deliberately incomplete receipt.
+  // Validation must remain read-only even on this failure path.
+  const run = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { inspectBuild } = require('./.github/scripts/release-handoff.js');
+    assert.throws(() => inspectBuild('build', {version:'3.0.0-rc.13',channel:'rc'}, '17'),
+      /delegated.json/);
+  `], { cwd: root, env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fs.existsSync(path.join(scripts, '__pycache__')), false,
+    'Python attestation dirtied the release checkout');
+});

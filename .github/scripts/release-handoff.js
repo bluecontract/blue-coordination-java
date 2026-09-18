@@ -97,7 +97,8 @@ function inspectBuild(build, binding, java) {
   assert.equal(scope.topologyEvidenceVerified, true, 'Topology comparison did not pass');
   const delegated = scope.delegatedTestEvidence;
   if (delegated) {
-    execFileSync('python3', [path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
+    // Validation must not create __pycache__ in the clean release checkout.
+    execFileSync('python3', ['-B', path.join(__dirname, 'ci-test-shards.py'), 'attest', build]);
     assert.deepEqual(delegated, json(path.join(build, 'reports/ci-test-shards/delegated.json')));
     assert.equal(delegated.version, binding.version, 'Delegated version mismatch');
     assert.equal(delegated.java, java, 'Delegated JDK mismatch');
