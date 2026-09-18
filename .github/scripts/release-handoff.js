@@ -75,7 +75,7 @@ function restore(root, directory, expected) {
 
 function identity(root, env) {
   clean(root);
-  assert.ok(['rc', 'stable'].includes(env.RELEASE_CHANNEL), 'Invalid release channel');
+  assert.ok(['build', 'rc', 'stable'].includes(env.RELEASE_CHANNEL), 'Invalid release channel');
   assert.match(env.GITHUB_RUN_ID || '', /^\d+$/, 'Missing workflow run identity');
   const commit = git(root, 'rev-parse', 'HEAD');
   assert.equal(commit, env.RELEASE_COMMIT, 'Wrong source commit');
@@ -205,6 +205,7 @@ function seal(root, output, java, env) {
 }
 
 function verify(root, directory, expectedHashes, env) {
+  assert.notEqual(env.RELEASE_CHANNEL, 'build', 'Build evidence cannot authorize publication');
   const binding = identity(root, env);
   const receipts = {};
   for (const java of ['17']) {

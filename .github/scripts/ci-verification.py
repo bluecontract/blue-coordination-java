@@ -69,8 +69,8 @@ def consume(java, archive_path, version):
 
 def run(lane, output):
     timing.require(lane in ['core', 'archive'], 'Invalid production verification lane')
-    channel = os.environ.get('RELEASE_CHANNEL', 'rc')
-    timing.require(channel in ['rc', 'stable'], 'Invalid release channel')
+    channel = os.environ.get('RELEASE_CHANNEL', 'build')
+    timing.require(channel in ['build', 'rc', 'stable'], 'Invalid release channel')
     timing.measure(lane, '17', output, identity, commands, channel)
 
 

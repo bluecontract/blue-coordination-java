@@ -273,7 +273,7 @@ test('CI uses only Java 17 while published bytecode remains Java 17', () => {
   }
   for (const file of ['../actions/setup-release/action.yml']) {
     const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    assert.match(text, /java-version: '17'/);
+    assert.match(text, /java-version: '17\.0\.19\+10'/);
     assert.doesNotMatch(text, /JAVA_HOME_(21|25)_X64|java-version: '(21|25)/);
   }
 });
@@ -313,4 +313,28 @@ test('prepared verification source restores without creating or requiring a rele
   });
   assert.equal(f.git(f.checkouts.publish, 'rev-parse', 'HEAD'), source.commit);
   assert.equal(f.git(f.checkouts.publish, 'tag', '--list'), '');
+});
+
+test('ordinary stable build seals without RC readiness but cannot authorize publication', (t) => {
+  const f = fixture(t, 'stable');
+  f.env.RELEASE_CHANNEL = 'build';
+  assert.doesNotThrow(() => f.sealGate());
+  assert.throws(() => f.publish(), /Build evidence cannot authorize publication/);
+  f.env.RELEASE_CHANNEL = 'stable';
+  assert.throws(() => f.publish(), /candidate\/run mismatch/);
+});
+
+test('RC still requires readiness evidence', (t) => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.builds['17'], `reports/release/${f.version}-readiness.json`));
+  assert.throws(() => f.sealGate(), /ENOENT/);
+});
+
+test('ordinary workflow selects build channel and handoff upload supports retry', () => {
+  const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+  assert.match(read('workflows/build.yml'), /channel: build/);
+  assert.match(read('workflows/verification.yml'), /channel:\n        default: build/);
+  const handoff = read('workflows/verification.yml').split('name: coordination-release-java17')[1].split('- uses:')[0];
+  assert.match(handoff, /overwrite: true/);
+  assert.match(read('actions/setup-release/action.yml'), /java-version: '17\.0\.19\+10'/);
 });
