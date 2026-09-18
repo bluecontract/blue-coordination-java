@@ -175,6 +175,13 @@ final class StoreIndexCodecs {
                     limits.keyBytes(), limits.valueBytes());
         }
 
+        <O> PersistentOrderedMap<O, PersistentOrderedMap<K, V>> openLogicalBuckets(LogicalRecordContext context,
+                blue.coordination.api.storage.CoordinationRecords.Family family,
+                blue.coordination.api.storage.CoordinationRecords.Bytes scope, Comparator<? super O> outerOrder,
+                OrderedRecordKey<O> outerKeys, OrderedRecordKey<K> innerKeys) {
+            return new LogicalRecordBuckets<>(outerOrder, order, context, family, scope, outerKeys, innerKeys, values, limits).open();
+        }
+
         PersistentOrderedMap<K, V> retain(PersistentOrderedMap<K, V> map) {
             return map.isLogical() ? map : map.storedCopy(identity, keys, values, objects, limits);
         }

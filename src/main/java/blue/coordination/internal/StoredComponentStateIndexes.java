@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.closure.ComponentSnapshot;
 import java.util.*;
 import java.util.function.Function;
@@ -22,6 +23,18 @@ final class StoredComponentStateIndexes {
         lineages = c.binding("component-state/lineage", EmbeddingBinding.TEXT_ORDER, c.text, rows);
         states = c.binding("component-state/state", EmbeddingBinding.TEXT_ORDER, c.text, c.text);
         documents = c.binding("component-state/document", EmbeddingBinding.DOCUMENT_ORDER, c.documents, c.text);
+    }
+
+    ComponentStateInventory openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        return ComponentStateInventory.restoreIndexes(new ComponentStateInventory.StoredIndexes(
+                lineages.openLogical(context, Family.COMPONENT_LINEAGE, scope, OrderedRecordKey.text()),
+                states.openLogical(context, Family.COMPONENT_STATE, scope, OrderedRecordKey.text()),
+                documents.openLogical(context, Family.COMPONENT_DOCUMENT, scope, OrderedRecordKey.document())));
+    }
+
+    void selectLogical(ComponentStateInventory value) {
+        var s = value.storedIndexes(); s.lineages().selectLogicalRecords(); s.states().selectLogicalRecords(); s.documents().selectLogicalRecords();
     }
 
     ComponentStateInventory retainPartition(ComponentStateInventory value) {

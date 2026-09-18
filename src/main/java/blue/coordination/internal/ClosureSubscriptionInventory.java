@@ -891,7 +891,7 @@ final class ClosureSubscriptionInventory {
         }
         PersistentOrderedMap.Mutation<String,
                 PersistentOrderedMap<String, SubscriptionState>>
-                documentMutation = bucketMutation.map().isEmpty()
+                documentMutation = !bucketMutation.map().isLogical() && bucketMutation.map().isEmpty()
                         ? indexes.byDocument().remove(slot.documentId())
                         : indexes.byDocument().put(
                                 slot.documentId(), bucketMutation.map());

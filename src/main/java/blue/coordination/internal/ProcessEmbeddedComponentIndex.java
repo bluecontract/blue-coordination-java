@@ -588,7 +588,7 @@ final class ProcessEmbeddedComponentIndex {
                             PersistentOrderedMap<DocumentId, Boolean>> index,
                     DocumentId document,
                     PersistentOrderedMap<DocumentId, Boolean> replacement) {
-        if (replacement.isEmpty()) {
+        if (!replacement.isLogical() && replacement.isEmpty()) {
             return index.remove(document).map();
         }
         return index.put(document, replacement).map();

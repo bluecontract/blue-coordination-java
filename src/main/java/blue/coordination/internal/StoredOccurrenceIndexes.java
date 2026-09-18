@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.closure.ManagedOccurrenceBinding;
 import java.util.*;
 import java.util.function.Function;
@@ -15,6 +16,7 @@ final class StoredOccurrenceIndexes {
     private final StoreIndexCodecs.Binding<String, ManagedOccurrenceInventory.OccurrenceKey> occurrenceIds, bindingIds;
     private final StoreIndexCodecs.Binding<DocumentId, PersistentOrderedMap<ManagedOccurrenceInventory.RowOrderKey, ManagedOccurrenceBinding>> documents, sources, activeSources;
     private final PersistentMapCodec<ManagedOccurrenceBinding> rows;
+    private final StoreIndexCodecs.Binding<ManagedOccurrenceInventory.RowOrderKey, ManagedOccurrenceBinding> bucket;
 
     StoredOccurrenceIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
         var codecs = new StoreIndexCodecs(objects, limits); rows = codecs.occurrences;
@@ -23,10 +25,36 @@ final class StoredOccurrenceIndexes {
         active = codecs.binding("occurrence/active", ManagedOccurrenceInventory.ROW_ORDER, codecs.occurrenceOrder, rows);
         occurrenceIds = codecs.binding("occurrence/identity", EmbeddingBinding.TEXT_ORDER, codecs.text, codecs.occurrenceKeys);
         bindingIds = codecs.binding("occurrence/binding", EmbeddingBinding.TEXT_ORDER, codecs.text, codecs.occurrenceKeys);
-        var bucket = codecs.binding("occurrence/bucket", ManagedOccurrenceInventory.ROW_ORDER, codecs.occurrenceOrder, rows);
+        bucket = codecs.binding("occurrence/bucket", ManagedOccurrenceInventory.ROW_ORDER, codecs.occurrenceOrder, rows);
         documents = codecs.binding("occurrence/document", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, bucket.nested());
         sources = codecs.binding("occurrence/source", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, bucket.nested());
         activeSources = codecs.binding("occurrence/active-source", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, bucket.nested());
+    }
+
+    ManagedOccurrenceInventory openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        var pathKeys = OrderedRecordKey.pair("occurrence-path", OrderedRecordKey.document(), OrderedRecordKey.text(),
+                ManagedOccurrenceInventory.OccurrenceKey::sourceDocumentId, ManagedOccurrenceInventory.OccurrenceKey::sourcePath,
+                ManagedOccurrenceInventory.OccurrenceKey::of);
+        var rowKeys = OrderedRecordKey.pair("occurrence-order", OrderedRecordKey.text(), OrderedRecordKey.text(),
+                ManagedOccurrenceInventory.RowOrderKey::occurrenceIdentity, ManagedOccurrenceInventory.RowOrderKey::bindingIdentity,
+                ManagedOccurrenceInventory.RowOrderKey::new);
+        return ManagedOccurrenceInventory.restoreIndexes(new ManagedOccurrenceInventory.StoredIndexes(
+                paths.openLogical(context, Family.OCCURRENCE_PATH, scope, pathKeys),
+                ordered.openLogical(context, Family.OCCURRENCE_ORDERED, scope, rowKeys),
+                active.openLogical(context, Family.OCCURRENCE_ACTIVE, scope, rowKeys),
+                occurrenceIds.openLogical(context, Family.OCCURRENCE_ID, scope, OrderedRecordKey.text()),
+                bindingIds.openLogical(context, Family.BINDING_ID, scope, OrderedRecordKey.text()),
+                bucket.openLogicalBuckets(context, Family.OCCURRENCE_DOCUMENT, scope, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document(), rowKeys),
+                bucket.openLogicalBuckets(context, Family.OCCURRENCE_SOURCE, scope, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document(), rowKeys),
+                bucket.openLogicalBuckets(context, Family.OCCURRENCE_ACTIVE_SOURCE, scope, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document(), rowKeys)));
+    }
+
+    void selectLogical(ManagedOccurrenceInventory value) {
+        var s = value.storedIndexes();
+        s.paths().selectLogicalRecords(); s.ordered().selectLogicalRecords(); s.active().selectLogicalRecords();
+        s.occurrenceKeys().selectLogicalRecords(); s.bindingKeys().selectLogicalRecords();
+        s.documents().selectLogicalRecords(); s.sources().selectLogicalRecords(); s.activeSources().selectLogicalRecords();
     }
 
     ManagedOccurrenceInventory retainPartition(ManagedOccurrenceInventory value) {

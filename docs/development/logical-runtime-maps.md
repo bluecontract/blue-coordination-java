@@ -38,3 +38,28 @@ both publication orders, but it is not an application S2/D2/H qualification.
 Artifact dependency collection and owner/control completion remain responsibilities
 of the forthcoming engine assembly. Unit tests use a coherent in-memory fixture;
 PostgreSQL and application acceptance remain separate required gates.
+
+## Flattened secondary memberships
+
+`LogicalRecordBuckets` stores each secondary member under a strict encoded
+owner prefix and inner key. There is no mutable bucket descriptor or shared
+insertion counter. A virtual empty bucket is a valid view: obtaining it does not
+assert membership; reading a member, enumerating it or testing emptiness records
+the corresponding condition. Outer enumeration contains only nonempty buckets.
+The nested-map callers migrated here treat absent and empty buckets identically;
+legacy resident/AVL callers retain their existing null behavior.
+
+Lineage mutations and occurrence, topology and subscription member removals keep
+logical empty views without testing the rest of the bucket just to decide its
+physical representation. Explicit whole-bucket replacement/removal still guards
+complete membership. Selected buckets are checked against their exact attempt,
+family, scope and owner prefix, including empty views.
+
+All five lineage families, eight occurrence families, five topology/join families,
+three component-state families and four subscription families have explicit
+logical bindings. Together with session and graph-generation primaries this is
+27 family bindings. Full runtime assembly is still pending; this count does not
+claim the remainder of the family inventory is migrated. The tests include two
+writers inserting into the same previously absent bucket, last-member removal
+versus insertion, precise query conflicts, foreign bucket rejection, shared-target
+occurrence memberships, and cold exact results from actual rooted execution.

@@ -7,27 +7,56 @@ import java.util.function.Consumer;
 
 /** Immutable tentative map over tracked logical points and complete range predicates. */
 final class LogicalRecordMap<K, V> {
-    private interface Source<K, V> {
+    interface Source<K, V> {
         V get(K key);
         Map.Entry<K, V> first(K lower, boolean exclusive, K upper);
         List<Map.Entry<K, V>> entries();
         boolean contains(K key);
     }
     private record Change<V>(V value) { }
+    private record Identity(LogicalRecordContext context, Family family, Bytes scope, Bytes lower) { }
+    private final Identity binding;
+    boolean bindingIs(LogicalRecordContext owner, Family family, Bytes scope, Bytes lower) {
+        context.checkOpen(); return new Identity(owner, family, scope, lower).equals(binding);
+    }
+    private LogicalRecordMap<K, V> withBinding(Identity identity) {
+        return new LogicalRecordMap<>(order, context, source, changes, selection, visible, identity);
+    }
+    private LogicalRecordMap<K, V> inheritBinding(LogicalRecordMap<K, V> changed) { return changed.withBinding(binding); }
     private final Comparator<? super K> order;
     private final LogicalRecordContext context;
     private final Source<K, V> source;
     private final PersistentOrderedMap<K, Change<V>> changes;
-    private final BiFunction<K, V, Mutation> encoding;
+    private final java.util.function.BiConsumer<K, V> selection;
+    private final java.util.function.Predicate<V> visible;
 
     private LogicalRecordMap(Comparator<? super K> order, LogicalRecordContext context, Source<K, V> source,
-            PersistentOrderedMap<K, Change<V>> changes, BiFunction<K, V, Mutation> encoding) {
-        this.order = order; this.context = context; this.source = source; this.changes = changes; this.encoding = encoding;
+            PersistentOrderedMap<K, Change<V>> changes, java.util.function.BiConsumer<K, V> selection,
+            java.util.function.Predicate<V> visible) {
+        this(order, context, source, changes, selection, visible, null);
+    }
+
+    private LogicalRecordMap(Comparator<? super K> order, LogicalRecordContext context, Source<K, V> source,
+            PersistentOrderedMap<K, Change<V>> changes, java.util.function.BiConsumer<K, V> selection,
+            java.util.function.Predicate<V> visible, Identity binding) {
+        this.binding = binding;
+        this.order = order; this.context = context; this.source = source; this.changes = changes; this.selection = selection; this.visible = visible;
+    }
+
+    static <K, V> LogicalRecordMap<K, V> virtual(Comparator<? super K> order, LogicalRecordContext context,
+            Source<K, V> source, java.util.function.BiConsumer<K, V> selection, java.util.function.Predicate<V> visible) {
+        return new LogicalRecordMap<>(order, context, source, PersistentOrderedMap.empty(order), selection, visible);
     }
 
     static <K, V> LogicalRecordMap<K, V> open(Comparator<? super K> order, LogicalRecordContext context,
             Family family, Bytes scope, OrderedRecordKey<K> keys, PersistentMapCodec<V> values,
             int maximumKeyBytes, int maximumValueBytes) {
+        return open(order, context, family, scope, keys, values, maximumKeyBytes, maximumValueBytes, null, null);
+    }
+
+    static <K, V> LogicalRecordMap<K, V> open(Comparator<? super K> order, LogicalRecordContext context,
+            Family family, Bytes scope, OrderedRecordKey<K> keys, PersistentMapCodec<V> values,
+            int maximumKeyBytes, int maximumValueBytes, Bytes lowerBoundary, Bytes upperBoundary) {
         Objects.requireNonNull(order); Objects.requireNonNull(context); Objects.requireNonNull(family);
         Objects.requireNonNull(scope); Objects.requireNonNull(keys); Objects.requireNonNull(values);
         if (maximumKeyBytes < 1 || maximumValueBytes < 1) throw new IllegalArgumentException("Invalid record codec limits");
@@ -58,14 +87,14 @@ final class LogicalRecordMap<K, V> {
             }
             public boolean contains(K key) { return context.read(address(key)).content() != null; }
             public Map.Entry<K, V> first(K lower, boolean exclusive, K upper) {
-                Bytes start = lower == null ? null : key(lower);
-                if (exclusive && start != null) start = after(start);
-                Bytes end = upper == null ? null : key(upper);
+                Bytes start = lower == null ? lowerBoundary : key(lower);
+                if (exclusive && lower != null) start = after(start);
+                Bytes end = upper == null ? upperBoundary : key(upper);
                 if (start != null && end != null && start.compareTo(end) >= 0) return null;
                 return context.first(new Range(family, scope, start, end)).map(this::row).orElse(null);
             }
             public List<Map.Entry<K, V>> entries() {
-                var result = context.query(new Range(family, scope, null, null)).stream().map(this::row).toList();
+                var result = context.query(new Range(family, scope, lowerBoundary, upperBoundary)).stream().map(this::row).toList();
                 for (int i = 1; i < result.size(); i++) if (order.compare(result.get(i - 1).getKey(), result.get(i).getKey()) >= 0)
                     throw new IllegalArgumentException("Runtime key encoding disagrees with semantic order");
                 return result;
@@ -80,7 +109,11 @@ final class LogicalRecordMap<K, V> {
             }
         }
         var binding = new Binding();
-        return new LogicalRecordMap<>(order, context, binding, PersistentOrderedMap.empty(order), binding::encode);
+        var map = virtual(order, context, binding, (key, value) -> {
+            var mutation = binding.encode(key, value);
+            context.select(mutation.key(), mutation.content());
+        }, value -> true);
+        return map.withBinding(new Identity(context, family, scope, lowerBoundary));
     }
 
     V get(K key) { return context.protect(() -> getUnchecked(key)); }
@@ -88,18 +121,18 @@ final class LogicalRecordMap<K, V> {
     private V getUnchecked(K key) { context.checkOpen(); var change = changes.get(key); return change == null ? source.get(key) : change.value(); }
     boolean contains(K key) { return context.protect(() -> containsUnchecked(key)); }
 
-    private boolean containsUnchecked(K key) { context.checkOpen(); var change = changes.get(key); return change == null ? source.contains(key) : change.value() != null; }
+    private boolean containsUnchecked(K key) { context.checkOpen(); var change = changes.get(key); return change == null ? source.contains(key) : change.value() != null && visible.test(change.value()); }
     LogicalRecordMap<K, V> put(K key, V value) { return context.protect(() -> putUnchecked(key, value)); }
 
     private LogicalRecordMap<K, V> putUnchecked(K key, V value) {
         context.checkOpen(); Objects.requireNonNull(key); Objects.requireNonNull(value);
-        return new LogicalRecordMap<>(order, context, source, changes.put(key, new Change<>(value)).map(), encoding);
+        return inheritBinding(new LogicalRecordMap<>(order, context, source, changes.put(key, new Change<>(value)).map(), selection, visible));
     }
     LogicalRecordMap<K, V> remove(K key) { return context.protect(() -> removeUnchecked(key)); }
 
     private LogicalRecordMap<K, V> removeUnchecked(K key) {
         context.checkOpen(); Objects.requireNonNull(key);
-        return new LogicalRecordMap<>(order, context, source, changes.put(key, new Change<V>(null)).map(), encoding);
+        return inheritBinding(new LogicalRecordMap<>(order, context, source, changes.put(key, new Change<V>(null)).map(), selection, visible));
     }
     LogicalRecordMap<K, V> empty() { return context.protect(() -> emptyUnchecked()); }
 
@@ -117,7 +150,7 @@ final class LogicalRecordMap<K, V> {
             if (row.getValue().value() == null) rows.remove(row.getKey());
             else rows.put(row.getKey(), row.getValue().value());
         }
-        return rows.entrySet().stream().map(e -> Map.entry(e.getKey(), e.getValue())).toList();
+        return rows.entrySet().stream().filter(e -> visible.test(e.getValue())).map(e -> Map.entry(e.getKey(), e.getValue())).toList();
     }
 
     Map.Entry<K, V> first(K lower, boolean exclusive, K upper) { return context.protect(() -> firstUnchecked(lower, exclusive, upper)); }
@@ -130,7 +163,7 @@ final class LogicalRecordMap<K, V> {
         while (iterator.hasNext()) {
             var row = iterator.next();
             if (exclusive && lower != null && order.compare(row.getKey(), lower) == 0) continue;
-            if (row.getValue().value() != null) { pending = Map.entry(row.getKey(), row.getValue().value()); break; }
+            if (row.getValue().value() != null && visible.test(row.getValue().value())) { pending = Map.entry(row.getKey(), row.getValue().value()); break; }
         }
         // Never observe a later original row when an earlier tentative insertion already wins.
         K ceiling = pending == null ? upper : pending.getKey();
@@ -140,7 +173,7 @@ final class LogicalRecordMap<K, V> {
             if (row == null) return pending;
             var changed = changes.get(row.getKey());
             if (changed == null) return row;
-            if (changed.value() != null) return Map.entry(row.getKey(), changed.value());
+            if (changed.value() != null && visible.test(changed.value())) return Map.entry(row.getKey(), changed.value());
             cursor = row.getKey(); skip = true;
         }
     }
@@ -166,14 +199,9 @@ final class LogicalRecordMap<K, V> {
 
     private void selectUnchecked() {
         context.checkOpen();
-        if (encoding == null) throw new IllegalStateException("Project working values back before selecting records");
-        // Encode the complete selected branch first. Discarded branches have no publication writes.
-        var encoded = new ArrayList<Mutation>();
-        for (var row : changes.entries()) encoded.add(encoding.apply(row.getKey(), row.getValue().value()));
-        for (var mutation : encoded) {
-            if (!Objects.equals(context.read(mutation.key()).content(), mutation.content()))
-                context.select(mutation.key(), mutation.content());
-        }
+        if (selection == null) throw new IllegalStateException("Project working values back before selecting records");
+        // A failed encoding retires this entire attempt, including all earlier selected maps.
+        for (var row : changes.entries()) selection.accept(row.getKey(), row.getValue().value());
     }
 
     <T> LogicalRecordMap<K, T> project(BiFunction<K, V, T> mapping, Consumer<K> absent) {
@@ -193,7 +221,7 @@ final class LogicalRecordMap<K, V> {
             public Map.Entry<K, T> first(K lower, boolean exclusive, K upper) { return map(base.first(lower, exclusive, upper)); }
             public List<Map.Entry<K, T>> entries() { return base.entries().stream().map(this::map).toList(); }
         };
-        return new LogicalRecordMap<>(order, context, projected, PersistentOrderedMap.empty(order), null);
+        return new LogicalRecordMap<>(order, context, projected, PersistentOrderedMap.empty(order), null, value -> true);
     }
 
     <T> LogicalRecordMap<K, V> stageProjection(LogicalRecordMap<K, T> working, BiFunction<K, T, V> retain) {

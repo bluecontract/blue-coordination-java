@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.closure.SubscriptionState;
 import java.util.*;
 import java.util.function.Function;
@@ -15,16 +16,35 @@ final class StoredSubscriptionIndexes {
     private final StoreIndexCodecs.Binding<String, PersistentOrderedMap<String, SubscriptionState>> documents;
     private final StoreIndexCodecs.Binding<DocumentId, PersistentOrderedMap<String, ClosureSubscriptionInventory.EmbeddedDemand>> demands;
     private final PersistentMapCodec<SubscriptionState> rows;
+    private final StoreIndexCodecs.Binding<String, SubscriptionState> documentRows;
+    private final StoreIndexCodecs.Binding<String, ClosureSubscriptionInventory.EmbeddedDemand> demandRows;
 
     StoredSubscriptionIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
         var c = new StoreIndexCodecs(objects, limits); rows = c.subscriptions;
         slots = c.binding("subscription/slot", ClosureSubscriptionInventory.SLOT_ORDER, c.subscriptionSlots, rows);
         identities = c.binding("subscription/identity", EmbeddingBinding.TEXT_ORDER, c.text, c.subscriptionSlots);
-        var documentRows = c.binding("subscription/document-bucket", EmbeddingBinding.TEXT_ORDER, c.text, rows);
+        documentRows = c.binding("subscription/document-bucket", EmbeddingBinding.TEXT_ORDER, c.text, rows);
         documents = c.binding("subscription/document", EmbeddingBinding.TEXT_ORDER, c.text, documentRows.nested());
-        var demandRows = c.binding("subscription/demand-bucket", EmbeddingBinding.TEXT_ORDER, c.text, c.embeddedDemands);
+        demandRows = c.binding("subscription/demand-bucket", EmbeddingBinding.TEXT_ORDER, c.text, c.embeddedDemands);
         demands = c.binding("subscription/demand", EmbeddingBinding.DOCUMENT_ORDER, c.documents, demandRows.nested());
     }
+    ClosureSubscriptionInventory openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        var slotKeys = OrderedRecordKey.pair("subscription-slot", OrderedRecordKey.text(), OrderedRecordKey.text(),
+                ClosureSubscriptionInventory.Slot::documentId, ClosureSubscriptionInventory.Slot::rawChannelKey, ClosureSubscriptionInventory.Slot::new);
+        return ClosureSubscriptionInventory.restoreIndexes(new ClosureSubscriptionInventory.StoredIndexes(
+                slots.openLogical(context, Family.SUBSCRIPTION_SLOT, scope, slotKeys),
+                identities.openLogical(context, Family.SUBSCRIPTION_IDENTITY, scope, OrderedRecordKey.text()),
+                documentRows.openLogicalBuckets(context, Family.SUBSCRIPTION_DOCUMENT, scope, EmbeddingBinding.TEXT_ORDER, OrderedRecordKey.text(), OrderedRecordKey.text()),
+                demandRows.openLogicalBuckets(context, Family.SUBSCRIPTION_DEMAND, scope, EmbeddingBinding.DOCUMENT_ORDER, OrderedRecordKey.document(), OrderedRecordKey.text()),
+                0, 0, 0));
+    }
+
+    void selectLogical(ClosureSubscriptionInventory value) {
+        var s = value.storedIndexes(); s.slots().selectLogicalRecords(); s.identities().selectLogicalRecords();
+        s.documents().selectLogicalRecords(); s.demands().selectLogicalRecords();
+    }
+
     ClosureSubscriptionInventory retainPartition(ClosureSubscriptionInventory value) {
         return physical(() -> {
             var s = value.storedIndexes(); return ClosureSubscriptionInventory.restoreIndexes(new ClosureSubscriptionInventory.StoredIndexes(

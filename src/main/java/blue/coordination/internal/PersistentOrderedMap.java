@@ -70,7 +70,16 @@ final class PersistentOrderedMap<K, V> {
                 LogicalRecordMap.open(order, context, family, scope, keys, values, maximumKeyBytes, maximumValueBytes));
     }
 
+    static <K, V> PersistentOrderedMap<K, V> logical(Comparator<? super K> order, LogicalRecordMap<K, V> records) {
+        return new PersistentOrderedMap<>(order, null, null, null, null, Objects.requireNonNull(records));
+    }
+
     boolean isLogical() { return records != null; }
+    boolean logicalBindingIs(LogicalRecordContext context, blue.coordination.api.storage.CoordinationRecords.Family family,
+            blue.coordination.api.storage.CoordinationRecords.Bytes scope, blue.coordination.api.storage.CoordinationRecords.Bytes lower) {
+        return records != null && records.bindingIs(context, family, scope, lower);
+    }
+
     void selectLogicalRecords() {
         if (records == null) throw new IllegalStateException("Not a logical-record map");
         records.select();
@@ -170,7 +179,7 @@ final class PersistentOrderedMap<K, V> {
     }
 
     boolean containsKey(K key) {
-        return read(key).found();
+        return records == null ? read(key).found() : records.contains(key);
     }
 
     /** Authenticated key-path membership only; deliberately does not project the value. */

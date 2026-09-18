@@ -51,6 +51,17 @@ interface OrderedRecordKey<K> extends PersistentMapCodec<K> {
         };
     }
 
+    static <K, A, B> OrderedRecordKey<K> pair(String identity, OrderedRecordKey<A> first, OrderedRecordKey<B> second,
+            Function<K, A> left, Function<K, B> right, java.util.function.BiFunction<A, B, K> construct) {
+        return new OrderedRecordKey<>() {
+            public String identity() { return "blue-coordination/ordered-key/" + identity + "/1"; }
+            public byte[] encode(K key) { return tuple(first.encode(left.apply(key)), second.encode(right.apply(key))); }
+            public K decode(byte[] bytes) {
+                byte[][] parts = split(bytes, 2); return construct.apply(first.decode(parts[0]), second.decode(parts[1]));
+            }
+        };
+    }
+
     /** Zero escaping plus a two-zero terminator preserves scalar and tuple prefix ordering. */
     static byte[] tuple(byte[]... components) {
         var out = new ByteArrayOutputStream();

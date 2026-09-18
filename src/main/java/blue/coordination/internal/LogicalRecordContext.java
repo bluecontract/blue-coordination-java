@@ -10,6 +10,8 @@ final class LogicalRecordContext {
     private final Map<Key, Mutation> selected = new TreeMap<>();
     private boolean flushed;
 
+    static Bytes runtimeScope() { return new Bytes(OrderedRecordKey.text().encode("runtime/1")); }
+
     LogicalRecordContext(CoordinationRecordAttempt attempt) { this.attempt = Objects.requireNonNull(attempt); }
     Value read(Key key) { open(); return attempt.read(key); }
     List<Row> query(Range range) { open(); return attempt.query(range); }
@@ -31,6 +33,7 @@ final class LogicalRecordContext {
             for (var mutation : selected.values()) attempt.read(mutation.key());
             flushed = true;
             for (var mutation : selected.values()) {
+                if (Objects.equals(attempt.read(mutation.key()).content(), mutation.content())) continue;
                 if (mutation.content() == null) attempt.delete(mutation.key());
                 else attempt.put(mutation.key(), mutation.content());
             }
