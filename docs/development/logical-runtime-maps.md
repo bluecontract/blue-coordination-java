@@ -99,3 +99,10 @@ only on query. Reverse document/root memberships likewise update individual
 members. Cold tests compare route deltas/results to the resident implementation,
 exercise both independent publication orders and reject new matching membership.
 The full engine/SDK assembly remains a separate required integration.
+
+Logical catch-up restoration does not enumerate all barriers or retain a mutable
+active-barrier count. Global diagnostic queries derive the count; optimization
+callers use a conservative hint and then inspect their reachable consumer
+barriers. Explicit-root stage processing anchors fairness to its requested root
+without enumerating the session catalog. Legacy convenience processing retains
+its previous global fairness behavior.

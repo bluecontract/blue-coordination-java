@@ -880,8 +880,8 @@ final class MultiDocumentPublicationTransaction {
                             update.transitionReceipt());
         }
         if (expectedCatchUpPlans != null
-                && (before.catchUpPlans().hasActiveBarriers()
-                        || publicationCatchUpPlans.hasActiveBarriers())) {
+                && (before.catchUpPlans().mayHaveActiveBarriers()
+                        || publicationCatchUpPlans.mayHaveActiveBarriers())) {
             // This is status-only dependency publication, not additional Root
             // processing. Parents without typed demands are outside the
             // Contracts cohort; derive their replacement from the current

@@ -68,7 +68,7 @@ final class ManagedCatchUpReadiness {
     }
 
     private CatchUpPlanStore.ActiveBarriersRead collect(DocumentId documentId) {
-        if (!plans.hasActiveBarriers()) {
+        if (!plans.mayHaveActiveBarriers()) {
             return plans.activeBarriersForConsumer(documentId);
         }
         Map<String, ManagedCatchUpBarrier> barriers = new TreeMap<>(EmbeddingBinding.TEXT_ORDER);

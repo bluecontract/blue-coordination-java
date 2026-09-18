@@ -13,6 +13,37 @@ import static org.junit.jupiter.api.Assertions.*;
 final class StoredCatchUpPlanIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(65536, 4096, 32768, 2048, 8);
 
+    @Test void logicalCatchUpStoreOpensAndMutatesWithoutGlobalBarrierEnumeration() {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var storage = storage(new DocumentSessionStorageTest.Bytes());
+        var left = fixture(1, DocumentId.of("left"), DocumentId.of("shared"));
+        var right = fixture(2, DocumentId.of("right"), DocumentId.of("shared"));
+        var packets = new ArrayList<blue.coordination.api.storage.CoordinationRecords.Publication>();
+        // when
+        for (var fixture : List.of(left, right)) {
+            try (var attempt = records.attempt()) {
+                var context = new LogicalRecordContext(attempt);
+                var selected = CatchUpPlanStore.restoreStored(new CatchUpPlanStore.StoredState(storage.openLogical(context),
+                        storage.openLogicalBarriers(context), ManagedCatchUpWorkIndex.empty(), 0, 0, 0));
+                assertTrue(selected.mayHaveActiveBarriers());
+                var changed = selected.withPlan(fixture.plan).withBarrier(fixture.barrier);
+                storage.selectLogical(changed.storedPlans()); changed.storedBarriers().selectLogicalRecords(); context.flush();
+                packets.add(attempt.prepare(fixture.plan.planIdentity(), List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1})));
+            }
+        }
+        // then
+        assertTrue(packets.stream().flatMap(packet -> packet.queries().stream())
+                .noneMatch(query -> query.range().family() == blue.coordination.api.storage.CoordinationRecords.Family.BARRIER));
+        assertTrue(records.publish(packets.get(0))); assertTrue(records.publish(packets.get(1)));
+        try (var attempt = records.attempt()) {
+            var context = new LogicalRecordContext(attempt);
+            var cold = CatchUpPlanStore.restoreStored(new CatchUpPlanStore.StoredState(storage.openLogical(context),
+                    storage.openLogicalBarriers(context), ManagedCatchUpWorkIndex.empty(), 0, 0, 0));
+            assertTrue(cold.hasActiveBarriers()); assertTrue(cold.hasActiveBarrierForConsumer(left.plan.consumerDocumentId()));
+            assertTrue(cold.hasActiveBarrierForConsumer(right.plan.consumerDocumentId()));
+        }
+    }
+
     @Test void logicalPlansSharingOneSourceDoNotWriteASharedCounterOrBucket() {
         // given
         for (boolean reverse : List.of(false, true)) {

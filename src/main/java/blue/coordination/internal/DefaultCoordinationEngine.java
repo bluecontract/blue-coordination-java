@@ -1438,7 +1438,7 @@ public final class DefaultCoordinationEngine
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
             }
             var anchor = next.localHistorical() != null ? next.localHistorical().root()
-                    : documents.sessionIds().stream()
+                    : !inspectReadiness ? root : documents.sessionIds().stream()
                     .filter(id -> !next.excludedConsumers().contains(id))
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
