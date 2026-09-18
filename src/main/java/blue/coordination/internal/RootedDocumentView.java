@@ -84,6 +84,58 @@ final class RootedDocumentView {
         return new RootedDocumentView(this, heads);
     }
 
+    record StoredState(ClosureProcessResult result, blue.language.processor.ExternalOrderKey logicalBoundary,
+            AffectedClosureSnapshot snapshot, ClosureSubscriptionInventory subscriptions,
+            Map<DocumentId, List<SubscriptionDelta.Entry>> routes,
+            Map<DocumentId, InMemoryDocumentStore.DocumentHead> publishedHeads,
+            AffectedClosureSnapshot retainedSnapshot) { }
+
+    StoredState storedState() {
+        return new StoredState(result, logicalBoundary, snapshot, subscriptions, routes, publishedHeads, retainedSnapshot);
+    }
+
+    /** The Language codecs have restored the original roles and binding; never reconstruct them from heads. */
+    static RootedDocumentView restoreStored(StoredState state) { return new RootedDocumentView(state); }
+
+    private RootedDocumentView(StoredState state) {
+        this.result = Objects.requireNonNull(state.result());
+        this.logicalBoundary = state.logicalBoundary();
+        this.snapshot = Objects.requireNonNull(state.snapshot());
+        this.retainedSnapshot = Objects.requireNonNull(state.retainedSnapshot());
+        this.subscriptions = Objects.requireNonNull(state.subscriptions());
+        var copiedRoutes = new LinkedHashMap<DocumentId, List<SubscriptionDelta.Entry>>();
+        state.routes().forEach((id, rows) -> copiedRoutes.put(id, List.copyOf(rows)));
+        this.routes = Map.copyOf(copiedRoutes);
+        this.publishedHeads = Map.copyOf(state.publishedHeads());
+        if (!result.commits() || result.commitCompanion() == null
+                || !RootedProcessingContext.CONTRACTS_SPECIFICATION_IDENTITY.equals(
+                        result.commitCompanion().contractsSpecificationIdentity())
+                || !snapshot.closureIdentity().equals(result.outputClosureIdentity())
+                || !routes.keySet().equals(result.resultingDocuments().stream()
+                    .map(document -> DocumentId.of(document.documentId().value())).collect(java.util.stream.Collectors.toSet()))
+                || snapshot.graphGeneration() != retainedSnapshot.graphGeneration()
+                || !ManagedOccurrenceInventory.sameRows(snapshot.occurrences(), retainedSnapshot.occurrences())
+                || !sameComponents(snapshot.components(), retainedSnapshot.components())
+                || !snapshot.publicRootDocumentIds().equals(retainedSnapshot.publicRootDocumentIds())
+                || snapshot.managedDocuments().size() != retainedSnapshot.managedDocuments().size()) {
+            throw new IllegalArgumentException("Stored rooted view differs from its authenticated result");
+        }
+        publishedHeads.forEach((owner, head) -> requireOwnerHead(owner, head.blueId()));
+        for (ManagedDocumentSnapshot document : snapshot.managedDocuments()) {
+            var retained = retainedSnapshot.managedDocument(document.documentId());
+            var published = publishedHeads.get(DocumentId.of(document.documentId().value()));
+            if (retained == null || retained.epoch() != (published == null ? document.epoch() : published.epoch())
+                    || !document.blueId().equals(retained.blueId())
+                    || !blue.language.model.NodeWireForm.get(document.document())
+                            .equals(blue.language.model.NodeWireForm.get(retained.document()))
+                    || document.initialized() != retained.initialized() || document.terminated() != retained.terminated()
+                    || document.publicRoot() != retained.publicRoot()
+                    || document.componentGeneration() != retained.componentGeneration()) {
+                throw new IllegalArgumentException("Stored retained snapshot changed exact body or publication position");
+            }
+        }
+    }
+
     /** Host receipt position may advance for an event-only step without changing the processor epoch. */
     long retainedEpoch(DocumentId documentId) {
         var published = publishedHeads.get(documentId);
@@ -123,7 +175,7 @@ final class RootedDocumentView {
             List<blue.language.processor.closure.DocumentId> publicRoots) {
         AffectedClosureSnapshot snapshot = retainedSnapshot;
         if (snapshot.graphGeneration() != graphGeneration || documents.size() != snapshot.managedDocuments().size()
-                || !ManagedOccurrenceInventory.sameRows(snapshot.occurrences(), occurrences) || !snapshot.components().equals(components)
+                || !ManagedOccurrenceInventory.sameRows(snapshot.occurrences(), occurrences) || !sameComponents(snapshot.components(), components)
                 || !snapshot.publicRootDocumentIds().equals(publicRoots)) return false;
         var seen = new java.util.HashSet<blue.language.processor.closure.DocumentId>();
         for (var document : documents) {
@@ -139,6 +191,23 @@ final class RootedDocumentView {
         return true;
     }
     ClosureSubscriptionInventory subscriptions() { return subscriptions; }
+    private static boolean sameComponents(List<blue.language.processor.closure.ComponentSnapshot> left,
+            List<blue.language.processor.closure.ComponentSnapshot> right) {
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) {
+            var a = left.get(i); var b = right.get(i);
+            if (!a.componentIdentity().equals(b.componentIdentity()) || !a.componentStateIdentity().equals(b.componentStateIdentity())
+                    || a.componentGeneration() != b.componentGeneration() || a.kind() != b.kind()
+                    || !a.orderedMemberDocumentIds().equals(b.orderedMemberDocumentIds())
+                    || !a.orderedMemberBlueIds().equals(b.orderedMemberBlueIds())
+                    || !Objects.equals(a.masterBlueId(), b.masterBlueId()) || !Objects.equals(a.cyclicProofIdentity(), b.cyclicProofIdentity())
+                    || !Objects.equals(proofWire(a.completeCyclicProof()), proofWire(b.completeCyclicProof()))) return false;
+        }
+        return true;
+    }
+    private static Object proofWire(blue.language.provider.CyclicSetProof proof) {
+        return proof == null ? null : proof.declaredPlaceholderSet().stream().map(blue.language.model.NodeWireForm::get).toList();
+    }
     List<SubscriptionDelta.Entry> routes(DocumentId documentId) {
         return Objects.requireNonNull(routes.get(documentId), "No selected route view for " + documentId);
     }

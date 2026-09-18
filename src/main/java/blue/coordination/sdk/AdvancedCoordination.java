@@ -26,6 +26,13 @@ public final class AdvancedCoordination {
         return runtime.engine();
     }
 
+    // Package-only component access; no public complete-SDK recovery claim.
+    byte[] storageMetadata(int maximumBytes) { return runtime.storageMetadata(maximumBytes); }
+
+    SdkPointStorage.Scope openPointStorage(SdkPointStorage storage, SdkPointStorage.References references) {
+        return runtime.openPointStorage(storage, references);
+    }
+
     /**
      * Processes one root input with an explicit low-level execution policy.
      * Ordinary processing retains the configured release policy.
@@ -182,6 +189,27 @@ public final class AdvancedCoordination {
                 Objects.requireNonNull(documentId, "documentId"));
     }
 
+    /**
+     * Reads one exact numbered revision from the current READY history without
+     * enumerating its prefix. Empty means the epoch is beyond the READY boundary;
+     * this is not a same-epoch representation cursor or a publication certificate.
+     */
+    public Optional<DocumentRevision> auditReadyRevision(DocumentId documentId, long epoch) {
+        return runtime.auditReadyRevision(Objects.requireNonNull(documentId, "documentId"), epoch);
+    }
+
+    /**
+     * Reads current complete history and authenticates reusable immutable receipt prefix artifacts.
+     * Current engine reads are never skipped. A foreign configuration/document, changed receipt
+     * object or cold reconstruction cannot borrow the previous artifact's content validation.
+     * @param documentId exact source lineage
+     * @param previous prior library-issued artifact, or null for a cold audit
+     * @return caller-budgeted immutable history with detached read-only Timeline metadata
+     */
+    public ManagedEpochHistory auditManagedEpochHistory(DocumentId documentId, ManagedEpochHistory previous) {
+        return runtime.auditManagedEpochHistory(Objects.requireNonNull(documentId, "documentId"), previous);
+    }
+
     /** Reads one complete source receipt by its canonical identity. */
     public Optional<ManagedEpochReceipt> auditManagedEpochReceipt(
             String receiptIdentity) {
@@ -216,6 +244,20 @@ public final class AdvancedCoordination {
             auditManagedEpochApplicationWork(String workIdentity) {
         return runtime.engine().auditManagedEpochApplicationWork(
                 requireIdentity(workIdentity, "workIdentity"));
+    }
+
+    /**
+     * Observes exact work identities together, sharing discovery for this call.
+     * Absence is explicit for every requested identity, not inferred from the
+     * globally next work item. The observations do not reserve work.
+     * @param workIdentities identities to query; duplicates are collapsed
+     * @return immutable map including present and absent requested work
+     */
+    public java.util.Map<String, Optional<blue.coordination.api.ManagedEpochApplicationWork>>
+            auditManagedEpochApplicationWorks(List<String> workIdentities) {
+        var selected = List.copyOf(Objects.requireNonNull(workIdentities, "workIdentities"));
+        selected.forEach(identity -> requireIdentity(identity, "workIdentity"));
+        return runtime.engine().auditManagedEpochApplicationWorks(selected);
     }
 
     /**
@@ -292,6 +334,15 @@ public final class AdvancedCoordination {
     public List<TimelineEntrySnapshot> auditTimeline(String timelineId) {
         return runtime.auditTimeline(
                 SdkPreconditions.requireText(timelineId, "timelineId"));
+    }
+
+    /**
+     * Reads a Timeline head and the journal-wide timestamp maximum in one pinned
+     * view, using point indexes rather than enumerating history. This is an audit,
+     * not append authority or Timeline completeness evidence.
+     */
+    public TimelineJournalPosition auditTimelinePosition(String timelineId) {
+        return runtime.auditTimelinePosition(SdkPreconditions.requireText(timelineId, "timelineId"));
     }
 
     public String blueLanguageSpecificationIdentity() {

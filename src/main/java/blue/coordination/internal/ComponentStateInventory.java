@@ -40,6 +40,14 @@ final class ComponentStateInventory {
                 PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER));
     }
 
+    record StoredIndexes(PersistentOrderedMap<String, ComponentSnapshot> lineages,
+            PersistentOrderedMap<String, String> states, PersistentOrderedMap<DocumentId, String> documents) { }
+
+    StoredIndexes storedIndexes() { return new StoredIndexes(byLineage, lineageByState, lineageByDocument); }
+    static ComponentStateInventory restoreIndexes(StoredIndexes indexes) {
+        return new ComponentStateInventory(indexes.lineages(), indexes.states(), indexes.documents());
+    }
+
     static ComponentStateInventory of(
             Collection<ComponentSnapshot> components) {
         ComponentStateInventory result = empty();

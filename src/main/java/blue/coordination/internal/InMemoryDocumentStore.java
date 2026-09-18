@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.DocumentRevision;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.ManagedEpochReceipt;
 import blue.coordination.api.ManagedCatchUpBarrier;
@@ -57,6 +58,10 @@ final class InMemoryDocumentStore {
             "temporal.unrelatedDocumentReads";
 
     private final EngineMetrics metrics;
+    private ManagedRepresentationVerificationMemo representationVerifications = new ManagedRepresentationVerificationMemo();
+    private final boolean coldPublicationProjection;
+    private StoredPublicationReceiptReuse storedPublicationReuse;
+    private Object publicationRetentionEpoch;
     private StoreState state;
 
     InMemoryDocumentStore() {
@@ -64,10 +69,51 @@ final class InMemoryDocumentStore {
     }
 
     InMemoryDocumentStore(EngineMetrics metrics) {
+        this(metrics, StoreState.empty());
+    }
+
+    /** Installs an already complete selected state; never enumerates, replays or derives missing rows. */
+    InMemoryDocumentStore(EngineMetrics metrics, StoreState selectedState) {
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         registerExactReadCounters();
-        state = StoreState.empty();
+        state = Objects.requireNonNull(selectedState, "selectedState");
+        coldPublicationProjection = state.closurePublicationReceiptIndex().valueProjectionIdentity() != null;
     }
+
+    /** Bound once, before a restored engine is returned to its caller; never a global identity cache. */
+    synchronized void bindStoredPublicationReuse(StoredPublicationReceiptReuse reuse) {
+        if (!coldPublicationProjection || storedPublicationReuse != null)
+            throw new IllegalStateException("Publication reuse requires a fresh cold document store");
+        storedPublicationReuse = Objects.requireNonNull(reuse);
+        publicationRetentionEpoch = reuse.retentionEpoch();
+        clearRepresentationVerifications();
+    }
+
+    private boolean retainedForProofReuse(ContractsClosurePublicationReceipt publication) {
+        if (!coldPublicationProjection) return true;
+        if (storedPublicationReuse == null) return false;
+        Object current = storedPublicationReuse.retentionEpoch();
+        if (current != publicationRetentionEpoch) {
+            // No uncharged proof may keep an unbounded series of evicted deep receipt graphs alive.
+            clearRepresentationVerifications(); publicationRetentionEpoch = current;
+        }
+        return storedPublicationReuse.contains(publication);
+    }
+
+    private ManagedRepresentationVerificationMemo representationMemo(ContractsClosurePublicationReceipt publication) {
+        // Retire any owner-local deep references even when this lookup can use the process entry.
+        boolean ownerRetained = retainedForProofReuse(publication);
+        if (coldPublicationProjection && storedPublicationReuse != null) {
+            var shared = storedPublicationReuse.processProofs(publication);
+            if (shared != null) return shared;
+        }
+        return ownerRetained ? representationVerifications : null;
+    }
+
+    synchronized StoreState storedState() { return state; }
+
+    /** Exact existing catalog order without materializing its session values. */
+    synchronized List<DocumentId> sessionIds() { return state.sessionIndex().keys(); }
 
     public synchronized Optional<DocumentSession> find(DocumentId documentId) {
         return Optional.ofNullable(state.sessions().get(
@@ -323,22 +369,83 @@ final class InMemoryDocumentStore {
                         publicationIdentity, "publicationIdentity")));
     }
 
+    /** Selects one current durable row and its pure proof under the same membership check. */
+    blue.language.processor.closure.ManagedRepresentationTransition proveRetainedRepresentation(
+            String publicationIdentity, blue.language.processor.closure.DocumentId document,
+            long epoch, String anchor, String predecessor, String receipt) {
+        ContractsClosurePublicationReceipt publication;
+        ManagedRepresentationVerificationMemo.Request request;
+        ManagedRepresentationVerificationMemo memo;
+        synchronized (this) {
+            // This is the ordinary physical selection, including dependency adoption and crosslinks.
+            // Selecting again before a warm hit would reopen the same complete receipt envelope.
+            publication = state.closurePublicationReceipts().get(
+                    Objects.requireNonNull(publicationIdentity, "publicationIdentity"));
+            request = representationRequest(publication, document, epoch, anchor, predecessor, receipt);
+            memo = representationMemo(publication);
+            var found = memo == null ? null : memo.find(request);
+            if (found != null) return found;
+        }
+        return completeRepresentationProof(publication, request, memo);
+    }
+
+    /** Supplied/staged objects still require an independent current-membership check before reuse. */
+    blue.language.processor.closure.ManagedRepresentationTransition proveRepresentation(
+            ContractsClosurePublicationReceipt publication, blue.language.processor.closure.DocumentId document,
+            long epoch, String anchor, String predecessor, String receipt) {
+        var request = representationRequest(publication, document, epoch, anchor, predecessor, receipt);
+        ManagedRepresentationVerificationMemo memo;
+        synchronized (this) {
+            // Physical selection, dependency adoption and current membership still precede every proof hit.
+            memo = state.closurePublicationReceipts().get(publication.publicationIdentity()) == publication
+                    ? representationMemo(publication) : null;
+            var found = memo == null ? null : memo.find(request);
+            if (found != null) return found;
+        }
+        return completeRepresentationProof(publication, request, memo);
+    }
+
+    private static ManagedRepresentationVerificationMemo.Request representationRequest(
+            ContractsClosurePublicationReceipt publication, blue.language.processor.closure.DocumentId document,
+            long epoch, String anchor, String predecessor, String receipt) {
+        if (publication == null || !publication.commits())
+            throw new IllegalArgumentException("Original representation commit is unavailable");
+        var input = publication.managedSurfaceEvidence().originalInvocation();
+        if (!publication.documentIds().contains(ContractsClosureAdapter.coordinationId(document)) || input == null)
+            throw new IllegalArgumentException("Original representation classification input is unavailable");
+        return new ManagedRepresentationVerificationMemo.Request(publication, document, epoch, anchor, predecessor,
+                input, publication.attempt().processResult(), receipt);
+    }
+
+    private blue.language.processor.closure.ManagedRepresentationTransition completeRepresentationProof(
+            ContractsClosurePublicationReceipt publication, ManagedRepresentationVerificationMemo.Request request,
+            ManagedRepresentationVerificationMemo memo) {
+        // The expensive pure proof never holds the store monitor. Concurrent cold proofs are benign.
+        var proved = request.prove();
+        synchronized (this) {
+            // Never retain a proposal that was staged on entry, even if it committed during proof.
+            if (memo != null
+                    && state.closurePublicationReceipts().get(publication.publicationIdentity()) == publication
+                    && representationMemo(publication) == memo)
+                return memo.retain(request, proved);
+        }
+        return proved;
+    }
+
+    synchronized void clearRepresentationVerifications() {
+        representationVerifications.clear();
+        // Opaque memo identity also invalidates any cold construction that began before this clear.
+        representationVerifications = new ManagedRepresentationVerificationMemo();
+    }
+
     /** Checks retained local-provider promises before accepting another exact entry. */
     synchronized void requireAfterRootedProviderFrontier(blue.coordination.api.TimelineEntry entry) {
         // The in-memory provider closes each required source through the
         // selected input when retaining its terminal admission evidence. The
         // promise survives response loss/restart with that atomic receipt;
         // unrelated sources never inherit a global environment watermark.
-        for (ContractsClosurePublicationReceipt receipt : state.closurePublicationReceipts().values()) {
-            RootedTerminalEvidence evidence = receipt.rootedTerminalEvidence();
-            if (evidence == null || !evidence.requiredTimelineIds().contains(entry.timeline().timelineId())
-                    || !(evidence.input().cause() instanceof blue.language.processor.closure.ExternalEventCause cause)) continue;
-            long closedThrough = new java.math.BigInteger(cause.sourceOrder().components().get(0).toString()).longValueExact();
-            if (entry.timestampMicros() <= closedThrough) {
-                throw new IllegalArgumentException("Timeline Entry order " + entry.sourceOrderKey()
-                        + " is not after its required Timeline completeness frontier " + cause.sourceOrder());
-            }
-        }
+        state.rootedProviderFrontiers().requireAfter(entry, state.publicationReceiptIndex(),
+                state.closurePublicationReceiptIndex());
     }
 
     /** Looks up one typed admission receipt without opening document heads. */
@@ -483,13 +590,15 @@ final class InMemoryDocumentStore {
             ManagedEpochApplicationReceipt application) {
         ContractsClosurePublicationReceipt legacy = state.closurePublicationReceipts().get(application.workIdentity());
         if (legacy != null) return Optional.of(legacy);
-        List<ContractsClosurePublicationReceipt> matches = state.closurePublicationReceipts().values().stream()
-                .filter(receipt -> receipt.attempt().processResult().commits())
-                .filter(receipt -> receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity()))
-                .filter(receipt -> receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
-                .toList();
-        if (matches.size() > 1) throw new IllegalStateException("Ambiguous retained rooted application result");
-        return matches.stream().findFirst();
+        String publicationIdentity = state.closureApplicationResults().publication(
+                application.contractsResultIdentity(), application.commitCompanionIdentity());
+        if (publicationIdentity == null) return Optional.empty();
+        var receipt = state.closurePublicationReceipts().get(publicationIdentity);
+        if (receipt == null || !receipt.attempt().processResult().commits()
+                || !receipt.attempt().processResult().outputClosureIdentity().equals(application.contractsResultIdentity())
+                || !receipt.attempt().processResult().commitCompanion().companionIdentity().equals(application.commitCompanionIdentity()))
+            throw new IllegalStateException("Retained application result differs from its publication index");
+        return Optional.of(receipt);
     }
 
     synchronized Optional<ManagedEpochApplicationWork> catchUpWork(
@@ -827,6 +936,8 @@ final class InMemoryDocumentStore {
                 closurePublicationReceiptIndex;
         private final Map<String, ContractsClosurePublicationReceipt>
                 closurePublicationReceipts;
+        private final RootedProviderFrontiers rootedProviderFrontiers;
+        private final ClosureApplicationResultIndex closureApplicationResults;
         private final ManagedEpochReceiptStore managedEpochReceipts;
         private final CatchUpPlanStore catchUpPlans;
 
@@ -917,7 +1028,11 @@ final class InMemoryDocumentStore {
                 orderByIdentity.put(
                         component.componentStateIdentity(), statePosition);
             }
-            requireCondensationOrder(canonicalComponents, componentIndex);
+            if (componentIndex.hasRootedViews()) {
+                requireRootedInventoryOrder(canonicalComponents, componentIndex);
+            } else {
+                requireCondensationOrder(canonicalComponents, componentIndex);
+            }
             this.componentStates = ComponentStateInventory.of(
                     canonicalComponents);
             this.closureSubscriptions = Objects.requireNonNull(
@@ -1036,16 +1151,14 @@ final class InMemoryDocumentStore {
                             throw new IllegalArgumentException(
                                     "Duplicate typed process receipt " + key);
                         }
-                        requireRetainedResult(
-                                exact.documentIds(),
-                                exact.attempt().processResult(),
-                                this.sessions,
-                                "Process receipt", exact.publicationDocuments().values());
+                        requireRetainedClosureReceipt(exact, this.sessions, "Process receipt");
                     });
             this.closurePublicationReceiptIndex =
                     closurePublicationReceiptIndex(processReceipts);
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.rootedProviderFrontiers = RootedProviderFrontiers.from(processReceipts.values());
+            this.closureApplicationResults = ClosureApplicationResultIndex.from(processReceipts.values());
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1070,6 +1183,8 @@ final class InMemoryDocumentStore {
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceiptIndex,
+                RootedProviderFrontiers rootedProviderFrontiers,
+                ClosureApplicationResultIndex closureApplicationResults,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             this.sessionIndex = Objects.requireNonNull(
@@ -1112,6 +1227,8 @@ final class InMemoryDocumentStore {
                     "closurePublicationReceiptIndex");
             this.closurePublicationReceipts = new PersistentMapView<>(
                     closurePublicationReceiptIndex);
+            this.rootedProviderFrontiers = Objects.requireNonNull(rootedProviderFrontiers, "rootedProviderFrontiers");
+            this.closureApplicationResults = Objects.requireNonNull(closureApplicationResults, "closureApplicationResults");
             this.managedEpochReceipts = Objects.requireNonNull(
                     managedEpochReceipts, "managedEpochReceipts");
             this.catchUpPlans = Objects.requireNonNull(
@@ -1136,6 +1253,8 @@ final class InMemoryDocumentStore {
                 PersistentOrderedMap<String,
                         ContractsClosurePublicationReceipt>
                         closurePublicationReceipts,
+                RootedProviderFrontiers rootedProviderFrontiers,
+                ClosureApplicationResultIndex closureApplicationResults,
                 ManagedEpochReceiptStore managedEpochReceipts,
                 CatchUpPlanStore catchUpPlans) {
             return new StoreState(
@@ -1153,6 +1272,8 @@ final class InMemoryDocumentStore {
                     publicationReceipts,
                     admissionReceipts,
                     closurePublicationReceipts,
+                    rootedProviderFrontiers,
+                    closureApplicationResults,
                     managedEpochReceipts,
                     catchUpPlans);
         }
@@ -1185,6 +1306,9 @@ final class InMemoryDocumentStore {
                 ManagedLineageIndex replacementLineages,
                 ProcessEmbeddedComponentIndex replacementIndex,
                 long replacementIndexGeneration) {
+            // A full reconstruction must not silently discard an unverified supplied frontier projection.
+            rootedProviderFrontiers.rows();
+            closureApplicationResults.rows();
             List<ComponentSnapshot> retainedComponents = componentStates()
                     .stream()
                     .filter(component -> component.orderedMemberDocumentIds()
@@ -1314,6 +1438,9 @@ final class InMemoryDocumentStore {
             return closurePublicationReceipts;
         }
 
+        RootedProviderFrontiers rootedProviderFrontiers() { return rootedProviderFrontiers; }
+        ClosureApplicationResultIndex closureApplicationResults() { return closureApplicationResults; }
+
         ManagedEpochReceiptStore managedEpochReceipts() {
             return managedEpochReceipts;
         }
@@ -1335,6 +1462,8 @@ final class InMemoryDocumentStore {
                     publicationReceiptIndex,
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
+                    rootedProviderFrontiers,
+                    closureApplicationResults,
                     Objects.requireNonNull(
                             replacement, "managedEpochReceipts"),
                     catchUpPlans);
@@ -1360,6 +1489,8 @@ final class InMemoryDocumentStore {
                     publicationReceiptIndex,
                     admissionReceiptIndex,
                     closurePublicationReceiptIndex,
+                    rootedProviderFrontiers,
+                    closureApplicationResults,
                     managedEpochReceipts,
                     Objects.requireNonNull(replacement, "catchUpPlans"));
         }
@@ -1440,7 +1571,74 @@ final class InMemoryDocumentStore {
             return result;
         }
 
-        private static void requireRetainedResult(
+        /** A host-rejected draft retains its authenticated input, not the unpublished successful result heads. */
+        static void requireRetainedClosureReceipt(ContractsClosurePublicationReceipt receipt,
+                Map<DocumentId, DocumentSession> sessions, String label) {
+            var plan = receipt.rejectedDraftPlan();
+            var terminal = receipt.rootedTerminalEvidence();
+            var result = receipt.attempt().processResult();
+            if (plan == null || terminal == null) {
+                requireRetainedResult(receipt.documentIds(), result, sessions, label, receipt.publicationDocuments().values());
+                return;
+            }
+            terminal.requireRejectedDraftPlan(plan, result, receipt.publicationIdentity());
+            var rooted = terminal.storedState().rooted();
+            var input = terminal.input().snapshot();
+            var target = input.managedDocument(ContractsClosureAdapter.closureId(plan.targetDocumentId()));
+            var targetFence = rooted.publicationFences().get(plan.targetDocumentId());
+            if (receipt.commits() || !result.commits() || receipt.managedSurfaceEvidence().present()
+                    || target == null || target.epoch() != plan.targetEpoch() || !target.blueId().equals(plan.targetBlueId())
+                    || targetFence == null || targetFence.head().epoch() != plan.targetEpoch()
+                    || !targetFence.head().blueId().equals(plan.targetBlueId())
+                    || !rooted.histories().keySet().equals(new LinkedHashSet<>(terminal.entryOwners()))
+                    || plan.drafts().keySet().stream().anyMatch(rooted.publicationFences()::containsKey)) {
+                throw new IllegalArgumentException(label + " rejection differs from its original target or absence fences");
+            }
+            var members = terminal.entryOwners().stream().map(owner -> Map.of(
+                    "documentId", owner.value(), "historyBasisIdentity", rooted.histories().get(owner).identity())).toList();
+            if (!members.equals(rooted.context().ownerDescriptor().get("members"))) {
+                throw new IllegalArgumentException(label + " rejection changed its original owner histories");
+            }
+            var publicationDocuments = receipt.publicationDocuments();
+            if (!new LinkedHashSet<>(receipt.documentIds()).equals(publicationDocuments.keySet())) {
+                throw new IllegalArgumentException(label + " rejection changed its exact publication owners");
+            }
+            for (var owner : receipt.documentIds()) {
+                var before = input.managedDocument(ContractsClosureAdapter.closureId(owner));
+                var after = publicationDocuments.get(owner);
+                if (before == null || !before.blueId().equals(after.beforeBlueId())) {
+                    throw new IllegalArgumentException(label + " rejection changed its original input for " + owner);
+                }
+                var fence = rooted.publicationFences().get(owner);
+                if (fence == null) {
+                    var draft = plan.drafts().get(owner);
+                    if (draft == null || before.epoch() != 0L || before.initialized()
+                            || !before.blueId().equals(draft.initial().blueId())) {
+                        throw new IllegalArgumentException(label + " rejection lacks an exact absent draft for " + owner);
+                    }
+                    // Absence belongs to the original atomic decision. A later
+                    // successful operation may admit this same lineage.
+                    continue;
+                }
+                var session = sessions.get(owner);
+                if (session == null || !session.documentId().equals(owner)
+                        || !session.retainsStoredPosition(before.epoch(), before.blueId())
+                        || !session.retainsStoredPosition(fence.head().epoch(), fence.head().blueId())) {
+                    throw new IllegalArgumentException(label + " rejection input or publication fence is absent from durable history for " + owner);
+                }
+                var history = rooted.histories().get(owner);
+                if (history != null) {
+                    var retained = session.requireRootedHistory();
+                    if (!history.identity().equals(retained.identity())
+                            || !history.admissionInvocationIdentity().equals(retained.admissionInvocationIdentity())
+                            || !history.admissionCompanionIdentity().equals(retained.admissionCompanionIdentity())) {
+                        throw new IllegalArgumentException(label + " rejection belongs to another admitted history for " + owner);
+                    }
+                }
+            }
+        }
+
+        static void requireRetainedResult(
                 List<DocumentId> receiptDocuments,
                 blue.language.processor.closure.ClosureProcessResult result,
                 Map<DocumentId, DocumentSession> sessions,
@@ -1448,7 +1646,7 @@ final class InMemoryDocumentStore {
             requireRetainedResult(receiptDocuments, result, sessions, label, RootedResultScope.documents(result));
         }
 
-        private static void requireRetainedResult(
+        static void requireRetainedResult(
                 List<DocumentId> receiptDocuments,
                 blue.language.processor.closure.ClosureProcessResult result,
                 Map<DocumentId, DocumentSession> sessions, String label,
@@ -1497,16 +1695,62 @@ final class InMemoryDocumentStore {
                         || !session.revision(exact.epoch()).after().blueId()
                                 .equals(exact.afterBlueId())
                         && !retainsAuthenticatedComponentRepresentation(
+                                result, exact, session)
+                        && !retainsAuthenticatedCheckpointSettlement(
                                 result, exact, session)) {
                     throw new IllegalArgumentException(
                             label + " result head is absent from durable "
-                                    + "history for " + entry.getKey());
+                                    + "history for " + entry.getKey()
+                                    + " (result epoch=" + exact.epoch()
+                                    + ", after=" + exact.afterBlueId()
+                                    + ", retained head epoch=" + session.epoch() + ")");
                 }
             }
             if (!retainedDocument) {
                 throw new IllegalArgumentException(
                         label + " has no retained document");
             }
+        }
+
+        private static boolean retainsAuthenticatedCheckpointSettlement(
+                blue.language.processor.closure.ClosureProcessResult result,
+                ResultingDocument document, DocumentSession session) {
+            if (!result.commits() || result.platformCommitCompanion() == null
+                    || !result.platformCommitCompanion().bindsManagedTransitionReceipts()
+                    || document.epoch() >= session.epoch()) {
+                return false;
+            }
+            var transition = result.managedTransitionReceipts().stream()
+                    .filter(row -> row.documentId().equals(document.documentId()))
+                    .findFirst().orElse(null);
+            if (!ContractsClosureAdapter.isVerifiedCheckpointSettlementChange(result,
+                    session.documentId(), new DocumentHead(document.epoch(), document.beforeBlueId()),
+                    document, transition)) {
+                return false;
+            }
+            // The live publisher advances exactly one Coordination revision for
+            // this verified settlement while Contracts retains its work epoch.
+            // Do not accept a later matching body or replace the original result.
+            var revision = session.revision(document.epoch() + 1L);
+            if ((revision.kind() != DocumentRevision.Kind.TIMELINE_ENTRY
+                    && revision.kind() != DocumentRevision.Kind.EMBEDDED_REVISION_APPLICATION)
+                    || !revision.before().map(before -> before.blueId().equals(document.beforeBlueId())).orElse(false)
+                    || !revision.after().blueId().equals(document.afterBlueId())
+                    || revision.managedEpochReceipt().isEmpty()) {
+                return false;
+            }
+            var receipt = revision.managedEpochReceipt().orElseThrow();
+            var sourceEntry = receipt.sourceEntry().orElse(null);
+            if (sourceEntry != null && !revision.causalEntryBlueId().filter(sourceEntry.blueId()::equals).isPresent()
+                    || revision.kind() == DocumentRevision.Kind.TIMELINE_ENTRY
+                    && (sourceEntry == null || !revision.sourceEntry().filter(entry -> entry.blueId().equals(sourceEntry.blueId())
+                            && entry.sourceOrderKey().equals(sourceEntry.sourceOrderKey())).isPresent())) {
+                return false;
+            }
+            var expected = ManagedEpochReceiptMapper.map(session.documentId(), revision.epoch(), revision.kind(),
+                    revision.before().orElseThrow(), revision.after(), sourceEntry,
+                    revision.sourceOrderKey().orElse(null), transition, result.platformCommitCompanion());
+            return receipt.receiptIdentity().equals(expected.receiptIdentity());
         }
 
         private static boolean retainsAuthenticatedComponentRepresentation(
@@ -1564,6 +1808,26 @@ final class InMemoryDocumentStore {
                             document.componentStateIdentity())
                     && component.orderedMemberBlueIds().get(memberIndex)
                             .equals(document.afterBlueId());
+        }
+
+        /** Root-local proof inventories are scalar ordered; their global edge union is not a semantic DAG. */
+        private static void requireRootedInventoryOrder(List<ComponentSnapshot> states,
+                ProcessEmbeddedComponentIndex index) {
+            DocumentId prior = null;
+            for (ComponentSnapshot state : states) {
+                List<DocumentId> members = state.orderedMemberDocumentIds().stream()
+                        .map(member -> DocumentId.of(member.value())).toList();
+                if (members.isEmpty() || prior != null
+                        && EmbeddingBinding.DOCUMENT_ORDER.compare(prior, members.get(0)) >= 0) {
+                    throw new IllegalArgumentException("Rooted component inventory is not in first-member scalar order");
+                }
+                for (DocumentId member : members) {
+                    if (!index.component(member).members().equals(members)) {
+                        throw new IllegalArgumentException("Rooted component inventory differs from its exact member index: " + member);
+                    }
+                }
+                prior = members.get(0);
+            }
         }
 
         private static void requireCondensationOrder(

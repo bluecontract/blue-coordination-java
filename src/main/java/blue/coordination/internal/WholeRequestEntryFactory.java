@@ -164,6 +164,38 @@ final class WholeRequestEntryFactory {
         return exactTimelineOrder ? entry.canonicalAt("/timeline").blueId() : legacyTimelineName;
     }
 
+    /** Verifies stored rows without admission, provider reads, or object retention. */
+    void verifyStoredEntry(TimelineEntry entry) {
+        ExactValue exact = entry.exactEvent();
+        FrozenNode root = exact.frozen();
+        String timelineId = (String) root.at("/timeline/timelineId").getValue();
+        String actorId = (String) root.at("/actor/accountId").getValue();
+        long timestamp = new BigInteger(root.at("/timestamp").getValue().toString()).longValueExact();
+        ExternalOrderKey order = ExternalOrderKey.of(List.of(
+                BigInteger.valueOf(timestamp), orderTimeline(exact, timelineId), exact.blueId()));
+        if (!new Timeline(timelineId, actorId).equals(entry.timeline())
+                || timestamp != entry.timestampMicros()
+                || !Objects.equals(root.at("/message/operation").getValue(), entry.operation())
+                || !Objects.equals(root.at("/message/channel").getValue(), entry.channel())
+                || !order.equals(entry.journalOrderKey())
+                || !order.equals(entry.sourceOrderKey())) {
+            throw new IllegalArgumentException("Stored Timeline metadata differs from exact event");
+        }
+        FrozenNode request = root.at("/message/request");
+        if ((request != null) != entry.request().isPresent()) {
+            throw new IllegalArgumentException("Stored Timeline request presence differs from exact event");
+        }
+        if (request != null) {
+            ExactValue retained = entry.request().orElseThrow();
+            String identity = request.isReferenceOnly() ? request.getReferenceBlueId() : request.blueId();
+            if (!identity.equals(retained.blueId())
+                    || !request.isReferenceOnly()
+                    && !ExactValue.fromFrozen(request).sameExactValue(retained)) {
+                throw new IllegalArgumentException("Stored Timeline request differs from exact event");
+            }
+        }
+    }
+
     /**
      * Retains one exact request body from an accepted external envelope.
      *

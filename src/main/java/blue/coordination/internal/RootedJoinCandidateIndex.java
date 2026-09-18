@@ -24,6 +24,12 @@ final class RootedJoinCandidateIndex {
                 PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER));
     }
 
+    record StoredIndexes(PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> members,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> roots) { }
+
+    StoredIndexes storedIndexes() { return new StoredIndexes(membersByRoot, rootsByMember); }
+    static RootedJoinCandidateIndex restoreIndexes(StoredIndexes indexes) { return new RootedJoinCandidateIndex(indexes.members(), indexes.roots()); }
+
     List<DocumentId> rootsFor(DocumentId member) { return bucket(rootsByMember, member).keys(); }
 
     RootedJoinCandidateIndex replace(Collection<DocumentId> owners, AffectedClosureSnapshot snapshot) {

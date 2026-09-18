@@ -63,6 +63,28 @@ final class ManagedCatchUpPlanIndex {
         return EMPTY;
     }
 
+    record StoredIndexes(
+            PersistentOrderedMap<String, ManagedOccurrenceCatchUpPlan> identities,
+            PersistentOrderedMap<DocumentId, IdBucket> consumers,
+            PersistentOrderedMap<DocumentId, IdBucket> sources,
+            PersistentOrderedMap<String, IdBucket> occurrences,
+            PersistentOrderedMap<String, IdBucket> barriers,
+            PersistentOrderedMap<DocumentId, Integer> activeSources,
+            int comparisons, int copiedNodes) { }
+
+    StoredIndexes storedIndexes() {
+        return new StoredIndexes(byIdentity, byConsumer, bySource, byOccurrence,
+                byBarrier, activePlanCountBySource, lastMutationComparisons, lastMutationNodeCopies);
+    }
+
+    static ManagedCatchUpPlanIndex restoreIndexes(StoredIndexes state) {
+        if (state.comparisons() < 0 || state.copiedNodes() < 0) {
+            throw new IllegalArgumentException("Negative stored plan-index counters");
+        }
+        return new ManagedCatchUpPlanIndex(state.identities(), state.consumers(), state.sources(),
+                state.occurrences(), state.barriers(), state.activeSources(), state.comparisons(), state.copiedNodes());
+    }
+
     ManagedCatchUpPlanIndex withPlan(
             ManagedOccurrenceCatchUpPlan plan,
             boolean cursorMayAdvance) {
@@ -467,7 +489,7 @@ final class ManagedCatchUpPlanIndex {
             int comparisons,
             int copiedNodes) { }
 
-    private static final class IdBucket {
+    static final class IdBucket {
         private final PersistentOrderedMap<String, Boolean> identities;
         private final int lastMutationComparisons;
         private final int lastMutationNodeCopies;
@@ -486,6 +508,13 @@ final class ManagedCatchUpPlanIndex {
                     PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER),
                     0,
                     0);
+        }
+
+        PersistentOrderedMap<String, Boolean> storedIdentities() { return identities; }
+
+        static IdBucket restoreStored(PersistentOrderedMap<String, Boolean> identities, int comparisons, int copiedNodes) {
+            if (comparisons < 0 || copiedNodes < 0) throw new IllegalArgumentException("Negative stored plan-bucket counters");
+            return new IdBucket(Objects.requireNonNull(identities), comparisons, copiedNodes);
         }
 
         IdBucket adding(String identity) {

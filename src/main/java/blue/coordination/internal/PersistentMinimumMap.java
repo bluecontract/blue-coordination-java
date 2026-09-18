@@ -1,5 +1,9 @@
 package blue.coordination.internal;
 
+import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.internal.PersistentOrderedMap.TreeNode;
+import java.util.function.Supplier;
+
 import java.util.AbstractMap;
 import java.util.Comparator;
 import java.util.Map;
@@ -8,94 +12,155 @@ import java.util.Objects;
 /** Immutable AVL map with an exact logarithmic minimum-entry read. */
 final class PersistentMinimumMap<K, V> {
     private final Comparator<? super K> order;
-    private final Node<K, V> root;
+    private final TreeNode<K, V> root;
+    private final PersistentMapStorage<K, V> storage;
+    private final java.util.function.BiConsumer<K, V> retainedReadCheck;
 
     private PersistentMinimumMap(
-            Comparator<? super K> order, Node<K, V> root) {
+            Comparator<? super K> order, TreeNode<K, V> root) {
+        this(order, root, null);
+    }
+
+    private PersistentMinimumMap(Comparator<? super K> order, TreeNode<K, V> root, PersistentMapStorage<K, V> storage) {
+        this(order, root, storage, null);
+    }
+
+    private PersistentMinimumMap(Comparator<? super K> order, TreeNode<K, V> root, PersistentMapStorage<K, V> storage,
+            java.util.function.BiConsumer<K, V> retainedReadCheck) {
         this.order = Objects.requireNonNull(order, "order");
         this.root = root;
+        this.storage = storage;
+        this.retainedReadCheck = retainedReadCheck;
     }
+
+    /** Private selected-read validation only; copied rows and mutation accounting remain unchanged. */
+    PersistentMinimumMap<K, V> withRetainedReadCheck(java.util.function.BiConsumer<K, V> check) {
+        if (storage == null || retainedReadCheck != null) throw new IllegalStateException("Expected one original physical minimum map");
+        return new PersistentMinimumMap<>(order, root, storage, Objects.requireNonNull(check));
+    }
+
+    private V checkedValue(TreeNode<K, V> node) {
+        V value = node.value(); if (retainedReadCheck != null) retainedReadCheck.accept(node.key(), value); return value;
+    }
+
+    static <K, V> PersistentMinimumMap<K, V> stored(Comparator<? super K> order, String orderingIdentity,
+            PersistentMapCodec<K> keys, PersistentMapCodec<V> values, CoordinationImmutableObjectStore objects,
+            PersistentMapStorage.Limits limits, byte[] descriptor) {
+        var storage = new PersistentMapStorage<>(order, orderingIdentity, keys, values, objects, limits);
+        return new PersistentMinimumMap<>(order, storage.open(descriptor), storage);
+    }
+
+    byte[] storedRootDescriptor() {
+        if (storage == null) throw new IllegalStateException("Not a storage-backed minimum map");
+        return storage.descriptor(root);
+    }
+
+    /** Explicit selected partition conversion; not an eager cold-runtime constructor. */
+    PersistentMinimumMap<K, V> storedCopy(String orderingIdentity, PersistentMapCodec<K> keys, PersistentMapCodec<V> values,
+            CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
+        if (storage != null) return stored(order, orderingIdentity, keys, values, objects, limits, storedRootDescriptor());
+        var target = new PersistentMapStorage<>(order, orderingIdentity, keys, values, objects, limits);
+        return target.scoped(() -> new PersistentMinimumMap<>(order, retainShape(root, target), target));
+    }
+
+    private static <K, V> TreeNode<K, V> retainShape(TreeNode<K, V> node, PersistentMapStorage<K, V> target) {
+        if (node == null) return null;
+        var left = retainShape(node.left(), target); var right = retainShape(node.right(), target);
+        return target.create(node.key(), node.value(), left, right);
+    }
+
+    private <T> T scoped(Supplier<T> action) { return storage == null ? action.get() : storage.scoped(action); }
 
     static <K, V> PersistentMinimumMap<K, V> empty(
             Comparator<? super K> order) {
         return new PersistentMinimumMap<>(order, null);
     }
 
-    ReadResult<V> read(K key) {
+    ReadResult<V> read(K key) { return scoped(() -> readInScope(key)); }
+
+    private ReadResult<V> readInScope(K key) {
         K selected = Objects.requireNonNull(key, "key");
         int comparisons = 0;
-        Node<K, V> node = root;
+        TreeNode<K, V> node = root;
         while (node != null) {
             comparisons = Math.addExact(comparisons, 1);
-            int comparison = order.compare(selected, node.key);
+            int comparison = order.compare(selected, node.key());
             if (comparison == 0) {
-                return new ReadResult<>(node.value, comparisons);
+                return new ReadResult<>(checkedValue(node), comparisons);
             }
-            node = comparison < 0 ? node.left : node.right;
+            node = comparison < 0 ? node.left() : node.right();
         }
         return new ReadResult<>(null, comparisons);
     }
 
-    MinimumResult<K, V> minimum() {
+    MinimumResult<K, V> minimum() { return scoped(this::minimumInScope); }
+
+    private MinimumResult<K, V> minimumInScope() {
         int rows = 0;
-        Node<K, V> node = root;
+        TreeNode<K, V> node = root;
         if (node == null) {
             return new MinimumResult<>(null, 0);
         }
-        while (node.left != null) {
+        while (node.left() != null) {
             rows = Math.addExact(rows, 1);
-            node = node.left;
+            node = node.left();
         }
         rows = Math.addExact(rows, 1);
         return new MinimumResult<>(
-                new AbstractMap.SimpleImmutableEntry<>(node.key, node.value),
+                new AbstractMap.SimpleImmutableEntry<>(node.key(), checkedValue(node)),
                 rows);
     }
 
     /** Returns the least entry whose key is strictly greater than {@code key}. */
-    MinimumResult<K, V> higherThan(K key) {
+    MinimumResult<K, V> higherThan(K key) { return scoped(() -> higherThanInScope(key)); }
+
+    private MinimumResult<K, V> higherThanInScope(K key) {
         K selected = Objects.requireNonNull(key, "key");
-        Node<K, V> node = root;
-        Node<K, V> candidate = null;
+        TreeNode<K, V> node = root;
+        TreeNode<K, V> candidate = null;
         int rows = 0;
         while (node != null) {
             rows = Math.addExact(rows, 1);
-            int comparison = order.compare(selected, node.key);
+            int comparison = order.compare(selected, node.key());
             if (comparison < 0) {
                 candidate = node;
-                node = node.left;
+                node = node.left();
             } else {
-                node = node.right;
+                node = node.right();
             }
         }
         return new MinimumResult<>(
                 candidate == null ? null
                         : new AbstractMap.SimpleImmutableEntry<>(
-                                candidate.key, candidate.value),
+                                candidate.key(), checkedValue(candidate)),
                 rows);
     }
 
-    Mutation<K, V> put(K key, V value) {
+    Mutation<K, V> put(K key, V value) { return scoped(() -> putInScope(key, value)); }
+
+    private Mutation<K, V> putInScope(K key, V value) {
         Counter work = new Counter();
-        Node<K, V> changed = put(
+        TreeNode<K, V> changed = put(
                 root,
                 Objects.requireNonNull(key, "key"),
                 Objects.requireNonNull(value, "value"),
                 work);
         return new Mutation<>(
-                new PersistentMinimumMap<>(order, changed),
+                new PersistentMinimumMap<>(order, changed, storage, retainedReadCheck),
                 true,
                 work.comparisons,
                 work.copiedNodes);
     }
 
-    Mutation<K, V> remove(K key) {
+    Mutation<K, V> remove(K key) { return scoped(() -> removeInScope(key)); }
+
+    private Mutation<K, V> removeInScope(K key) {
         Counter work = new Counter();
         Change removed = new Change();
-        Node<K, V> changed = remove(
+        TreeNode<K, V> changed = remove(
                 root, Objects.requireNonNull(key, "key"), removed, work);
         return new Mutation<>(
-                removed.value ? new PersistentMinimumMap<>(order, changed)
+                removed.value ? new PersistentMinimumMap<>(order, changed, storage, retainedReadCheck)
                         : this,
                 removed.value,
                 work.comparisons,
@@ -103,10 +168,12 @@ final class PersistentMinimumMap<K, V> {
     }
 
     int size() {
-        return Node.size(root);
+        return TreeNode.size(root);
     }
 
-    void assertStructurallyValid() {
+    void assertStructurallyValid() { scoped(() -> { validateInScope(); return null; }); }
+
+    private void validateInScope() {
         Validation<K> validation = validate(root);
         if (validation.size != size()) {
             throw new IllegalStateException(
@@ -114,121 +181,121 @@ final class PersistentMinimumMap<K, V> {
         }
     }
 
-    private Node<K, V> put(
-            Node<K, V> node, K key, V value, Counter work) {
+    private TreeNode<K, V> put(
+            TreeNode<K, V> node, K key, V value, Counter work) {
         if (node == null) {
             return copied(key, value, null, null, work);
         }
         work.compared();
-        int comparison = order.compare(key, node.key);
+        int comparison = order.compare(key, node.key());
         if (comparison == 0) {
-            return copied(key, value, node.left, node.right, work);
+            return copied(key, value, node.left(), node.right(), work);
         }
-        Node<K, V> changed = comparison < 0
+        TreeNode<K, V> changed = comparison < 0
                 ? copied(
-                        node.key,
-                        node.value,
-                        put(node.left, key, value, work),
-                        node.right,
+                        node.key(),
+                        node.value(),
+                        put(node.left(), key, value, work),
+                        node.right(),
                         work)
                 : copied(
-                        node.key,
-                        node.value,
-                        node.left,
-                        put(node.right, key, value, work),
+                        node.key(),
+                        node.value(),
+                        node.left(),
+                        put(node.right(), key, value, work),
                         work);
         return balance(changed, work);
     }
 
-    private Node<K, V> remove(
-            Node<K, V> node, K key, Change removed, Counter work) {
+    private TreeNode<K, V> remove(
+            TreeNode<K, V> node, K key, Change removed, Counter work) {
         if (node == null) {
             return null;
         }
         work.compared();
-        int comparison = order.compare(key, node.key);
+        int comparison = order.compare(key, node.key());
         if (comparison < 0) {
-            Node<K, V> left = remove(node.left, key, removed, work);
+            TreeNode<K, V> left = remove(node.left(), key, removed, work);
             return removed.value
                     ? balance(copied(
-                            node.key,
-                            node.value,
+                            node.key(),
+                            node.value(),
                             left,
-                            node.right,
+                            node.right(),
                             work), work)
                     : node;
         }
         if (comparison > 0) {
-            Node<K, V> right = remove(node.right, key, removed, work);
+            TreeNode<K, V> right = remove(node.right(), key, removed, work);
             return removed.value
                     ? balance(copied(
-                            node.key,
-                            node.value,
-                            node.left,
+                            node.key(),
+                            node.value(),
+                            node.left(),
                             right,
                             work), work)
                     : node;
         }
         removed.value = true;
-        if (node.left == null) {
-            return node.right;
+        if (node.left() == null) {
+            return node.right();
         }
-        if (node.right == null) {
-            return node.left;
+        if (node.right() == null) {
+            return node.left();
         }
-        Node<K, V> successor = minimum(node.right);
-        Node<K, V> right = removeMinimum(node.right, work);
+        TreeNode<K, V> successor = minimum(node.right());
+        TreeNode<K, V> right = removeMinimum(node.right(), work);
         return balance(copied(
-                successor.key,
-                successor.value,
-                node.left,
+                successor.key(),
+                successor.value(),
+                node.left(),
                 right,
                 work), work);
     }
 
-    private Node<K, V> removeMinimum(Node<K, V> node, Counter work) {
-        if (node.left == null) {
-            return node.right;
+    private TreeNode<K, V> removeMinimum(TreeNode<K, V> node, Counter work) {
+        if (node.left() == null) {
+            return node.right();
         }
         return balance(copied(
-                node.key,
-                node.value,
-                removeMinimum(node.left, work),
-                node.right,
+                node.key(),
+                node.value(),
+                removeMinimum(node.left(), work),
+                node.right(),
                 work), work);
     }
 
-    private static <K, V> Node<K, V> minimum(Node<K, V> node) {
-        Node<K, V> selected = node;
-        while (selected.left != null) {
-            selected = selected.left;
+    private static <K, V> TreeNode<K, V> minimum(TreeNode<K, V> node) {
+        TreeNode<K, V> selected = node;
+        while (selected.left() != null) {
+            selected = selected.left();
         }
         return selected;
     }
 
-    private Node<K, V> balance(Node<K, V> node, Counter work) {
-        int balance = Node.height(node.left) - Node.height(node.right);
+    private TreeNode<K, V> balance(TreeNode<K, V> node, Counter work) {
+        int balance = TreeNode.height(node.left()) - TreeNode.height(node.right());
         if (balance > 1) {
-            if (Node.height(node.left.left)
-                    < Node.height(node.left.right)) {
-                Node<K, V> left = rotateLeft(node.left, work);
+            if (TreeNode.height(node.left().left())
+                    < TreeNode.height(node.left().right())) {
+                TreeNode<K, V> left = rotateLeft(node.left(), work);
                 return rotateRight(copied(
-                        node.key,
-                        node.value,
+                        node.key(),
+                        node.value(),
                         left,
-                        node.right,
+                        node.right(),
                         work), work);
             }
             return rotateRight(node, work);
         }
         if (balance < -1) {
-            if (Node.height(node.right.right)
-                    < Node.height(node.right.left)) {
-                Node<K, V> right = rotateRight(node.right, work);
+            if (TreeNode.height(node.right().right())
+                    < TreeNode.height(node.right().left())) {
+                TreeNode<K, V> right = rotateRight(node.right(), work);
                 return rotateLeft(copied(
-                        node.key,
-                        node.value,
-                        node.left,
+                        node.key(),
+                        node.value(),
+                        node.left(),
                         right,
                         work), work);
             }
@@ -237,51 +304,51 @@ final class PersistentMinimumMap<K, V> {
         return node;
     }
 
-    private Node<K, V> rotateLeft(Node<K, V> node, Counter work) {
-        Node<K, V> pivot = node.right;
-        Node<K, V> left = copied(
-                node.key,
-                node.value,
-                node.left,
-                pivot.left,
+    private TreeNode<K, V> rotateLeft(TreeNode<K, V> node, Counter work) {
+        TreeNode<K, V> pivot = node.right();
+        TreeNode<K, V> left = copied(
+                node.key(),
+                node.value(),
+                node.left(),
+                pivot.left(),
                 work);
-        return copied(pivot.key, pivot.value, left, pivot.right, work);
+        return copied(pivot.key(), pivot.value(), left, pivot.right(), work);
     }
 
-    private Node<K, V> rotateRight(Node<K, V> node, Counter work) {
-        Node<K, V> pivot = node.left;
-        Node<K, V> right = copied(
-                node.key,
-                node.value,
-                pivot.right,
-                node.right,
+    private TreeNode<K, V> rotateRight(TreeNode<K, V> node, Counter work) {
+        TreeNode<K, V> pivot = node.left();
+        TreeNode<K, V> right = copied(
+                node.key(),
+                node.value(),
+                pivot.right(),
+                node.right(),
                 work);
-        return copied(pivot.key, pivot.value, pivot.left, right, work);
+        return copied(pivot.key(), pivot.value(), pivot.left(), right, work);
     }
 
-    private static <K, V> Node<K, V> copied(
+    private TreeNode<K, V> copied(
             K key,
             V value,
-            Node<K, V> left,
-            Node<K, V> right,
+            TreeNode<K, V> left,
+            TreeNode<K, V> right,
             Counter work) {
         work.copied();
-        return new Node<>(key, value, left, right);
+        return storage == null ? new MemoryNode<>(key, value, left, right) : storage.create(key, value, left, right);
     }
 
-    private Validation<K> validate(Node<K, V> node) {
+    private Validation<K> validate(TreeNode<K, V> node) {
         if (node == null) {
             return Validation.empty();
         }
-        Validation<K> left = validate(node.left);
-        Validation<K> right = validate(node.right);
+        Validation<K> left = validate(node.left());
+        Validation<K> right = validate(node.right());
         if (left.maximum != null
-                && order.compare(left.maximum, node.key) >= 0) {
+                && order.compare(left.maximum, node.key()) >= 0) {
             throw new IllegalStateException(
                     "Persistent minimum-map left order is invalid");
         }
         if (right.minimum != null
-                && order.compare(node.key, right.minimum) >= 0) {
+                && order.compare(node.key(), right.minimum) >= 0) {
             throw new IllegalStateException(
                     "Persistent minimum-map right order is invalid");
         }
@@ -294,8 +361,8 @@ final class PersistentMinimumMap<K, V> {
                     "Persistent minimum-map AVL metadata is invalid");
         }
         return new Validation<>(
-                left.minimum == null ? node.key : left.minimum,
-                right.maximum == null ? node.key : right.maximum,
+                left.minimum == null ? node.key() : left.minimum,
+                right.maximum == null ? node.key() : right.maximum,
                 height,
                 size);
     }
@@ -333,36 +400,20 @@ final class PersistentMinimumMap<K, V> {
         }
     }
 
-    private static final class Node<K, V> {
+    private static final class MemoryNode<K, V> extends TreeNode<K, V> {
         private final K key;
         private final V value;
-        private final Node<K, V> left;
-        private final Node<K, V> right;
-        private final int height;
-        private final int size;
-
-        private Node(
-                K key,
-                V value,
-                Node<K, V> left,
-                Node<K, V> right) {
-            this.key = Objects.requireNonNull(key, "key");
-            this.value = Objects.requireNonNull(value, "value");
-            this.left = left;
-            this.right = right;
-            this.height = Math.addExact(
-                    Math.max(height(left), height(right)), 1);
-            this.size = Math.addExact(
-                    Math.addExact(size(left), size(right)), 1);
+        private final TreeNode<K, V> left, right;
+        private MemoryNode(K key, V value, TreeNode<K, V> left, TreeNode<K, V> right) {
+            super(Math.addExact(Math.max(TreeNode.height(left), TreeNode.height(right)), 1),
+                    Math.addExact(Math.addExact(TreeNode.size(left), TreeNode.size(right)), 1));
+            this.key = Objects.requireNonNull(key, "key"); this.value = Objects.requireNonNull(value, "value");
+            this.left = left; this.right = right;
         }
-
-        private static int height(Node<?, ?> node) {
-            return node == null ? 0 : node.height;
-        }
-
-        private static int size(Node<?, ?> node) {
-            return node == null ? 0 : node.size;
-        }
+        @Override K key() { return key; }
+        @Override V value() { return value; }
+        @Override TreeNode<K, V> left() { return left; }
+        @Override TreeNode<K, V> right() { return right; }
     }
 
     private static final class Counter {

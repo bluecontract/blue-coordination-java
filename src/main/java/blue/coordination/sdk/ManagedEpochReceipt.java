@@ -14,6 +14,7 @@ public final class ManagedEpochReceipt {
     private final blue.coordination.api.ManagedEpochReceipt receipt;
     private final TimelineEntrySnapshot sourceEntry;
     private final List<ManagedEventOccurrence> emittedEvents;
+    private final ExactBlueValue afterDocument;
 
     ManagedEpochReceipt(
             blue.coordination.api.ManagedEpochReceipt receipt,
@@ -27,7 +28,10 @@ public final class ManagedEpochReceipt {
         this.emittedEvents = receipt.emittedEvents().stream()
                 .map(ManagedEventOccurrence::wrap)
                 .toList();
+        this.afterDocument = ExactBlueValue.wrap(receipt.afterDocument());
     }
+
+    boolean retains(blue.coordination.api.ManagedEpochReceipt selected) { return receipt == selected; }
 
     /** Canonical self-verifying Coordination receipt identity. */
     public String receiptIdentity() {
@@ -61,7 +65,7 @@ public final class ManagedEpochReceipt {
 
     /** Complete exact source document after this epoch. */
     public ExactBlueValue afterDocument() {
-        return ExactBlueValue.wrap(receipt.afterDocument());
+        return afterDocument;
     }
 
     /** Exact Contracts cause that originally produced this transition. */

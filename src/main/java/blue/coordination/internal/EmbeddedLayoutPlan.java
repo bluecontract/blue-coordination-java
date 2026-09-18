@@ -41,7 +41,7 @@ final class EmbeddedLayoutPlan {
     private final Map<String, ScopeRule> rulesByScope;
     private final List<EmbeddedCollectionPlanningAudit> collectionAudits;
 
-    private EmbeddedLayoutPlan(
+    EmbeddedLayoutPlan(
             Map<String, AuthoredScopeIdentity> identitiesByScope,
             RoutingSurface routingSurface,
             Map<String, ScopeRule> rulesByScope,
@@ -288,10 +288,12 @@ final class EmbeddedLayoutPlan {
         return checked;
     }
 
-    private record AuthoredScopeIdentity(
+    Map<String, AuthoredScopeIdentity> storedIdentities() { return identitiesByScope; }
+
+    record AuthoredScopeIdentity(
             String typeBlueId,
             String contractsBlueId) {
-        private AuthoredScopeIdentity {
+        AuthoredScopeIdentity {
             typeBlueId = requireIdentity(typeBlueId);
             contractsBlueId = requireIdentity(contractsBlueId);
         }

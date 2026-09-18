@@ -101,7 +101,8 @@ final class HistoricalRepresentationApplicationIntegrationTest {
         }
     }
 
-    private static final class Graph implements AutoCloseable {
+    static final class Graph implements AutoCloseable {
+        java.util.function.Consumer<blue.coordination.api.ManagedEpochApplicationWork> representationObserver = ignored -> { };
         final BlueCoordination blue = LegacyContracts10TestProfile.sdkBuilder().contentDerivedDocumentIds().build();
         final Map<String, ExactBlueValue> originals = new LinkedHashMap<>();
         final Map<String, DocumentHandle> handles = new LinkedHashMap<>();
@@ -167,6 +168,7 @@ final class HistoricalRepresentationApplicationIntegrationTest {
                 var selected = blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
                 var work = engine.documents().nextCatchUpWork().orElseThrow();
                 assertEquals(selected.workIdentity(), work.workIdentity());
+                if (work.isRepresentationApplication()) representationObserver.accept(work);
                 long beforeCursor = engine.documents().catchUpPlan(work.planIdentity()).orElseThrow().nextSourceEpoch();
                 System.out.println("POSITIONAL_PUBLIC_WORK edge=" + parent + "->" + child + " step=" + step
                         + " sourceEpoch=" + work.sourceEpoch() + " representation=" + work.isRepresentationApplication());

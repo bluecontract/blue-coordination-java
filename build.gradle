@@ -17,7 +17,7 @@ def immutableDevelopmentContracts =
         localRc || dependencyMode == 'immutable-development-contracts'
 def immutableContractsRepository =
         immutableStagedContracts || immutableDevelopmentContracts
-def publishedLanguageVersion = '3.1.0-rc.27'
+def publishedLanguageVersion = '3.1.0-rc.32'
 def immutableStagedLanguageVersion = providers.gradleProperty(
         'blueContractsVersion').orNull
 if (immutableContractsRepository
@@ -704,14 +704,19 @@ def publicBoundarySources = files(
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
 def currentProductionShapeLimits = [
-        // Reconciled rooted corrections plus exact-provider Compute presence.
-        // Measured on the pinned RC10 base; omit optional frozen proof sharing,
-        // cross-call representation memo and early LIVE candidate bound.
-        // See docs/baseline-reconciliation-disposition.md. These inventory
-        // limits do not change any protocol, closure or logical-gas bound.
-        classes: 253,
-        lines: 74_084L,
-        publicApiTypes: 87,
+        // Baseline31 plus P2: merged RC11 behavior and the reviewed external-storage POC,
+        // including eight private indexed-session/lineage history and provider-frontier helpers,
+        // plus causal-entry endpoint metadata for selective SDK change summaries.
+        // Physical inventory only; no protocol, closure or logical-gas bound changes.
+        // Measured source inventory; see docs/poc-indexed-session-history-plan.md.
+        // Cost38: one private observation memo plus reviewed bounded artifact-read paths.
+        // Public inventory and per-source limits are unchanged; see the Cost38 package note.
+        // Cost39: two immutable core/SDK observation records and point-read adapters (+90 lines).
+        // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
+        classes: 327,
+        // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
+        lines: 87_765L,
+        publicApiTypes: 96,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -751,8 +756,10 @@ def retainedManagedEpochProductionSources = [
         'src/main/java/blue/coordination/sdk/ManagedEpochApplicationWork.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochEvidenceFailure.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochReceipt.java',
+        'src/main/java/blue/coordination/sdk/ManagedEpochHistory.java',
         'src/main/java/blue/coordination/sdk/ManagedEpochSelector.java',
         'src/main/java/blue/coordination/sdk/ManagedEventOccurrence.java',
+        'src/main/java/blue/coordination/sdk/VerifiedExactEvidence.java',
         'src/main/java/blue/coordination/sdk/SourceOrder.java'
 ]
 def forbiddenArchitectureTokens = [
@@ -871,7 +878,11 @@ tasks.register('verifyPublicApiBoundary') {
                 'src/main/java/blue/coordination/internal/Contracts10AuthoredClosureCompiler.java',
                 'src/main/java/blue/coordination/internal/Contracts10StaticEmbeddedAdmissionCompiler.java',
                 'src/main/java/blue/coordination/internal/ContractsManagedDraftPlan.java',
-                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java'
+                'src/main/java/blue/coordination/internal/ContractsManagedEpochSelectionPlan.java',
+                // Named advanced-storage assembly bridges used across the SDK package.
+                'src/main/java/blue/coordination/internal/ExactValueStorageCodec.java',
+                'src/main/java/blue/coordination/internal/InsertionOrderedStorage.java',
+                'src/main/java/blue/coordination/internal/RootedEngineStorage.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
             include '**/*.java'
@@ -893,7 +904,7 @@ tasks.register('verifyPublicApiBoundary') {
 
 tasks.register('verifySdkPublicApiBoundary') {
     group = 'verification'
-    description = 'Allows only DocumentId and the reviewed Builder ContractsExecutionPolicy compatibility surface; rejects every other implementation dependency in normal SDK signatures.'
+    description = 'Allows DocumentId, the reviewed Builder policy and exact named advanced-storage signatures; rejects other implementation dependencies in normal SDK signatures.'
     dependsOn tasks.named('compileJava')
     inputs.files(fileTree('src/main/java/blue/coordination/sdk') {
         include '**/*.java'
@@ -1005,6 +1016,21 @@ tasks.register('verifySdkPublicApiBoundary') {
                     normalSignature = normalSignature.replaceAll(
                                 /blue\.coordination\.api\.ContractsExecutionPolicy\b/,
                                 '')
+                }
+                // This host-only facade is not exempt from the boundary check:
+                // only its four reviewed storage types are permitted. Other API,
+                // processor or internal types in it or its nested types still fail.
+                if (className == 'blue.coordination.sdk.RootedCoordinationStorage'
+                        || className.startsWith('blue.coordination.sdk.RootedCoordinationStorage$')) {
+                    [
+                            'blue.coordination.api.TimelineJournalStore',
+                            'blue.coordination.api.storage.CoordinationImmutableObjectStore',
+                            'blue.coordination.internal.RootedEngineStorage$Limits',
+                            'blue.coordination.internal.InsertionOrderedStorage$Limits'
+                    ].each { allowed ->
+                        normalSignature = normalSignature.replaceAll(
+                                java.util.regex.Pattern.quote(allowed) + '(?![\\w$])', '')
+                    }
                 }
                 forbiddenSignaturePrefixes.findAll {
                     normalSignature.contains(it)
@@ -2239,6 +2265,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.12.md',
                 'docs/releases/3.0.0-rc.11.md',
                 'docs/releases/3.0.0-rc.10.md',
                 'docs/releases/3.0.0-rc.9.md',
@@ -5346,7 +5373,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'docs/releases/3.0.0-rc.11.md')
+            'docs/releases/3.0.0-rc.12.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -5364,12 +5391,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.11-readiness.json')
+            'reports/release/3.0.0-rc.12-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.11') {
-            failures << "release version is ${version}; expected 3.0.0-rc.11"
+        if (version.toString() != '3.0.0-rc.12') {
+            failures << "release version is ${version}; expected 3.0.0-rc.12"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -5418,20 +5445,20 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             if (!testSource.isFile()
                     || !(testSource.getText('UTF-8') =~
                             /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
-                failures << "required rc.11 capability evidence is missing ${source}"
+                failures << "required rc.12 capability evidence is missing ${source}"
             }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.11.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.12.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC11_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC12_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC11_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC12_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC11_PUBLIC_ARTIFACT_READY: true')
+                'RC12_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC11_PRODUCTION_READY: false')) {
-            failures << 'rc.11 release notes do not state the exact release tier'
+                'RC12_PRODUCTION_READY: false')) {
+            failures << 'rc.12 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -5479,7 +5506,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence: 'complete current releaseCheck plus '
-                                + 'the rc.11 capability test inventory',
+                                + 'the rc.12 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -5496,7 +5523,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.11'
+    dependsOn(version.toString() == '3.0.0-rc.12'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -5511,7 +5538,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.11'
+    dependsOn(version.toString() == '3.0.0-rc.12'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'

@@ -471,7 +471,7 @@ final class ContractsRootFeederWindowTest {
         }
     }
 
-    private static Fixture fixture() {
+    static Fixture fixture() {
         EngineMetrics metrics = new EngineMetrics();
         WholeObjectStore objects = new WholeObjectStore(metrics);
         BlueRuntime runtime = BlueRuntime.create(objects, metrics);
@@ -595,7 +595,7 @@ final class ContractsRootFeederWindowTest {
                 """.formatted(documentId.value());
     }
 
-    private record Fixture(
+    record Fixture(
             BlueRuntime runtime,
             InMemoryDocumentStore store,
             ContractsClosureAdapter adapter,

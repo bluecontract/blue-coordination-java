@@ -25,13 +25,13 @@ import java.util.TreeSet;
  * that call.</p>
  */
 final class ManagedOccurrenceInventory {
-    private static final Comparator<OccurrenceKey> KEY_ORDER = Comparator
+    static final Comparator<OccurrenceKey> KEY_ORDER = Comparator
             .comparing((OccurrenceKey key) ->
                             key.sourceDocumentId().value(),
                     EmbeddingBinding.TEXT_ORDER)
             .thenComparing(OccurrenceKey::sourcePath,
                     EmbeddingBinding.TEXT_ORDER);
-    private static final Comparator<RowOrderKey> ROW_ORDER = Comparator
+    static final Comparator<RowOrderKey> ROW_ORDER = Comparator
             .comparing(RowOrderKey::occurrenceIdentity,
                     EmbeddingBinding.TEXT_ORDER)
             .thenComparing(RowOrderKey::bindingIdentity,
@@ -114,6 +114,27 @@ final class ManagedOccurrenceInventory {
     /** Returns the canonical empty inventory. */
     static ManagedOccurrenceInventory empty() {
         return EMPTY;
+    }
+
+    record StoredIndexes(
+            PersistentOrderedMap<OccurrenceKey, ManagedOccurrenceBinding> paths,
+            PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding> ordered,
+            PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding> active,
+            PersistentOrderedMap<String, OccurrenceKey> occurrenceKeys,
+            PersistentOrderedMap<String, OccurrenceKey> bindingKeys,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding>> documents,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding>> sources,
+            PersistentOrderedMap<DocumentId, PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding>> activeSources) { }
+
+    StoredIndexes storedIndexes() {
+        return new StoredIndexes(rowsBySourcePath, rowsByCanonicalOrder, activeRowsByCanonicalOrder,
+                keysByOccurrenceIdentity, keysByBindingIdentity, rowsByDocument, rowsBySourceDocument, activeRowsBySourceDocument);
+    }
+
+    /** Opens already pinned index roots, without rebuilding an inventory from a realm-wide row list. */
+    static ManagedOccurrenceInventory restoreIndexes(StoredIndexes indexes) {
+        return new ManagedOccurrenceInventory(indexes.paths(), indexes.ordered(), indexes.active(),
+                indexes.occurrenceKeys(), indexes.bindingKeys(), indexes.documents(), indexes.sources(), indexes.activeSources());
     }
 
     /** Captures and verifies all Contracts-owned active and inactive rows. */
@@ -693,17 +714,17 @@ final class ManagedOccurrenceInventory {
         }
     }
 
-    private record RowOrderKey(
+    record RowOrderKey(
             String occurrenceIdentity,
             String bindingIdentity) {
-        private RowOrderKey {
+        RowOrderKey {
             occurrenceIdentity = Objects.requireNonNull(
                     occurrenceIdentity, "occurrenceIdentity");
             bindingIdentity = Objects.requireNonNull(
                     bindingIdentity, "bindingIdentity");
         }
 
-        private static RowOrderKey from(
+        static RowOrderKey from(
                 ManagedOccurrenceBinding row) {
             ManagedOccurrenceBinding selected = Objects.requireNonNull(
                     row, "row");
@@ -1084,10 +1105,10 @@ final class ManagedOccurrenceInventory {
         REBIND
     }
 
-    private record OccurrenceKey(
+    record OccurrenceKey(
             DocumentId sourceDocumentId,
             String sourcePath) {
-        private static OccurrenceKey of(
+        static OccurrenceKey of(
                 DocumentId sourceDocumentId,
                 String sourcePath) {
             return new OccurrenceKey(

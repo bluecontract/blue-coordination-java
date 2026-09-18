@@ -137,7 +137,7 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
         private final DocumentId rootDocumentId;
         private final Node authoredRoot;
 
-        private CompiledStaticAdmission(
+        CompiledStaticAdmission(
                 ClosureInvocationInput invocation,
                 Contracts10AuthoredClosureCompiler.ActivationInputs activation,
                 DocumentId rootDocumentId,
@@ -226,6 +226,8 @@ public final class Contracts10StaticEmbeddedAdmissionCompiler {
                 supplied = Objects.requireNonNull(
                         delegate.findExactEvidence(selected),
                         "provider evidence result");
+            } catch (blue.language.processor.NoncommittingExecutionException failure) {
+                throw failure;
             } catch (CoordinationException failure) {
                 throw failure;
             } catch (RuntimeException failure) {

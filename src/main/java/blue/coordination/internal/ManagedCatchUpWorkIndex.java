@@ -13,7 +13,7 @@ import java.util.Set;
 
 /** Persistent work, due-order, and response-loss receipt indexes. */
 final class ManagedCatchUpWorkIndex {
-    private static final Comparator<DueKey> DUE_ORDER = Comparator
+    static final Comparator<DueKey> DUE_ORDER = Comparator
             .comparing(DueKey::barrierCauseOrder)
             .thenComparing(DueKey::sourceOrder)
             .thenComparing(
@@ -38,7 +38,7 @@ final class ManagedCatchUpWorkIndex {
     private final PersistentOrderedMap<String, RegisteredWork> byWorkIdentity;
     private final PersistentOrderedMap<String, String> pendingWorkByPlan;
     private final PersistentOrderedMap<String,
-            ManagedEpochApplicationReceipt> applicationByIdentity;
+            RegisteredApplication> applicationByIdentity;
     private final PersistentOrderedMap<String, String> applicationByWork;
     private final PersistentMinimumMap<DueKey, String> due;
     private final int lastMutationComparisons;
@@ -48,7 +48,7 @@ final class ManagedCatchUpWorkIndex {
             PersistentOrderedMap<String, RegisteredWork> byWorkIdentity,
             PersistentOrderedMap<String, String> pendingWorkByPlan,
             PersistentOrderedMap<String,
-                    ManagedEpochApplicationReceipt> applicationByIdentity,
+                    RegisteredApplication> applicationByIdentity,
             PersistentOrderedMap<String, String> applicationByWork,
             PersistentMinimumMap<DueKey, String> due,
             int lastMutationComparisons,
@@ -68,6 +68,22 @@ final class ManagedCatchUpWorkIndex {
 
     static ManagedCatchUpWorkIndex empty() {
         return EMPTY;
+    }
+
+    record StoredIndexes(PersistentOrderedMap<String, RegisteredWork> work,
+            PersistentOrderedMap<String, String> pending,
+            PersistentOrderedMap<String, RegisteredApplication> applications,
+            PersistentOrderedMap<String, String> applicationsByWork,
+            PersistentMinimumMap<DueKey, String> due, int comparisons, int copiedNodes) { }
+
+    StoredIndexes storedIndexes() {
+        return new StoredIndexes(byWorkIdentity, pendingWorkByPlan, applicationByIdentity,
+                applicationByWork, due, lastMutationComparisons, lastMutationNodeCopies);
+    }
+
+    static ManagedCatchUpWorkIndex restoreIndexes(StoredIndexes s) {
+        if (s.comparisons() < 0 || s.copiedNodes() < 0) throw new IllegalArgumentException("Negative stored work counters");
+        return new ManagedCatchUpWorkIndex(s.work(), s.pending(), s.applications(), s.applicationsByWork(), s.due(), s.comparisons(), s.copiedNodes());
     }
 
     ManagedCatchUpWorkIndex withWork(
@@ -217,7 +233,7 @@ final class ManagedCatchUpWorkIndex {
         requireApplicationMatch(selectedWork, selectedReceipt);
         PersistentOrderedMap.ReadResult<String> workApplicationRead =
                 applicationByWork.read(selectedWork.workIdentity());
-        PersistentOrderedMap.ReadResult<ManagedEpochApplicationReceipt>
+        PersistentOrderedMap.ReadResult<RegisteredApplication>
                 identityRead = applicationByIdentity.read(
                         selectedReceipt.applicationReceiptIdentity());
         if (workApplicationRead.found() || identityRead.found()) {
@@ -225,7 +241,7 @@ final class ManagedCatchUpWorkIndex {
                     && identityRead.found()
                     && workApplicationRead.value().equals(
                             selectedReceipt.applicationReceiptIdentity())
-                    && identityRead.value().workIdentity().equals(
+                    && identityRead.value().receipt().workIdentity().equals(
                             selectedWork.workIdentity())) {
                 return this;
             }
@@ -242,10 +258,10 @@ final class ManagedCatchUpWorkIndex {
                     "Application does not own the plan's pending work slot");
         }
         PersistentOrderedMap.Mutation<String,
-                ManagedEpochApplicationReceipt> applicationMutation =
+                RegisteredApplication> applicationMutation =
                 applicationByIdentity.put(
                         selectedReceipt.applicationReceiptIdentity(),
-                        selectedReceipt);
+                        new RegisteredApplication(selectedReceipt, registered.work()));
         PersistentOrderedMap.Mutation<String, String> byWorkMutation =
                 applicationByWork.put(
                         selectedWork.workIdentity(),
@@ -343,6 +359,9 @@ final class ManagedCatchUpWorkIndex {
                 throw new IllegalStateException(
                         "Due index points to missing catch-up work");
             }
+            if (!selected.entry().getKey().equals(workRead.value().dueKey())) {
+                throw new IllegalStateException("Due index order differs from its exact registered work");
+            }
             workRowsRead = Math.addExact(workRowsRead, 1);
             ManagedEpochApplicationWork work = workRead.value().work();
             if (!excluded.contains(work.consumerDocumentId())) {
@@ -396,26 +415,26 @@ final class ManagedCatchUpWorkIndex {
             return new ApplicationRead(
                     null, workRead.comparisons(), 0, 0);
         }
-        PersistentOrderedMap.ReadResult<ManagedEpochApplicationReceipt> read =
+        PersistentOrderedMap.ReadResult<RegisteredApplication> read =
                 applicationByIdentity.read(workRead.value());
         if (!read.found()) {
             throw new IllegalStateException(
                     "Application-by-work index points to a missing receipt");
         }
         return new ApplicationRead(
-                read.value(),
+                read.value().receipt(),
                 Math.addExact(workRead.comparisons(), read.comparisons()),
                 1,
                 0);
     }
 
     ApplicationRead application(String applicationReceiptIdentity) {
-        PersistentOrderedMap.ReadResult<ManagedEpochApplicationReceipt> read =
+        PersistentOrderedMap.ReadResult<RegisteredApplication> read =
                 applicationByIdentity.read(Objects.requireNonNull(
                         applicationReceiptIdentity,
                         "applicationReceiptIdentity"));
         return new ApplicationRead(
-                read.value(), read.comparisons(), read.found() ? 1 : 0, 0);
+                read.found() ? read.value().receipt() : null, read.comparisons(), read.found() ? 1 : 0, 0);
     }
 
     int workCount() {
@@ -476,7 +495,7 @@ final class ManagedCatchUpWorkIndex {
         }
     }
 
-    private static void requireApplicationMatch(
+    static void requireApplicationMatch(
             ManagedEpochApplicationWork work,
             ManagedEpochApplicationReceipt receipt) {
         if (!receipt.representationCauseIdentity().equals(work.representationCause().map(cause -> cause.causeIdentity()))
@@ -503,15 +522,23 @@ final class ManagedCatchUpWorkIndex {
         return total;
     }
 
-    private record RegisteredWork(
+    record RegisteredWork(
             ManagedEpochApplicationWork work, DueKey dueKey) {
-        private RegisteredWork {
+        RegisteredWork {
             work = Objects.requireNonNull(work, "work");
             dueKey = Objects.requireNonNull(dueKey, "dueKey");
         }
     }
 
-    private record DueKey(
+    /** Original work is retained, never reconstructed from a public receipt or current source head. */
+    record RegisteredApplication(ManagedEpochApplicationReceipt receipt, ManagedEpochApplicationWork work) {
+        RegisteredApplication {
+            Objects.requireNonNull(receipt, "receipt"); Objects.requireNonNull(work, "work");
+            requireApplicationMatch(work, receipt);
+        }
+    }
+
+    record DueKey(
             ExternalOrderKey barrierCauseOrder,
             ExternalOrderKey sourceOrder,
             DocumentId sourceDocumentId,
@@ -519,7 +546,7 @@ final class ManagedCatchUpWorkIndex {
             DocumentId consumerDocumentId,
             String targetPath,
             long activationGeneration) {
-        private DueKey {
+        DueKey {
             barrierCauseOrder = Objects.requireNonNull(
                     barrierCauseOrder, "barrierCauseOrder");
             sourceOrder = Objects.requireNonNull(sourceOrder, "sourceOrder");

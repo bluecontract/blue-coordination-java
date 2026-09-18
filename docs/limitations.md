@@ -1,5 +1,22 @@
 # Known limitations
 
+## Current RC12 boundary
+
+The current candidate is `3.0.0-rc.12`, using published Language/Contracts
+`3.1.0-rc.32`. Its authoritative supported profile and remaining limits are in
+the [RC12 release decision](releases/3.0.0-rc.12.md). It retains resident
+processing and adds complete external-state engine/SDK adapters with cold
+reopen under host-owned atomic publication, storage and fencing. No database,
+distributed scheduler or production-scale resource/latency guarantee is supplied.
+See [runtime storage](rooted-runtime-storage-factory.md) and
+[SDK storage](rooted-sdk-storage-factory.md) for the exact integration boundary.
+
+The following RC4/RC5 discussion is historical. In particular its resident-only,
+no-restart and old closure descriptions do not override the current rooted
+specification or RC12 storage contract.
+
+## Historical RC4/RC5 boundary
+
 `3.0.0-rc.5` is a bounded external-pilot release candidate. It is not stable,
 production-ready, or a production MyOS runtime. It consumes the complete
 published Blue Language/Contracts `3.1.0-rc.23` graph.

@@ -35,6 +35,7 @@ test('advances an RC after the current tag exists', () => {
   assert.equal(nextVersionForCurrentRc('3.0.0-rc.8', 8), '3.0.0-rc.9');
   assert.equal(nextVersionForCurrentRc('3.0.0-rc.9', 9), '3.0.0-rc.10');
   assert.equal(nextVersionForCurrentRc('3.0.0-rc.10', 10), '3.0.0-rc.11');
+  assert.equal(nextVersionForCurrentRc('3.0.0-rc.11', 11), '3.0.0-rc.12');
 });
 
 test('reads the release bound by the current authority', () => {
@@ -43,6 +44,7 @@ test('reads the release bound by the current authority', () => {
   assert.equal(authorityRelease('RC9_VERSION: 3.0.0-rc.9\n'), '3.0.0-rc.9');
   assert.equal(authorityRelease('RC10_VERSION: 3.0.0-rc.10\n'), '3.0.0-rc.10');
   assert.equal(authorityRelease('RC11_VERSION: 3.0.0-rc.11\n'), '3.0.0-rc.11');
+  assert.equal(authorityRelease('RC12_VERSION: 3.0.0-rc.12\n'), '3.0.0-rc.12');
   assert.throws(
     () => authorityRelease('# missing marker\n'),
     /Release authority is missing RC version/,
@@ -88,5 +90,19 @@ test('authorizes RC11 without authorizing RC12', () => {
       'RC11_VERSION: 3.0.0-rc.11\n',
     ),
     /Prepared RC 3\.0\.0-rc\.12 does not match authorized release 3\.0\.0-rc\.11/,
+  );
+});
+
+test('authorizes RC12 without authorizing RC13', () => {
+  assert.doesNotThrow(() => assertAuthorityRelease(
+    '3.0.0-rc.12',
+    'RC12_VERSION: 3.0.0-rc.12\n',
+  ));
+  assert.throws(
+    () => assertAuthorityRelease(
+      '3.0.0-rc.13',
+      'RC12_VERSION: 3.0.0-rc.12\n',
+    ),
+    /Prepared RC 3\.0\.0-rc\.13 does not match authorized release 3\.0\.0-rc\.12/,
   );
 });

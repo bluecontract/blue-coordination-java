@@ -20,6 +20,34 @@ final class RootedTerminalEvidence {
     private final blue.coordination.api.ManagedEpochApplicationWork historicalWork;
     private final java.util.Set<String> requiredTimelineIds;
 
+    /** Complete original retained fields, not a request to recapture a current cohort. */
+    record StoredState(ClosureInvocationInput input, ContractsManagedDraftPlan managedDraftPlan,
+            RootedInvocationEvidence rooted, String executedInvocationIdentity, String historicalWorkIdentity,
+            blue.coordination.api.ManagedEpochApplicationWork historicalWork, java.util.Set<String> requiredTimelineIds) {
+        StoredState { requiredTimelineIds = java.util.Set.copyOf(requiredTimelineIds); }
+    }
+
+    StoredState storedState() {
+        return new StoredState(input, managedDraftPlan, rooted, executedInvocationIdentity,
+                historicalWorkIdentity, historicalWork, requiredTimelineIds);
+    }
+
+    /** Trusted selected storage only; the enclosing publication still checks the complete result. */
+    static RootedTerminalEvidence restoreStored(StoredState state) { return new RootedTerminalEvidence(state); }
+
+    private RootedTerminalEvidence(StoredState state) {
+        input = Objects.requireNonNull(state.input(), "input");
+        managedDraftPlan = state.managedDraftPlan();
+        rooted = Objects.requireNonNull(state.rooted(), "rooted");
+        executedInvocationIdentity = Objects.requireNonNull(state.executedInvocationIdentity(), "executedInvocationIdentity");
+        historicalWorkIdentity = state.historicalWorkIdentity();
+        historicalWork = state.historicalWork();
+        requiredTimelineIds = java.util.Set.copyOf(state.requiredTimelineIds());
+        if (!Objects.equals(historicalWorkIdentity, historicalWork == null ? null : historicalWork.workIdentity()))
+            throw new IllegalArgumentException("Stored terminal changed its exact historical work");
+        if (historicalWork != null) requireHistoricalCause(historicalWork);
+    }
+
     private RootedTerminalEvidence(ContractsClosureAdapter.CohortInvocation invocation,
             blue.coordination.api.ManagedEpochApplicationWork work) {
         this.input = invocation.input();

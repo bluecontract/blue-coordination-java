@@ -38,6 +38,16 @@ final class ClosureGraphGenerationInventory {
                 new Work());
     }
 
+    record StoredState(PersistentOrderedMap<DocumentId, Long> generations, int comparisons, int copiedNodes) { }
+
+    StoredState storedState() { return new StoredState(generations, lastOperationComparisons, lastOperationCopiedNodes); }
+
+    static ClosureGraphGenerationInventory restoreStored(StoredState state) {
+        if (state.comparisons() < 0 || state.copiedNodes() < 0) throw new IllegalArgumentException("Negative graph-index work");
+        Work work = new Work(); work.comparisons = state.comparisons(); work.copiedNodes = state.copiedNodes();
+        return new ClosureGraphGenerationInventory(state.generations(), work);
+    }
+
     /** Retains known lineages and initializes newly admitted documents at zero. */
     ClosureGraphGenerationInventory retainingDocuments(
             Collection<DocumentId> documentIds) {

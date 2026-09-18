@@ -22,8 +22,15 @@ final class RootedCheckpointDriver {
     }
 
     Selection select(DocumentId root, List<TimelineEntry> entries) {
-        return select(root, entries, RootedJoinEligibility.captureForRoot(documents, root));
+        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries)),
+                () -> select(root, entries, RootedJoinEligibility.captureForRoot(documents, root)),
+                selected -> !selected.blocked() && (selected.live() != null
+                        || selected.historical() != null || selected.localHistorical() != null),
+                "rooted.observation.selectionReuses");
     }
+
+    private record SelectionKey(DocumentId root, List<TimelineEntry> entries) { }
+    private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
 
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
     boolean completeBefore(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey cutoff) {
@@ -69,15 +76,16 @@ final class RootedCheckpointDriver {
         Set<DocumentId> owners = new LinkedHashSet<>(component.orderedMemberDocumentIds().stream()
                 .map(ContractsClosureAdapter::coordinationId).toList());
         Set<DocumentId> excluded = new LinkedHashSet<>();
-        documents.sessions().forEach(s -> { if (!owners.contains(s.documentId())) excluded.add(s.documentId()); });
+        documents.sessionIds().forEach(id -> { if (!owners.contains(id)) excluded.add(id); });
         boolean historyOutstanding = owners.stream().flatMap(id -> documents.catchUpPlans(id).stream())
                 .anyMatch(p -> p.status() != ManagedCatchUpStatus.COMPLETE
                         && p.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED);
         var work = documents.nextCatchUpWorkExcluding(excluded);
         if (historyOutstanding && work.isEmpty()) return new Selection(null, null, excluded, true);
-        var local = adapter.nextRootLocalHistory(root, entries);
+        var candidates = adapter.nextRootInputCandidates(root, entries, () -> work.map(this::order).orElse(null));
+        var local = candidates.local();
         if (local.pending() && local.step() == null) return new Selection(null, null, excluded, true, null);
-        var live = adapter.nextRootLiveInput(root, entries);
+        var live = candidates.live();
         if (local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
                 && (live.isEmpty() || local.step().sourceOrder().compareTo(live.get().entry().sourceOrderKey()) <= 0)) {
             return new Selection(null, null, excluded, false, local.step());
@@ -96,6 +104,13 @@ final class RootedCheckpointDriver {
 
     /** A transport entry is not a substitute for each root's retained progress. */
     Scan scan(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
+        return adapter.reuseObservation(new ScanKey(List.copyOf(entries), cutoff),
+                () -> scanFresh(entries, cutoff),
+                selected -> !selected.heads().isEmpty() && selected.blockedRoots().isEmpty(),
+                "rooted.observation.scanReuses");
+    }
+
+    private Scan scanFresh(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
         List<Head> heads = new ArrayList<>();
         Set<DocumentId> blocked = new LinkedHashSet<>();
         var joins = RootedJoinEligibility.capture(documents);
