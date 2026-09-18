@@ -75,7 +75,8 @@ public final class DefaultCoordinationEngine
         AFTER_STAGING_CHILD_SESSION,
         AFTER_APPLYING_CHILD_REVISION,
         BEFORE_COMMIT_VALIDATION,
-        AFTER_STATE_SWAP_BEFORE_RETURN
+        AFTER_STATE_SWAP_BEFORE_RETURN,
+        BEFORE_ROOTED_READINESS
     }
 
     static final class InjectedFailureException extends RuntimeException {
@@ -1242,13 +1243,32 @@ public final class DefaultCoordinationEngine
     /** Executes the supplied root input using one frozen invocation budget. */
     public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
             blue.coordination.api.ContractsExecutionPolicy policy) {
+        return processRootInput(root, input, policy, true);
+    }
+
+    /**
+     * Completes only the supplied root stage. Receipt flags describe this stage,
+     * not the existence of later eligible work. No readiness selection is made.
+     * @param root authoritative root
+     * @param input exact accepted journal input
+     * @param policy optional invocation policy, or null for the configured policy
+     * @return complete current-stage evidence, still subject to host publication
+     */
+    public synchronized ProcessingDrainReceipt processRootInputStage(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        return processRootInput(root, input, policy, false);
+    }
+
+    private ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy, boolean inspectReadiness) {
         try {
             ensureOpen();
             TimelineEntry entry = journal.requireCanonical(Objects.requireNonNull(input, "input"));
             long started = System.nanoTime();
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
-            return rootedReadiness(root, executeRootBatch(batch, started), started);
+            var completed = executeRootBatch(batch, started);
+            return inspectReadiness ? rootedReadiness(root, completed, started) : completed;
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
@@ -1392,6 +1412,22 @@ public final class DefaultCoordinationEngine
 
     /** Executes only the exact retained local work selected for this root, before any mutation. */
     public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork) {
+        return processNextRoot(root, expectedLocalWork, true);
+    }
+
+    /**
+     * Executes one selected LIVE, retained-local or managed historical stage
+     * without inspecting future readiness. This is an internal bridge for the
+     * durable host boundary; the legacy convenience drain retains lookahead.
+     * @param root authoritative root requesting progress
+     * @param expectedLocalWork optional exact retained-local work identity
+     * @return current-stage evidence, not a claim that the root is quiescent
+     */
+    public synchronized ProcessingDrainReceipt processNextRootStage(DocumentId root, String expectedLocalWork) {
+        return processNextRoot(root, expectedLocalWork, false);
+    }
+
+    private ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork, boolean inspectReadiness) {
         try {
             ensureOpen();
             long started = System.nanoTime();
@@ -1407,7 +1443,7 @@ public final class DefaultCoordinationEngine
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
             contractsRecoveryState.rootedSchedule.completed(anchor, next, completed);
-            return rootedReadiness(root, completed, started);
+            return inspectReadiness ? rootedReadiness(root, completed, started) : completed;
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
@@ -1458,6 +1494,7 @@ public final class DefaultCoordinationEngine
     /** Recomputes pending work after the selected step; the one-step budget is not a resource wait. */
     private ProcessingDrainReceipt rootedReadiness(DocumentId root, ProcessingDrainReceipt completed, long started) {
         if (!completed.quiescent()) return completed;
+        inject(FailurePoint.BEFORE_ROOTED_READINESS);
         RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
                 .select(root, journal.entries());
         boolean pending = remaining.live() != null || remaining.historical() != null || remaining.localHistorical() != null;

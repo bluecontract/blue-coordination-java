@@ -722,7 +722,9 @@ def currentProductionShapeLimits = [
         // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
         classes: 327,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
-        lines: 87_765L,
+        // Completed-stage internal bridges and an optional-readiness fault boundary (+39 lines).
+        // No new source/public boundary type; see docs/development/completed-stage-boundary.md.
+        lines: 87_802L,
         publicApiTypes: 96,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

@@ -34,6 +34,41 @@ final class RootedCoordinationStorageTest {
                     64 * 1024, 8192, 32, 256 * 1024, 4L * 1024 * 1024, 100), MAX, 128 * 1024, MAX, 100, 256 * 1024));
     private static final SdkStorageCodec CODEC = new SdkStorageCodec(new Object(), MAX);
 
+    @Test void completedStageCanBeStoredAndColdReopenedBeforeReadiness() throws Exception {
+        var objects = new Bytes();
+        RootedCoordinationStorage.Selection selected;
+        ColdStorageJournalFixture.Snapshot journalBytes;
+        DocumentId id; byte[] expectedHistory; String expectedHead;
+        try (var original = new RootedSdkFixture()) {
+            var document = original.start("source.yaml", "rcp2/source", Map.of());
+            id = document.id();
+            original.append(document, "rcp2/source", "setCounter", 10, "counterValue: 5");
+            var engine = (DefaultCoordinationEngine) original.blue.advanced().rawEngine();
+            var control = CoordinationTestControl.attach(engine);
+            control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            var stage = engine.processNextRootStage(id, null);
+            assertEquals(1, stage.committedProcessTransitions());
+            expectedHistory = history(document); expectedHead = document.snapshot().blueId();
+            selected = RootedCoordinationStorage.retainPartition(original.blue, objects, LIMITS);
+            journalBytes = ColdStorageJournalFixture.retain(engine);
+            var failure = assertThrows(RuntimeException.class,
+                    () -> original.blue.processing().processNext(document));
+            assertTrue(control.isInjectedFailure(failure), "Storage must not consume the armed readiness fault");
+        }
+        var journal = ColdStorageJournalFixture.open(journalBytes);
+        try (var scope = RootedCoordinationStorage.open(objects.fresh(), LIMITS, selected,
+                ExactNodeProvider.empty(), journal)) {
+            var document = scope.documentHandle(id).orElseThrow();
+            assertEquals(expectedHead, document.snapshot().blueId());
+            assertArrayEquals(expectedHistory, history(document));
+            assertEquals(5, document.snapshot().longAt("/counter"));
+            var next = scope.coordination().processing().processNext(document);
+            assertEquals(0, next.stats().committedTransitions());
+            assertArrayEquals(expectedHistory, history(document));
+            assertEquals(0, journal.mutations(), "Reopening must not reappend the accepted input");
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"zeroMatches", "wrongPath"})
     void coldRejectedDraftSurvivesValidSameChildAndSecondReopen(String operation) throws Exception {

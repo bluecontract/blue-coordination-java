@@ -196,7 +196,8 @@ public final class CoordinationTestControl {
         AFTER_STAGING_CHILD_SESSION,
         AFTER_APPLYING_CHILD_REVISION,
         BEFORE_COMMIT_VALIDATION,
-        AFTER_STATE_SWAP_BEFORE_RETURN
+        AFTER_STATE_SWAP_BEFORE_RETURN,
+        BEFORE_ROOTED_READINESS
     }
 
     /** One stable read-only catch-up projection. */
