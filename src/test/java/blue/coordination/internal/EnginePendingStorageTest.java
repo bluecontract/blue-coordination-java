@@ -54,8 +54,53 @@ final class EnginePendingStorageTest {
         assertDoesNotThrow(scenario);
     }
 
-    private void sourceRoundTrip(boolean known, boolean publish) throws Exception {
-        EnginePendingStorage.Snapshot snapshot; DocumentSessionStorageTest.Bytes copied;
+    @Test void logicalSourceMapsRetainExactPendingSubmittedAndCompletedEvidenceAcrossColdOpen() throws Exception {
+        // given
+        boolean logical = true;
+        // when
+        org.junit.jupiter.api.function.Executable scenarios = () -> {
+            sourceRoundTrip(false, false, logical);
+            sourceRoundTrip(false, true, logical);
+            sourceRoundTrip(true, true, logical);
+        };
+        // then
+        assertDoesNotThrow(scenarios);
+    }
+
+    @Test void pendingMembershipPredicatesOnlyConflictWithMatchingRequestingRoots() throws Exception {
+        // given
+        var records = new LogicalRecordMapTest.Store();
+        try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false);
+             var writer = records.attempt(); var matching = records.attempt(); var unrelated = records.attempt();
+             var views = scenario.f.storage.openScope()) {
+            var w = new LogicalPointStorage(writer); var m = new LogicalPointStorage(matching); var u = new LogicalPointStorage(unrelated);
+            try (var rows = storage(scenario.f.bytes, scenario.f.storage).openLogical(w, views, NO_WORK, NO_ADMISSION);
+                 var match = storage(scenario.f.bytes, scenario.f.storage).openLogical(m, views, NO_WORK, NO_ADMISSION);
+                 var other = storage(scenario.f.bytes, scenario.f.storage).openLogical(u, views, NO_WORK, NO_ADMISSION)) {
+                var descriptor = scenario.selection(); var value = scenario.coordinator().pendingForStorage(key(descriptor));
+                // when
+                assertTrue(((RootedSourceDiscoveryCoordinator.PendingSelections) match.sources().pending()).forRoot(scenario.parent.id()).isEmpty());
+                assertTrue(((RootedSourceDiscoveryCoordinator.PendingSelections) other.sources().pending()).forRoot(DocumentId.of("unrelated")).isEmpty());
+                rows.sources().pending().put(value.key(), value); w.stage(); m.stage(); u.stage();
+                var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+                var written = writer.prepare("written", java.util.List.of(), evidence);
+                var selected = matching.prepare("matching", java.util.List.of(), evidence);
+                var independent = unrelated.prepare("independent", java.util.List.of(), evidence);
+                // then
+                assertTrue(records.publish(written)); assertFalse(records.publish(selected)); assertTrue(records.publish(independent));
+                assertEquals(1, independent.queries().size());
+                assertNotNull(independent.queries().get(0).range().lower());
+                assertNotNull(independent.queries().get(0).range().upper());
+            }
+        }
+    }
+
+    private void sourceRoundTrip(boolean known, boolean publish) throws Exception { sourceRoundTrip(known, publish, false); }
+
+    private void sourceRoundTrip(boolean known, boolean publish, boolean logical) throws Exception {
+        var records = new LogicalRecordMapTest.Store(); var attempt = records.attempt();
+        var binding = new LogicalPointStorage(attempt);
+        EnginePendingStorage.Snapshot snapshot = null; DocumentSessionStorageTest.Bytes copied;
         SourceHistoryPrerequisite descriptor; byte[] preparedPacket; byte[] responsePacket = null;
         Map<String, byte[]> admissions = new java.util.HashMap<>();
         try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(known)) {
@@ -72,17 +117,33 @@ final class EnginePendingStorageTest {
             }
             scenario.f.engine.documents().publicationSnapshot().admissionReceipts().forEach((id, receipt) ->
                     admissions.put(id, new CoreReceiptStorageCodec(MAX, 128).encodeAdmission(receipt)));
-            try (var views = scenario.f.storage.openScope(); var selected = storage(scenario.f.bytes, scenario.f.storage).empty(views, NO_WORK,
-                    id -> scenario.f.engine.documents().admissionReceipt(id).orElse(null))) {
+            try (var views = scenario.f.storage.openScope(); var selected = logical
+                    ? storage(scenario.f.bytes, scenario.f.storage).openLogical(binding, views, NO_WORK,
+                            id -> scenario.f.engine.documents().admissionReceipt(id).orElse(null))
+                    : storage(scenario.f.bytes, scenario.f.storage).empty(views, NO_WORK,
+                            id -> scenario.f.engine.documents().admissionReceipt(id).orElse(null))) {
                 selected.retain(scenario.f.engine.contractsClosureAdapter().storedPlans(), c.storedMaps());
                 assertSame(c.storedMaps().pending().get(key(descriptor)), selected.sources().pending().get(key(descriptor)));
-                snapshot = selected.snapshot(); copied = scenario.f.bytes.copy();
+                if (logical) {
+                    binding.stage(); assertTrue(records.publish(attempt.prepare("source", java.util.List.of(),
+                            new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}))));
+                } else snapshot = selected.snapshot();
+                copied = scenario.f.bytes.copy();
             }
         }
         var sessions = new DocumentSessionStorage(copied, SESSION); int writes = copied.writes;
-        try (var views = sessions.openScope(); var selected = storage(copied, sessions).open(snapshot, views, NO_WORK,
-                id -> admissions.containsKey(id) ? new CoreReceiptStorageCodec(MAX, 128).decodeAdmission(admissions.get(id)) : null)) {
+        var coldAttempt = records.attempt(); var coldBinding = new LogicalPointStorage(coldAttempt);
+        Function<String, ContractsClosureAdmissionReceipt> original = id -> admissions.containsKey(id)
+                ? new CoreReceiptStorageCodec(MAX, 128).decodeAdmission(admissions.get(id)) : null;
+        try (var views = sessions.openScope(); var selected = logical
+                ? storage(copied, sessions).openLogical(coldBinding, views, NO_WORK, original)
+                : storage(copied, sessions).open(snapshot, views, NO_WORK, original)) {
             var pending = selected.sources().pending().get(key(descriptor));
+            if (logical) {
+                var scoped = (RootedSourceDiscoveryCoordinator.PendingSelections) selected.sources().pending();
+                assertEquals(java.util.List.of(pending), scoped.forRoot(DocumentId.of(descriptor.requestingRoot().value())));
+                assertTrue(scoped.forRoot(DocumentId.of("unrelated")).isEmpty());
+            }
             assertFalse(pending.attempt().isComplete());
             assertTrue(pending.attempt().resourceDemands().stream().anyMatch(d -> d == pending.demand()));
             var submitted = selected.sources().submitted().get(descriptor.selectionIdentity());

@@ -95,3 +95,13 @@ its previous insertion-order behavior. Neither path silently converts to the
 other. Actual SDK execution/cold point restoration and independent Timeline
 map writes in both publication orders are tested; complete engine control and
 application stage assembly are still separate work.
+
+Engine pending draft/selection, source pending/submitted/completed and suspended
+feeder/rejection maps now have logical bindings. Payloads retain their exact
+codec, original processor evidence, pinned identities and read-time validation.
+Source selection uses flattened requesting-owner memberships instead of a
+global pending scan. Membership additions invalidate a matching empty-root
+observation; unrelated roots remain independent. The logical feeder maps have
+canonical encoded-key diagnostic iteration; normal feeder selection uses exact
+lane points. Feeder terminal/frontier control and the full engine remain to be
+assembled before these bindings are application-qualified.

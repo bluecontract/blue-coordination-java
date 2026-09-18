@@ -123,9 +123,12 @@ final class RootedSourceDiscoveryCoordinator {
         return new Pending(current, attempt, demand, occurrence.targetDocumentId(), authored, cutoff);
     }
 
+    interface PendingSelections { List<Pending> forRoot(DocumentId root); }
+
     List<SourceHistoryPrerequisite> selections(DocumentId requestingRoot) {
         var values = new ArrayList<SourceHistoryPrerequisite>();
-        for (var candidate : List.copyOf(pending.values())) {
+        for (var candidate : pending instanceof PendingSelections selected
+                ? selected.forRoot(requestingRoot) : List.copyOf(pending.values())) {
             if (!candidate.owns(requestingRoot)) continue;
             if (!stillCurrent(candidate)) { pending.remove(candidate.key()); continue; }
             Prepared next = prepare(candidate);

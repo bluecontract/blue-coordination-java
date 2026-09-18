@@ -8,6 +8,8 @@ import java.util.*;
 public final class LogicalPointStorage {
     private final LogicalRecordContext context;
     private final List<Scope<?, ?>> scopes = new ArrayList<>();
+    private final List<Runnable> selections = new ArrayList<>();
+    void selectBeforeFlush(Runnable selection) { context.checkOpen(); selections.add(Objects.requireNonNull(selection)); }
 
     /** Binds the caller-owned attempt; creating a binding performs no reads. @param attempt owned attempt */
     public LogicalPointStorage(CoordinationRecordAttempt attempt) { context = new LogicalRecordContext(attempt); }
@@ -41,9 +43,25 @@ public final class LogicalPointStorage {
         });
     }
 
+    <K, V> Scope<K, V> open(Family family, String scope, PersistentMapCodec<K> keys,
+            PersistentMapCodec<V> values, StoredInsertionOrderedMap.Limits limits) {
+        var i = limits.indexes();
+        return open(family, scope, adapt(keys), adapt(values), new InsertionOrderedStorage.Limits(
+                i.nodeBytes(), i.keyBytes(), i.valueBytes(), i.descriptorBytes(), i.cachedNodes(),
+                limits.maximumRecordBytes(), limits.maximumPinnedBytes(), limits.maximumPinnedEntries()));
+    }
+    private static <T> InsertionOrderedStorage.Codec<T> adapt(PersistentMapCodec<T> codec) {
+        return new InsertionOrderedStorage.Codec<>() {
+            public String identity() { return codec.identity(); }
+            public T prepare(T value) { return codec.prepareForStorage(value); }
+            public byte[] encode(T value) { return codec.encode(value); }
+            public T decode(byte[] bytes) { return codec.decode(bytes); }
+        };
+    }
+
     /** Encodes every selected map, then flushes their mutations into the attempt; does not publish. */
     public void stage() {
-        context.protect(() -> { scopes.forEach(scope -> { scope.guard(); scope.map.select(); }); return null; });
+        context.protect(() -> { selections.forEach(Runnable::run); scopes.forEach(scope -> { scope.guard(); scope.map.select(); }); return null; });
         context.flush();
     }
 
