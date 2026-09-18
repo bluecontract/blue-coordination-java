@@ -229,5 +229,22 @@ final class RootedLocalHistory {
         TimelineEntry anchor() { return anchor; }
         ContractsClosureAdapter.CohortInvocation invocation() { return invocation; }
         ContractsClosureAdapter.RootedCapturedState capturedState() { return capturedState; }
+
+        blue.language.processor.closure.ClosureInvocationInput originalInputForStorage() { return originalInput; }
+
+        /** Reinstalls the original pre-binding capture using the same closed constructor as live selection. */
+        static Step restoreStored(DocumentId root, ManagedOccurrenceBinding target, ExternalOrderKey sourceOrder,
+                TimelineEntry anchor, ContractsClosureAdapter.CohortInvocation bound,
+                blue.language.processor.closure.ClosureInvocationInput originalInput,
+                ContractsClosureAdapter.RootedCapturedState captured) {
+            if (originalInput.snapshot() != captured.snapshot() || bound.retryInput() != null)
+                throw new IllegalArgumentException("Stored local step changed its original capture or retry mode");
+            var evidence = Objects.requireNonNull(bound.rootedEvidence());
+            var base = new ContractsClosureAdapter.CohortInvocation(bound.members(), bound.directDeliveries(),
+                    originalInput, null, bound.documents(), bound.managedDraftPlan(), bound.automaticExpansion(),
+                    bound.publicationIdentityMembers(), bound.publicationIdentityPublicRoots(), bound.rootedAnchor());
+            return new Step(root, target, Objects.requireNonNull(evidence.historicalWork()), sourceOrder,
+                    anchor, base, captured, evidence);
+        }
     }
 }

@@ -484,13 +484,7 @@ final class ManagedOccurrenceResolver {
         if (!isReplayable(lineage, sourceEpoch)) {
             return null;
         }
-        for (ManagedLineageIndex.RetainedState state
-                : lineage.retainedStates()) {
-            if (state.epoch() == sourceEpoch) {
-                return state.blueId();
-            }
-        }
-        return null;
+        return lineage.retainedBlueIdAt(sourceEpoch);
     }
 
     private FoldedResolution resolveSelectedLineage(

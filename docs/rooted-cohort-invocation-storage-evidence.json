@@ -1,0 +1,31 @@
+{
+  "qualification": "component-only",
+  "baseCommit": "1952942ee54983e9a50545747f7ec477cb2cec36",
+  "languageSourceCommit": "8542285144a8969f157d73e73292398885105c46",
+  "bexSourceCommit": "ab72af14ee54c6123e6d80349956af373a887680",
+  "catalogSourceCommit": "0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+  "archive": "/Users/kamil/Documents/Projects/Blue/rooted-cohort-invocation-evidence.Wv3RMf/final-focused",
+  "commandReceipt": "receipt.json",
+  "commandReceiptSha256": "f012695c2e4740c61cfb5cfb4a39646a11c806d4e66e24c4591640316f4302cb",
+  "gradleLogSha256": "eed126f506e6e567289e3fed89a40f4c07a40a085985f346828c958ff7dc4ae8",
+  "testedSourceArchive": "tested-source.tar.gz",
+  "testedSourceArchiveSha256": "22b03be07174d03384a9d5b295ced5ea3e8b19fa08d166616d1cc70de36c4b76",
+  "sourceManifestSha256": "4a3cdfce0e8f70dea02fac4827302eb2c00e9faa23eebf327e92562da4ebfece",
+  "startedUtc": "2026-09-11T04:20:53Z",
+  "finishedUtc": "2026-09-11T04:21:24Z",
+  "sourceStable": true,
+  "javaVersion": 17,
+  "maximumWorkers": 1,
+  "tests": 22,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "javadoc": "PASS",
+  "owners": {
+    "CohortInvocationStorageCodecTest": 7,
+    "DocumentSessionStorageTest": 12,
+    "OperationPlanStorageCodecTest": 3
+  },
+  "scope": "Complete captured cohort/attempt and historical work component transport; no engine or SDK cold-start claim.",
+  "priorRuns": "The same archive parent retains source-stable fixture and compilation diagnostics. They are not additional passing tests. The initial tick fixture was an owned epoch change; the final same-epoch control uses the existing emit-only unmatched checkpoint scenario. Cold PROCESS separately needs the original exact Timeline request body; the final test retains missing-body suspension as a negative before full-result parity."
+}

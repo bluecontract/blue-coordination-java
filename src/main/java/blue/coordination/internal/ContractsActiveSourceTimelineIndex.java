@@ -13,21 +13,22 @@ import java.util.TreeSet;
 import java.util.function.Function;
 
 /**
- * Disposable exact Timeline union for the configured public Root surfaces.
+ * Exact Timeline union for the configured public Root surfaces.
  *
  * <p>Successful publications refresh each configured Root whose last
  * committed source surface contains an affected document, as well as an
  * affected Root itself. The durable occurrence inventory remains
- * authoritative; restart may rebuild every configured Root contribution from
- * it.</p>
+ * authoritative. Internal storage may restore the exact retained indexes;
+ * explicit resident rebuild remains available.</p>
  */
 final class ContractsActiveSourceTimelineIndex {
-    private final TreeSet<DocumentId> publicRoots;
+    private PersistentOrderedMap<DocumentId, Boolean> publicRoots =
+            PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     private final EngineMetrics metrics;
-    private final Map<DocumentId, ContractsRootSourceSurface.Surface>
-            surfacesByRoot = new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
-    private final Map<DocumentId, Set<DocumentId>> rootsByManagedDocument =
-            new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+    private PersistentOrderedMap<DocumentId, ContractsRootSourceSurface.Surface>
+            surfacesByRoot = PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
+    private PersistentOrderedMap<DocumentId, Set<DocumentId>> rootsByManagedDocument =
+            PersistentOrderedMap.empty(EmbeddingBinding.DOCUMENT_ORDER);
     private PersistentOrderedMap<String, Long> timelineReferences =
             PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
     private Set<String> timelineIds = Set.of();
@@ -44,12 +45,15 @@ final class ContractsActiveSourceTimelineIndex {
                 EmbeddingBinding.DOCUMENT_ORDER);
         Objects.requireNonNull(publicRoots, "publicRoots").forEach(root ->
                 canonical.add(Objects.requireNonNull(root, "publicRoot")));
-        this.publicRoots = canonical;
+        for (DocumentId root : canonical) this.publicRoots = this.publicRoots.put(root, true).map();
     }
 
     synchronized void addPublicRoots(Collection<DocumentId> roots) {
-        Objects.requireNonNull(roots, "roots").forEach(root ->
-                publicRoots.add(Objects.requireNonNull(root, "publicRoot")));
+        var prepared = publicRoots;
+        for (DocumentId root : Objects.requireNonNull(roots, "roots")) {
+            prepared = prepared.put(Objects.requireNonNull(root, "publicRoot"), true).map();
+        }
+        publicRoots = prepared;
     }
 
     /** Refreshes configured Roots affected by one newly published cohort. */
@@ -93,11 +97,11 @@ final class ContractsActiveSourceTimelineIndex {
         for (DocumentId documentId : affectedDocuments) {
             DocumentId checked = Objects.requireNonNull(
                     documentId, "affectedDocument");
-            if (publicRoots.contains(checked)) {
+            if (Boolean.TRUE.equals(publicRoots.get(checked))) {
                 affectedRoots.add(checked);
             }
-            affectedRoots.addAll(rootsByManagedDocument.getOrDefault(
-                    checked, Set.of()));
+            Set<DocumentId> retained = rootsByManagedDocument.get(checked);
+            if (retained != null) affectedRoots.addAll(retained);
         }
         if (affectedRoots.isEmpty()) {
             return;
@@ -114,19 +118,23 @@ final class ContractsActiveSourceTimelineIndex {
                         return resolver.apply(document);
                     }));
         }
-        replacements.forEach(this::replaceSurface);
-        timelineIds = Collections.unmodifiableSet(
-                new PersistentMapView<>(timelineReferences).keySet());
+        // Physical writes may fail. Prepare all immutable map changes before
+        // publishing any replacement, just as source resolution is staged above.
+        var prepared = restoreIndexes(storedIndexes(), metrics);
+        if (surfacesByRoot.isStored()) {
+            SessionStorageWire.physical(() -> { replacements.forEach(prepared::replaceSurface); return true; });
+        } else {
+            replacements.forEach(prepared::replaceSurface);
+        }
+        install(prepared.storedIndexes());
     }
 
     /** Rebuilds the entire disposable index after a process restart. */
     synchronized void rebuild(InMemoryDocumentStore documents) {
-        surfacesByRoot.clear();
-        rootsByManagedDocument.clear();
-        timelineReferences = PersistentOrderedMap.empty(
-                EmbeddingBinding.TEXT_ORDER);
-        timelineIds = Set.of();
-        refresh(List.copyOf(publicRoots), documents);
+        var prepared = restoreIndexes(new StoredIndexes(publicRoots, surfacesByRoot.emptyCopy(),
+                rootsByManagedDocument.emptyCopy(), timelineReferences.emptyCopy()), metrics);
+        prepared.refresh(publicRoots.keys(), documents);
+        install(prepared.storedIndexes());
     }
 
     /** Immutable O(1) snapshot used for journal entry filtering. */
@@ -142,15 +150,19 @@ final class ContractsActiveSourceTimelineIndex {
             return;
         }
         if (prior != null) {
+            SessionStorageWire.require(prior.lane().equals(ContractsRootFeederWindow.LaneId.publicRoots(List.of(root))),
+                    "Retained source surface has foreign Root");
             for (DocumentId document : prior.managedDocuments()) {
-                Set<DocumentId> roots = Objects.requireNonNull(
-                        rootsByManagedDocument.get(document));
+                Set<DocumentId> roots = new TreeSet<>(EmbeddingBinding.DOCUMENT_ORDER);
+                roots.addAll(Objects.requireNonNull(rootsByManagedDocument.get(document)));
                 if (!roots.remove(root)) {
                     throw new IllegalStateException(
                             "Missing retained source membership");
                 }
                 if (roots.isEmpty()) {
-                    rootsByManagedDocument.remove(document);
+                    rootsByManagedDocument = rootsByManagedDocument.remove(document).map();
+                } else {
+                    rootsByManagedDocument = rootsByManagedDocument.put(document, Collections.unmodifiableSet(roots)).map();
                 }
             }
             for (String timeline : prior.timelineIds()) {
@@ -165,17 +177,48 @@ final class ContractsActiveSourceTimelineIndex {
             }
         }
         for (DocumentId document : surface.managedDocuments()) {
-            rootsByManagedDocument.computeIfAbsent(
-                            document,
-                            ignored -> new TreeSet<>(
-                                    EmbeddingBinding.DOCUMENT_ORDER))
-                    .add(root);
+            Set<DocumentId> roots = new TreeSet<>(EmbeddingBinding.DOCUMENT_ORDER);
+            Set<DocumentId> previous = rootsByManagedDocument.get(document);
+            if (previous != null) roots.addAll(previous);
+            roots.add(root);
+            rootsByManagedDocument = rootsByManagedDocument.put(document, Collections.unmodifiableSet(roots)).map();
         }
         for (String timeline : surface.timelineIds()) {
             Long previous = timelineReferences.get(timeline);
             timelineReferences = timelineReferences.put(timeline,
                     previous == null ? 1L : Math.addExact(previous, 1L)).map();
         }
-        surfacesByRoot.put(root, surface);
+        surfacesByRoot = surfacesByRoot.put(root, surface).map();
+    }
+
+    synchronized StoredIndexes storedIndexes() {
+        return new StoredIndexes(publicRoots, surfacesByRoot, rootsByManagedDocument, timelineReferences);
+    }
+
+    static ContractsActiveSourceTimelineIndex restoreIndexes(StoredIndexes state, EngineMetrics metrics) {
+        var restored = new ContractsActiveSourceTimelineIndex(List.of(), metrics);
+        restored.install(state);
+        return restored;
+    }
+
+    private void install(StoredIndexes state) {
+        publicRoots = state.publicRoots();
+        surfacesByRoot = state.surfaces();
+        rootsByManagedDocument = state.memberships();
+        timelineReferences = state.timelineReferences();
+        timelineIds = Collections.unmodifiableSet(new PersistentMapView<>(timelineReferences).keySet());
+    }
+
+    record StoredIndexes(
+            PersistentOrderedMap<DocumentId, Boolean> publicRoots,
+            PersistentOrderedMap<DocumentId, ContractsRootSourceSurface.Surface> surfaces,
+            PersistentOrderedMap<DocumentId, Set<DocumentId>> memberships,
+            PersistentOrderedMap<String, Long> timelineReferences) {
+        StoredIndexes {
+            Objects.requireNonNull(publicRoots, "publicRoots");
+            Objects.requireNonNull(surfaces, "surfaces");
+            Objects.requireNonNull(memberships, "memberships");
+            Objects.requireNonNull(timelineReferences, "timelineReferences");
+        }
     }
 }

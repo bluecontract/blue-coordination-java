@@ -126,7 +126,7 @@ final class RootedDeclaredBirthRejectionTest {
         }
     }
 
-    private static final class Scenario implements AutoCloseable {
+    static final class Scenario implements AutoCloseable {
         final BlueCoordination blue = BlueCoordination.inMemory();
         final DefaultCoordinationEngine engine = (DefaultCoordinationEngine) blue.advanced().rawEngine();
         final ContractsClosureAdapter adapter = engine.contractsClosureAdapter();

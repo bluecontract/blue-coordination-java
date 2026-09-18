@@ -147,7 +147,7 @@ final class ManagedEpochIndirectComponentRebindTest {
     }
 
     @Test
-    void verifiedSourceCapsuleCopiesProofWithoutExposingMutableMembers() {
+    void verifiedSourceCapsuleSharesProofWithoutExposingMutableMembers() {
         // given
         try (Scenario scenario = prepared(true)) {
             DefaultCoordinationEngine engine = scenario.engine();
@@ -164,8 +164,8 @@ final class ManagedEpochIndirectComponentRebindTest {
                     .map(NodeWireForm::get).toList();
             var evidence = new ManagedEpochSourceEvidenceVerifier.VerifiedSourceEvidence(
                     retained.receipt(), retained.transitionReceipt(), capsule);
-            assertNotSame(capsule, evidence.afterCyclicProof());
-            assertNotSame(evidence.afterCyclicProof(), evidence.afterCyclicProof());
+            assertSame(capsule, evidence.afterCyclicProof());
+            assertSame(evidence.afterCyclicProof(), evidence.afterCyclicProof());
 
             DurableImage before = DurableImage.capture(scenario);
             var capturer = invocationCapturer(engine.contractsClosureAdapter());
@@ -303,7 +303,7 @@ final class ManagedEpochIndirectComponentRebindTest {
             var retainedEvidence = documents.managedEpochEvidence(work.sourceDocumentId(), work.sourceEpoch());
             var acquired = verifier.verify(work, retainedEvidence, planBefore);
             assertNotNull(acquired.afterCyclicProof());
-            assertNotSame(acquired.afterCyclicProof(), acquired.afterCyclicProof());
+            assertSame(acquired.afterCyclicProof(), acquired.afterCyclicProof());
             DocumentSession consumerBefore = documents.require(
                     work.consumerDocumentId());
             long consumerEpochBefore = consumerBefore.epoch();

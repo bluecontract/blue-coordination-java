@@ -103,7 +103,7 @@ final class RoutingSurface {
         this(definitions, List.of(), embeddedRevisionHandler);
     }
 
-    private RoutingSurface(
+    RoutingSurface(
             Collection<Definition> definitions,
             Collection<OperationDefinition> operationDefinitions,
             boolean embeddedRevisionHandler) {

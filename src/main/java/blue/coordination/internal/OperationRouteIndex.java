@@ -593,14 +593,40 @@ final class OperationRouteIndex {
             return;
         }
         long nextGeneration = Math.addExact(generation, 1L);
-        rows = PersistentOrderedMap.empty(RouteKey.ORDER);
-        keysByDocument = PersistentOrderedMap.empty(
-                EmbeddingBinding.DOCUMENT_ORDER);
+        rows = rows.emptyCopy();
+        keysByDocument = keysByDocument.emptyCopy();
         generation = nextGeneration;
     }
 
     synchronized RouteStructureSnapshot routeStructureSnapshotForTesting() {
         return new RouteStructureSnapshot(rows, keysByDocument);
+    }
+
+    /** Internal selected-root state; not publication authority or a route rebuild. */
+    synchronized StoredIndexes storedIndexes() {
+        return new StoredIndexes(rows, keysByDocument, generation);
+    }
+
+    static OperationRouteIndex restoreIndexes(
+            StoredIndexes state, EngineMetrics metrics,
+            Function<DocumentId, DocumentSession> sessions,
+            Function<DocumentId, String> selectedHeads) {
+        OperationRouteIndex restored = new OperationRouteIndex(metrics, sessions, selectedHeads);
+        restored.rows = state.rows();
+        restored.keysByDocument = state.keysByDocument();
+        restored.generation = state.generation();
+        return restored;
+    }
+
+    record StoredIndexes(
+            PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
+            PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument,
+            long generation) {
+        StoredIndexes {
+            Objects.requireNonNull(rows, "rows");
+            Objects.requireNonNull(keysByDocument, "keysByDocument");
+            if (generation < 0L) throw new IllegalArgumentException("Negative stored route generation");
+        }
     }
 
     /** One exact Root delivery selected from a frozen route generation. */
@@ -869,17 +895,17 @@ final class OperationRouteIndex {
         }
     }
 
-    private record RouteKey(
+    record RouteKey(
             String operation,
             String channel,
             String subscriptionKey) {
-        private static final Comparator<RouteKey> ORDER = Comparator
+        static final Comparator<RouteKey> ORDER = Comparator
                 .comparing(RouteKey::operation, EmbeddingBinding.TEXT_ORDER)
                 .thenComparing(RouteKey::channel, EmbeddingBinding.TEXT_ORDER)
                 .thenComparing(RouteKey::subscriptionKey,
                         EmbeddingBinding.TEXT_ORDER);
 
-        private RouteKey {
+        RouteKey {
             operation = requireText(operation, "operation");
             channel = requireText(channel, "channel");
             subscriptionKey = requireText(
@@ -918,13 +944,13 @@ final class OperationRouteIndex {
         }
     }
 
-    private record RouteRow(
+    record RouteRow(
             DocumentId documentId,
             String scopePath,
             int channelOrder,
             ExternalOrderKey startAfter,
             List<RoutingSurface.SourceAddress> sources) {
-        private static final Comparator<RouteRow> ORDER = Comparator
+        static final Comparator<RouteRow> ORDER = Comparator
                 .comparing(RouteRow::documentId, EmbeddingBinding.DOCUMENT_ORDER)
                 .thenComparing(RouteRow::scopePath, EmbeddingBinding.TEXT_ORDER)
                 .thenComparingInt(RouteRow::channelOrder)
@@ -941,7 +967,7 @@ final class OperationRouteIndex {
                 .thenComparing(RouteRow::sources,
                         RoutingSurface::compareSources);
 
-        private RouteRow {
+        RouteRow {
             documentId = Objects.requireNonNull(documentId, "documentId");
             scopePath = requireText(scopePath, "scopePath");
             sources = List.copyOf(Objects.requireNonNull(sources, "sources"));

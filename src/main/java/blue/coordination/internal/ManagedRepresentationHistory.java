@@ -99,23 +99,27 @@ final class ManagedRepresentationHistory {
         var view = session.rootedView();
         if (view != null) {
             view.requirePublishedHead(consumer, session.epoch(), session.currentRepresentation().blueId());
-            session.rootedPublicationPrefix(view);
+            session.requireRetainedRootedView(view);
         }
         return view;
     }
     /** Authenticate committed membership, plus only this transaction's exact owned publication. */
-    private java.util.Set<String> publicationPrefix(DocumentId source, RootedDocumentView view) {
-        if (view != stagedRootedView) return documents.require(source).rootedPublicationPrefix(view);
+    private java.util.function.Predicate<String> publicationMembership(DocumentId source, RootedDocumentView view) {
+        if (view != stagedRootedView) {
+            var session = documents.require(source);
+            session.requireRetainedRootedView(view);
+            return invocation -> session.rootedPublicationIncludes(view, invocation);
+        }
         if (stagedPublication == null || !stagedPublication.commits()
                 || !RootedResultScope.members(view.result()).contains(source)
                 || view.result() != stagedPublication.attempt().processResult())
             throw new IllegalArgumentException("Staged representation view lacks exact owned publication evidence");
-        var prefix = new java.util.LinkedHashSet<String>();
         var session = documents.find(source).orElse(null);
-        if (session != null && session.rootedView() != null)
-            prefix.addAll(session.rootedPublicationPrefix(session.rootedView()));
-        prefix.add(view.result().invocationIdentity());
-        return java.util.Set.copyOf(prefix);
+        var committed = session == null ? null : session.rootedView();
+        if (committed != null) session.requireRetainedRootedView(committed);
+        String stagedInvocation = view.result().invocationIdentity();
+        return invocation -> stagedInvocation.equals(invocation)
+                || (committed != null && session.rootedPublicationIncludes(committed, invocation));
     }
     /** A co-owned causal position, committed or this publisher's private staged proposal; never an ambient future head. */
     private RootedDocumentView sourceView(DocumentId source, blue.language.processor.ExternalOrderKey boundary) {
@@ -130,7 +134,7 @@ final class ManagedRepresentationHistory {
             var selected = rootSnapshot.managedDocument(ContractsClosureAdapter.closureId(source));
             rootView.requirePublishedHead(source, selected.epoch(), selected.blueId());
             // Reject a constructed result/view even when all its endpoints and hashes agree.
-            publicationPrefix(source, rootView);
+            publicationMembership(source, rootView);
             return rootView;
         }
         if (rootView != null && boundary.equals(rootView.logicalBoundary())) {
@@ -145,8 +149,8 @@ final class ManagedRepresentationHistory {
                     if (boundary.equals(original.logicalBoundary()) && projection != null
                             && projection.owns(ContractsClosureAdapter.closureId(source))
                             && projection.owns(ContractsClosureAdapter.closureId(rootAnchor))
-                            && publicationPrefix(rootAnchor, rootView)
-                                    .contains(original.result().invocationIdentity())) {
+                            && publicationMembership(rootAnchor, rootView)
+                                    .test(original.result().invocationIdentity())) {
                         // A split keeps the source position that this root already
                         // co-published. Later source-only positions are not imported.
                         original.requirePublishedHead(source, selected.epoch(), selected.blueId());
@@ -182,40 +186,28 @@ final class ManagedRepresentationHistory {
         List<ManagedRepresentationTransition> transitions = new ArrayList<>();
         String predecessorPosition = anchor.receiptIdentity();
         String beforeBlueId = anchor.afterBlueId();
-        List<DocumentSession.ComponentRepresentationTransition> rows = new ArrayList<>(session == null ? List.of() : session.representationTransitions());
+        List<DocumentSession.ComponentRepresentationTransition> rows = new ArrayList<>(session == null ? List.of() : session.representationTransitionsAt(epoch));
         if (session != null && stagedPublication != null && head.epoch() == session.epoch()
                 && !head.blueId().equals(session.currentRepresentation().blueId())) {
             var transition = stagedPublication.attempt().processResult().managedTransitionReceipts().stream()
                     .filter(item -> item.documentId().value().equals(documentId.value())).findFirst().orElseThrow();
-            rows.add(new DocumentSession.ComponentRepresentationTransition(head.epoch(),
-                    session.currentRepresentation().blueId(), head.blueId(), transition.transitionReceiptIdentity(),
-                    stagedPublication.publicationIdentity()));
+            if (head.epoch() == epoch) {
+                rows.add(new DocumentSession.ComponentRepresentationTransition(head.epoch(),
+                        session.currentRepresentation().blueId(), head.blueId(), transition.transitionReceiptIdentity(),
+                        stagedPublication.publicationIdentity()));
+            }
         }
         for (DocumentSession.ComponentRepresentationTransition row : rows) {
-            if (row.epoch() != epoch) continue;
             if (!row.beforeBlueId().equals(beforeBlueId) || row.originalPublicationIdentity() == null) {
                 throw new IllegalArgumentException("Unproved ordered representation predecessor");
             }
-            ContractsClosurePublicationReceipt publication = (stagedPublication != null
+            ManagedRepresentationTransition proved = stagedPublication != null
                     && stagedPublication.publicationIdentity().equals(row.originalPublicationIdentity())
-                    ? Optional.of(stagedPublication) : documents.closurePublicationReceipt(row.originalPublicationIdentity()))
-                    .filter(ContractsClosurePublicationReceipt::commits)
-                    .orElseThrow(() -> new IllegalArgumentException("Original representation commit is unavailable"));
-            if (!publication.documentIds().contains(documentId)
-                    || publication.managedSurfaceEvidence().originalInvocation() == null) {
-                throw new IllegalArgumentException("Original representation classification input is unavailable");
-            }
-            ManagedRepresentationTransition proved = new ManagedRepresentationTransition(
-                    ContractsClosureAdapter.closureId(documentId), epoch,
-                    anchor.receiptIdentity(), predecessorPosition,
-                    publication.managedSurfaceEvidence().originalInvocation(),
-                    publication.attempt().processResult(), row.transitionReceiptIdentity());
-            if (proved.rootedCheckpointReferenceProofIdentity().isPresent()) {
-                RootedTerminalEvidence rooted = publication.rootedTerminalEvidence();
-                if (rooted == null) throw new IllegalArgumentException("Original rooted representation authority is unavailable");
-                rooted.requireCheckpointReferencePosition(publication.attempt().processResult(), documentId,
-                        proved.rootedCheckpointReferenceProofIdentity().orElseThrow());
-            }
+                    ? documents.proveRepresentation(stagedPublication, ContractsClosureAdapter.closureId(documentId),
+                            epoch, anchor.receiptIdentity(), predecessorPosition, row.transitionReceiptIdentity())
+                    : documents.proveRetainedRepresentation(row.originalPublicationIdentity(),
+                            ContractsClosureAdapter.closureId(documentId), epoch, anchor.receiptIdentity(),
+                            predecessorPosition, row.transitionReceiptIdentity());
             if (!proved.transitionReceipt().beforeBlueId().equals(row.beforeBlueId())
                     || !proved.transitionReceipt().afterBlueId().equals(row.afterBlueId())) {
                 throw new IllegalArgumentException("Representation commit differs from its durable source history");
@@ -244,7 +236,14 @@ final class ManagedRepresentationHistory {
     /** Rooted history may exclude a genuine next receipt only by its authenticated frozen source view/order. */
     Chain atRootedCaptured(DocumentId documentId, long epoch, ManagedRepresentationCursor cursor,
             blue.language.processor.ExternalOrderKey boundary) {
-        Chain full = at(documentId, epoch);
+        return rootedCaptured(at(documentId, epoch), cursor, boundary);
+    }
+
+    /** Reuses only this call's complete authenticated chain, including its later suffix. */
+    private Chain rootedCaptured(Chain full, ManagedRepresentationCursor cursor,
+            blue.language.processor.ExternalOrderKey boundary) {
+        DocumentId documentId = full.documentId();
+        long epoch = full.epoch();
         if (full.nextRevisionReceiptIdentity() != null && (cursor == null || cursor.nextRevisionReceiptIdentity() == null)) {
             var view = sourceView(documentId, boundary);
             var selected = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(documentId));
@@ -348,7 +347,8 @@ final class ManagedRepresentationHistory {
         }
         var cursor = new ManagedRepresentationCursor(anchor.receiptIdentity(), anchor.receiptIdentity(),
                 successor.targetPositionIdentity(), null);
-        Chain captured = atRootedCaptured(work.sourceDocumentId(), work.sourceEpoch(), cursor, boundary);
+        Chain full = at(work.sourceDocumentId(), work.sourceEpoch());
+        Chain captured = rootedCaptured(full, cursor, boundary);
         if (captured.transitions().isEmpty()
                 || !captured.transitions().get(0).positionIdentity().equals(successor.transition().positionIdentity())) {
             throw new IllegalArgumentException("Numbered successor omitted its first exact position");
@@ -356,28 +356,28 @@ final class ManagedRepresentationHistory {
         var last = captured.transitions().get(captured.transitions().size() - 1);
         RootedDocumentView targetView = documents.require(work.sourceDocumentId())
                 .rootedViewForInvocation(last.originalResult().invocationIdentity());
-        var positioned = prefixAt(at(work.sourceDocumentId(), work.sourceEpoch()), targetView, boundary);
+        var positioned = prefixAt(full, targetView, boundary);
         if (!positioned.stream().map(ManagedRepresentationTransition::positionIdentity).toList()
                 .equals(captured.transitions().stream().map(ManagedRepresentationTransition::positionIdentity).toList())
                 || !last.transitionReceipt().afterBlueId().equals(selected.blueId())) {
             throw new IllegalArgumentException("Numbered successor differs from its captured source-view position");
         }
-        verifySupplied(successor.transition());
+        verifySupplied(successor.transition(), full);
     }
 
     private List<ManagedRepresentationTransition> prefixAt(Chain chain, RootedDocumentView view,
             blue.language.processor.ExternalOrderKey boundary) {
         // A view's stored position also clamps earlier causal dates to its existing frontier.
         // Comparing with rootedViewBefore proves that it is no later than this exact cutoff.
-        var eligible = publicationPrefix(chain.documentId(), sourceView(chain.documentId(), boundary));
-        if (!eligible.contains(view.result().invocationIdentity())) {
+        var eligible = publicationMembership(chain.documentId(), sourceView(chain.documentId(), boundary));
+        if (!eligible.test(view.result().invocationIdentity())) {
             throw new IllegalArgumentException("Representation target is after the frozen attachment boundary");
         }
-        var membership = publicationPrefix(chain.documentId(), view);
+        var membership = publicationMembership(chain.documentId(), view);
         var prefix = new ArrayList<ManagedRepresentationTransition>();
         boolean outside = false;
         for (var transition : chain.transitions()) {
-            boolean included = membership.contains(transition.originalResult().invocationIdentity());
+            boolean included = membership.test(transition.originalResult().invocationIdentity());
             if (outside && included) throw new IllegalArgumentException("Source view skips an earlier representation publication");
             if (included) prefix.add(transition); else outside = true;
         }
@@ -397,10 +397,10 @@ final class ManagedRepresentationHistory {
                 || !occurrence.occurrenceIdentity().equals(cause.targetOccurrenceIdentity())) {
             throw new IllegalArgumentException("Representation cause does not own the pending occurrence");
         }
+        Chain full = at(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch());
         Chain chain = rootedBoundary == null
-                ? atCaptured(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch(), occurrence.pendingRepresentationCursor())
-                : atRootedCaptured(DocumentId.of(cause.childDocumentId().value()), cause.fromEpoch(),
-                        occurrence.pendingRepresentationCursor(), rootedBoundary);
+                ? captured(full, occurrence.pendingRepresentationCursor())
+                : rootedCaptured(full, occurrence.pendingRepresentationCursor(), rootedBoundary);
         var next = chain.next(occurrence.pendingRepresentationCursor(), occurrence.expectedTargetBlueId())
                 .orElseThrow(() -> new IllegalArgumentException("Captured representation chain is already complete"));
         if (!next.positionIdentity().equals(cause.transition().positionIdentity())
@@ -408,12 +408,18 @@ final class ManagedRepresentationHistory {
                 || !Objects.equals(chain.nextRevisionReceiptIdentity(), cause.nextRevisionReceiptIdentity())) {
             throw new IllegalArgumentException("Representation cause skips or changes its authenticated history target");
         }
-        verifySupplied(cause.transition());
+        verifySupplied(cause.transition(), full);
     }
 
     /** Supplied recomputable evidence has no authority without exact durable membership. */
     void verifySupplied(ManagedRepresentationTransition supplied) {
-        Chain chain = at(DocumentId.of(supplied.documentId().value()), supplied.epoch());
+        verifySupplied(supplied, at(DocumentId.of(supplied.documentId().value()), supplied.epoch()));
+    }
+
+    private static void verifySupplied(ManagedRepresentationTransition supplied, Chain chain) {
+        if (!chain.documentId().value().equals(supplied.documentId().value()) || chain.epoch() != supplied.epoch()) {
+            throw new IllegalArgumentException("Supplied representation belongs to another source history");
+        }
         ManagedRepresentationTransition actual = chain.transitions().stream()
                 .filter(row -> row.positionIdentity().equals(supplied.positionIdentity()))
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("Supplied representation position was not committed"));

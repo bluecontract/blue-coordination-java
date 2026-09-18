@@ -10,6 +10,7 @@ import java.util.Objects;
 /** Immutable, content-addressed Blue value exposed by the developer SDK. */
 public final class ExactBlueValue {
     private final ExactValue value;
+    private volatile VerifiedExactEvidence verifiedEvidence;
 
     ExactBlueValue(ExactValue value) {
         this.value = Objects.requireNonNull(value, "value");
@@ -35,20 +36,27 @@ public final class ExactBlueValue {
 
     /** Returns the verified exact value as detached Blue JSON. */
     public String json() {
-        return UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(
-                value.copyNode());
+        VerifiedExactEvidence retained = verifiedEvidence;
+        return retained == null ? UncheckedObjectMapper.JSON_MAPPER.writeValueAsString(value.copyNode())
+                : retained.exactContent();
+    }
+
+    /**
+     * Retains the library's authenticated immutable body and complete proof.
+     * This content artifact grants no current storage or publication authority.
+     * @return a stable immutable transport artifact for this exact value
+     */
+    public synchronized VerifiedExactEvidence verifiedEvidence() {
+        if (verifiedEvidence == null) verifiedEvidence = VerifiedExactEvidence.issue(value);
+        return verifiedEvidence;
     }
 
     /** Package-private provider transport from authenticated internal state. */
     ExactNodeEvidence providerEvidence() {
+        VerifiedExactEvidence retained = verifiedEvidence();
         String content = json();
-        return value.cyclicSetProof()
-                .map(proof -> ExactNodeEvidence.cyclic(
-                        content,
-                        proof.declaredPlaceholderSet().stream()
-                                .map(UncheckedObjectMapper.JSON_MAPPER::
-                                        writeValueAsString)
-                                .toList()))
+        return retained.declaredPlaceholderSet()
+                .map(proof -> ExactNodeEvidence.cyclic(content, proof))
                 .orElseGet(() -> ExactNodeEvidence.ordinary(content));
     }
 

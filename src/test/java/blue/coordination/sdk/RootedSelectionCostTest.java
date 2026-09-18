@@ -25,7 +25,11 @@ final class RootedSelectionCostTest {
             var history = fixture.history(source);
             assertEquals(pending.blueId(), fixture.control.nextLiveInput(source.id()).orElseThrow());
             long compiled = control.metricsSnapshot().counters().getOrDefault("routing.surfaceCompilations", 0L)-before;
-            assertEquals(1L, compiled, "One selection decision needs one frozen routing surface, independent of past entries");
+            assertTrue(compiled <= 1L, "At most one frozen routing surface; an unchanged captured view may already be retained");
+            long captures = control.metricsSnapshot().counters().getOrDefault("rooted.observation.captures", 0L);
+            for (int i = 0; i < 8; i++)
+                assertEquals(pending.blueId(), fixture.control.nextLiveInput(source.id()).orElseThrow());
+            assertTrue(control.metricsSnapshot().counters().getOrDefault("rooted.observation.captureReuses", 0L) > 0);
             assertEquals(history, fixture.history(source));
             assertEquals(12L, source.snapshot().longAt("/counter"));
             assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().processNext(source).entry(pending).disposition());
@@ -34,6 +38,8 @@ final class RootedSelectionCostTest {
             assertEquals(next.blueId(), fixture.control.nextLiveInput(source.id()).orElseThrow());
             assertEquals(EntryDisposition.APPLIED, fixture.blue.processing().processNext(source).entry(next).disposition());
             assertEquals(14L, source.snapshot().longAt("/counter"));
+            assertTrue(control.metricsSnapshot().counters().getOrDefault("rooted.observation.captures", 0L) > captures,
+                    "Publishing a new epoch must invalidate the captured state");
         }
     }
 }

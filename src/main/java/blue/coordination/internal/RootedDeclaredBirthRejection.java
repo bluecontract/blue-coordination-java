@@ -14,6 +14,20 @@ final class RootedDeclaredBirthRejection {
     private final List<ManagedOccurrenceResolver.UnresolvedDemand> issues;
     private final long retries;
 
+    record StoredState(ContractsClosureAdapter.CohortInvocation selected,
+            ContractsClosureAdapter.CohortInvocation executed, ClosureAttemptResult attempt,
+            List<ManagedOccurrenceResolver.UnresolvedDemand> issues, long retries) {
+        StoredState { issues = List.copyOf(issues); }
+    }
+
+    StoredState storedState() { return new StoredState(selected, executed, attempt, issues, retries); }
+
+    /** Restore the original shared plan and demand objects, then run every existing rejection guard. */
+    static RootedDeclaredBirthRejection restoreStored(StoredState state) {
+        return Objects.requireNonNull(capture(state.selected(), state.executed(), state.attempt(), state.issues(), state.retries()),
+                "Stored rejection has no rejected managed declaration");
+    }
+
     private RootedDeclaredBirthRejection(ContractsClosureAdapter.CohortInvocation selected,
             ContractsClosureAdapter.CohortInvocation executed, ClosureAttemptResult attempt,
             List<ManagedOccurrenceResolver.UnresolvedDemand> issues, long retries) {

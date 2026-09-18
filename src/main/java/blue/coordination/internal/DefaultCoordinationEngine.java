@@ -155,6 +155,7 @@ public final class DefaultCoordinationEngine
     private final ContractsClosureAdmissionAdapter
             contractsClosureAdmissionAdapter;
     private final ContractsClosureProfile contractsClosureProfile;
+    private final ContractsRuntimeBinding contractsRuntimeBinding;
     private final ContractsActiveSourceTimelineIndex
             contractsActiveSourceTimelines;
     private final ContractsRecoveryState contractsRecoveryState;
@@ -171,6 +172,40 @@ public final class DefaultCoordinationEngine
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
     private boolean closed;
 
+    // Physical subcomponent only: no document, journal, route or provider restore.
+    synchronized EngineControlStorageCodec.State controlStateForStorage() {
+        return controlStateForStorage(true);
+    }
+
+    private EngineControlStorageCodec.State controlStateForStorage(boolean requireEmptyPendingComponents) {
+        ensureOpen();
+        if (contractsRecoveryState == null || !contractsClosureProfile.rootedCheckpoint())
+            throw new blue.coordination.api.storage.CoordinationObjectStorageException("Control storage requires the rooted Contracts profile");
+        if (requireEmptyPendingComponents) {
+            rootedSourceDiscoveries.requireStorageSupported();
+            contractsClosureAdapter.requireControlStorageSupported();
+        }
+        return new EngineControlStorageCodec.State(contractsRuntimeBinding,
+                timelines, timelineActorKinds, logicalClockMicros, applicationClockMicros,
+                List.copyOf(contractsClosureProfile.publicRoots()), contractsRecoveryState.rootedSchedule.storageState(),
+                List.copyOf(contractsRecoveryState.deferredManagedConsumers),
+                List.copyOf(contractsRecoveryState.isolatedManagedConsumers), contractsRecoveryState.managedEpochTurn,
+                contractsRecoveryState.feederWindow.storageState(requireEmptyPendingComponents), contractsRecoveryState.journalDrain.storageState());
+    }
+
+    /** Control-only restoration; the full factory installs the separate feeder evidence maps as well. */
+    static ContractsRecoveryState recoveryStateFromStorage(EngineControlStorageCodec.State state) {
+        return recoveryStateFromStorage(state, ContractsRootFeederWindow.DurableState.StoredMaps.empty());
+    }
+
+    static ContractsRecoveryState recoveryStateFromStorage(EngineControlStorageCodec.State state,
+            ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+        return new ContractsRecoveryState(RootedProcessingSchedule.fromStorage(state.rootedSchedule()),
+                ContractsRootFeederWindow.DurableState.fromStorage(state.feeder(), feederMaps),
+                ContractsJournalDrainCoordinator.DurableState.fromStorage(state.journal()),
+                state.deferredManagedConsumers(), state.isolatedManagedConsumers(), state.managedEpochTurn());
+    }
+
     private DefaultCoordinationEngine(
             ContractsBootstrap contractsBootstrap) {
         this(contractsBootstrap, null);
@@ -179,9 +214,34 @@ public final class DefaultCoordinationEngine
     private DefaultCoordinationEngine(
             ContractsBootstrap contractsBootstrap,
             blue.coordination.sdk.ExactNodeProvider exactNodeProvider) {
+        this(contractsBootstrap, exactNodeProvider, null);
+    }
+
+    private DefaultCoordinationEngine(
+            ContractsBootstrap contractsBootstrap,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider,
+            blue.coordination.api.TimelineJournalStore journalStore) {
+        this(contractsBootstrap, exactNodeProvider, journalStore, null);
+    }
+
+    /** All families are installed together; this constructor never replays admission or rebuilds routes. */
+    private DefaultCoordinationEngine(
+            ContractsBootstrap contractsBootstrap,
+            blue.coordination.sdk.ExactNodeProvider exactNodeProvider,
+            blue.coordination.api.TimelineJournalStore journalStore, StoredParts stored) {
+        contractsRuntimeBinding = contractsBootstrap == null ? null : new ContractsRuntimeBinding(
+                contractsBootstrap.blueLanguageSpecificationIdentity(), contractsBootstrap.contractsSpecificationIdentity(),
+                contractsBootstrap.executionPolicy());
         metrics = new EngineMetrics();
+        if (stored != null) {
+            if (!stored.control().binding().equals(contractsRuntimeBinding) || journalStore == null)
+                throw new blue.coordination.api.storage.CoordinationObjectStorageException("Complete engine storage has another release or no exact journal");
+            timelines.putAll(stored.control().timelines()); timelineActorKinds.putAll(stored.control().actorKinds());
+            logicalClockMicros = stored.control().logicalClockMicros();
+            applicationClockMicros = stored.control().applicationClockMicros();
+        }
         rootedSourceProvider = exactNodeProvider == null ? id -> Optional.empty() : exactNodeProvider;
-        objects = new WholeObjectStore(metrics);
+        objects = new WholeObjectStore(metrics, stored == null ? WholeObjectBacking.EMPTY : stored.objects());
         applicationExactNodeProvider = exactNodeProvider == null
                 ? null
                 : Contracts10StaticEmbeddedAdmissionCompiler
@@ -192,16 +252,19 @@ public final class DefaultCoordinationEngine
                 runtime, objects, metrics, this::timelineActorKind,
                 contractsBootstrap != null && ContractsClosureProfile.ROOTED_CONTRACTS_SPECIFICATION
                         .equals(contractsBootstrap.contractsSpecificationIdentity()));
-        journal = new InMemoryTimelineJournal(entryFactory, metrics);
-        documents = new InMemoryDocumentStore(metrics);
-        routeIndex = new OperationRouteIndex(
-                metrics, documentId -> documents.find(documentId).orElse(null));
+        journal = journalStore == null ? new InMemoryTimelineJournal(entryFactory, metrics)
+                : new InMemoryTimelineJournal(entryFactory, metrics, journalStore);
+        documents = stored == null ? new InMemoryDocumentStore(metrics) : new InMemoryDocumentStore(metrics, stored.documents());
+        routeIndex = stored == null ? new OperationRouteIndex(metrics, documentId -> documents.find(documentId).orElse(null))
+                : OperationRouteIndex.restoreIndexes(stored.routes(), metrics,
+                        documentId -> documents.find(documentId).orElse(null),
+                        documentId -> documents.find(documentId).map(session -> session.currentRepresentation().blueId()).orElse(null));
         layoutBuilder = new EmbeddedOnlyLayoutBuilder(
                 runtime, objects, metrics);
         processor = new DocumentTransitionProcessor(
                 runtime, objects, layoutBuilder, metrics,
                 this::inject);
-        drainCoordinator = new SequentialDrainCoordinator(
+        drainCoordinator = contractsBootstrap == null ? new SequentialDrainCoordinator(
                 runtime,
                 objects,
                 entryFactory,
@@ -211,7 +274,7 @@ public final class DefaultCoordinationEngine
                 documents,
                 metrics,
                 this::nextApplicationTimestamp,
-                this::inject);
+                this::inject) : null;
         if (contractsBootstrap == null) {
             contractsClosureAdapter = null;
             contractsClosureAdmissionAdapter = null;
@@ -231,9 +294,9 @@ public final class DefaultCoordinationEngine
                             contractsBootstrap.executionPolicy(),
                             contractsBootstrap.publicRootDocumentIds());
             contractsClosureProfile = profile;
-            contractsActiveSourceTimelines =
-                    new ContractsActiveSourceTimelineIndex(
-                            profile.publicRoots(), metrics);
+            contractsActiveSourceTimelines = stored == null
+                    ? new ContractsActiveSourceTimelineIndex(profile.publicRoots(), metrics)
+                    : ContractsActiveSourceTimelineIndex.restoreIndexes(stored.activeSources(), metrics);
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,
@@ -242,7 +305,7 @@ public final class DefaultCoordinationEngine
                     routeIndex,
                     profile,
                     contractsActiveSourceTimelines,
-                    journal::entries);
+                    journal::entries, stored == null ? ContractsClosureAdapter.StoredPlans.empty() : stored.plans());
             contractsClosureAdmissionAdapter =
                     new ContractsClosureAdmissionAdapter(
                             runtime,
@@ -255,18 +318,53 @@ public final class DefaultCoordinationEngine
                             (input, result, project) -> RootedBeginningAdmission.verify(
                                     input, result, journal, timelines, this::timelineActorKind, project));
             rootedSourceDiscoveries = profile.rootedCheckpoint() ? new RootedSourceDiscoveryCoordinator(this, documents,
-                    contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider) : null;
+                    contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider,
+                    stored == null ? RootedSourceDiscoveryCoordinator.StoredMaps.empty() : stored.sources()) : null;
             if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
-            contractsRecoveryState = new ContractsRecoveryState();
+            contractsRecoveryState = stored == null ? new ContractsRecoveryState() : recoveryStateFromStorage(stored.control(), stored.feederMaps());
             contractsClosureAdapter.feederDecisions(contractsRecoveryState.feederWindow);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
         }
     }
 
+    /** Complete typed assembly, supplied only by the private physical-storage boundary. */
+    record StoredParts(EngineControlStorageCodec.State control, WholeObjectBacking objects,
+            InMemoryDocumentStore.StoreState documents, OperationRouteIndex.StoredIndexes routes,
+            ContractsActiveSourceTimelineIndex.StoredIndexes activeSources, ContractsClosureAdapter.StoredPlans plans,
+            RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+        StoredParts {
+            Objects.requireNonNull(control); Objects.requireNonNull(objects); Objects.requireNonNull(documents);
+            Objects.requireNonNull(routes); Objects.requireNonNull(activeSources); Objects.requireNonNull(plans); Objects.requireNonNull(sources);
+            Objects.requireNonNull(feederMaps);
+        }
+    }
+
+    static DefaultCoordinationEngine restoreRooted(StoredParts stored,
+            blue.coordination.sdk.ExactNodeProvider provider, blue.coordination.api.TimelineJournalStore journalStore) {
+        Objects.requireNonNull(stored); var b = stored.control().binding();
+        return new DefaultCoordinationEngine(new ContractsBootstrap(b.languageSpecificationIdentity(), b.contractsSpecificationIdentity(),
+                b.executionPolicy(), new java.util.LinkedHashSet<>(stored.control().publicRoots())), provider,
+                Objects.requireNonNull(journalStore), stored);
+    }
+
+    /** Current owning scope only; the storage layer must detach every family before retiring this runtime. */
+    synchronized StoredParts storedParts(WholeObjectBacking retainedObjects) {
+        ensureOpen();
+        return new StoredParts(controlStateForStorage(false), retainedObjects, documents.storedState(), routeIndex.storedIndexes(),
+                contractsActiveSourceTimelines.storedIndexes(), contractsClosureAdapter.storedPlans(), rootedSourceDiscoveries.storedMaps(),
+                contractsRecoveryState.feederWindow.storedMaps());
+    }
+
     /** Creates the legacy Process Embedded temporal-profile engine. */
     public static DefaultCoordinationEngine create() {
         return new DefaultCoordinationEngine(null);
+    }
+
+    /** Journal-only physical test seam; no other runtime state is restored. */
+    static DefaultCoordinationEngine createWithJournalStore(
+            blue.coordination.api.TimelineJournalStore store) {
+        return new DefaultCoordinationEngine(null, null, Objects.requireNonNull(store, "store"));
     }
 
     /**
@@ -420,6 +518,60 @@ public final class DefaultCoordinationEngine
                 timelineId, "MyOS/Principal Actor");
     }
 
+    /**
+     * Reads one actual registration without treating an empty journal as absence.
+     * This diagnostic neither registers a Timeline nor grants append authority.
+     * @param timelineId exact registered Timeline identity
+     * @return the immutable registration, including registered-empty Timelines
+     */
+    public synchronized Optional<Timeline> auditRegisteredTimeline(String timelineId) {
+        ensureOpen();
+        return Optional.ofNullable(timelines.get(requireAuditText(timelineId, "timelineId")));
+    }
+
+    /**
+     * Reads retained catalog membership without loading a session body. Existence
+     * does not certify the current body, readiness, or permission to execute it.
+     * @param documentId exact retained document identity
+     * @return whether the selected catalog contains this identity
+     */
+    public synchronized boolean hasStoredDocument(DocumentId documentId) {
+        ensureOpen();
+        return documents.storedState().sessionIndex().containsKeyWithoutValue(
+                Objects.requireNonNull(documentId, "documentId"));
+    }
+
+    /**
+     * Explicit identity inventory of the selected catalog, without session bodies.
+     * This is linear in catalog size; it is not a next-work or graph-selection API.
+     * @return detached identities, in stable host presentation order
+     */
+    public synchronized List<DocumentId> storedDocumentIds() {
+        ensureOpen();
+        return documents.sessionIds().stream().sorted(java.util.Comparator.comparing(DocumentId::value)).toList();
+    }
+
+    /**
+     * Exact configuration of this engine's actual Contracts bootstrap.
+     * @param languageSpecificationIdentity selected Language specification
+     * @param contractsSpecificationIdentity selected Contracts specification
+     * @param executionPolicy exact configured default policy
+     */
+    public record ContractsRuntimeBinding(String languageSpecificationIdentity,
+            String contractsSpecificationIdentity, ContractsExecutionPolicy executionPolicy) { }
+
+    /**
+     * Reports actual immutable configuration for matching a storage component.
+     * It is not a caller-selected policy or a restoration/authority factory.
+     * @return exact bootstrap binding
+     * @throws IllegalStateException if this is not a Contracts engine
+     */
+    public synchronized ContractsRuntimeBinding contractsRuntimeBinding() {
+        ensureOpen();
+        if (contractsRuntimeBinding == null) throw new IllegalStateException("Engine has no Contracts bootstrap");
+        return contractsRuntimeBinding;
+    }
+
     /** Returns one canonical retained Timeline Entry for read-only audit. */
     public synchronized Optional<TimelineEntry> auditTimelineEntry(
             String entryBlueId) {
@@ -439,6 +591,12 @@ public final class DefaultCoordinationEngine
             String timelineId) {
         ensureOpen();
         return journal.entries(requireAuditText(timelineId, "timelineId"));
+    }
+
+    /** Reads only the selected head and maximum-order entry, under one journal view. */
+    public synchronized blue.coordination.api.TimelineJournalPosition auditTimelinePosition(String timelineId) {
+        ensureOpen();
+        return journal.position(requireAuditText(timelineId, "timelineId"));
     }
 
     synchronized Timeline timeline(String timelineId, String actorId) {
@@ -1244,7 +1402,7 @@ public final class DefaultCoordinationEngine
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
             }
             var anchor = next.localHistorical() != null ? next.localHistorical().root()
-                    : documents.sessions().stream().map(DocumentSession::documentId)
+                    : documents.sessionIds().stream()
                     .filter(id -> !next.excludedConsumers().contains(id))
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
@@ -1374,7 +1532,14 @@ public final class DefaultCoordinationEngine
             throw new IllegalArgumentException(
                     "expectedWorkIdentity must be a lowercase sha256 identity");
         }
-        ProcessingSelection next = auditNextProcessingSelection();
+        // Retain the exact head validated here for execution. Fairness is still
+        // evaluated on every command, not cached as part of the derived scan.
+        var driver = contractsClosureProfile.rootedCheckpoint()
+                ? new RootedCheckpointDriver(documents, contractsClosureAdapter) : null;
+        var head = driver == null ? null : contractsRecoveryState.rootedSchedule.next(
+                driver.scan(journal.entries(), null), false, Set.of());
+        ProcessingSelection next = head == null ? auditNextProcessingSelection()
+                : rootedSelection(head.selection());
         String actual = next.managedEpochApplicationWork()
                 .map(ManagedEpochApplicationWork::workIdentity)
                 .orElse(null);
@@ -1386,10 +1551,8 @@ public final class DefaultCoordinationEngine
                     "MANAGED_EPOCH_APPLICATION", next, expected);
         }
         if (contractsClosureProfile.rootedCheckpoint()) {
-            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter);
-            var selected = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
             long started = System.nanoTime();
-            var completed = executeScheduledRoot(selected);
+            var completed = executeScheduledRoot(Objects.requireNonNull(head));
             if (!completed.quiescent()) return completed;
             var remaining = driver.scan(journal.entries(), null);
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
@@ -1480,6 +1643,7 @@ public final class DefaultCoordinationEngine
 
     synchronized void restartFromStores() {
         ensureOpen();
+        documents.clearRepresentationVerifications();
         clearFailureInjection();
         routeIndex.clear();
         documents.sessions().stream()
@@ -1489,7 +1653,7 @@ public final class DefaultCoordinationEngine
                         session.documentId(),
                         session.layout().routingSurface(),
                         session.activeSubscriptions()));
-        drainCoordinator = drainCoordinator.restartFromStores(this::inject);
+        if (drainCoordinator != null) drainCoordinator = drainCoordinator.restartFromStores(this::inject);
         if (contractsClosureAdapter != null) {
             // Retain ContractsRecoveryState, including the deterministic
             // managed-consumer deferral round, across route reconstruction.
@@ -1682,7 +1846,7 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized DocumentSnapshot document(DocumentId documentId) {
         DocumentSession session = requireDocument(documentId);
-        boolean pendingTopLevelAdmission = drainCoordinator
+        boolean pendingTopLevelAdmission = drainCoordinator != null && drainCoordinator
                 .hasPendingTopLevelAdmission(session.documentId());
         String readinessFailure = pendingTopLevelAdmission
                 ? "top-level historical admission remains pending"
@@ -1785,6 +1949,30 @@ public final class DefaultCoordinationEngine
     }
 
     @Override
+    public synchronized Map<String, Optional<ManagedEpochApplicationWork>>
+            auditManagedEpochApplicationWorks(List<String> workIdentities) {
+        ensureOpen();
+        var identities = List.copyOf(Objects.requireNonNull(workIdentities, "workIdentities"));
+        var result = new LinkedHashMap<String, Optional<ManagedEpochApplicationWork>>();
+        for (String identity : identities) result.computeIfAbsent(identity, documents::catchUpWork);
+        if (contractsClosureProfile.rootedCheckpoint() && result.values().stream().anyMatch(Optional::isEmpty)) {
+            // One synchronized observation: no cache survives into another call,
+            // where document, journal or provider evidence may have changed.
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            for (var head : scan.heads()) {
+                var local = head.selection().localHistorical();
+                if (local == null) continue;
+                String identity = local.work().workIdentity();
+                // Keep direct managed-index precedence and first-match behavior
+                // identical to the individual query. Not-next is not absence.
+                if (result.containsKey(identity) && result.get(identity).isEmpty())
+                    result.put(identity, Optional.of(local.work()));
+            }
+        }
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    @Override
     public synchronized ProcessingSelection auditNextProcessingSelection() {
         return auditNextProcessingSelection(ProcessingAvailability.none());
     }
@@ -1804,11 +1992,7 @@ public final class DefaultCoordinationEngine
             if (selected == null) return supplied.journalAdmissionAvailable()
                     || contractsJournalCoordinator.hasCompletableRootedTransport(scan)
                     ? ProcessingSelection.journal() : ProcessingSelection.none();
-            var next = selected.selection();
-            if (next.localHistorical() != null && next.historical() == null)
-                return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
-            return next.historical() == null ? ProcessingSelection.journal()
-                    : ProcessingSelection.managedEpochApplication(next.historical());
+            return rootedSelection(selected.selection());
         }
         Optional<ManagedEpochApplicationWork> managed =
                 nextFairManagedEpochApplicationWork();
@@ -1826,6 +2010,13 @@ public final class DefaultCoordinationEngine
         return managed
                 .map(ProcessingSelection::managedEpochApplication)
                 .orElseGet(ProcessingSelection::none);
+    }
+
+    private static ProcessingSelection rootedSelection(RootedCheckpointDriver.Selection next) {
+        if (next.localHistorical() != null && next.historical() == null)
+            return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
+        return next.historical() == null ? ProcessingSelection.journal()
+                : ProcessingSelection.managedEpochApplication(next.historical());
     }
 
     /** Mirrors managed round rollover without mutating the retained round. */
@@ -1979,6 +2170,28 @@ public final class DefaultCoordinationEngine
         return requireDocument(documentId).revisions();
     }
 
+    /**
+     * SDK assembly point read. Unlike the explicit history audit this selects
+     * one numbered revision, preserving the caller's exact READY/current epoch.
+     * @param documentId retained document identity
+     * @param epoch exact numbered position, not the ambient latest head
+     * @return the immutable revision at that position
+     */
+    public synchronized DocumentRevision revisionAt(DocumentId documentId, long epoch) {
+        return requireDocument(documentId).revision(epoch);
+    }
+
+    /**
+     * SDK change-summary selector equivalent to the first and last full-history causal match.
+     * Includes initialization and imported revisions without a direct Timeline source entry.
+     * @param documentId retained document identity
+     * @param entryBlueId exact causal entry identity
+     * @return no match, one matching revision, or the first and last matching revisions
+     */
+    public synchronized List<DocumentRevision> causalRevisionEndpoints(DocumentId documentId, String entryBlueId) {
+        return requireDocument(documentId).causalRevisionEndpoints(entryBlueId);
+    }
+
     @Override
     public synchronized Set<String> effectiveTimelineIds(
             DocumentId documentId) {
@@ -2035,9 +2248,12 @@ public final class DefaultCoordinationEngine
                 layout.processingFrozen().blueId());
     }
 
-    private static CoordinationException translateStartFailure(
+    private static RuntimeException translateStartFailure(
             DocumentId documentId,
             RuntimeException failure) {
+        if (failure instanceof blue.coordination.api.TimelineJournalStorageException) {
+            return failure;
+        }
         if (failure instanceof ExecutionEvidenceUnavailableException
                 unavailable) {
             Map<String, String> details = new LinkedHashMap<>();
@@ -2088,6 +2304,9 @@ public final class DefaultCoordinationEngine
 
     private static RuntimeException translateDispatchFailure(
             RuntimeException failure) {
+        if (failure instanceof blue.language.processor.NoncommittingExecutionException) {
+            return failure;
+        }
         if (failure instanceof InjectedFailureException) {
             return failure;
         }
@@ -2197,6 +2416,7 @@ public final class DefaultCoordinationEngine
             return;
         }
         closed = true;
+        documents.clearRepresentationVerifications();
         try {
             if (contractsClosureAdapter != null) {
                 try {
@@ -2689,13 +2909,11 @@ public final class DefaultCoordinationEngine
     }
 
     /** In-memory stand-in for the durable feeder publication boundary. */
-    private static final class ContractsRecoveryState {
-        private final RootedProcessingSchedule rootedSchedule = new RootedProcessingSchedule();
-        private final ContractsRootFeederWindow.DurableState feederWindow =
-                new ContractsRootFeederWindow.DurableState();
+    static final class ContractsRecoveryState {
+        private final RootedProcessingSchedule rootedSchedule;
+        private final ContractsRootFeederWindow.DurableState feederWindow;
         private final ContractsJournalDrainCoordinator.DurableState
-                journalDrain =
-                new ContractsJournalDrainCoordinator.DurableState();
+                journalDrain;
         private final LinkedHashSet<DocumentId> deferredManagedConsumers =
                 new LinkedHashSet<>();
         /** Failed/suspended consumers isolated across exact processing slices. */
@@ -2703,6 +2921,19 @@ public final class DefaultCoordinationEngine
                 new LinkedHashSet<>();
         /** Retained fair turn between external and managed transition lanes. */
         private boolean managedEpochTurn;
+
+        private ContractsRecoveryState() {
+            this(new RootedProcessingSchedule(), new ContractsRootFeederWindow.DurableState(),
+                    new ContractsJournalDrainCoordinator.DurableState(), List.of(), List.of(), false);
+        }
+
+        private ContractsRecoveryState(RootedProcessingSchedule schedule,
+                ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
+                List<DocumentId> deferred, List<DocumentId> isolated, boolean managedTurn) {
+            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal;
+            deferredManagedConsumers.addAll(deferred); isolatedManagedConsumers.addAll(isolated);
+            managedEpochTurn = managedTurn;
+        }
 
         private Set<DocumentId> deferredManagedConsumers() {
             return Set.copyOf(deferredManagedConsumers);

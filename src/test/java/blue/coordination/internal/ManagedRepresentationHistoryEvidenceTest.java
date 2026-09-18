@@ -25,10 +25,10 @@ final class ManagedRepresentationHistoryEvidenceTest {
             // A different short-lived history reader uses the same store.
             var repeated = f.chain();
             // then
-            // Every reader constructs a fresh proof with the same exact position.
+            // POC readers reuse the same complete proof only after current authority checks.
             assertEquals(2, first.transitions().size());
             for (int i = 0; i < first.transitions().size(); i++) {
-                assertNotSame(first.transitions().get(i), repeated.transitions().get(i));
+                assertSame(first.transitions().get(i), repeated.transitions().get(i));
                 assertEquals(first.transitions().get(i).positionIdentity(), repeated.transitions().get(i).positionIdentity());
                 new ManagedRepresentationHistory(f.engine.documents()).verifySupplied(first.transitions().get(i));
             }
@@ -160,17 +160,16 @@ final class ManagedRepresentationHistoryEvidenceTest {
             } finally { mapField.set(state, originals); }
 
             var session = f.engine.documents().require(f.parent.id());
-            var rowsField = DocumentSession.class.getDeclaredField("componentRepresentationTransitions");
-            rowsField.setAccessible(true);
-            @SuppressWarnings("unchecked") var rows = (List<DocumentSession.ComponentRepresentationTransition>) rowsField.get(session);
-            var originalRows = List.copyOf(rows);
-            try {
+            var rows = new java.util.ArrayList<>(session.representationTransitions());
+            try (var corruption = new RepresentationRowCorruption(session)) {
                 var last = rows.remove(rows.size() - 1);
+                corruption.replace(rows);
                 assertTrue(assertThrows(IllegalArgumentException.class, f::chain).getMessage().contains("terminal representation head"));
                 rows.add(new DocumentSession.ComponentRepresentationTransition(last.epoch(), last.beforeBlueId(), "forged-head",
                         last.transitionReceiptIdentity(), last.originalPublicationIdentity()));
+                corruption.replace(rows);
                 assertTrue(assertThrows(IllegalArgumentException.class, f::chain).getMessage().contains("durable source history"));
-            } finally { rows.clear(); rows.addAll(originalRows); }
+            }
             var anchorState = stateField.get(f.engine.documents());
             try {
                 f.engine.documents().replaceManagedEpochEvidenceForTesting(f.parent.id(), 0, null, null);

@@ -1,0 +1,13 @@
+# Exact append-chunk storage
+
+The current document store retains ordered public-event and checkpoint logs as immutable append chunks. Flattening those logs into one serialized list would rewrite the whole prefix on every publication and lose the original append boundaries used by its prefix fence.
+
+This private physical backing preserves the existing chunk chain. Each immutable record binds its row codec, log family, complete ordered chunk, predecessor address and exact cumulative size. Fresh open authenticates the selected tail only; subsequent reads follow the selected predecessor path. One append retains one new chunk, without rewriting or decoding prior rows. The mutable directory root and read/prefix publication fences remain the owning store's responsibility.
+
+Resident behavior is unchanged. Stored `extendsLog` recognizes the same authenticated physical prefix across fresh wrappers while preserving chunk boundaries: equal flattened values are not enough. This does not establish that different namespaces or root publications are interchangeable; the external directory must still fence the selected log slot. Explicit resident conversion and same-backing reopen are separate from relocation between two byte stores.
+
+Physical frame, value, descriptor and per-operation cache bounds are explicit. Each full `values()` result remains proportional to its requested complete history, as before; neither the chunk store nor its cache is a bounded-total-history claim. No row decoding or re-encoding writes to storage. Missing bytes, malformed predecessor coverage, bad retention acknowledgment or changed canonical rows fail noncommittingly without replacing the caller's original root.
+
+Final gate 6273 passed eight tests (five storage controls plus three unchanged resident controls) with Javadoc, on the immutable bd09/ab72/0b tuple. The source-stable hash before/after was `1a52cb003b1bd674dc89e10e5193629dbf829bd744c73ca0aaff55de724d2628`; this qualification paragraph changed afterward. Initial clean compile/feedback took 15s; the final incremental gate took 5s.
+
+This is the generic current-log storage seam only. Public-event payloads retain private Language event evidence, so their concrete row codec must use an actual original result/position reference or a Language-owned lossless event transport. A flat Node plus BlueId is not an acceptable substitute. Both normal admission and processing retain the original process result alongside their emitted log rows, making exact result/position references viable; manual store fixtures do not universally have that provenance. No SDK or full store recovery is claimed here.

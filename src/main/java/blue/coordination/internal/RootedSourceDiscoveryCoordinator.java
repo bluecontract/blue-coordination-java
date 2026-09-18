@@ -31,15 +31,40 @@ final class RootedSourceDiscoveryCoordinator {
     private final OperationRouteIndex routes;
     private final Map<String, Timeline> timelines;
     private final ExactNodeProvider provider;
-    private final Map<String, Pending> pending = new LinkedHashMap<>();
-    private final Map<String, SourceHistoryPrerequisiteResult> completed = new LinkedHashMap<>();
-    private final Map<String, Prepared> submitted = new LinkedHashMap<>();
+    private final Map<String, Pending> pending;
+    private final Map<String, SourceHistoryPrerequisiteResult> completed;
+    private final Map<String, Prepared> submitted;
+
+    /** Owned maps from one complete runtime scope; not independently publishable evidence. */
+    record StoredMaps(Map<String, Pending> pending, Map<String, SourceHistoryPrerequisiteResult> completed,
+            Map<String, Prepared> submitted) {
+        StoredMaps { Objects.requireNonNull(pending); Objects.requireNonNull(completed); Objects.requireNonNull(submitted); }
+        static StoredMaps empty() { return new StoredMaps(new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>()); }
+    }
+
+    StoredMaps storedMaps() { return new StoredMaps(pending, completed, submitted); }
+
+    Pending pendingForStorage(String key) { return pending.get(key); }
+    Prepared submittedForStorage(String selectionIdentity) { return submitted.get(selectionIdentity); }
+
+    void requireStorageSupported() {
+        if (!pending.isEmpty() || !completed.isEmpty() || !submitted.isEmpty())
+            throw new blue.coordination.api.storage.CoordinationObjectStorageException(
+                    "Retained source discovery requires complete invocation/attempt/selection storage");
+    }
 
     RootedSourceDiscoveryCoordinator(DefaultCoordinationEngine engine, InMemoryDocumentStore documents,
             ContractsClosureAdapter adapter, InMemoryTimelineJournal journal, EmbeddedOnlyLayoutBuilder layouts,
             OperationRouteIndex routes, Map<String, Timeline> timelines, ExactNodeProvider provider) {
+        this(engine, documents, adapter, journal, layouts, routes, timelines, provider, StoredMaps.empty());
+    }
+
+    RootedSourceDiscoveryCoordinator(DefaultCoordinationEngine engine, InMemoryDocumentStore documents,
+            ContractsClosureAdapter adapter, InMemoryTimelineJournal journal, EmbeddedOnlyLayoutBuilder layouts,
+            OperationRouteIndex routes, Map<String, Timeline> timelines, ExactNodeProvider provider, StoredMaps maps) {
         this.engine = engine; this.documents = documents; this.adapter = adapter; this.journal = journal;
         this.layouts = layouts; this.routes = routes; this.timelines = timelines; this.provider = provider;
+        pending = maps.pending(); completed = maps.completed(); submitted = maps.submitted();
     }
 
     ManagedOccurrenceResolver.Resolution requirePrerequisites(ContractsClosureAdapter.CohortInvocation current,
@@ -319,7 +344,7 @@ final class RootedSourceDiscoveryCoordinator {
     record Prepared(SourceHistoryPrerequisite descriptor,
             Contracts10StaticEmbeddedAdmissionCompiler.CompiledStaticAdmission admission,
             RootedCheckpointDriver.Selection step, CompletenessEvidence completeness) { }
-    private record Pending(ContractsClosureAdapter.CohortInvocation invocation, ClosureAttemptResult attempt,
+    record Pending(ContractsClosureAdapter.CohortInvocation invocation, ClosureAttemptResult attempt,
             ManagedOccurrenceEvidenceDemand demand, DocumentId source, ExactValue authored, ExternalOrderKey cutoff) {
         String key() { return RootedSourceDiscoveryCoordinator.key(invocation.input().invocationIdentity(), demand.demandIdentity()); }
         boolean owns(DocumentId root) { return invocation.rootedEvidence().context().entryOwners()

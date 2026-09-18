@@ -5,9 +5,9 @@ The documentation is organized by task so application guidance, API reference,
 semantic explanation, contributor internals, and historical release evidence do
 not compete as different starting points.
 
-`3.0.0-rc.11` is the current bounded-pilot release candidate. It remains
+`3.0.0-rc.12` is the current bounded-pilot release candidate. It remains
 non-production and consumes the complete published Blue Language
-`3.1.0-rc.27` graph.
+`3.1.0-rc.32` graph.
 
 ## Start here
 
@@ -93,7 +93,7 @@ Executable public-SDK examples live in:
 ## Release status and historical evidence
 
 The current release authority is the bounded external-pilot
-[`3.0.0-rc.11` decision](releases/3.0.0-rc.11.md). It is not a stable or
+[`3.0.0-rc.12` decision](releases/3.0.0-rc.12.md). It is not a stable or
 production-readiness claim. Documentation of a required gate is not a claim
 that it passed.
 

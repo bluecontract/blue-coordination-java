@@ -3,6 +3,7 @@ package blue.coordination.internal;
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.Timeline;
+import blue.coordination.api.storage.CoordinationObjectStorageException;
 
 import blue.language.identity.BlueIds;
 import blue.language.merge.ResolvedSnapshot;
@@ -27,7 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * In-memory whole-object store.
+ * Whole-object machine with an optional pinned backing and a local overlay.
  *
  * <p>Requests, Timeline Entries, semantic Roots, and Process Embedded documents
  * are retained as whole immutable values. The semantic value retained for API
@@ -51,10 +52,18 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             new LinkedHashSet<>();
     private final List<Mark> activeMarks = new ArrayList<>();
     private final EngineMetrics metrics;
+    private final WholeObjectBacking backing;
 
     public WholeObjectStore(EngineMetrics metrics) {
-        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this(metrics, WholeObjectBacking.EMPTY);
     }
+
+    WholeObjectStore(EngineMetrics metrics, WholeObjectBacking backing) {
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        this.backing = Objects.requireNonNull(backing, "backing");
+    }
+
+    boolean hasRetainedBacking() { return backing != WholeObjectBacking.EMPTY; }
 
     public ExactValue put(Node exact, String purpose) {
         return put(ExactValue.verified(exact), purpose);
@@ -74,13 +83,15 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             ExactValue value,
             String purpose) {
         ExactValue checked = Objects.requireNonNull(value, "value");
-        ExactValue existing = canonicalByBlueId.get(checked.blueId());
+        ExactValue existing = canonical(checked.blueId());
         if (existing != null) {
             if (existing.frozen().isReferenceOnly()
                     && !checked.frozen().isReferenceOnly()) {
+                // Pinned backing access can fail. Resolve the old provider lane
+                // before changing even the attempt-local canonical lane.
+                ExactValue provider = provider(checked.blueId());
                 recordBeforeMutation(checked.blueId());
                 canonicalByBlueId.put(checked.blueId(), checked);
-                ExactValue provider = providerByBlueId.get(checked.blueId());
                 if (provider == null || provider.frozen().isReferenceOnly()) {
                     providerByBlueId.put(checked.blueId(), checked);
                 }
@@ -185,7 +196,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             String purpose) {
         ExactValue preferred = ExactValue.fromFrozen(
                 Objects.requireNonNull(representation, "representation"));
-        ExactValue canonical = canonicalByBlueId.get(preferred.blueId());
+        ExactValue canonical = canonical(preferred.blueId());
         if (canonical == null) {
             throw new IllegalStateException(
                     "Cannot prefer an unknown exact object "
@@ -214,7 +225,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             String purpose) {
         ExactValue preferred = ExactValue.fromFrozen(
                 Objects.requireNonNull(representation, "representation"));
-        ExactValue canonical = canonicalByBlueId.get(preferred.blueId());
+        ExactValue canonical = canonical(preferred.blueId());
         if (canonical == null) {
             throw new IllegalStateException(
                     "Cannot prefer an unknown exact object "
@@ -236,6 +247,24 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
      * Coordination preflights all store invariants before mutating state.
      */
     synchronized void retainVerifiedClosureComponentEvidence(
+            ClosureProcessResult result) {
+        if (backing == WholeObjectBacking.EMPTY) {
+            retainVerifiedClosureComponentEvidenceInAttempt(result);
+            return;
+        }
+        // The original resident writes cannot fail due to storage. A backing
+        // read during a multi-member write must not leave a partial local delta.
+        Mark before = mark();
+        try {
+            retainVerifiedClosureComponentEvidenceInAttempt(result);
+            commit(before);
+        } catch (RuntimeException | Error failure) {
+            rollbackTo(before);
+            throw failure;
+        }
+    }
+
+    private void retainVerifiedClosureComponentEvidenceInAttempt(
             ClosureProcessResult result) {
         ClosureProcessResult verified = Objects.requireNonNull(
                 result, "result");
@@ -309,7 +338,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             }
             String blueId = document.afterBlueId();
             String masterBlueId = BlueIds.cyclicSetMasterBlueId(blueId);
-            ExactValue retained = canonicalByBlueId.get(blueId);
+            ExactValue retained = canonical(blueId);
             if (!masterBlueId.equals(component.masterBlueId())
                     || retained == null
                     || !retained.isCyclicMember()
@@ -362,12 +391,12 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     /** Retains a passive ordinary result member omitted by layout rebuilding. */
     private void retainOrdinaryClosureMember(ExactValue member) {
         String blueId = member.blueId();
-        ExactValue canonical = canonicalByBlueId.get(blueId);
+        ExactValue canonical = canonical(blueId);
         if (canonical == null || canonical.frozen().isReferenceOnly()) {
             put(member, "verified-closure-component-member");
             return;
         }
-        ExactValue provider = providerByBlueId.get(blueId);
+        ExactValue provider = provider(blueId);
         if (provider == null || provider.frozen().isReferenceOnly()) {
             recordBeforeMutation(blueId);
             providerByBlueId.put(blueId, member);
@@ -378,7 +407,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     public synchronized ExactValue require(String blueId) {
-        ExactValue value = canonicalByBlueId.get(Objects.requireNonNull(
+        ExactValue value = canonical(Objects.requireNonNull(
                 blueId, "blueId"));
         if (value == null) {
             throw new IllegalArgumentException("Unknown exact object " + blueId);
@@ -388,8 +417,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     public synchronized boolean contains(String blueId) {
-        return canonicalByBlueId.containsKey(Objects.requireNonNull(
-                blueId, "blueId"));
+        return canonical(Objects.requireNonNull(blueId, "blueId")) != null;
     }
 
     /**
@@ -402,7 +430,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
      * cyclic member has no independently verifiable ordinary body.</p>
      */
     synchronized boolean hasCompleteOrdinaryProviderBody(String blueId) {
-        ExactValue provider = providerByBlueId.get(Objects.requireNonNull(
+        ExactValue provider = provider(Objects.requireNonNull(
                 blueId, "blueId"));
         return provider != null
                 && !provider.isCyclicMember()
@@ -418,7 +446,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
         if (selected.isCyclicMember()) {
             return requireCyclicProviderDocument(selected);
         }
-        ExactValue provider = providerByBlueId.get(selected.blueId());
+        ExactValue provider = provider(selected.blueId());
         if (provider == null || provider.frozen().isReferenceOnly()) {
             throw new IllegalStateException(
                     "No complete provider representation for "
@@ -428,13 +456,22 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     private Node requireCyclicProviderDocument(ExactValue selected) {
-        Node providerBody = cyclicProviderBodyByBlueId.get(selected.blueId());
+        String master = BlueIds.cyclicSetMasterBlueId(selected.blueId());
+        // Local/public values can have custom clone behavior; only the closed
+        // storage decoder may memoize a fresh persistent body/proof pair.
+        if (!cyclicProviderBodyByBlueId.containsKey(selected.blueId())
+                && !cyclicProofByMasterBlueId.containsKey(master)) {
+            Node stored = physical(() -> Objects.requireNonNull(backing.verifiedCyclicProviderDocument(
+                    selected.blueId()), "backing verified provider result").orElse(null));
+            if (stored != null) return stored;
+        }
+        Node providerBody = cyclicBody(selected.blueId());
         if (providerBody == null) {
             throw new IllegalStateException(
                     "No wire-preserving cyclic provider representation for "
                             + selected.blueId());
         }
-        CyclicSetProof proof = cyclicProofByMasterBlueId.get(
+        CyclicSetProof proof = proof(
                 BlueIds.cyclicSetMasterBlueId(selected.blueId()));
         if (proof == null) {
             throw new IllegalStateException(
@@ -449,7 +486,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             throw new IllegalStateException(
                     "Retained provider representation is inconsistent with "
                             + selected.blueId() + " (purpose="
-                            + purposeByBlueId.get(selected.blueId()) + ")",
+                            + purpose(selected.blueId()) + ")",
                     invalid);
         }
     }
@@ -459,16 +496,29 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             String selectedBlueId,
             Node selectedProviderBody,
             CyclicSetProof candidateProof) {
-        for (Map.Entry<String, Node> entry
-                : cyclicProviderBodyByBlueId.entrySet()) {
-            String retainedBlueId = entry.getKey();
+        java.util.Set<String> retainedKeys = new LinkedHashSet<>();
+        physical(() -> {
+            for (String key : backing.cyclicMembers(masterBlueId)) {
+                if (key == null || !BlueIds.hasCyclicMemberSeparator(key)
+                        || !masterBlueId.equals(BlueIds.cyclicSetMasterBlueId(key))) {
+                    throw new CoordinationObjectStorageException("Invalid cyclic provider index key");
+                }
+                retainedKeys.add(key);
+            }
+            return null;
+        });
+        retainedKeys.addAll(cyclicProviderBodyByBlueId.keySet());
+        for (String retainedBlueId : retainedKeys) {
             if (!masterBlueId.equals(
                     BlueIds.cyclicSetMasterBlueId(retainedBlueId))) {
                 continue;
             }
             Node retainedBody = retainedBlueId.equals(selectedBlueId)
                     ? selectedProviderBody
-                    : entry.getValue();
+                    : cyclicBody(retainedBlueId);
+            if (retainedBody == null) {
+                throw new CoordinationObjectStorageException("Cyclic provider index has no body " + retainedBlueId);
+            }
             try {
                 ExactValue.fromVerifiedProviderEvidence(
                         retainedBlueId, retainedBody, candidateProof);
@@ -482,15 +532,23 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     public synchronized int size() {
-        return canonicalByBlueId.size();
+        if (backing == WholeObjectBacking.EMPTY) return canonicalByBlueId.size();
+        int size = physical(backing::size);
+        if (size < 0) throw new CoordinationObjectStorageException("Negative object count");
+        for (String key : canonicalByBlueId.keySet()) {
+            if (storedEntry(key) == null) size = Math.addExact(size, 1);
+        }
+        return size;
     }
 
     synchronized void forceProviderUnavailable(String blueId) {
+        observationRevision++;
         unavailableProviderBlueIds.add(Objects.requireNonNull(
                 blueId, "blueId"));
     }
 
     synchronized void restoreProviderAvailability(String blueId) {
+        observationRevision++;
         unavailableProviderBlueIds.remove(Objects.requireNonNull(
                 blueId, "blueId"));
     }
@@ -515,6 +573,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     /** Restores only keys changed after the supplied nested savepoint. */
     public synchronized void rollbackTo(Mark mark) {
         requireTopMark(mark);
+        observationRevision++;
         List<Map.Entry<String, PriorState>> changes = new ArrayList<>(
                 mark.priorByBlueId.entrySet());
         for (int index = changes.size() - 1; index >= 0; index--) {
@@ -544,22 +603,22 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
 
     @Override
     public synchronized List<Node> fetchByBlueId(String blueId) {
-        Node cyclicProvider = cyclicProviderBodyByBlueId.get(blueId);
+        Node cyclicProvider = cyclicBody(blueId);
         if (cyclicProvider != null) {
             metrics.increment("wholeObjectStore.providerReads");
-            String purpose = purposeByBlueId.getOrDefault(blueId, "unknown");
+            String purpose = purpose(blueId);
             metrics.increment("wholeObjectStore.providerReads." + purpose);
             return Collections.singletonList(cyclicProvider.clone());
         }
         if (BlueIds.hasCyclicMemberSeparator(blueId)) {
             return Collections.emptyList();
         }
-        ExactValue value = providerByBlueId.get(blueId);
+        ExactValue value = provider(blueId);
         if (value == null) {
             return Collections.emptyList();
         }
         metrics.increment("wholeObjectStore.providerReads");
-        String purpose = purposeByBlueId.getOrDefault(blueId, "unknown");
+        String purpose = purpose(blueId);
         metrics.increment("wholeObjectStore.providerReads." + purpose);
         return Collections.singletonList(value.copyNode());
     }
@@ -582,11 +641,10 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             return false;
         }
         if (BlueIds.hasCyclicMemberSeparator(selected)) {
-            return cyclicProviderBodyByBlueId.containsKey(selected)
-                    && cyclicProofByMasterBlueId.containsKey(
-                            BlueIds.cyclicSetMasterBlueId(selected));
+            return cyclicBody(selected) != null
+                    && proof(BlueIds.cyclicSetMasterBlueId(selected)) != null;
         }
-        ExactValue provider = providerByBlueId.get(selected);
+        ExactValue provider = provider(selected);
         if (provider == null
                 || provider.frozen().isReferenceOnly()) {
             return false;
@@ -602,13 +660,13 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
             return CyclicSetProofResult.unavailable(
                     "Test-controlled exact resource is unavailable");
         }
-        CyclicSetProof proof = cyclicProofByMasterBlueId.get(
-                BlueIds.cyclicSetMasterBlueId(selected));
-        if (proof == null) {
+        Node provider = cyclicBody(selected);
+        if (provider == null) {
             return CyclicSetProofResult.notFound();
         }
-        Node provider = cyclicProviderBodyByBlueId.get(selected);
-        if (provider == null) {
+        CyclicSetProof proof = proof(
+                BlueIds.cyclicSetMasterBlueId(selected));
+        if (proof == null) {
             return CyclicSetProofResult.notFound();
         }
         try {
@@ -625,6 +683,83 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
                         proof.declaredPlaceholderSet()));
     }
 
+    /** No backing reads are cached into the local mutation maps. */
+    private WholeObjectBacking.Entry storedEntry(String blueId) {
+        return physical(() -> {
+            var entry = Objects.requireNonNull(backing.find(blueId), "backing find result").orElse(null);
+            if (entry != null && !blueId.equals(entry.canonical().blueId())) {
+                throw new CoordinationObjectStorageException("Stored exact object key mismatch " + blueId);
+            }
+            if (entry != null && entry.cyclicProviderBody() != null) {
+                CyclicSetProof complete = Objects.requireNonNull(backing.proof(
+                        BlueIds.cyclicSetMasterBlueId(blueId)), "backing proof result")
+                        .orElseThrow(() -> new CoordinationObjectStorageException(
+                                "Stored cyclic provider body has no complete proof " + blueId));
+                // A corrupt persisted lane is a noncommitting storage failure,
+                // not the semantic INVALID_EVIDENCE provider outcome. Canonical
+                // and provider representation shapes need not be identical.
+                ExactValue.fromVerifiedProviderEvidence(blueId, entry.cyclicProviderBody(), complete);
+            }
+            return entry;
+        });
+    }
+
+    private ExactValue canonical(String blueId) {
+        ExactValue local = canonicalByBlueId.get(blueId);
+        if (local != null) return local;
+        var stored = storedEntry(blueId);
+        return stored == null ? null : stored.canonical();
+    }
+
+    private ExactValue provider(String blueId) {
+        ExactValue local = providerByBlueId.get(blueId);
+        if (local != null) return local;
+        var stored = storedEntry(blueId);
+        return stored == null ? null : stored.provider();
+    }
+
+    private Node cyclicBody(String blueId) {
+        Node local = cyclicProviderBodyByBlueId.get(blueId);
+        if (local != null) return local;
+        var stored = storedEntry(blueId);
+        return stored == null ? null : stored.cyclicProviderBody();
+    }
+
+    private String purpose(String blueId) {
+        String local = purposeByBlueId.get(blueId);
+        if (local != null) return local;
+        var stored = storedEntry(blueId);
+        return stored == null ? "unknown" : stored.purpose();
+    }
+
+    private CyclicSetProof proof(String masterBlueId) {
+        CyclicSetProof local = cyclicProofByMasterBlueId.get(masterBlueId);
+        return local == null ? physical(() -> Objects.requireNonNull(
+                backing.proof(masterBlueId), "backing proof result").orElse(null)) : local;
+    }
+
+    /** Immutable delta only. The caller must fence and publish it atomically. */
+    synchronized WholeObjectBacking.Changes changes() {
+        var changed = new LinkedHashSet<>(canonicalByBlueId.keySet());
+        changed.addAll(providerByBlueId.keySet());
+        changed.addAll(cyclicProviderBodyByBlueId.keySet());
+        changed.addAll(purposeByBlueId.keySet());
+        var entries = new LinkedHashMap<String, WholeObjectBacking.Entry>();
+        for (String key : changed) {
+            entries.put(key, new WholeObjectBacking.Entry(
+                    canonical(key), provider(key), cyclicBody(key), purpose(key)));
+        }
+        return new WholeObjectBacking.Changes(entries, cyclicProofByMasterBlueId);
+    }
+
+    private static <T> T physical(java.util.function.Supplier<T> operation) {
+        try { return operation.get(); }
+        catch (CoordinationObjectStorageException failure) { throw failure; }
+        catch (RuntimeException failure) {
+            throw new CoordinationObjectStorageException("Exact object backing is unavailable or invalid", failure);
+        }
+    }
+
     private static String sanitize(String purpose) {
         String checked = Objects.requireNonNull(purpose, "purpose").trim();
         if (checked.isEmpty()) {
@@ -633,7 +768,12 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
         return checked.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
 
+    private long observationRevision;
+
+    synchronized long observationRevision() { return observationRevision; }
+
     private void recordBeforeMutation(String blueId) {
+        observationRevision++;
         if (activeMarks.isEmpty()) {
             return;
         }
@@ -648,6 +788,7 @@ final class WholeObjectStore implements NodeProvider, CyclicAwareNodeProvider {
     }
 
     private void recordProofBeforeMutation(String masterBlueId) {
+        observationRevision++;
         if (activeMarks.isEmpty()) {
             return;
         }

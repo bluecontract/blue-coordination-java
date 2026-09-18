@@ -1,0 +1,35 @@
+{
+  "scope": "Component qualification only: exact publication/admission/drain/rejection/result-row transport, not full runtime restart",
+  "baseCommit": "a168ccd017da223bccab331e24b2b6d9cba7b9b4",
+  "archive": "/Users/kamil/Documents/Projects/Blue/rooted-publication-receipt-evidence.Wfk3uW/final-focused",
+  "startedUtc": "2026-09-11T04:52:25Z",
+  "finishedUtc": "2026-09-11T04:53:36Z",
+  "javaHome": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home",
+  "languageCommit": "8542285144a8969f157d73e73292398885105c46",
+  "bexCommit": "ab72af14ee54c6123e6d80349956af373a887680",
+  "catalogCommit": "0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+  "exactCommandAndManifests": "receipt.json in archive",
+  "exitCode": 0,
+  "sourceStable": true,
+  "testedInputCount": 835,
+  "tests": 38,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "javadoc": "PASS",
+  "newTests": {"PublicationReceiptStorageCodecTest": 5, "StoredProcessingReceiptSdkTest": 2},
+  "existingTests": {"CohortInvocationStorageCodecTest": 7, "DocumentSessionStorageTest": 12, "OperationPlanStorageCodecTest": 3, "StoredStructuralIndexesTest": 4, "StoredCatchUpWorkIndexesTest": 4, "StoredCatchUpWorkSdkTest": 1},
+  "sha256": {
+    "receipt.json": "2439e9a6cd29efab4b0d9322fc318344e6c46b8d2bbcada1a792169494ab0d99",
+    "gradle.log": "65e09b76e5c0c3e69e7291a2abd6018fa078ec6a21b303ad2b1a6b3aa7e99ad9",
+    "tested-source.tar.gz": "9808d1cfc272fece289a51acf82ad7754e361886f11a6b94ed4828b2d1598a00",
+    "source-before.json": "17994ba36b5791d2d8dc587d52bd1a7a3e01b9872c877afd4ea01457a56d0fc6"
+  },
+  "priorRunsNotCounted": [
+    {"directory": "initial-focused", "outcome": "Compile failed: needsResources overload inference; fixed with explicitly typed demand list"},
+    {"directory": "compiled-focused", "outcome": "2 of 5 pass; three rejection fixtures had authored document IDs inconsistent with explicit fixture IDs"},
+    {"directory": "actual-focused", "outcome": "4 of 5 pass; negative public demand copy lacked original inline value and reached missing-value rejection before issued-marker rejection"},
+    {"directory": "complete-focused", "outcome": "6 of 7 pass; test used Java object equality on application receipt without equals; replaced by complete original-work/receipt byte equality"}
+  ],
+  "postGateChange": "Only this compact evidence manifest added; all 835 tested source inputs rechecked unchanged"
+}

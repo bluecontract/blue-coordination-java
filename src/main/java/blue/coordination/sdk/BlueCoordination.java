@@ -4,7 +4,7 @@ import blue.coordination.api.ContractsExecutionPolicy;
 
 import java.util.Objects;
 
-/** Stable application-facing owner of one in-memory Coordination runtime. */
+/** Stable application-facing owner of one Coordination runtime. */
 public final class BlueCoordination implements AutoCloseable {
     private final SdkCoordinationRuntime runtime;
     private final TimelineCatalog timelines;
@@ -21,13 +21,18 @@ public final class BlueCoordination implements AutoCloseable {
             ExactNodeProvider exactNodeProvider,
             boolean contentDerivedDocumentIds,
             ContractsExecutionPolicy contractsExecutionPolicy) {
-        runtime = SdkCoordinationRuntime.create(
-                this,
+        this(owner -> SdkCoordinationRuntime.create(
+                owner,
                 languageIdentity,
                 contractsIdentity,
                 exactNodeProvider,
                 contentDerivedDocumentIds,
-                contractsExecutionPolicy);
+                contractsExecutionPolicy));
+    }
+
+    /** Complete storage assembly uses this same owner for all restored SDK handles. */
+    BlueCoordination(java.util.function.Function<Object, SdkCoordinationRuntime> factory) {
+        runtime = Objects.requireNonNull(factory.apply(this), "runtime");
         timelines = new TimelineCatalog(runtime);
         documents = new DocumentCatalog(runtime);
         operations = new OperationGateway(runtime);
@@ -36,6 +41,8 @@ public final class BlueCoordination implements AutoCloseable {
         values = new ExactValues(runtime);
         advanced = new AdvancedCoordination(runtime);
     }
+
+    SdkCoordinationRuntime runtimeForStorage() { return runtime; }
 
     /** Creates the supported in-memory runtime pinned to the bundled release. */
     public static BlueCoordination inMemory() {

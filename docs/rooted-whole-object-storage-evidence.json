@@ -1,0 +1,91 @@
+{
+  "workingDirectory": "/Users/kamil/Documents/Projects/Blue/worktrees/rooted-external-state-storage",
+  "baseCommit": "e2ac0dbb39e232ab88b67bf184b52895c785b163",
+  "startedUtc": "2026-09-11T01:16:36Z",
+  "finishedUtc": "2026-09-11T01:28:21Z",
+  "javaHome": "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home",
+  "command": [
+    "./gradlew",
+    "test",
+    "--tests",
+    "*WholeObjectStorageTest",
+    "--tests",
+    "*WholeObjectStoreTest",
+    "--tests",
+    "*RootedRetainedSourceWireTest",
+    "--tests",
+    "*RootedLocalHistoryRecoveryTest",
+    "javadoc",
+    "-PblueDependencyMode=immutable-development-contracts",
+    "-PblueDevelopmentVersion=3.0.0-dev.e2ac0dbb39e232ab88b67bf184b52895c785b163",
+    "-PblueContractsRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/language",
+    "-PblueContractsVersion=3.1.0-dev.7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+    "-PblueContractsSourceCommit=7ec0fdaafff41ad8e41387e7e5647d5a800d807c",
+    "-PblueContractsManifestSha256=sha256:4ec8cd6fb225503c32ea28b9174d96acacca426c9f6b0b41ddb16880c27bfb81",
+    "-PblueBexRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/bex",
+    "-PblueBexVersion=1.1.0-dev.ab72af14ee54c6123e6d80349956af373a887680",
+    "-PblueBexSourceCommit=ab72af14ee54c6123e6d80349956af373a887680",
+    "-PblueBexManifestSha256=sha256:9053a287e0107eb145c4af8a3dae0ed2eabb1f06529ba7b2d8b0ee5c7fe61855",
+    "-PblueRepositoryRepository=/Users/kamil/Documents/Projects/Blue/rooted-retarget-historical-development.zE0Rg1/catalog",
+    "-PblueRepositoryVersion=3.0.0-dev.0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+    "-PblueRepositorySourceCommit=0b68744ba6456ef312d1ba87a27096bd2ac5341f",
+    "-PblueRepositoryManifestSha256=sha256:689fea3a72ce6bcc3488ae45437aa15ddfe05edb50e59c8a5ba356674ffec08d",
+    "-PtestJavaVersion=17",
+    "--max-workers=1",
+    "--no-parallel",
+    "--no-daemon",
+    "--offline",
+    "--console=plain"
+  ],
+  "exitCode": 0,
+  "sourceStable": true,
+  "compilerInputCount": 623,
+  "compilerInputSha256": "59098619f38367c4959c29b7868ed16a1997fadf910b865be68d68acf5754082",
+  "suites": {
+    "blue.coordination.internal.RootedRetainedSourceWireTest": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "blue.coordination.internal.WholeObjectStorageTest": {
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "blue.coordination.internal.WholeObjectStoreTest": {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "blue.coordination.sdk.RootedLocalHistoryRecoveryTest": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "totals": {
+    "tests": 31,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "artifacts": {
+    "gradle.log": "1c935ed79cd31d778ca45af4f88431bbac4845894a6332637b9f3068af20a01d",
+    "source-before.json": "feca8dedad1c0ee3e2bd6c7a2adfce0190e17cb59cccee55cf39f68853e3929f",
+    "source-after.json": "feca8dedad1c0ee3e2bd6c7a2adfce0190e17cb59cccee55cf39f68853e3929f",
+    "tested-source.tar.gz": "c3e3a21c995ae182316371da87a327ab38e28ec0e6183a502a7f1e230e9a942d"
+  },
+  "scope": "WholeObjectStore body/provider/cyclic-proof component only; excludes resolver snapshots, SDK/state restoration and PostgreSQL publication",
+  "archiveRoot": "/Users/kamil/Documents/Projects/Blue/rooted-external-state-storage-evidence.RHEMrm/focused-final",
+  "receiptSha256": "4aa83f66562d1f6e36dc66d0ad5bac89f9950f0510bf0ded81247bef38d93a6b",
+  "xmlSha256": {
+    "TEST-blue.coordination.internal.RootedRetainedSourceWireTest.xml": "150f0a51c671a5019687528f2b41e1c8516dbbf0e2da4b6151c59075806ed885",
+    "TEST-blue.coordination.internal.WholeObjectStorageTest.xml": "0c3a23e7c076cbd4fbf629a0dd33b7f421b4d7f38b512a2b6b0cd9ef9cf142e8",
+    "TEST-blue.coordination.internal.WholeObjectStoreTest.xml": "1812997dbe2a1c910e6a8f0a52e952313068ce7180102533302b40028e4eaed4",
+    "TEST-blue.coordination.sdk.RootedLocalHistoryRecoveryTest.xml": "1d478c2f4caddbe4bdd501e682ebb2912d180426ea36564a01cc16a13fd71207"
+  }
+}

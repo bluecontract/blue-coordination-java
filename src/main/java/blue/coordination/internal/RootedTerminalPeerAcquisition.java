@@ -100,7 +100,7 @@ final class RootedTerminalPeerAcquisition {
             if (session.rootedView() != view)
                 throw ContractsClosureAdapter.stale("Terminal peer publication changed before capture");
             view.requirePublishedHead(id, session.epoch(), session.currentRepresentation().blueId());
-            session.rootedPublicationPrefix(view);
+            session.requireRetainedRootedView(view);
         }
     }
 }

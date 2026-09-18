@@ -836,11 +836,7 @@ final class SdkDrainResultMapper {
                     .toList();
 
             List<blue.coordination.api.DocumentRevision> matching =
-                    engine.history(documentId).stream()
-                            .filter(revision -> revision.causalEntryBlueId()
-                                    .filter(entry.blueId()::equals)
-                                    .isPresent())
-                            .toList();
+                    engine.causalRevisionEndpoints(documentId, entry.blueId());
             if (!matching.isEmpty()) {
                 blue.coordination.api.DocumentRevision first =
                         matching.get(0);

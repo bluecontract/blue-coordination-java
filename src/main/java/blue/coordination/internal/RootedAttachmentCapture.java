@@ -161,7 +161,7 @@ final class RootedAttachmentCapture {
             throw new ProjectionUnavailableException("Current-at-activation attachment changed its original source publication");
         view.requirePublishedHead(id, source.epoch(), source.blueId());
         anchor.requirePublishedHead(id, source.epoch(), source.blueId());
-        session.rootedPublicationPrefix(anchor);
+        session.requireRetainedRootedView(anchor);
         return true;
     }
 
