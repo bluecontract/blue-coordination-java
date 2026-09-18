@@ -1,6 +1,10 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.ContractsExecutionPolicy;
+import blue.coordination.api.storage.CoordinationRecordAttempt;
+import blue.coordination.api.storage.CoordinationRecordStore;
+import blue.coordination.api.storage.CoordinationRecords.*;
+import java.util.TreeMap;
 import blue.coordination.api.SourceHistoryPrerequisite;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
 import blue.coordination.api.storage.CoordinationObjectStorageException;
@@ -28,6 +32,71 @@ final class SdkRuntimePointMapsTest {
             new InsertionOrderedStorage.Limits(512 * 1024, 64 * 1024, 64 * 1024, 4096, 32,
                     256 * 1024, 4 * 1024 * 1024, 100),
             new SdkPointStorage.Limits(MAX, 128 * 1024, MAX, 100), 256 * 1024);
+
+    @Test void logicalRowsRestoreActualSdkExecutionWithColdOwnedHandles() throws Exception {
+        // given
+        var records = new LogicalRecords(); var objects = new Bytes();
+        try (var original = new Fixture(); var receiver = new Fixture(); var attempt = records.attempt()) {
+            var binding = new blue.coordination.internal.LogicalPointStorage(attempt);
+            try (var maps = SdkRuntimePointMaps.openLogical(original.runtime, objects, LIMITS, binding)) {
+                original.runtime.installPointMaps(maps.maps());
+                // when
+                var result = original.execute(); var independent = receiver.execute();
+                binding.stage(); var packet = attempt.prepare("sdk", List.of(), LogicalRecords.EVIDENCE);
+                // then
+                assertTrue(packet.queries().isEmpty(), "ordinary SDK work selects points, not all SDK families");
+                assertTrue(records.publish(packet));
+                assertThrows(NoncommittingExecutionException.class, maps::snapshot);
+                try (var coldAttempt = records.attempt()) {
+                    var coldObjects = objects.fresh();
+                    var coldBinding = new blue.coordination.internal.LogicalPointStorage(coldAttempt);
+                    try (var cold = SdkRuntimePointMaps.openLogical(receiver.runtime, coldObjects, LIMITS, coldBinding)) {
+                        assertEquals(0, coldObjects.reads);
+                        var restored = cold.maps().results().get(result.entry().blueId());
+                        assertArrayEquals(original.codec.encode(result), receiver.codec.encode(restored));
+                        assertEquals(independent.entry(), restored.entry());
+                        assertNotEquals(result.entry(), restored.entry());
+                        assertSame(restored, cold.maps().results().get(result.entry().blueId()));
+                        assertTrue(cold.maps().intents().get(result.entry().blueId()).targeted());
+                        assertNotNull(cold.maps().entries().get(result.entry().blueId()));
+                        assertEquals(0, coldObjects.writes);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test void differentLogicalSdkTimelinesPublishInBothOrdersWithoutAnInsertionCounter() throws Exception {
+        // given
+        for (boolean reverse : List.of(false, true)) {
+            var records = new LogicalRecords(); var objects = new Bytes();
+            try (var left = new Fixture(); var right = new Fixture(); var a = records.attempt(); var b = records.attempt()) {
+                var ca = new blue.coordination.internal.LogicalPointStorage(a);
+                var cb = new blue.coordination.internal.LogicalPointStorage(b);
+                try (var ma = SdkRuntimePointMaps.openLogical(left.runtime, objects, LIMITS, ca);
+                     var mb = SdkRuntimePointMaps.openLogical(right.runtime, objects, LIMITS, cb)) {
+                    left.runtime.installPointMaps(ma.maps()); right.runtime.installPointMaps(mb.maps());
+                    // when
+                    left.runtime.registerTimeline("left", "alice"); right.runtime.registerTimeline("right", "alice");
+                    ca.stage(); cb.stage();
+                    var pa = a.prepare("left", List.of(), LogicalRecords.EVIDENCE);
+                    var pb = b.prepare("right", List.of(), LogicalRecords.EVIDENCE);
+                    // then
+                    assertTrue(pa.queries().isEmpty()); assertTrue(pb.queries().isEmpty());
+                    assertEquals(1, pa.mutations().size()); assertEquals(1, pb.mutations().size());
+                    assertTrue(records.publish(reverse ? pb : pa)); assertTrue(records.publish(reverse ? pa : pb));
+                    try (var owner = new Fixture(); var coldAttempt = records.attempt()) {
+                        owner.runtime.registerTimeline("left", "alice"); owner.runtime.registerTimeline("right", "alice");
+                        var binding = new blue.coordination.internal.LogicalPointStorage(coldAttempt);
+                        try (var cold = SdkRuntimePointMaps.openLogical(owner.runtime, objects, LIMITS, binding)) {
+                            assertEquals("left", cold.maps().timelines().get("left").id());
+                            assertEquals("right", cold.maps().timelines().get("right").id());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     @Test void genuineRowsColdOpenLazilyWithNewOwnerHandlesAndNoProcessingOrReadTimeWrites() throws Exception {
         // given
@@ -257,5 +326,37 @@ final class SdkRuntimePointMapsTest {
         assertEquals(expected.roots().keySet(), actual.roots().keySet());
         expected.roots().forEach((kind, a) -> { var b = actual.roots().get(kind);
             assertArrayEquals(a.keys(), b.keys()); assertArrayEquals(a.order(), b.order()); assertEquals(a.nextSequence(), b.nextSequence()); });
+    }
+    private static final class LogicalRecords {
+        static final blue.coordination.api.storage.CoordinationRecords.Bytes EVIDENCE = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+        static final Address ADDRESS = new Address("sdk-test", "instance");
+        final TreeMap<Key, Value> data = new TreeMap<>();
+        CoordinationRecordAttempt attempt() {
+            var snapshot = new TreeMap<>(data);
+            return new CoordinationRecordAttempt(new CoordinationRecordStore.ReadScope() {
+                boolean closed;
+                void open() { if (closed) throw new IllegalStateException("Closed fixture snapshot"); }
+                public Address address() { open(); return ADDRESS; }
+                public Value read(Key key) { open(); return snapshot.getOrDefault(key, Value.absent()); }
+                public List<Row> query(Range range) { open(); return rows(snapshot, range); }
+                public Optional<Row> first(Range range) { return query(range).stream().findFirst(); }
+                public void close() { closed = true; }
+            });
+        }
+        boolean publish(Publication packet) {
+            for (var point : packet.points()) if (!point.expected().equals(data.getOrDefault(point.key(), Value.absent()))) return false;
+            for (var query : packet.queries()) if (!query.expected().equals(rows(data, query.range()))) return false;
+            for (var fact : packet.immutableFacts()) {
+                var prior = data.get(fact.key());
+                if (prior != null && !fact.content().equals(prior.content())) throw new IllegalArgumentException("Different immutable fact");
+            }
+            for (var fact : packet.immutableFacts()) data.putIfAbsent(fact.key(), new Value(1, fact.content()));
+            for (var mutation : packet.mutations()) data.put(mutation.key(), new Value(data.getOrDefault(mutation.key(), Value.absent()).revision() + 1, mutation.content()));
+            return true;
+        }
+        private static List<Row> rows(TreeMap<Key, Value> data, Range range) {
+            return data.entrySet().stream().filter(e -> range.contains(e.getKey()) && e.getValue().content() != null)
+                    .map(e -> new Row(e.getKey(), e.getValue())).toList();
+        }
     }
 }

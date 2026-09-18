@@ -82,3 +82,16 @@ absence; explicit point/range observations still retain their strict conditions.
 Object entries are deliberately mutable: reference-to-body upgrades and exact
 representation selection still require ordinary conditions. Shared object-entry
 selection is not yet a qualified false-conflict-free integration.
+
+SDK logical maps share a `LogicalPointStorage` attempt binding. This is an
+explicit internal cross-package bridge (alongside `InsertionOrderedStorage`),
+not an added application semantic API. All five closed SDK families preserve
+point payloads, exact owner validation and bounded identity pins. Selecting the
+complete SDK map is a complete predicate, whereas ordinary execution uses only
+selected keys. The logical path enumerates canonical encoded keys and has no
+shared insertion counter. SDK iteration is used by metadata export/legacy
+restoration; it does not schedule work. The legacy descriptor path preserves
+its previous insertion-order behavior. Neither path silently converts to the
+other. Actual SDK execution/cold point restoration and independent Timeline
+map writes in both publication orders are tested; complete engine control and
+application stage assembly are still separate work.
