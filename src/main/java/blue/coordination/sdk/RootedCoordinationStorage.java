@@ -475,6 +475,13 @@ public final class RootedCoordinationStorage {
         public Optional<DocumentHandle> documentHandle(DocumentId id) { guard(); return owned.runtime.findStoredDocumentHandle(id); }
         /** Finds retained SDK registration. @param id Timeline identity @return owned Timeline handle */
         public Optional<TimelineHandle> timelineHandle(String id) { guard(); return Optional.ofNullable(owned.maps.maps().timelines().get(id)); }
+        /** Explicit complete document inventory; records a catalog predicate. Never use as an unrelated-work scheduler.
+         * @return detached stored document identities */
+        public List<DocumentId> documentIds() { guard(); return owned.engine.engine().storedDocumentIds(); }
+        /** Explicit complete registration inventory; records a catalog predicate.
+         * @return detached Timeline identities */
+        public List<String> timelineIds() { guard(); return owned.maps.maps().timelines().keySet().stream().sorted().toList(); }
+
         /** Selects and flushes all families, then retires this owner. No database publication occurs here. */
         public void stage() {
             guard();
