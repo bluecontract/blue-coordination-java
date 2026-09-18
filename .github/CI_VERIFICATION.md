@@ -60,3 +60,18 @@ without a measurement receives weight 1 and still runs. Removed classes are not
 selected. Weights are currently refreshed explicitly from successful CI reports;
 CI does not commit weight updates automatically. Refreshing these data affects
 only CI group assignment; normal local Gradle commands remain unchanged.
+
+To refresh weights explicitly from a successful sharded Build (requires `gh`
+authentication), run from the repository root:
+
+```sh
+python3 .github/scripts/refresh-test-weights.py --run 35264124428
+git diff -- .github/scripts/ci-test-weights.json
+```
+
+Use the chosen successful run ID. The helper downloads all three shard artifacts,
+checks their run/attempt binding, complete class coverage and report hashes, then
+updates only the weights file. It refuses failed/incomplete runs and never commits,
+pushes, starts workflows or publishes packages. Use `--output /tmp/weights.json`
+to inspect measurements without changing the repository. Updating weights does
+not guarantee a faster run; compare actual group durations before retaining them.
