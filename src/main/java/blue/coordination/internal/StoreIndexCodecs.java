@@ -168,8 +168,15 @@ final class StoreIndexCodecs {
         PersistentOrderedMap<K, V> open(byte[] descriptor) {
             return PersistentOrderedMap.stored(order, identity, keys, values, objects, limits, descriptor);
         }
+        PersistentOrderedMap<K, V> openLogical(LogicalRecordContext context,
+                blue.coordination.api.storage.CoordinationRecords.Family family,
+                blue.coordination.api.storage.CoordinationRecords.Bytes scope, OrderedRecordKey<K> orderedKeys) {
+            return PersistentOrderedMap.logical(order, context, family, scope, orderedKeys, values,
+                    limits.keyBytes(), limits.valueBytes());
+        }
+
         PersistentOrderedMap<K, V> retain(PersistentOrderedMap<K, V> map) {
-            return map.storedCopy(identity, keys, values, objects, limits);
+            return map.isLogical() ? map : map.storedCopy(identity, keys, values, objects, limits);
         }
         PersistentMapCodec<PersistentOrderedMap<K, V>> nested() {
             return new PersistentMapCodec<>() {

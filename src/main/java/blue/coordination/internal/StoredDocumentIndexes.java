@@ -44,6 +44,27 @@ final class StoredDocumentIndexes {
         retained = codecs.binding("lineage/retained", EmbeddingBinding.TEXT_ORDER, codecs.text, retainedBucket.nested());
     }
 
+    /** Fine-grained primary rows; session/history bodies remain immutable library artifacts. */
+    PersistentOrderedMap<DocumentId, StoreIndexCodecs.SessionAddress> openLogicalSessions(LogicalRecordContext context) {
+        return addresses.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.SESSION,
+                logicalScope(), OrderedRecordKey.document());
+    }
+
+    ClosureGraphGenerationInventory openLogicalGenerations(LogicalRecordContext context) {
+        return ClosureGraphGenerationInventory.restoreStored(new ClosureGraphGenerationInventory.StoredState(
+                generations.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.GRAPH_GENERATION,
+                        logicalScope(), OrderedRecordKey.document()), 0, 0));
+    }
+
+    PersistentOrderedMap<DocumentId, ManagedLineageIndex.Lineage> openLogicalLineageDocuments(LogicalRecordContext context) {
+        return lineages.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.LINEAGE_DOCUMENT,
+                logicalScope(), OrderedRecordKey.document());
+    }
+
+    private static blue.coordination.api.storage.CoordinationRecords.Bytes logicalScope() {
+        return new blue.coordination.api.storage.CoordinationRecords.Bytes(OrderedRecordKey.text().encode("runtime/1"));
+    }
+
     StoreIndexCodecs.SessionAddress retainSession(DocumentSession session) {
         return new StoreIndexCodecs.SessionAddress(session.documentId(), sessions.retain(session));
     }
