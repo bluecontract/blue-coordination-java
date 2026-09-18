@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -185,7 +186,9 @@ final class ApplicationReadinessProofIntegrationTest {
 
     private static void replaceCurrentParentStateWithMismatch(
             DocumentSession parent) throws ReflectiveOperationException {
-        List<DocumentRevision> revisions = fieldValue(parent, "revisions");
+        List<DocumentRevision> retained = fieldValue(parent, "revisions");
+        // Test-only corrupt image: production history is append-only and cannot be set in place.
+        List<DocumentRevision> revisions = new ArrayList<>(retained);
         int lastIndex = revisions.size() - 1;
         DocumentRevision current = revisions.get(lastIndex);
         Node mismatchedRoot = current.after().copyNode();
@@ -206,6 +209,12 @@ final class ApplicationReadinessProofIntegrationTest {
                 current.catchUpCause().orElse(null),
                 current.emittedEvents(),
                 current.processingGas()));
+        setField(parent, "revisions", SessionHistoryList.copyOf(revisions));
+        // Keep the row's point index coherent: this fixture isolates the parent/cursor
+        // mismatch, not the separate check for corruption of a retained revision index.
+        setField(parent, "retainedStates", parent.retainedStateIndex().put(
+                current.epoch(), new ManagedLineageIndex.RetainedState(
+                        current.documentId(), current.epoch(), mismatched.blueId())).map());
     }
 
     private static String resource(String name) throws IOException {

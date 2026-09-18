@@ -66,3 +66,25 @@ These are packaging/structural checks, not a full current-tuple test result.
 The PR's complete Java 17/21 `releaseCheck`, extracted-source build and RC12
 readiness are required before merge, followed by the normal publication gates.
 MyOS acceptance against the published tuple is a later, separate step.
+
+### First complete PR attempt
+
+PR #27 run `35287896191`, head `26b5be2`, completed the same inventories on
+Java 17 and Java 21: unit **1,515/1,515**, built-JAR consumer **16/16**, and
+integration **90/91**, with no errors or skips. The integration failure stopped
+later release tasks; this is not complete release acceptance.
+
+`ApplicationReadinessProofIntegrationTest` attempted `List.set` on the now
+append-only session revision history while constructing its deliberately corrupt
+parent state. It therefore failed before exercising the intended parent/cursor
+mismatch rejection. Replace the test-only revision image and its exact retained
+position metadata together, leaving the child cursor and all original
+`DOCUMENT_NOT_READY`, diagnostic and audit-state assertions unchanged. A first
+local attempt replacing only the row correctly hit the independent row/index
+integrity guard; the fixture must isolate the composite readiness proof instead.
+No production source or integrity rule changes.
+
+The repaired five-case owner passes locally on both Java 17 and Java 21. The previously unreached
+scenario suite also passes **14/14** (13 owners), and test architecture,
+conformance coverage and source-archive hygiene pass. These scoped results do
+not replace the new exact-head Java 17/21 PR run or extracted-source release gate.
