@@ -145,6 +145,20 @@ public final class CoordinationRecords {
         public Mutation { Objects.requireNonNull(key); }
     }
 
+    /** Closed cache/index families whose identities can be inserted once and never changed or deleted. */
+    public static boolean immutableFamily(Family family) {
+        return family == Family.OBJECT_PROOF || family == Family.OBJECT_MEMBER;
+    }
+
+    /** An immutable physical lookup fact: absence or identical bytes is acceptable at publication. */
+    public record ImmutableFact(Key key, Bytes content) {
+        /** Only immutable object lookup families qualify; mutable runtime/host records never do. */
+        public ImmutableFact {
+            Objects.requireNonNull(key); Objects.requireNonNull(content);
+            if (!immutableFamily(key.family())) throw new IllegalArgumentException("Not an immutable lookup family");
+        }
+    }
+
     /** Required immutable body; hosts must authenticate bytes before making it reachable. */
     public record Artifact(Bytes sha256, long bytes) {
         /** Digest is binary SHA-256 and byte length is exact. */
@@ -165,6 +179,7 @@ public final class CoordinationRecords {
         private final List<Point> points;
         private final List<Query> queries;
         private final List<Mutation> mutations;
+        private final List<ImmutableFact> immutableFacts;
         private final List<Artifact> artifacts;
         private final Bytes evidence;
         private final Bytes digest;
@@ -176,6 +191,13 @@ public final class CoordinationRecords {
          */
         public Publication(Address address, String id, Collection<Point> points,
                 Collection<Query> queries, Collection<Mutation> mutations,
+                Collection<Artifact> artifacts, Bytes evidence) {
+            this(address, id, points, queries, mutations, List.of(), artifacts, evidence);
+        }
+
+        /** Creates a packet with insert-once physical facts in addition to strictly conditional mutations. */
+        public Publication(Address address, String id, Collection<Point> points, Collection<Query> queries,
+                Collection<Mutation> mutations, Collection<ImmutableFact> immutableFacts,
                 Collection<Artifact> artifacts, Bytes evidence) {
             this.address = Objects.requireNonNull(address); this.id = text(id);
             this.evidence = Objects.requireNonNull(evidence);
@@ -203,12 +225,17 @@ public final class CoordinationRecords {
             }
             var writes = new TreeMap<Key, Mutation>();
             for (var mutation : mutations) {
+                if (immutableFamily(mutation.key().family())) throw new IllegalArgumentException("Immutable lookup facts cannot be mutated or deleted");
                 var point = byKey.get(mutation.key());
                 if (point == null || point.expected().revision() == Long.MAX_VALUE)
                     throw new IllegalArgumentException("Mutation lacks an incrementable point condition");
                 if (writes.put(mutation.key(), mutation) != null) throw new IllegalArgumentException("Repeated mutation");
             }
             this.mutations = List.copyOf(writes.values());
+            var facts = new TreeMap<Key, ImmutableFact>();
+            for (var fact : immutableFacts) if (facts.put(fact.key(), fact) != null)
+                throw new IllegalArgumentException("Repeated immutable fact");
+            this.immutableFacts = List.copyOf(facts.values());
             var dependencies = new TreeMap<Bytes, Artifact>();
             for (var artifact : artifacts) if (dependencies.put(artifact.sha256(), artifact) != null)
                 throw new IllegalArgumentException("Repeated immutable dependency");
@@ -226,6 +253,8 @@ public final class CoordinationRecords {
         public List<Query> queries() { return queries; }
         /** All runtime and applicable host mutations. */
         public List<Mutation> mutations() { return mutations; }
+        /** Insert-once physical lookup facts; existing different bytes are an integrity failure. */
+        public List<ImmutableFact> immutableFacts() { return immutableFacts; }
         /** Exact immutable bytes required by the packet. */
         public List<Artifact> artifacts() { return artifacts; }
         /** Detached exact result/continuation evidence in a library-owned encoding. */
@@ -235,7 +264,7 @@ public final class CoordinationRecords {
         /** Portable canonical payload. No host-private SQL or AVL representation is encoded here. */
         public Bytes canonicalBytes() {
             return bytes(out -> {
-                text(out, "blue-coordination/logical-publication/1");
+                text(out, immutableFacts.isEmpty() ? "blue-coordination/logical-publication/1" : "blue-coordination/logical-publication/2");
                 text(out, address.namespace()); text(out, address.instance()); text(out, id);
                 out.writeInt(points.size());
                 for (var p : points) { key(out, p.key()); value(out, p.expected()); }
@@ -246,6 +275,10 @@ public final class CoordinationRecords {
                 }
                 out.writeInt(mutations.size());
                 for (var m : mutations) { key(out, m.key()); nullable(out, m.content()); }
+                if (!immutableFacts.isEmpty()) {
+                    out.writeInt(immutableFacts.size());
+                    for (var fact : immutableFacts) { key(out, fact.key()); blob(out, fact.content()); }
+                }
                 out.writeInt(artifacts.size());
                 for (var a : artifacts) { blob(out, a.sha256()); out.writeLong(a.bytes()); }
                 blob(out, evidence);
@@ -278,7 +311,9 @@ public final class CoordinationRecords {
         if (encoded.size() > limits.maximumPacketBytes()) throw new CoordinationObjectStorageException("Oversized publication");
         try {
             var reader = new Decoder(encoded.copy(), limits);
-            if (!reader.text().equals("blue-coordination/logical-publication/1"))
+            String format = reader.text();
+            boolean withFacts = format.equals("blue-coordination/logical-publication/2");
+            if (!withFacts && !format.equals("blue-coordination/logical-publication/1"))
                 throw new IllegalArgumentException("Unknown publication format");
             var address = new Address(reader.text(), reader.text());
             String id = reader.text();
@@ -293,9 +328,11 @@ public final class CoordinationRecords {
             }
             var mutations = new ArrayList<Mutation>();
             for (int n = reader.count(); n > 0; n--) mutations.add(new Mutation(reader.key(), reader.nullable()));
+            var facts = new ArrayList<ImmutableFact>();
+            if (withFacts) for (int n = reader.count(); n > 0; n--) facts.add(new ImmutableFact(reader.key(), reader.blob()));
             var artifacts = new ArrayList<Artifact>();
             for (int n = reader.count(); n > 0; n--) artifacts.add(new Artifact(reader.blob(), reader.in.readLong()));
-            var publication = new Publication(address, id, points, queries, mutations, artifacts, reader.blob());
+            var publication = new Publication(address, id, points, queries, mutations, facts, artifacts, reader.blob());
             if (reader.in.available() != 0 || !publication.canonicalBytes().equals(encoded))
                 throw new IllegalArgumentException("Noncanonical publication encoding");
             return publication;

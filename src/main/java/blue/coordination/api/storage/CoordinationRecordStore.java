@@ -23,7 +23,12 @@ public interface CoordinationRecordStore {
 
     /**
      * Atomically validates every condition and artifact, installs all mutations,
-     * and records identity/digest/evidence. Validation must prevent write skew and
+     * and records identity/digest/evidence. Immutable lookup facts accept absence
+     * or identical existing bytes and never increment an existing revision;
+     * different bytes fail as an integrity error. Every writer must reject
+     * replacement/deletion of those families. Explicit point/query conditions
+     * still apply strictly, including any semantic absence observation.
+     * Validation must prevent write skew and
      * range phantoms against every writer, not only conflicting same-row writes.
      * An identical committed identity returns ALREADY_COMMITTED before comparing
      * obsolete conditions. Reusing an identity with other bytes is an integrity error.

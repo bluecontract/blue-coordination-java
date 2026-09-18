@@ -13,9 +13,19 @@ final class LogicalRecordContext {
     static Bytes runtimeScope() { return new Bytes(OrderedRecordKey.text().encode("runtime/1")); }
 
     LogicalRecordContext(CoordinationRecordAttempt attempt) { this.attempt = Objects.requireNonNull(attempt); }
-    Value read(Key key) { open(); return attempt.read(key); }
-    List<Row> query(Range range) { open(); return attempt.query(range); }
-    Optional<Row> first(Range range) { open(); return attempt.first(range); }
+    Value read(Key key) {
+        open();
+        if (!blue.coordination.api.storage.CoordinationRecords.immutableFamily(key.family())) return attempt.read(key);
+        return attempt.immutableFact(key).map(bytes -> new Value(1, bytes)).orElse(Value.absent());
+    }
+    List<Row> query(Range range) {
+        open(); return blue.coordination.api.storage.CoordinationRecords.immutableFamily(range.family())
+                ? attempt.immutableFacts(range) : attempt.query(range);
+    }
+    Optional<Row> first(Range range) {
+        open(); return blue.coordination.api.storage.CoordinationRecords.immutableFamily(range.family())
+                ? attempt.firstImmutableFact(range) : attempt.first(range);
+    }
 
     void select(Key key, Bytes content) {
         open();
@@ -30,9 +40,12 @@ final class LogicalRecordContext {
         open();
         try {
             // Capture every original first. A failed read retires the whole selection.
-            for (var mutation : selected.values()) attempt.read(mutation.key());
+            for (var mutation : selected.values()) read(mutation.key());
             flushed = true;
             for (var mutation : selected.values()) {
+                if (blue.coordination.api.storage.CoordinationRecords.immutableFamily(mutation.key().family())) {
+                    attempt.retainImmutableFact(mutation.key(), Objects.requireNonNull(mutation.content(), "Immutable deletion")); continue;
+                }
                 if (Objects.equals(attempt.read(mutation.key()).content(), mutation.content())) continue;
                 if (mutation.content() == null) attempt.delete(mutation.key());
                 else attempt.put(mutation.key(), mutation.content());

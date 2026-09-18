@@ -210,6 +210,11 @@ final class LogicalRecordMapTest {
         boolean publish(Publication packet) {
             for (var point : packet.points()) if (!point.expected().equals(data.getOrDefault(point.key(), Value.absent()))) return false;
             for (var query : packet.queries()) if (!query.expected().equals(rows(data, query.range()))) return false;
+            for (var fact : packet.immutableFacts()) {
+                var prior = data.get(fact.key());
+                if (prior != null && !fact.content().equals(prior.content())) throw new IllegalArgumentException("Different immutable fact");
+            }
+            for (var fact : packet.immutableFacts()) data.putIfAbsent(fact.key(), new Value(1, fact.content()));
             for (var mutation : packet.mutations()) data.put(mutation.key(), new Value(data.getOrDefault(mutation.key(), Value.absent()).revision() + 1, mutation.content()));
             return true;
         }

@@ -727,7 +727,8 @@ def currentProductionShapeLimits = [
         // Logical runtime maps, strict ordered keys and primary family bindings; private types only.
         // Flattened secondary memberships and explicit graph-family bindings.
         // Catch-up/receipt bindings, derived source counts and lazy historical evidence.
-        lines: 89_574L,
+        // Insert-once physical proof/member facts; object entries retain upgrade conditions.
+        lines: 89_696L,
         publicApiTypes: 100,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

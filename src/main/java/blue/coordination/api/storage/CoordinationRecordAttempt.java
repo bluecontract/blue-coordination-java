@@ -17,6 +17,7 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
     private final Map<Key, Value> observed = new TreeMap<>();
     private final Map<Range, Query> predicates = new LinkedHashMap<>();
     private final Map<Key, Mutation> writes = new TreeMap<>();
+    private final Map<Key, ImmutableFact> facts = new TreeMap<>();
     private State state = State.OPEN;
 
     /** Takes exclusive ownership of a new coherent host scope. */
@@ -104,6 +105,62 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
         return new Bytes(Arrays.copyOf(original, Math.addExact(original.length, 1)));
     }
 
+    /**
+     * Reads an insert-once physical lookup fact without a mutable observation.
+     * Absence is only a cache miss, never a semantic absence condition. Call
+     * {@link #read(Key)} when logic actually depends on absence. Hosts must
+     * prevent every writer from replacing or deleting these families.
+     */
+    public Optional<Bytes> immutableFact(Key key) {
+        ensureOpen(); requireImmutable(key.family());
+        var pending = facts.get(key); if (pending != null) return Optional.of(pending.content());
+        try { return immutableValue(Objects.requireNonNull(scope.read(key))); }
+        catch (RuntimeException | Error failure) { throw retire(failure); }
+    }
+
+    /** Complete physical cache membership, not a semantic completeness/absence assertion. */
+    public List<Row> immutableFacts(Range range) {
+        ensureOpen(); requireImmutable(range.family());
+        try {
+            var observed = new Query(range, scope.query(range)); var rows = new TreeMap<Key, Row>();
+            for (var row : observed.expected()) { immutableValue(row.value()); rows.put(row.key(), row); }
+            for (var fact : facts.values()) if (range.contains(fact.key())) rows.put(fact.key(), new Row(fact.key(), new Value(1, fact.content())));
+            return List.copyOf(rows.values());
+        } catch (RuntimeException | Error failure) { throw retire(failure); }
+    }
+
+    /** Indexed physical cache hint; never substitutes for a semantic range condition. */
+    public Optional<Row> firstImmutableFact(Range range) {
+        ensureOpen(); requireImmutable(range.family());
+        try {
+            Row selected = scope.first(range).orElse(null);
+            if (selected != null) {
+                if (!range.contains(selected.key())) throw new IllegalArgumentException("Immutable row is outside the requested range");
+                immutableValue(selected.value());
+            }
+            for (var fact : facts.values()) if (range.contains(fact.key()) && (selected == null || fact.key().compareTo(selected.key()) < 0))
+                selected = new Row(fact.key(), new Value(1, fact.content()));
+            return Optional.ofNullable(selected);
+        } catch (RuntimeException | Error failure) { throw retire(failure); }
+    }
+
+    /** Retains an immutable lookup fact; equal concurrent insertion must not conflict. */
+    public void retainImmutableFact(Key key, Bytes content) {
+        ensureOpen(); var fact = new ImmutableFact(key, content);
+        var prior = immutableFact(key);
+        if (prior.isPresent() && !prior.orElseThrow().equals(content))
+            throw retire(new IllegalArgumentException("Immutable lookup identity has different bytes"));
+        facts.put(key, fact);
+    }
+
+    private static Optional<Bytes> immutableValue(Value value) {
+        if (value.revision() != (value.present() ? 1 : 0)) throw new IllegalArgumentException("Immutable fact was changed or deleted");
+        return Optional.ofNullable(value.content());
+    }
+    private static void requireImmutable(Family family) {
+        if (!CoordinationRecords.immutableFamily(family)) throw new IllegalArgumentException("Not an immutable lookup family");
+    }
+
     /** Installs a pending replacement and automatically captures its point condition. */
     public void put(Key key, Bytes content) {
         ensureOpen(); Objects.requireNonNull(key); Objects.requireNonNull(content);
@@ -127,7 +184,7 @@ public final class CoordinationRecordAttempt implements AutoCloseable {
         ensureOpen();
         try {
             var points = observed.entrySet().stream().map(e -> new Point(e.getKey(), e.getValue())).toList();
-            var packet = new Publication(address, publicationId, points, predicates.values(), writes.values(), artifacts, evidence);
+            var packet = new Publication(address, publicationId, points, predicates.values(), writes.values(), facts.values(), artifacts, evidence);
             state = State.PREPARED;
             scope.close();
             return packet;

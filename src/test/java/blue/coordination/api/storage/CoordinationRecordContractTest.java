@@ -38,6 +38,58 @@ final class CoordinationRecordContractTest {
         assertNotEquals(publication.digest(), packet(reversed, bytes("other-result")).digest());
     }
 
+    @Test void immutableLookupFactsAreDetachedAndDoNotRelaxSemanticAbsenceConditions() {
+        // given
+        var object = new Key(Family.OBJECT_PROOF, SCOPE, bytes("blue-id"));
+        var scope = new FixtureScope(); var attempt = new CoordinationRecordAttempt(scope);
+        // when
+        assertTrue(attempt.immutableFact(object).isEmpty());
+        attempt.retainImmutableFact(object, bytes("body-address"));
+        var packet = attempt.prepare("immutable", List.of(), bytes("result"));
+        // then
+        assertTrue(packet.points().isEmpty()); assertTrue(packet.mutations().isEmpty());
+        assertEquals(List.of(new ImmutableFact(object, bytes("body-address"))), packet.immutableFacts());
+        assertEquals(packet.digest(), decodePublication(packet.canonicalBytes(), LIMITS).digest());
+        var observed = new CoordinationRecordAttempt(new FixtureScope());
+        assertEquals(Value.absent(), observed.read(object)); observed.retainImmutableFact(object, bytes("body-address"));
+        assertEquals(List.of(new Point(object, Value.absent())), observed.prepare("strict-absence", List.of(), bytes("e")).points());
+        assertThrows(IllegalArgumentException.class, () -> new ImmutableFact(A, bytes("mutable-owner")));
+        assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "illegal", List.of(new Point(object, Value.absent())),
+                List.of(), List.of(new Mutation(object, bytes("value"))), List.of(), bytes("e")));
+    }
+
+    @Test void immutableFactCodecRejectsCorruptionAndEveryTruncationAndCoversFactBytes() {
+        // given
+        var key = new Key(Family.OBJECT_PROOF, SCOPE, bytes("proof"));
+        var packet = new Publication(ADDRESS, "fact", List.of(), List.of(), List.of(),
+                List.of(new ImmutableFact(key, bytes("one"))), List.of(), bytes("e"));
+        // when
+        var encoded = packet.canonicalBytes().copy();
+        // then
+        for (int i = 0; i < encoded.length; i++) {
+            var truncated = new Bytes(Arrays.copyOf(encoded, i));
+            assertThrows(CoordinationObjectStorageException.class, () -> decodePublication(truncated, LIMITS));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "duplicate", List.of(), List.of(), List.of(),
+                List.of(new ImmutableFact(key, bytes("one")), new ImmutableFact(key, bytes("one"))), List.of(), bytes("e")));
+        assertNotEquals(packet.digest(), new Publication(ADDRESS, "fact", List.of(), List.of(), List.of(),
+                List.of(new ImmutableFact(key, bytes("two"))), List.of(), bytes("e")).digest());
+        assertThrows(CoordinationObjectStorageException.class, () -> decodePublication(packet.canonicalBytes(), new DecodeLimits(encoded.length, 100, 1)));
+    }
+
+    @Test void changedOrTombstonedImmutableFactsRetireTheAttempt() {
+        // given
+        var key = new Key(Family.OBJECT_MEMBER, SCOPE, bytes("member"));
+        var scope = new FixtureScope(); scope.values.put(key, new Value(1, bytes("one")));
+        var attempt = new CoordinationRecordAttempt(scope);
+        // when
+        assertThrows(IllegalArgumentException.class, () -> attempt.retainImmutableFact(key, bytes("two")));
+        // then
+        assertTrue(scope.closed); assertThrows(IllegalStateException.class, () -> attempt.prepare("bad", List.of(), bytes("e")));
+        var deleted = new FixtureScope(); deleted.values.put(key, new Value(2, null));
+        assertThrows(IllegalArgumentException.class, () -> new CoordinationRecordAttempt(deleted).immutableFact(key)); assertTrue(deleted.closed);
+    }
+
     private Publication packet(List<Point> points, Bytes evidence) {
         return new Publication(ADDRESS, "stage-1", points, List.of(), List.of(new Mutation(A, bytes("next"))),
                 List.of(new Artifact(sha256(new Bytes(new byte[] {1, 2, 3})), 3)), evidence);

@@ -72,3 +72,13 @@ three new public types. API boundary, shape and artifact gates remain enabled.
 The private runtime family adapters and public stage result/selection lifecycle
 are separate outstanding increments; this port must not be advertised as a
 complete consumer integration until those are wired and qualified.
+
+Insert-once physical facts use the closed `OBJECT_PROOF` and `OBJECT_MEMBER`
+families. Packet format 2 includes sorted immutable facts in the authenticated
+payload; packets without facts retain format 1. Equal concurrent retention is
+idempotent, different bytes are an integrity failure, and every writer must
+prevent replacement or deletion. Cache-only reads do not observe semantic
+absence; explicit point/range observations still retain their strict conditions.
+Object entries are deliberately mutable: reference-to-body upgrades and exact
+representation selection still require ordinary conditions. Shared object-entry
+selection is not yet a qualified false-conflict-free integration.
