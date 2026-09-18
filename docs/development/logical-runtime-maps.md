@@ -106,3 +106,24 @@ callers use a conservative hint and then inspect their reachable consumer
 barriers. Explicit-root stage processing anchors fairness to its requested root
 without enumerating the session catalog. Legacy convenience processing retains
 its previous global fairness behavior.
+
+`StoredDocumentStore.openLogical` now assembles all document families and their
+existing read-validation projections without descriptors. Opening performs no
+record reads. `stageLogical` selects current changes and leaves final flush and
+publication to the enclosing attempt. Occurrence/component generation scalars
+remain local guards; durable per-document generation records supply conditions.
+Topology membership validation occurs at the selected logical member, including
+key enumeration, so virtual empty buckets do not assert an existing owner.
+
+Logical outbox/checkpoint evidence has owner-scoped append positions and counters.
+Diagnostic enumeration groups owners canonically and preserves append order
+within each owner; tentative and cold views use the same order. Cross-owner
+diagnostic order is not a processing selector or a global commit sequence.
+Rows retain their exact original result/member references. Checkpoints use the
+first canonical processor-derived result owner as their append domain; events
+use their public Root. Complete enumeration validates owner/tail coverage.
+
+`LogicalDocumentStoreTest` executes actual admission, cold rooted processing,
+parent/source catch-up and independent prepared stages in both publication
+orders. Its fixture replaces the document state in a resident engine; it is
+explicitly not full engine/SDK restoration or application S2/D2/H qualification.

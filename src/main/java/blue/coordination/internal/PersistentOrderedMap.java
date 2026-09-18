@@ -80,6 +80,11 @@ final class PersistentOrderedMap<K, V> {
         return records != null && records.bindingIs(context, family, scope, lower);
     }
 
+    Object logicalSnapshotIdentity() {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return records.snapshotIdentity();
+    }
+
     LogicalRecordContext logicalContext() {
         if (records == null) throw new IllegalStateException("Not a logical-record map");
         return records.context();

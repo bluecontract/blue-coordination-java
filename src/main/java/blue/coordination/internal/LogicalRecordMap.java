@@ -16,6 +16,10 @@ final class LogicalRecordMap<K, V> {
     private record Change<V>(V value) { }
     private record Identity(LogicalRecordContext context, Family family, Bytes scope, Bytes lower) { }
     private final Identity binding;
+    private record SnapshotIdentity(Object binding, Object changes) { }
+    Object snapshotIdentity() {
+        context.checkOpen(); return new SnapshotIdentity(binding == null ? source : binding, changes.isEmpty() ? null : changes);
+    }
     boolean bindingIs(LogicalRecordContext owner, Family family, Bytes scope, Bytes lower) {
         context.checkOpen(); return new Identity(owner, family, scope, lower).equals(binding);
     }

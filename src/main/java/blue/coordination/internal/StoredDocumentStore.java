@@ -118,10 +118,15 @@ final class StoredDocumentStore {
     }
 
     Opened open(Selection selection, int maximumSelectedSessions, int maximumSelectedIndexMaps) {
-        return physical(() -> new Opened(selection, maximumSelectedSessions, maximumSelectedIndexMaps));
+        return physical(() -> new Opened(selection, null, maximumSelectedSessions, maximumSelectedIndexMaps));
+    }
+
+    Opened openLogical(LogicalRecordContext context, int maximumSelectedSessions, int maximumSelectedIndexMaps) {
+        return context.protect(() -> new Opened(null, context, maximumSelectedSessions, maximumSelectedIndexMaps));
     }
 
     final class Opened implements AutoCloseable {
+        private final LogicalRecordContext logical;
         private final StoredDocumentIndexes.WorkingSessions selectedSessions;
         private final StoredResultRows results;
         private final StoredPublicationIndexes publication;
@@ -131,21 +136,22 @@ final class StoredDocumentStore {
         private final StoredDocumentReadChecks checks;
         private boolean closed;
 
-        private Opened(Selection selected, int maximumSelectedSessions, int maximumSelectedIndexMaps) {
-            var m = selected.metadata();
-            var lineages = documents.openLineages(family(selected, "LINEAGE_"), m.lineageCopies());
-            var generations = documents.openGenerations(selected.root(Root.GRAPH_GENERATIONS), m.graphComparisons(), m.graphCopies());
-            var occurrence = occurrences.open(family(selected, "OCCURRENCE_"));
-            var graph = topology.open(family(selected, "TOPOLOGY_"), m.rootedViews());
-            var component = components.open(family(selected, "COMPONENT_"));
-            var subscription = subscriptions.open(family(selected, "SUBSCRIPTION_"), m.subscriptionComparisons(), m.subscriptionCopies(), m.subscriptionVisited());
-            var receipt = receipts.open(family(selected, "RECEIPT_"), m.receiptComparisons(), m.receiptCopies());
-            var plan = plans.open(family(selected, "PLAN_"), m.planComparisons(), m.planCopies());
-            var barriers = plans.openBarriers(selected.root(Root.BARRIERS));
-            var works = work.open(family(selected, "WORK_"), m.workComparisons(), m.workCopies());
+        private Opened(Selection selected, LogicalRecordContext logical, int maximumSelectedSessions, int maximumSelectedIndexMaps) {
+            this.logical = logical;
+            var m = logical == null ? selected.metadata() : new Metadata(0, 0, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            var lineages = (logical == null ? documents.openLineages(family(selected, "LINEAGE_"), m.lineageCopies()) : documents.openLogicalLineages(logical));
+            var generations = (logical == null ? documents.openGenerations(selected.root(Root.GRAPH_GENERATIONS), m.graphComparisons(), m.graphCopies()) : documents.openLogicalGenerations(logical));
+            var occurrence = (logical == null ? occurrences.open(family(selected, "OCCURRENCE_")) : occurrences.openLogical(logical));
+            var graph = (logical == null ? topology.open(family(selected, "TOPOLOGY_"), m.rootedViews()) : topology.openLogical(logical));
+            var component = (logical == null ? components.open(family(selected, "COMPONENT_")) : components.openLogical(logical));
+            var subscription = (logical == null ? subscriptions.open(family(selected, "SUBSCRIPTION_"), m.subscriptionComparisons(), m.subscriptionCopies(), m.subscriptionVisited()) : subscriptions.openLogical(logical));
+            var receipt = (logical == null ? receipts.open(family(selected, "RECEIPT_"), m.receiptComparisons(), m.receiptCopies()) : receipts.openLogical(logical));
+            var plan = (logical == null ? plans.open(family(selected, "PLAN_"), m.planComparisons(), m.planCopies()) : plans.openLogical(logical));
+            var barriers = (logical == null ? plans.openBarriers(selected.root(Root.BARRIERS)) : plans.openLogicalBarriers(logical));
+            var works = (logical == null ? work.open(family(selected, "WORK_"), m.workComparisons(), m.workCopies()) : work.openLogical(logical));
             var catchUp = CatchUpPlanStore.restoreStored(new CatchUpPlanStore.StoredState(plan, barriers, works,
                     m.activeBarriers(), m.catchUpComparisons(), m.catchUpCopies()));
-            selectedSessions = documents.openWorkingSessions(documents.openSessions(selected.root(Root.SESSIONS)),
+            selectedSessions = documents.openWorkingSessions((logical == null ? documents.openSessions(selected.root(Root.SESSIONS)) : documents.openLogicalSessions(logical)),
                     lineages, generations, maximumSelectedSessions,
                     (id, original) -> topology.requireJoinRoot(graph, id, original.retainedView()));
             results = new StoredResultRows(objects, sessionLimits, decodedCache);
@@ -154,9 +160,9 @@ final class StoredDocumentStore {
             try {
                 publication = publication(selectedSessions.viewScope(), results);
                 openingPublication = publication;
-                var generic = publication.openGeneric(selected.root(Root.PUBLICATIONS));
-                var admissions = publication.openAdmissions(selected.root(Root.ADMISSIONS));
-                var closures = publication.openClosures(selected.root(Root.CLOSURES));
+                var generic = (logical == null ? publication.openGeneric(selected.root(Root.PUBLICATIONS)) : publication.openLogicalGeneric(logical));
+                var admissions = (logical == null ? publication.openAdmissions(selected.root(Root.ADMISSIONS)) : publication.openLogicalAdmissions(logical));
+                var closures = (logical == null ? publication.openClosures(selected.root(Root.CLOSURES)) : publication.openLogicalClosures(logical));
                 admissionValues = admissions.projectValues((key, row) -> {
                     StoredPublicationIndexes.checkedAdmission(key, row, generic, closures);
                     InMemoryDocumentStore.StoreState.requireRetainedResult(row.documentIds(), row.attempt().processResult(),
@@ -167,22 +173,22 @@ final class StoredDocumentStore {
                     InMemoryDocumentStore.StoreState.requireRetainedClosureReceipt(row,
                             new PersistentMapView<>(selectedSessions.open()), "Stored closure receipt"); return row;
                 });
-                var frontierRows = publication.openFrontiers(selected.root(Root.PROVIDER_FRONTIERS));
+                var frontierRows = (logical == null ? publication.openFrontiers(selected.root(Root.PROVIDER_FRONTIERS)) : publication.openLogicalFrontiers(logical));
                 // Raw namespaces cannot prove a maximum from a single witness. Verify before guard, mutation or export,
                 // not during open: mere selection must not materialize every historical receipt and document.
                 var frontiers = RootedEngineStorage.isControlledNamespace(objects)
                         ? RootedProviderFrontiers.restoreStored(frontierRows)
                         : RootedProviderFrontiers.restoreStrict(frontierRows, () -> RootedProviderFrontiers.from(
                                 new PersistentMapView<>(closureValues.open()).values()));
-                var applicationRows = publication.openApplicationResults(selected.root(Root.APPLICATION_RESULTS));
+                var applicationRows = (logical == null ? publication.openApplicationResults(selected.root(Root.APPLICATION_RESULTS)) : publication.openLogicalApplicationResults(logical));
                 var applicationResults = RootedEngineStorage.isControlledNamespace(objects)
                         ? ClosureApplicationResultIndex.restoreStored(applicationRows)
                         : ClosureApplicationResultIndex.restoreStrict(applicationRows, () -> ClosureApplicationResultIndex.from(
                                 new PersistentMapView<>(closureValues.open()).values()));
                 var raw = InMemoryDocumentStore.StoreState.trustedTransition(selectedSessions.open(), lineages,
                         occurrence, m.occurrenceGeneration(), graph, m.componentGeneration(), generations,
-                        component, subscription, outbox(results).open(selected.root(Root.OUTBOX)).workingCopy(),
-                        checkpoints(results).open(selected.root(Root.CHECKPOINTS)).workingCopy(), generic,
+                        component, subscription, (logical == null ? outbox(results).open(selected.root(Root.OUTBOX)).workingCopy() : results.logicalOutbox(logical, mapLimits)),
+                        (logical == null ? checkpoints(results).open(selected.root(Root.CHECKPOINTS)).workingCopy() : results.logicalCheckpoints(logical, mapLimits)), generic,
                         admissionValues.open(), closureValues.open(), frontiers, applicationResults, receipt, catchUp);
                 openingChecks = new StoredDocumentReadChecks(maximumSelectedIndexMaps, raw, occurrences, topology, components,
                         subscriptions, receipts, plans, work, selectedSessions::selected,
@@ -198,8 +204,34 @@ final class StoredDocumentStore {
         DocumentSessionStorage.OpenScope viewScope() { require(!closed, "Document-store scope is closed"); return selectedSessions.viewScope(); }
         StoredPublicationReceiptReuse publicationReuse() { require(!closed, "Document-store scope is closed"); return publication.closureReuse(); }
 
+        /** Selects typed record changes only; the enclosing engine prepares and publishes the closed attempt. */
+        void stageLogical(InMemoryDocumentStore.StoreState complete) {
+            Objects.requireNonNull(logical, "Not a logical document-store scope").protect(() -> {
+                try {
+                    require(!closed, "Document-store scope is closed"); selectedSessions.preflightSelectedAuthority();
+                    var admissions = admissionValues.stage(complete.admissionReceiptIndex(), (key, row) -> row);
+                    var closures = closureValues.stage(complete.closurePublicationReceiptIndex(), (key, row) -> row);
+                    // Original result rows must be registered before outbox/checkpoint members are encoded.
+                    admissions.selectLogicalRecords(); closures.selectLogicalRecords();
+                    var state = checks.stage(complete);
+                    selectedSessions.stage(state.sessionIndex()).selectLogicalRecords();
+                    documents.selectLogicalLineages(state.lineageIndex());
+                    state.graphGenerations().storedState().generations().selectLogicalRecords();
+                    occurrences.selectLogical(state.occurrenceInventory()); topology.selectLogical(state.componentIndex());
+                    components.selectLogical(state.componentStateInventory()); subscriptions.selectLogical(state.closureSubscriptions());
+                    receipts.selectLogical(state.managedEpochReceipts());
+                    var catchUp = state.catchUpPlans().storedState(); plans.selectLogical(catchUp.plans());
+                    catchUp.barriers().selectLogicalRecords(); work.selectLogical(catchUp.work());
+                    state.publicationReceiptIndex().selectLogicalRecords(); state.rootedProviderFrontiers().rows().selectLogicalRecords();
+                    state.closureApplicationResults().rows().selectLogicalRecords();
+                    state.outboxLog().selectLogicalRecords(); state.checkpointEvidenceLog().selectLogicalRecords(); return true;
+                } finally { selectedSessions.clearVerifiedSelections(); }
+            });
+        }
+
         /** Prewrites only; failures leave the pinned selection and working mutable rows unchanged. */
         Selection stage(InMemoryDocumentStore.StoreState complete) {
+            require(logical == null, "Logical records cannot be staged as descriptors");
             return physical(() -> {
                 try {
                     require(!closed, "Document-store scope is closed");

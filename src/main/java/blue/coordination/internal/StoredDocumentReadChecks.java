@@ -153,6 +153,12 @@ final class StoredDocumentReadChecks implements AutoCloseable {
             java.util.function.BiConsumer<DocumentId, DocumentId> check) {
         if (stage) return maps.stage(source);
         return checked("topology/" + kind, source, (owner, bucket) -> {
+            if (bucket.isLogical()) return maps.open("topology/" + kind + "-bucket", owner, bucket, (member, present) -> {
+                if (kind.equals("targets") || kind.equals("sources"))
+                    require(topology.component(original.componentIndex(), owner).isPresent(), "Topology edge owner is missing");
+                if (kind.equals("join-members")) topology.requireJoinRoot(original.componentIndex(), owner, selected.apply(owner).retainedView());
+                require(Boolean.TRUE.equals(present), "Topology membership is not true"); check.accept(owner, member); return present;
+            }, (key, present) -> present);
             // These APIs enumerate keys. Validate the complete selected membership bucket at its value boundary,
             // not by mapping descendant values (which keys() deliberately never opens).
             if (kind.equals("targets") || kind.equals("sources"))
@@ -162,7 +168,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
                 require(Boolean.TRUE.equals(entry.getValue()), "Topology membership is not true"); check.accept(owner, entry.getKey());
             }
             return bucket;
-        });
+        }, (owner, bucket) -> maps.stage(bucket));
     }
     private static void requireMembership(PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> source,
             DocumentId owner, DocumentId member) {

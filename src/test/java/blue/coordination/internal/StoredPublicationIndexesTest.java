@@ -21,6 +21,7 @@ final class StoredPublicationIndexesTest {
         var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
         var packets = new ArrayList<blue.coordination.api.storage.CoordinationRecords.Publication>();
         var expected = new LinkedHashMap<String, byte[]>();
+        var expectedEvents = new ArrayList<String>(); var expectedCheckpoints = new ArrayList<String>();
         var codec = new ClosureProcessResultStorageCodec(MAX, 256);
         try (var fixture = new DocumentSessionStorageTest.Fixture()) {
             // when
@@ -35,6 +36,12 @@ final class StoredPublicationIndexesTest {
                     var context = new LogicalRecordContext(attempt); String id = receipt.publicationIdentity();
                     binding.indexes.openLogicalGeneric(context).put(id, true).map().selectLogicalRecords();
                     binding.indexes.openLogicalClosures(context).put(id, receipt).map().selectLogicalRecords();
+                    var result = receipt.attempt().processResult();
+                    assertFalse(RootedResultScope.events(result).isEmpty()); assertFalse(RootedResultScope.checkpoints(result).isEmpty());
+                    binding.results.logicalOutbox(context, MAPS).appendAll(RootedResultScope.events(result)).selectLogicalRecords();
+                    binding.results.logicalCheckpoints(context, MAPS).appendAll(RootedResultScope.checkpoints(result)).selectLogicalRecords();
+                    for (var event : RootedResultScope.events(result)) expectedEvents.add(HexFormat.of().formatHex(binding.results.outboxCodec().encode(event)));
+                    for (var checkpoint : RootedResultScope.checkpoints(result)) expectedCheckpoints.add(HexFormat.of().formatHex(binding.results.checkpointCodec().encode(checkpoint)));
                     context.flush(); packets.add(attempt.prepare(id, List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1})));
                     expected.put(id, codec.encode(receipt.attempt().processResult()));
                 }
@@ -51,6 +58,10 @@ final class StoredPublicationIndexesTest {
                     var receipt = StoredPublicationIndexes.checkedClosure(row.getKey(), closures.get(row.getKey()), generic, admissions);
                     assertArrayEquals(row.getValue(), codec.encode(receipt.attempt().processResult()));
                 }
+                assertEquals(expectedEvents.stream().sorted().toList(), binding.results.logicalOutbox(context, MAPS).values().stream()
+                        .map(row -> HexFormat.of().formatHex(binding.results.outboxCodec().encode(row))).sorted().toList());
+                assertEquals(expectedCheckpoints.stream().sorted().toList(), binding.results.logicalCheckpoints(context, MAPS).values().stream()
+                        .map(row -> HexFormat.of().formatHex(binding.results.checkpointCodec().encode(row))).sorted().toList());
             }
         }
     }
