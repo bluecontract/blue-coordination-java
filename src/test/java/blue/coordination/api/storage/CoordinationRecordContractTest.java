@@ -15,6 +15,7 @@ final class CoordinationRecordContractTest {
     private static final DecodeLimits LIMITS = new DecodeLimits(1_000_000, 1_000, 100_000);
 
     @Test void payloadIsDetachedCanonicalAndCoversHostAuthorityAndEvidence() {
+        // given
         byte[] content = { 1, 2, 3 };
         var owned = new Bytes(content); var digest = sha256(owned);
         var points = new ArrayList<>(List.of(new Point(B, Value.absent()), new Point(A, new Value(3, owned))));
@@ -22,9 +23,11 @@ final class CoordinationRecordContractTest {
         points.add(new Point(host, new Value(9, bytes("token-9"))));
         var publication = new Publication(ADDRESS, "stage-1", points, List.of(),
                 List.of(new Mutation(A, bytes("next"))), List.of(new Artifact(digest, 3)), bytes("exact-result"));
+        // when
         Arrays.fill(content, (byte) 9); points.clear();
         Arrays.fill(publication.points().get(1).expected().content().copy(), (byte) 0);
         var reopened = decodePublication(publication.canonicalBytes(), LIMITS);
+        // then
         assertEquals(publication.digest(), reopened.digest());
         assertEquals(new Bytes(new byte[] {1, 2, 3}), reopened.points().stream().filter(p -> p.key().equals(A)).findFirst().orElseThrow().expected().content());
         assertThrows(UnsupportedOperationException.class, () -> publication.mutations().clear());
@@ -41,11 +44,14 @@ final class CoordinationRecordContractTest {
     }
 
     @Test void overlappingPredicatesCannotDescribeDifferentSnapshots() {
+        // given
         var a = new Row(A, new Value(1, bytes("a1")));
         var b = new Row(B, new Value(2, bytes("b2")));
         var right = new Range(Family.SESSION, SCOPE, B.key(), null);
+        // when
         assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "id", List.of(),
                 List.of(new Query(ALL, List.of(a, b)), new Query(right, List.of())), List.of(), List.of(), bytes("result")));
+        // then
         assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "id", List.of(new Point(B, Value.absent())),
                 List.of(new Query(ALL, List.of(a, b))), List.of(), List.of(), bytes("result")));
         assertThrows(IllegalArgumentException.class, () -> new Query(ALL, List.of(b, a)));
@@ -53,21 +59,28 @@ final class CoordinationRecordContractTest {
     }
 
     @Test void absenceAndDeleteRecreateHaveDistinctConditionsAndBlindWritesFail() {
+        // given
+        var deleted = new Publication(ADDRESS, "id", List.of(new Point(A, new Value(2, null))), List.of(),
+                List.of(new Mutation(A, bytes("recreated"))), List.of(), bytes("result"));
+        // when
+        var reopened = decodePublication(deleted.canonicalBytes(), LIMITS);
+        // then
         assertNotEquals(Value.absent(), new Value(2, null));
         assertThrows(IllegalArgumentException.class, () -> new Value(0, bytes("illegal")));
         assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "id", List.of(), List.of(),
                 List.of(new Mutation(A, bytes("blind"))), List.of(), bytes("result")));
         assertThrows(IllegalArgumentException.class, () -> new Publication(ADDRESS, "id", List.of(new Point(A, new Value(Long.MAX_VALUE, null))),
                 List.of(), List.of(new Mutation(A, bytes("overflow"))), List.of(), bytes("result")));
-        var deleted = new Publication(ADDRESS, "id", List.of(new Point(A, new Value(2, null))), List.of(),
-                List.of(new Mutation(A, bytes("recreated"))), List.of(), bytes("result"));
-        assertEquals(new Value(2, null), decodePublication(deleted.canonicalBytes(), LIMITS).points().get(0).expected());
+        assertEquals(new Value(2, null), reopened.points().get(0).expected());
     }
 
     @Test void codecRejectsEveryTruncationTrailingBytesAndBounds() {
+        // given
         var p = new Publication(ADDRESS, "id", List.of(new Point(A, Value.absent())), List.of(new Query(ALL, List.of())),
                 List.of(new Mutation(A, bytes("next"))), List.of(), bytes("result"));
+        // when
         byte[] complete = p.canonicalBytes().copy();
+        // then
         for (int i = 0; i < complete.length; i++) {
             var truncated = new Bytes(Arrays.copyOf(complete, i));
             assertThrows(CoordinationObjectStorageException.class, () -> decodePublication(truncated, LIMITS));
@@ -79,14 +92,17 @@ final class CoordinationRecordContractTest {
     }
 
     @Test void trackedAttemptRetainsOriginalSnapshotWhileOverlayingOwnChanges() {
+        // given
         var scope = new FixtureScope(); scope.values.put(A, new Value(4, bytes("old")));
         var attempt = new CoordinationRecordAttempt(scope);
+        // when
         assertEquals(1, attempt.query(ALL).size());
         attempt.put(A, bytes("new")); attempt.put(B, bytes("born"));
         assertEquals(2, attempt.query(ALL).size());
         attempt.delete(A);
         assertEquals(List.of(new Row(B, new Value(1, bytes("born")))), attempt.query(ALL));
         var p = attempt.prepare("id", List.of(), bytes("exact-evidence"));
+        // then
         assertTrue(scope.closed); assertEquals(1, scope.queryCalls);
         assertEquals(new Value(4, bytes("old")), p.points().get(0).expected());
         assertEquals(Value.absent(), p.points().get(1).expected());
@@ -97,9 +113,11 @@ final class CoordinationRecordContractTest {
     }
 
     @Test void failedReadsRetireScopeAndThreadForeignCallsCannotTouchIt() throws Exception {
+        // given
         var scope = new FixtureScope();
         var attempt = new CoordinationRecordAttempt(scope);
         var thread = Executors.newSingleThreadExecutor();
+        // when
         try {
             var failure = assertThrows(ExecutionException.class, () -> thread.submit(() -> attempt.read(A)).get());
             assertInstanceOf(IllegalStateException.class, failure.getCause());
@@ -107,23 +125,30 @@ final class CoordinationRecordContractTest {
         } finally { thread.shutdownNow(); }
         scope.fail = true;
         assertThrows(CoordinationObjectStorageException.class, () -> attempt.read(A));
+        // then
         assertTrue(scope.closed);
         assertThrows(IllegalStateException.class, () -> attempt.prepare("id", List.of(), bytes("e")));
     }
 
     @Test void scopeIsReleasedWhenPreparationRejectsInconsistentProvider() {
+        // given
         var scope = new FixtureScope(); var attempt = new CoordinationRecordAttempt(scope);
         assertTrue(attempt.query(ALL).isEmpty());
         scope.values.put(A, new Value(1, bytes("illegally-new-snapshot")));
+        // when
         attempt.read(A);
         assertThrows(IllegalArgumentException.class, () -> attempt.prepare("id", List.of(), bytes("e")));
+        // then
         assertTrue(scope.closed);
     }
 
     @Test void sortKeysUseUnsignedBytesAndHalfOpenScopeBoundaries() {
+        // given
         var low = new Bytes(new byte[] {0x7f}); var high = new Bytes(new byte[] {(byte) 0x80});
-        assertTrue(low.compareTo(high) < 0);
+        // when
         var range = new Range(Family.SESSION, SCOPE, low, high);
+        // then
+        assertTrue(low.compareTo(high) < 0);
         assertTrue(range.contains(new Key(Family.SESSION, SCOPE, low)));
         assertFalse(range.contains(new Key(Family.SESSION, SCOPE, high)));
         assertFalse(range.contains(new Key(Family.SESSION, bytes("other"), low)));
@@ -131,11 +156,14 @@ final class CoordinationRecordContractTest {
     }
 
     @Test void firstSelectionGuardsOnlyItsCompletePrefixAndIncludesPendingChanges() {
+        // given
         var scope = new FixtureScope();
         scope.values.put(A, new Value(1, bytes("a"))); scope.values.put(B, new Value(1, bytes("b")));
+        // when
         try (var attempt = new CoordinationRecordAttempt(scope)) {
             assertEquals(A, attempt.first(ALL).orElseThrow().key());
             var packet = attempt.prepare("first", List.of(), bytes("e"));
+            // then
             assertEquals(List.of(new Row(A, new Value(1, bytes("a")))), packet.queries().get(0).expected());
             assertFalse(packet.queries().get(0).range().contains(B), "Later work must not become a publication precondition");
         }

@@ -35,6 +35,7 @@ final class RootedCoordinationStorageTest {
     private static final SdkStorageCodec CODEC = new SdkStorageCodec(new Object(), MAX);
 
     @Test void completedStageCanBeStoredAndColdReopenedBeforeReadiness() throws Exception {
+        // given
         var objects = new Bytes();
         RootedCoordinationStorage.Selection selected;
         ColdStorageJournalFixture.Snapshot journalBytes;
@@ -47,7 +48,9 @@ final class RootedCoordinationStorageTest {
             var engine = (DefaultCoordinationEngine) original.blue.advanced().rawEngine();
             var control = CoordinationTestControl.attach(engine);
             control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
             var stage = original.blue.processing().processNextStage(document);
+            // then
             assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
             assertEquals(1, stage.stats().committedTransitions());
             expectedResult = CODEC.encode(stage.entry(entry));

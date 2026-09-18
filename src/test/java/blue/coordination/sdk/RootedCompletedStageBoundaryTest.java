@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real selection/execution with an independently armed optional-readiness fault. */
 final class RootedCompletedStageBoundaryTest {
     @Test void waitingConsumerAndSeparateSourceAdmissionAndLiveStageAvoidReadiness() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
             var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
             var originalParent = parent.snapshot().blueId();
@@ -19,7 +20,9 @@ final class RootedCompletedStageBoundaryTest {
             var attachment = fixture.append(parent, "rcp2/parent", "attach", 20, "child:\n  blueId: " + sourceBody.blueId());
             var control = CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
             control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
             var waiting = fixture.blue.processing().processNextStage(parent);
+            // then
             assertEquals(ProcessingStageResult.Disposition.WAITING, waiting.disposition());
             assertEquals(EntryDisposition.NEEDS_RESOURCES, waiting.entry(attachment).disposition());
             var admission = fixture.blue.advanced().sourceHistoryPrerequisites(parent).get(0);
@@ -37,12 +40,15 @@ final class RootedCompletedStageBoundaryTest {
     }
 
     @Test void publicStageRetainsExactResultWithoutReportingFutureQuiescence() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
             var document = fixture.start("source.yaml", "rcp2/source", Map.of());
             var entry = fixture.append(document, "rcp2/source", "setCounter", 10, "counterValue: 13");
             var control = CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
             control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
             var result = fixture.blue.processing().processStage(document, entry);
+            // then
             assertEquals(ProcessingStageResult.Disposition.COMPLETED, result.disposition());
             assertTrue(result.entry(entry).applied());
             assertEquals(result.entry(entry), fixture.blue.runtimeForStorage().storedMaps().results().get(entry.blueId()));
@@ -55,11 +61,14 @@ final class RootedCompletedStageBoundaryTest {
     }
 
     @Test void publicStageRejectsForeignAndClosedOwners() throws Exception {
+        // given
         try (var owner = new RootedSdkFixture(); var foreign = new RootedSdkFixture()) {
             var document = owner.start("source.yaml", "rcp2/source", Map.of());
             var other = foreign.start("source.yaml", "rcp2/source", Map.of());
             var entry = foreign.append(other, "rcp2/source", "setCounter", 10, "counterValue: 17");
+            // when
             assertThrows(IllegalArgumentException.class, () -> owner.blue.processing().processStage(document, entry));
+            // then
             assertThrows(IllegalArgumentException.class, () -> owner.blue.processing().processNextStage(other));
             owner.blue.close();
             assertThrows(IllegalStateException.class, () -> owner.blue.processing().processNextStage(document));
@@ -67,14 +76,17 @@ final class RootedCompletedStageBoundaryTest {
     }
 
     @Test void incompleteStageFailureDoesNotReturnCompletedEvidence() throws Exception {
+        // given
         try (var fixture = new RootedSdkFixture()) {
             var document = fixture.start("source.yaml", "rcp2/source", Map.of());
             fixture.append(document, "rcp2/source", "setCounter", 10, "counterValue: 11");
             var before = fixture.history(document);
             var engine = (DefaultCoordinationEngine) fixture.blue.advanced().rawEngine();
             fixture.control.failPublicationAt("BEFORE_SWAP");
+            // when
             var failure = assertThrows(RuntimeException.class,
                     () -> engine.processNextRootStage(document.id(), null));
+            // then
             assertTrue(failure.getMessage().contains("Injected rooted publication failure"));
             assertEquals(0, document.snapshot().longAt("/counter"));
             assertEquals(before, fixture.history(document));
@@ -91,10 +103,12 @@ final class RootedCompletedStageBoundaryTest {
             var control = CoordinationTestControl.attach(engine);
             control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
 
-            // when: this selects and executes the real pending protocol stage.
+            // when
+            // this selects and executes the real pending protocol stage.
             var completed = engine.processNextRootStage(document.id(), null);
 
-            // then: exact current work is available despite the still-armed fault.
+            // then
+            // exact current work is available despite the still-armed fault.
             assertEquals(1, completed.committedProcessTransitions());
             assertEquals(5, document.snapshot().longAt("/counter"));
             var history = fixture.history(document);
@@ -142,7 +156,8 @@ final class RootedCompletedStageBoundaryTest {
             var fault = assertThrows(RuntimeException.class,
                     () -> fixture.blue.processing().processNext(document));
 
-            // then: this is the old negative control, not a durable publication.
+            // then
+            // this is the old negative control, not a durable publication.
             assertTrue(control.isInjectedFailure(fault));
             assertEquals(9, document.snapshot().longAt("/counter"));
         }
