@@ -409,7 +409,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         sourceDiscoverySurfaces(view, root).forEach(surface -> timelines.addAll(surface.routing().externalTimelineIds()));
         var selected = new java.util.TreeMap<ExternalOrderKey, TimelineEntry>();
         for (var timeline : timelines) for (var entry : journal.entries(timeline)) selected.put(entry.sourceOrderKey(), entry);
-        if (view.logicalBoundary() != null) {
+        if (view.logicalBoundary() != null && !RootedLocalHistory.pending(view.snapshot(), root).isEmpty()) {
             var anchor = journal.atExternalOrder(view.logicalBoundary()).orElseThrow(
                     () -> new IllegalStateException("Retained root boundary has no accepted causal entry"));
             selected.put(anchor.sourceOrderKey(), anchor);

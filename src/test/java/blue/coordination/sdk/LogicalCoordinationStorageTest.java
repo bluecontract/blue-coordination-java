@@ -258,6 +258,32 @@ final class LogicalCoordinationStorageTest {
         }
     }
 
+    @Test void fromNowAdmissionBoundaryDoesNotRequireANonexistentJournalCause() throws Exception {
+        // given
+        var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
+        RootedCoordinationStorage.Configuration configuration;
+        try (var blue = BlueCoordination.inMemory()) { configuration = RootedCoordinationStorage.configuration(blue, LIMITS); }
+        var id = DocumentId.of("from-now-root");
+        try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
+                .openLogical(LIMITS, configuration, attempt, ExactNodeProvider.empty())) {
+            var blue = scope.coordination(); blue.timelines().register("rcp2/source", "alice");
+            blue.documents().admit(ManagedDocument.yaml(id, RootedSdkFixture.resource("source.yaml")).publicRoot().fromNow());
+            scope.stage(); assertTrue(records.publish(attempt.prepare("admission", List.of(), EVIDENCE)));
+        }
+        // when
+        try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
+                .openLogical(LIMITS, configuration, attempt, ExactNodeProvider.empty())) {
+            var blue = scope.coordination(); var root = scope.documentHandle(id).orElseThrow();
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK, blue.processing().processNextStage(root).disposition());
+            append(blue, root, scope.timelineHandle("rcp2/source").orElseThrow(), 10, "counterValue: 5");
+            var stage = blue.processing().processNextStage(root);
+            // then
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
+            assertEquals(5, root.snapshot().longAt("/counter"));
+            scope.stage(); assertTrue(records.publish(attempt.prepare("processed", List.of(), EVIDENCE)));
+        }
+    }
+
     private static String stageIdentity(ProcessingStageResult stage) {
         return stage.disposition() + "/" + stage.stats().gas() + "/" + stage.stats().committedTransitions() + "/" + stage.stats().documentStepOrder();
     }
