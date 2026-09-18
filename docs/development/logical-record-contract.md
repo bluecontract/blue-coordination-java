@@ -158,3 +158,17 @@ is preserved through this wrapper. `CoordinationRecordAttempt.requireArtifact`
 coalesces identical requirements and retires an attempt on conflicting lengths.
 The publisher must validate these artifacts atomically with the record packet;
 missing bytes must not become a successful publication with dangling references.
+
+The SDK `openLogical` overload without a host journal now assembles the library's
+journal in the same logical attempt. Exact entries, append positions, Timeline
+positions/heads, external-order positions and coverage/control are library-owned
+records; acceptance becomes visible only when the enclosing packet commits.
+Discarding an attempt exposes no accepted input. Cold reads retain exact original
+rows, duplicate detection, predecessors, ordering, rollback and availability.
+The explicit host-journal overload remains available for coherent external stores.
+
+This increment preserves the existing global append sequence/revision semantics:
+competing input acceptance may conflict on that authoritative control. It does
+not yet narrow root selection or historical completeness to scoped journal
+predicates. Those reader changes, atomic application ingress/finalization, and
+real application concurrency qualification are still required.

@@ -35,10 +35,10 @@ final class LogicalCoordinationStorageTest {
             head = root.snapshot().blueId(); history = reference.history(root);
         }
         var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
-        var journal = ColdStorageJournalFixture.empty(); DocumentId rootId; String entryId;
+        DocumentId rootId; String entryId;
         // when
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.openLogical(objects, LIMITS, configuration,
-                attempt, ExactNodeProvider.empty(), journal)) {
+                attempt, ExactNodeProvider.empty())) {
             var blue = scope.coordination(); var timeline = blue.timelines().register("rcp2/source", "alice");
             var root = blue.documents().admitStaticProcessEmbedded(RootedSdkFixture.resource("source.yaml"),
                     ActivationPolicy.importFullHistory()).document("root");
@@ -46,9 +46,8 @@ final class LogicalCoordinationStorageTest {
             scope.stage(); assertTrue(records.publish(attempt.prepare("accepted", List.of(), EVIDENCE)));
             assertThrows(RuntimeException.class, root::snapshot);
         }
-        var detachedJournal = ColdStorageJournalFixture.retain(journal);
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.openLogical(objects, LIMITS, configuration,
-                attempt, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(detachedJournal))) {
+                attempt, ExactNodeProvider.empty())) {
             var root = scope.documentHandle(rootId).orElseThrow();
             var stage = scope.coordination().processing().processNextStage(root);
             assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
@@ -58,7 +57,7 @@ final class LogicalCoordinationStorageTest {
         }
         // then
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.openLogical(objects.fresh(), LIMITS, configuration,
-                attempt, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(detachedJournal))) {
+                attempt, ExactNodeProvider.empty())) {
             var root = scope.documentHandle(rootId).orElseThrow();
             assertEquals(head, root.snapshot().blueId());
             assertEquals(history, scope.coordination().advanced().auditManagedEpochs(rootId).stream().map(ManagedEpochReceipt::receiptIdentity).toList());

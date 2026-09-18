@@ -111,6 +111,17 @@ public final class RootedCoordinationStorage {
         }
 
         /**
+         * Opens the complete SDK including its journal in the same atomic logical attempt.
+         * @param limits physical bounds @param configuration exact SDK binding
+         * @param attempt coherent record attempt @param provider exact provider
+         * @return fresh logical owner
+         */
+        public LogicalScope openLogical(Limits limits, Configuration configuration, CoordinationRecordAttempt attempt,
+                ExactNodeProvider provider) {
+            return RootedCoordinationStorage.openLogical(objects, limits, configuration, attempt, provider);
+        }
+
+        /**
          * Reopens controlled-origin state with optional host-managed immutable reuse.
          * @param limits physical storage bounds
          * @param selection coherently pinned library-issued descriptors
@@ -435,6 +446,17 @@ public final class RootedCoordinationStorage {
         } catch (RuntimeException | Error failure) {
             opening.closeAfter(failure); closeOne(failure, attempt::close); throw failure;
         }
+    }
+
+    /**
+     * Opens a complete SDK with its journal in the caller's same logical attempt.
+     * @param objects immutable artifact store @param limits physical bounds
+     * @param configuration exact SDK configuration @param attempt coherent record attempt
+     * @param provider exact content provider @return fresh logical runtime
+     */
+    public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits, Configuration configuration,
+            CoordinationRecordAttempt attempt, ExactNodeProvider provider) {
+        return openLogical(objects, limits, configuration, attempt, provider, null);
     }
 
     /** Fresh logical owner; staging retires it and leaves a detached attempt ready for publication. */

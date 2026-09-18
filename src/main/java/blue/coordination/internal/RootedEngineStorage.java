@@ -291,8 +291,10 @@ public final class RootedEngineStorage {
             LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
             ExactNodeProvider provider, TimelineJournalStore journal) {
         Objects.requireNonNull(records);
+        if (journal == null) journal = new LogicalTimelineJournalStore(records, limits);
+        final TimelineJournalStore selectedJournal = journal;
         return records.context().protect(() -> new RootedEngineStorage(objects, limits)
-                .new LogicalScope(records, binding, provider, journal));
+                .new LogicalScope(records, binding, provider, selectedJournal));
     }
 
     /** Complete logical engine owner. Stage it before flushing the shared record binding. */
