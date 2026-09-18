@@ -44,3 +44,19 @@ node --test .github/scripts/*.test.js
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 actionlint .github/workflows/*.yml
 ```
+
+## Assigning tests to CI groups
+
+Developers add tests normally; no shard annotation or manual group assignment is
+required. Each CI job discovers the current compiled JUnit classes and computes
+the same deterministic plan. Whole classes are sorted longest-first and assigned
+to the group with the smallest accumulated weight; ties use stable suite/class
+names and group ids. Test methods and assertions are unchanged.
+
+Weights in `.github/scripts/ci-test-weights.json` are JUnit XML class elapsed
+seconds from [Build 35264124428](https://github.com/bluecontract/blue-coordination-java/actions/runs/35264124428).
+They are scheduling hints, not a test inclusion list. A newly discovered class
+without a measurement receives weight 1 and still runs. Removed classes are not
+selected. Weights are currently refreshed explicitly from successful CI reports;
+CI does not commit weight updates automatically. Refreshing these data affects
+only CI group assignment; normal local Gradle commands remain unchanged.
