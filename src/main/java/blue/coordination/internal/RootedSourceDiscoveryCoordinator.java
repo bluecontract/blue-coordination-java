@@ -232,7 +232,7 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.ADMISSION, compiled, null,
                     window.identity(), null, window.evidence());
         }
-        var driver = new RootedCheckpointDriver(documents, adapter);
+        var driver = new RootedCheckpointDriver(documents, adapter, documents.storedState().sessionIndex().isLogical());
         var next = driver.select(candidate.source(), journal.entries());
         if (next.blocked()) {
             if (driver.completeBefore(candidate.source(), journal.entries(), candidate.cutoff())) return null;

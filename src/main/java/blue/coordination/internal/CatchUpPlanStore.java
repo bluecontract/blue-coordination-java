@@ -429,6 +429,11 @@ final class CatchUpPlanStore {
             ManagedEpochApplicationWork applicationWork,
             ManagedEpochApplicationReceipt applicationReceipt,
             Set<DocumentId> excludedConsumers) {
+        return withCommittedApplication(applicationWork, applicationReceipt, CatchUpConsumerScope.excluding(excludedConsumers));
+    }
+
+    CatchUpPlanStore withCommittedApplication(ManagedEpochApplicationWork applicationWork,
+            ManagedEpochApplicationReceipt applicationReceipt, CatchUpConsumerScope consumers) {
         ManagedEpochApplicationWork selectedWork = Objects.requireNonNull(
                 applicationWork, "applicationWork");
         ManagedEpochApplicationReceipt receipt = Objects.requireNonNull(
@@ -450,8 +455,7 @@ final class CatchUpPlanStore {
                     "Cannot commit unregistered catch-up work");
         }
         ManagedCatchUpWorkIndex.DueWorkRead canonicalDue =
-                work.nextDueWorkExcluding(Objects.requireNonNull(
-                        excludedConsumers, "excludedConsumers"));
+                nextDueWork(Objects.requireNonNull(consumers, "consumers"));
         if (!canonicalDue.found()
                 || !canonicalDue.work().workIdentity().equals(
                         selectedWork.workIdentity())) {
@@ -597,6 +601,14 @@ final class CatchUpPlanStore {
 
     ManagedCatchUpWorkIndex.DueWorkRead nextDueWork() {
         return work.nextDueWork();
+    }
+
+    ManagedCatchUpWorkIndex.DueWorkRead nextDueWork(CatchUpConsumerScope consumers) {
+        if (!consumers.included()) return work.nextDueWorkExcluding(consumers.documents());
+        var selectedPlans = new java.util.ArrayList<ManagedOccurrenceCatchUpPlan>();
+        for (var owner : consumers.documents().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList())
+            selectedPlans.addAll(plans.forConsumer(owner).plans());
+        return work.nextDueWorkForPlans(selectedPlans);
     }
 
     ManagedCatchUpWorkIndex.DueWorkRead nextDueWorkExcluding(

@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual complete SDK/engine installation; all cold state comes from immutable bytes plus the exact journal. */
 final class RootedCoordinationStorageTest {
     private static final int MAX = 32 * 1024 * 1024;
-    private static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
+    static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
             // Same complete-receipt capacities as RootedEngineStorageTest;
             // a cyclic publication contains more than a 256 KiB scalar row.
             new RootedEngineStorage.Limits(40 * 1024 * 1024, 64 * 1024, MAX, 8192, 32,

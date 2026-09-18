@@ -482,7 +482,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
             List<RootedLocalHistory.Step> terminals) {
         var capturer = new ManagedEpochInvocationCapturer(this, runtime, objects, documents, profile, environment);
         java.util.function.Consumer<RootedLocalHistory.Step> verify = local -> capturer.captureRootedJoin(
-                fence.terminal().work(), fence.terminal().excludedConsumers(), local);
+                fence.terminal().work(), fence.terminal().consumers(), local);
         var result = new ArrayList<RootedLocalHistory.Step>();
         for (var original : terminals) {
             var acquisition = RootedTerminalPeerAcquisition.select(original, terminals, fence, documents, verify);
@@ -726,16 +726,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /** Applies the canonical retained step within the caller's frozen root scope. */
     synchronized ManagedApplicationOutcome executeManagedEpochApplication(
-            ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers) {
+            ManagedEpochApplicationWork work, CatchUpConsumerScope consumers) {
         ensureOpen();
-        return managedEpochApplicationExecutor.execute(work, excludedConsumers);
+        return managedEpochApplicationExecutor.execute(work, consumers, null);
+    }
+
+    synchronized ManagedApplicationOutcome executeRootedJoinApplication(ManagedEpochApplicationWork work,
+            Set<DocumentId> excluded, RootedLocalHistory.Step local) {
+        return executeRootedJoinApplication(work, CatchUpConsumerScope.excluding(excluded), local);
     }
 
     /** Publishes one actual local terminal and its exact registered application in the existing atomic transaction. */
     synchronized ManagedApplicationOutcome executeRootedJoinApplication(ManagedEpochApplicationWork work,
-            Set<DocumentId> excludedConsumers, RootedLocalHistory.Step local) {
+            CatchUpConsumerScope consumers, RootedLocalHistory.Step local) {
         ensureOpen();
-        return managedEpochApplicationExecutor.execute(work, excludedConsumers, local);
+        return managedEpochApplicationExecutor.execute(work, consumers, local);
     }
 
     /** Runs retained managed work through the ordinary typed-demand loop. */
@@ -1112,11 +1117,19 @@ final class ContractsClosureAdapter implements AutoCloseable {
         if (!closed) {
             closed = true;
             observationReuse.clear();
-            managedDraftPlans.clear();
-            managedEpochSelectionPlans.clear();
+            closePlanMap(managedDraftPlans);
+            closePlanMap(managedEpochSelectionPlans);
             managedEpochApplicationExecutor.resetAfterRouteRebuild();
             contracts.close();
         }
+    }
+
+    private static void closePlanMap(Map<?, ?> map) {
+        if (map instanceof AutoCloseable owned) {
+            try { owned.close(); }
+            catch (RuntimeException failure) { throw failure; }
+            catch (Exception failure) { throw new IllegalStateException("Could not close retained plan view", failure); }
+        } else map.clear();
     }
 
     static List<CohortSelection> partitionSelection(

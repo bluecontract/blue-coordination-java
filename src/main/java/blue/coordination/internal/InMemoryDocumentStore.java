@@ -623,6 +623,10 @@ final class InMemoryDocumentStore {
                 .work());
     }
 
+    synchronized Optional<ManagedEpochApplicationWork> nextCatchUpWork(CatchUpConsumerScope consumers) {
+        return Optional.ofNullable(state.catchUpPlans().nextDueWork(consumers).work());
+    }
+
     /**
      * Atomically records a pre-PROCESS immutable-evidence failure. Document
      * sessions, committed/ready heads, occurrence cursors, and receipt history

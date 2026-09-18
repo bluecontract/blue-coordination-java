@@ -132,12 +132,12 @@ final class ManagedEpochApplicationExecutor {
     ContractsClosureAdapter.ManagedApplicationOutcome execute(
             ManagedEpochApplicationWork work,
             Set<DocumentId> excludedConsumers) {
-        return execute(work, excludedConsumers, null);
+        return execute(work, CatchUpConsumerScope.excluding(excludedConsumers), null);
     }
 
     /** A real local terminal input may perform the same independently registered application at an exact join. */
     ContractsClosureAdapter.ManagedApplicationOutcome execute(
-            ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers, RootedLocalHistory.Step localJoin) {
+            ManagedEpochApplicationWork work, CatchUpConsumerScope consumers, RootedLocalHistory.Step localJoin) {
         ManagedEpochApplicationWork selected = Objects.requireNonNull(
                 work, "work");
         Optional<ManagedEpochApplicationReceipt> prior =
@@ -172,8 +172,8 @@ final class ManagedEpochApplicationExecutor {
         boolean attemptMarkClosed = false;
         try {
             ManagedEpochInvocationCapturer.Capture initialCapture =
-                    localJoin == null ? invocationCapturer.capture(selected, excludedConsumers)
-                            : invocationCapturer.captureRootedJoin(selected, excludedConsumers, localJoin);
+                    localJoin == null ? invocationCapturer.capture(selected, consumers)
+                            : invocationCapturer.captureRootedJoin(selected, consumers, localJoin);
             AutomaticOccurrenceResolutionCoordinator.RunResult<
                     ContractsClosureAdapter.CohortInvocation,
                     ContractsClosurePublicationReceipt> automatic = host
@@ -225,7 +225,7 @@ final class ManagedEpochApplicationExecutor {
                     ManagedSurfacePublicationEvidence.committed(capture.invocation(), result), null, terminal);
             ManagedEpochApplicationReceipt application;
             try {
-                application = publish(capture, receipt, excludedConsumers);
+                application = publish(capture, receipt, consumers);
             } catch (UnsupportedNestedNewLineageException failure) {
                 objects.rollbackTo(attemptMark);
                 attemptMarkClosed = true;
@@ -291,7 +291,7 @@ final class ManagedEpochApplicationExecutor {
     private ManagedEpochApplicationReceipt publish(
             ManagedEpochInvocationCapturer.Capture capture,
             ContractsClosurePublicationReceipt receipt,
-            Set<DocumentId> excludedConsumers) {
+            CatchUpConsumerScope consumers) {
         ContractsClosureAdapter.CohortInvocation invocation =
                 capture.invocation();
         ManagedEpochApplicationWork work = capture.work();
@@ -726,7 +726,7 @@ final class ManagedEpochApplicationExecutor {
             }
             CatchUpPlanStore advancedCatchUpPlans = beforeCatchUpPlans
                     .withCommittedApplication(
-                            work, application, excludedConsumers);
+                            work, application, consumers);
             RootedDocumentView resultingRootedView = result.rootedProjection() == null ? null
                     : new RootedDocumentView(result, resultingClosureSubscriptions, viewRoutes, owningBarrier.causeOrder());
             ManagedCatchUpPlanner.PlanningResult catchUp =

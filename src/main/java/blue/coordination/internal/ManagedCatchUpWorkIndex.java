@@ -375,6 +375,27 @@ final class ManagedCatchUpWorkIndex {
         return new DueWorkRead(null, indexRowsRead, workRowsRead, 0);
     }
 
+    /** Every selected consumer plan is covered by its owner membership predicate. */
+    DueWorkRead nextDueWorkForPlans(java.util.List<blue.coordination.api.ManagedOccurrenceCatchUpPlan> plans) {
+        RegisteredWork first = null; int comparisons = 0; int opened = 0;
+        for (var plan : plans) {
+            var pending = pendingWorkByPlan.read(plan.planIdentity());
+            comparisons = Math.addExact(comparisons, pending.comparisons());
+            if (!pending.found()) continue;
+            var selected = byWorkIdentity.read(pending.value());
+            comparisons = Math.addExact(comparisons, selected.comparisons()); opened++;
+            if (!selected.found() || !selected.value().work().planIdentity().equals(plan.planIdentity())
+                    || !selected.value().work().consumerDocumentId().equals(plan.consumerDocumentId()))
+                throw new IllegalStateException("Consumer plan selects foreign or absent work");
+            var dueRead = due.read(selected.value().dueKey());
+            comparisons = Math.addExact(comparisons, dueRead.comparisons());
+            if (!dueRead.found() || !dueRead.value().equals(pending.value()))
+                throw new IllegalStateException("Pending consumer work is absent from its exact due position");
+            if (first == null || DUE_ORDER.compare(selected.value().dueKey(), first.dueKey()) < 0) first = selected.value();
+        }
+        return new DueWorkRead(first == null ? null : first.work(), comparisons, opened, 0);
+    }
+
     WorkRead work(String workIdentity) {
         PersistentOrderedMap.ReadResult<RegisteredWork> read =
                 byWorkIdentity.read(Objects.requireNonNull(

@@ -105,3 +105,47 @@ observation; unrelated roots remain independent. The logical feeder maps have
 canonical encoded-key diagnostic iteration; normal feeder selection uses exact
 lane points. Feeder terminal/frontier control and the full engine remain to be
 assembled before these bindings are application-qualified.
+
+The complete logical SDK assembly is now available through
+`RootedCoordinationStorage.Configuration`, `openLogical` and `LogicalScope`.
+It binds document, object, route, source, pending, SDK and engine control families
+to one caller-owned attempt. Stable configuration is checked on open; clocks,
+Timeline registrations, source terminal/frontier and scheduling records are
+selected lazily. `stage()` flushes all selected families and retires the runtime;
+the host subsequently prepares and publishes the attempt. Closing a stored plan
+map releases its view rather than clearing durable plans. The old descriptor
+assembly remains supported and cannot silently export a logical scope.
+
+Root fairness uses per-owner turn, completed-history round and isolation records in the logical
+path. A multi-root scheduler chooses the eligible root with the fewest completed
+history rounds, with canonical order breaking ties. Completing one owner never
+clears another owner's fairness record. The resident global-round convenience
+policy remains unchanged. Legacy
+whole-journal processing and authored timestamps still select their global
+control records when actually used. Logical opening does not select those
+records. Root stages use an explicit included-owner scope for history selection, capture
+and publication validation. Each owner's complete plan membership and exact
+pending/due points establish canonical local order without consulting unrelated
+sessions or a global due prefix. Terminal joins preserve this scope too. The
+legacy whole-runtime drain retains its exclusion-based scheduling API.
+Submitted source continuation format 3 records included owners; unchanged
+exclusion-based packets retain exact format 2. Both decode canonically.
+
+`controlledRepository(...).openLogical(...)` carries the existing explicit
+library-writer origin contract across records and immutable artifacts. The host
+must enforce this boundary for every writer. It preserves indexed history
+invariants without a global receipt rebuild at each cold open. The strict raw
+factory retains complete import verification. Neither factory confers host
+publication authority.
+
+`LogicalCoordinationStorageTest` compares exact resident/cold entry results,
+heads and receipt identities, publishes two complete independent live stages
+prepared from one snapshot in both orders, publishes retained parent history
+alongside unrelated live work in both orders, and resumes a suspended parent after
+cold source admission and idempotent admission replay. Every retained stage in
+the continuation test closes its SDK/engine owner. Its bounded selected-map
+capacity is 2048 because provider-backed retained-state probes select empty
+logical buckets too; capacity exhaustion still retires an attempt. These tests
+use the separately coherent host journal fixture. A library-owned logical
+journal, owner/topology stage envelope and real Mini executor/finalizer remain
+required before any S2/D2/H application acceptance claim.

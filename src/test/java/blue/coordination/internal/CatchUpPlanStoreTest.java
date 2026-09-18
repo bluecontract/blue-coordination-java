@@ -24,6 +24,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CatchUpPlanStoreTest {
 
+    @Test void includedConsumersKeepCanonicalLocalOrderAndRejectForeignWork() {
+        // given
+        var a = fixture(1L, DocumentId.of("a"), DocumentId.of("source-a"), "/child", 1L, 0L, 10L, 20L);
+        var b = fixture(2L, DocumentId.of("b"), DocumentId.of("source-b"), "/child", 1L, 0L, 5L, 15L);
+        var store = CatchUpPlanStore.empty().withPlan(a.plan()).withBarrier(a.barrier()).withWork(a.work(), a.sourceReceipt())
+                .withPlan(b.plan()).withBarrier(b.barrier()).withWork(b.work(), b.sourceReceipt());
+        var onlyA = CatchUpConsumerScope.owners(java.util.Set.of(a.plan().consumerDocumentId()));
+        // when
+        var selected = store.nextDueWork(onlyA);
+        var committed = store.withCommittedApplication(a.work(), application(a.work(), 100L, 1L), onlyA);
+        // then
+        assertEquals(b.work().workIdentity(), store.nextDueWork().work().workIdentity());
+        assertEquals(a.work().workIdentity(), selected.work().workIdentity());
+        assertEquals(b.work().workIdentity(), committed.nextDueWork().work().workIdentity());
+        assertFalse(committed.nextDueWork(onlyA).found());
+        assertThrows(IllegalArgumentException.class,
+                () -> store.withCommittedApplication(b.work(), application(b.work(), 200L, 1L), onlyA));
+        assertEquals(b.work().workIdentity(), store.nextDueWork(CatchUpConsumerScope.owners(
+                java.util.Set.of(a.plan().consumerDocumentId(), b.plan().consumerDocumentId()))).work().workIdentity());
+    }
+
     @Test
     void applicationIsResponseLossSafeAndCompletePlanStaysClosed() {
         // given

@@ -165,13 +165,12 @@ final class RootedJoinEligibility {
         var work = pending.work();
         if (work.sourceEpoch() != plan.requiredThroughSourceEpoch() || work.successorRepresentationCause().isPresent()
                 || work.isRepresentationApplication() && !work.representationCause().orElseThrow().terminalPositionReached()) return null;
-        var excluded = documents.sessions().stream().map(DocumentSession::documentId).filter(id -> !owners.contains(id))
-                .collect(java.util.stream.Collectors.toSet());
-        if (documents.nextCatchUpWorkExcluding(excluded).filter(next -> next.workIdentity().equals(work.workIdentity())).isEmpty()) return null;
+        var consumers = CatchUpConsumerScope.owners(owners);
+        if (documents.nextCatchUpWork(consumers).filter(next -> next.workIdentity().equals(work.workIdentity())).isEmpty()) return null;
         var interior = new LinkedHashSet<>(receivers);
         interior.removeAll(owners);
         if (interior.isEmpty()) return null;
-        return new Terminal(work, interior, excluded);
+        return new Terminal(work, interior, consumers);
     }
 
     /** Only vertices on a start-to-goal path participate; reachable side branches are not protected. */
@@ -216,8 +215,8 @@ final class RootedJoinEligibility {
     }
 
     record Terminal(blue.coordination.api.ManagedEpochApplicationWork work,
-            Set<DocumentId> interiorOwners, Set<DocumentId> excludedConsumers) {
-        Terminal { interiorOwners = Set.copyOf(interiorOwners); excludedConsumers = Set.copyOf(excludedConsumers); }
+            Set<DocumentId> interiorOwners, CatchUpConsumerScope consumers) {
+        Terminal { interiorOwners = Set.copyOf(interiorOwners); java.util.Objects.requireNonNull(consumers); }
     }
 
     record Fence(ExternalOrderKey boundary, Set<DocumentId> owners, Set<DocumentId> receivers, String causeIdentity,

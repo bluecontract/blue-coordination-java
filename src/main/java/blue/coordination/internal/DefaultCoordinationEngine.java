@@ -165,9 +165,9 @@ public final class DefaultCoordinationEngine
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
     private final RootedSourceDiscoveryCoordinator rootedSourceDiscoveries;
     private final blue.coordination.sdk.ExactNodeProvider rootedSourceProvider;
-    private final Map<String, Timeline> timelines = new LinkedHashMap<>();
-    private final Map<String, String> timelineActorKinds =
-            new LinkedHashMap<>();
+    private final Map<String, Timeline> timelines;
+    private final Map<String, String> timelineActorKinds;
+    private final LogicalEngineControl logicalControl;
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
@@ -190,7 +190,7 @@ public final class DefaultCoordinationEngine
                 timelines, timelineActorKinds, logicalClockMicros, applicationClockMicros,
                 List.copyOf(contractsClosureProfile.publicRoots()), contractsRecoveryState.rootedSchedule.storageState(),
                 List.copyOf(contractsRecoveryState.deferredManagedConsumers),
-                List.copyOf(contractsRecoveryState.isolatedManagedConsumers), contractsRecoveryState.managedEpochTurn,
+                List.copyOf(contractsRecoveryState.isolatedManagedConsumers), contractsRecoveryState.managedEpochTurn(),
                 contractsRecoveryState.feederWindow.storageState(requireEmptyPendingComponents), contractsRecoveryState.journalDrain.storageState());
     }
 
@@ -234,10 +234,15 @@ public final class DefaultCoordinationEngine
                 contractsBootstrap.blueLanguageSpecificationIdentity(), contractsBootstrap.contractsSpecificationIdentity(),
                 contractsBootstrap.executionPolicy());
         metrics = new EngineMetrics();
+        logicalControl = stored == null ? null : stored.logicalControl();
+        timelines = logicalControl == null ? new LinkedHashMap<>() : logicalControl.timelines();
+        timelineActorKinds = logicalControl == null ? new LinkedHashMap<>() : logicalControl.actorKinds();
         if (stored != null) {
             if (!stored.control().binding().equals(contractsRuntimeBinding) || journalStore == null)
                 throw new blue.coordination.api.storage.CoordinationObjectStorageException("Complete engine storage has another release or no exact journal");
-            timelines.putAll(stored.control().timelines()); timelineActorKinds.putAll(stored.control().actorKinds());
+            if (logicalControl == null) {
+                timelines.putAll(stored.control().timelines()); timelineActorKinds.putAll(stored.control().actorKinds());
+            }
             logicalClockMicros = stored.control().logicalClockMicros();
             applicationClockMicros = stored.control().applicationClockMicros();
         }
@@ -298,6 +303,7 @@ public final class DefaultCoordinationEngine
             contractsActiveSourceTimelines = stored == null
                     ? new ContractsActiveSourceTimelineIndex(profile.publicRoots(), metrics)
                     : ContractsActiveSourceTimelineIndex.restoreIndexes(stored.activeSources(), metrics);
+            if (logicalControl != null) profile.bindLogicalPublicRoots(contractsActiveSourceTimelines.logicalPublicRoots());
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,
@@ -322,7 +328,9 @@ public final class DefaultCoordinationEngine
                     contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider,
                     stored == null ? RootedSourceDiscoveryCoordinator.StoredMaps.empty() : stored.sources()) : null;
             if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
-            contractsRecoveryState = stored == null ? new ContractsRecoveryState() : recoveryStateFromStorage(stored.control(), stored.feederMaps());
+            contractsRecoveryState = stored == null ? new ContractsRecoveryState()
+                    : logicalControl == null ? recoveryStateFromStorage(stored.control(), stored.feederMaps())
+                    : logicalControl.recovery(stored.feederMaps());
             contractsClosureAdapter.feederDecisions(contractsRecoveryState.feederWindow);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
@@ -333,7 +341,14 @@ public final class DefaultCoordinationEngine
     record StoredParts(EngineControlStorageCodec.State control, WholeObjectBacking objects,
             InMemoryDocumentStore.StoreState documents, OperationRouteIndex.StoredIndexes routes,
             ContractsActiveSourceTimelineIndex.StoredIndexes activeSources, ContractsClosureAdapter.StoredPlans plans,
-            RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+            RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps,
+            LogicalEngineControl logicalControl) {
+        StoredParts(EngineControlStorageCodec.State control, WholeObjectBacking objects,
+                InMemoryDocumentStore.StoreState documents, OperationRouteIndex.StoredIndexes routes,
+                ContractsActiveSourceTimelineIndex.StoredIndexes activeSources, ContractsClosureAdapter.StoredPlans plans,
+                RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+            this(control, objects, documents, routes, activeSources, plans, sources, feederMaps, null);
+        }
         StoredParts {
             Objects.requireNonNull(control); Objects.requireNonNull(objects); Objects.requireNonNull(documents);
             Objects.requireNonNull(routes); Objects.requireNonNull(activeSources); Objects.requireNonNull(plans); Objects.requireNonNull(sources);
@@ -352,9 +367,9 @@ public final class DefaultCoordinationEngine
     /** Current owning scope only; the storage layer must detach every family before retiring this runtime. */
     synchronized StoredParts storedParts(WholeObjectBacking retainedObjects) {
         ensureOpen();
-        return new StoredParts(controlStateForStorage(false), retainedObjects, documents.storedState(), routeIndex.storedIndexes(),
+        return new StoredParts(logicalControl == null ? controlStateForStorage(false) : logicalControl.initialState(), retainedObjects, documents.storedState(), routeIndex.storedIndexes(),
                 contractsActiveSourceTimelines.storedIndexes(), contractsClosureAdapter.storedPlans(), rootedSourceDiscoveries.storedMaps(),
-                contractsRecoveryState.feederWindow.storedMaps());
+                contractsRecoveryState.feederWindow.storedMaps(), logicalControl);
     }
 
     /** Creates the legacy Process Embedded temporal-profile engine. */
@@ -957,7 +972,7 @@ public final class DefaultCoordinationEngine
             Operation operation) {
         ensureOpen();
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
-        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        long candidateTimestamp = Math.addExact(currentLogicalClock(), 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         try {
@@ -968,7 +983,7 @@ public final class DefaultCoordinationEngine
                             operation,
                             candidateTimestamp));
             requireAfterProcessedFrontier(entry);
-            logicalClockMicros = candidateTimestamp;
+            setLogicalClock(candidateTimestamp);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1063,8 +1078,8 @@ public final class DefaultCoordinationEngine
                     "Managed draft and epoch selector plans capture different "
                             + "operation target heads");
         }
-        long previousLogicalClock = logicalClockMicros;
-        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        long previousLogicalClock = currentLogicalClock();
+        long candidateTimestamp = Math.addExact(currentLogicalClock(), 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         String registeredDraftEntryBlueId = null;
@@ -1100,7 +1115,7 @@ public final class DefaultCoordinationEngine
                 inject(FailurePoint
                         .AFTER_MANAGED_EPOCH_SELECTION_PLAN_REGISTERED);
             }
-            logicalClockMicros = candidateTimestamp;
+            setLogicalClock(candidateTimestamp);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1133,7 +1148,7 @@ public final class DefaultCoordinationEngine
             } catch (RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
-            logicalClockMicros = previousLogicalClock;
+            setLogicalClock(previousLogicalClock);
             throw failure;
         }
     }
@@ -1145,7 +1160,7 @@ public final class DefaultCoordinationEngine
             long timestampMicros) {
         ensureOpen();
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
-        long nextClock = Math.max(logicalClockMicros, timestampMicros);
+        long nextClock = Math.max(currentLogicalClock(), timestampMicros);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         try {
@@ -1153,7 +1168,7 @@ public final class DefaultCoordinationEngine
                     () -> journal.append(
                             canonicalTimeline, operation, timestampMicros));
             requireAfterProcessedFrontier(entry);
-            logicalClockMicros = nextClock;
+            setLogicalClock(nextClock);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1187,7 +1202,7 @@ public final class DefaultCoordinationEngine
             if (stored) {
                 requireAfterProcessedFrontier(admitted);
             }
-            logicalClockMicros = Math.max(logicalClockMicros, timestamp);
+            setLogicalClock(Math.max(currentLogicalClock(), timestamp));
             objects.commit(objectMark);
             return new TimelineAppendReceipt(
                     admitted,
@@ -1431,7 +1446,7 @@ public final class DefaultCoordinationEngine
         try {
             ensureOpen();
             long started = System.nanoTime();
-            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
+            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter, !inspectReadiness)
                     .select(Objects.requireNonNull(root, "root"), journal.entries());
             if (expectedLocalWork != null && (next.localHistorical() == null
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
@@ -1439,7 +1454,7 @@ public final class DefaultCoordinationEngine
             }
             var anchor = next.localHistorical() != null ? next.localHistorical().root()
                     : !inspectReadiness ? root : documents.sessionIds().stream()
-                    .filter(id -> !next.excludedConsumers().contains(id))
+                    .filter(id -> next.consumers().contains(id))
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
             contractsRecoveryState.rootedSchedule.completed(anchor, next, completed);
@@ -1473,8 +1488,8 @@ public final class DefaultCoordinationEngine
         if (next.historical() != null) {
             try {
                 var outcome = next.localHistorical() == null
-                        ? contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers())
-                        : contractsClosureAdapter.executeRootedJoinApplication(next.historical(), next.excludedConsumers(), next.localHistorical());
+                        ? contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.consumers())
+                        : contractsClosureAdapter.executeRootedJoinApplication(next.historical(), next.consumers(), next.localHistorical());
                 return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
                         outcome.published(), false, outcome.published() && !outcome.replayed()
                                 ? RootedResultScope.processTransitionCount(outcome.attempt().processResult()) : 0L,
@@ -1551,7 +1566,7 @@ public final class DefaultCoordinationEngine
                 // inactive, or resource-blocked journal rows. A compatibility
                 // drain would now fall through to its managed phase in this
                 // same call; retain that continuation as the next sliced turn.
-                contractsRecoveryState.managedEpochTurn = true;
+                contractsRecoveryState.managedEpochTurn(true);
             }
             return drained;
         } catch (RuntimeException failure) {
@@ -1861,7 +1876,7 @@ public final class DefaultCoordinationEngine
     }
 
     synchronized long logicalClockMicros() {
-        return logicalClockMicros;
+        return currentLogicalClock();
     }
 
     synchronized InMemoryDocumentStore documents() {
@@ -2036,7 +2051,7 @@ public final class DefaultCoordinationEngine
         boolean journal = contractsJournalCoordinator
                 .hasPendingJournalTurn()
                 || supplied.journalAdmissionAvailable();
-        if (contractsRecoveryState.managedEpochTurn
+        if (contractsRecoveryState.managedEpochTurn()
                 && managed.isPresent()) {
             return ProcessingSelection.managedEpochApplication(
                     managed.orElseThrow());
@@ -2246,7 +2261,7 @@ public final class DefaultCoordinationEngine
                 routeIndex.rowCount(),
                 journal.size(),
                 objects.size(),
-                logicalClockMicros);
+                currentLogicalClock());
     }
 
     private DocumentSnapshot snapshot(
@@ -2535,7 +2550,7 @@ public final class DefaultCoordinationEngine
         do {
             madeProgress = false;
             boolean managedFirst = managedAllowed
-                    && contractsRecoveryState.managedEpochTurn;
+                    && contractsRecoveryState.managedEpochTurn();
             int phaseCount = managedAllowed ? 2 : 1;
             for (int phase = 0; phase < phaseCount; phase++) {
                 if (committedTransitions
@@ -2570,7 +2585,7 @@ public final class DefaultCoordinationEngine
                             progress.committedTransitions());
                     if (selectedThisPass != 0L
                             || progress.committedTransitions() != 0L) {
-                        contractsRecoveryState.managedEpochTurn = true;
+                        contractsRecoveryState.managedEpochTurn(true);
                     }
                     madeProgress = madeProgress
                             || !progress.completedEntries().isEmpty()
@@ -2607,19 +2622,19 @@ public final class DefaultCoordinationEngine
                         contractsRecoveryState.deferManagedEpochConsumer(
                                 failure.work().consumerDocumentId());
                         selectedManaged = true;
-                        contractsRecoveryState.managedEpochTurn = false;
+                        contractsRecoveryState.managedEpochTurn(false);
                         madeProgress = true;
                         continue;
                     }
                     if (managed.isEmpty()) {
                         if (!selectedManaged) {
-                            contractsRecoveryState.managedEpochTurn = false;
+                            contractsRecoveryState.managedEpochTurn(false);
                         }
                         break;
                     }
                     selectedManaged = true;
                     selectedEntries = Math.addExact(selectedEntries, 1L);
-                    contractsRecoveryState.managedEpochTurn = false;
+                    contractsRecoveryState.managedEpochTurn(false);
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
                     managedAttempts.add(managedApplicationAttempt(outcome));
@@ -2951,13 +2966,12 @@ public final class DefaultCoordinationEngine
         private final ContractsRootFeederWindow.DurableState feederWindow;
         private final ContractsJournalDrainCoordinator.DurableState
                 journalDrain;
-        private final LinkedHashSet<DocumentId> deferredManagedConsumers =
-                new LinkedHashSet<>();
+        private final Set<DocumentId> deferredManagedConsumers;
         /** Failed/suspended consumers isolated across exact processing slices. */
-        private final LinkedHashSet<DocumentId> isolatedManagedConsumers =
-                new LinkedHashSet<>();
+        private final Set<DocumentId> isolatedManagedConsumers;
         /** Retained fair turn between external and managed transition lanes. */
         private boolean managedEpochTurn;
+        private final LogicalEngineControl logical;
 
         private ContractsRecoveryState() {
             this(new RootedProcessingSchedule(), new ContractsRootFeederWindow.DurableState(),
@@ -2967,9 +2981,25 @@ public final class DefaultCoordinationEngine
         private ContractsRecoveryState(RootedProcessingSchedule schedule,
                 ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
                 List<DocumentId> deferred, List<DocumentId> isolated, boolean managedTurn) {
-            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal;
-            deferredManagedConsumers.addAll(deferred); isolatedManagedConsumers.addAll(isolated);
+            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal; logical = null;
+            deferredManagedConsumers = new LinkedHashSet<>(deferred); isolatedManagedConsumers = new LinkedHashSet<>(isolated);
             managedEpochTurn = managedTurn;
+        }
+
+        private ContractsRecoveryState(RootedProcessingSchedule schedule,
+                ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
+                Set<DocumentId> deferred, Set<DocumentId> isolated, LogicalEngineControl logical) {
+            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal;
+            deferredManagedConsumers = deferred; isolatedManagedConsumers = isolated; this.logical = logical;
+        }
+        static ContractsRecoveryState logical(RootedProcessingSchedule schedule,
+                ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
+                Set<DocumentId> deferred, Set<DocumentId> isolated, LogicalEngineControl logical) {
+            return new ContractsRecoveryState(schedule, feeder, journal, deferred, isolated, logical);
+        }
+        private boolean managedEpochTurn() { return logical == null ? managedEpochTurn : logical.managedTurn(); }
+        private void managedEpochTurn(boolean value) {
+            if (logical == null) managedEpochTurn = value; else logical.managedTurn(value);
         }
 
         private Set<DocumentId> deferredManagedConsumers() {
@@ -3019,10 +3049,16 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    private long currentLogicalClock() { return logicalControl == null ? logicalClockMicros : logicalControl.clock("logical"); }
+    private void setLogicalClock(long value) {
+        if (logicalControl == null) logicalClockMicros = value; else logicalControl.clock("logical", value);
+    }
+
     private long nextApplicationTimestamp() {
-        applicationClockMicros = Math.addExact(
-                Math.max(applicationClockMicros, logicalClockMicros), 1L);
-        return applicationClockMicros;
+        long next = Math.addExact(Math.max(logicalControl == null ? applicationClockMicros
+                : logicalControl.clock("application"), currentLogicalClock()), 1L);
+        if (logicalControl == null) applicationClockMicros = next; else logicalControl.clock("application", next);
+        return next;
     }
 
     private ExternalOrderKey currentAdmissionFrontier(DocumentId documentId) {

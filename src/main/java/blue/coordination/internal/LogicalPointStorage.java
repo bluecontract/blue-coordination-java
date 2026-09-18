@@ -74,6 +74,11 @@ public final class LogicalPointStorage {
         private final Map<K, Integer> charges = new HashMap<>();
         private long bytes;
         private boolean closed;
+        private java.util.function.BiConsumer<K, V> validator = (key, value) -> { };
+        Scope<K, V> validateRows(java.util.function.BiConsumer<K, V> validator) {
+            guard(); if (!pins.isEmpty()) throw new IllegalStateException("Validation must be bound before reading");
+            this.validator = Objects.requireNonNull(validator); return this;
+        }
         private Scope(LogicalRecordMap<K, V> map, InsertionOrderedStorage.Codec<V> codec,
                 InsertionOrderedStorage.Limits limits) {
             this.map = map; this.codec = codec; this.limits = limits;
@@ -81,6 +86,7 @@ public final class LogicalPointStorage {
         }
         private void guard() { context.checkOpen(); if (closed) throw new IllegalStateException("Logical point view is closed"); }
         private V pin(K key, V value) {
+            if (value != null) validator.accept(key, value);
             int charge = value == null ? 0 : codec.encode(value).length;
             long next = Math.addExact(bytes - charges.getOrDefault(key, 0), charge);
             if (charge > limits.recordBytes() || next > limits.pinnedBytes()

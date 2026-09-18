@@ -151,6 +151,6 @@ final class RootedTerminalOwnerFenceTest {
         var profile = ContractsClosureProfile.release10(environment.blueLanguageSpecificationIdentity(), environment.contractsSpecificationIdentity(),
                 ContractsExecutionPolicy.exactSharedGas(policy.sharedLimit(), policy.label()), List.of(root));
         return new ManagedEpochInvocationCapturer(engine.contractsClosureAdapter(), engine.runtime(), engine.objects(), engine.documents(), profile, environment)
-                .capture(selected.historical(), selected.excludedConsumers()).invocation();
+                .capture(selected.historical(), selected.consumers()).invocation();
     }
 }

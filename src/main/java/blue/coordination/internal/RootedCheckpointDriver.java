@@ -16,20 +16,23 @@ final class RootedCheckpointDriver {
     private final InMemoryDocumentStore documents;
     private final ContractsClosureAdapter adapter;
 
-    RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter) {
+    private final boolean scopedStage;
+    RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter) { this(documents, adapter, false); }
+    RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter, boolean scopedStage) {
+        this.scopedStage = scopedStage;
         this.documents = documents;
         this.adapter = adapter;
     }
 
     Selection select(DocumentId root, List<TimelineEntry> entries) {
-        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries)),
+        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries), scopedStage),
                 () -> select(root, entries, RootedJoinEligibility.captureForRoot(documents, root)),
                 selected -> !selected.blocked() && (selected.live() != null
                         || selected.historical() != null || selected.localHistorical() != null),
                 "rooted.observation.selectionReuses");
     }
 
-    private record SelectionKey(DocumentId root, List<TimelineEntry> entries) { }
+    private record SelectionKey(DocumentId root, List<TimelineEntry> entries, boolean scopedStage) { }
     private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
 
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
@@ -75,31 +78,35 @@ final class RootedCheckpointDriver {
                 .contains(ContractsClosureAdapter.closureId(root))).findFirst().orElseThrow();
         Set<DocumentId> owners = new LinkedHashSet<>(component.orderedMemberDocumentIds().stream()
                 .map(ContractsClosureAdapter::coordinationId).toList());
-        Set<DocumentId> excluded = new LinkedHashSet<>();
-        documents.sessionIds().forEach(id -> { if (!owners.contains(id)) excluded.add(id); });
+        CatchUpConsumerScope consumers = CatchUpConsumerScope.owners(owners);
         boolean historyOutstanding = owners.stream().flatMap(id -> documents.catchUpPlans(id).stream())
                 .anyMatch(p -> p.status() != ManagedCatchUpStatus.COMPLETE
                         && p.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED);
-        var work = documents.nextCatchUpWorkExcluding(excluded);
-        if (historyOutstanding && work.isEmpty()) return new Selection(null, null, excluded, true);
+        if (!scopedStage) {
+            Set<DocumentId> excluded = new LinkedHashSet<>();
+            documents.sessionIds().forEach(id -> { if (!owners.contains(id)) excluded.add(id); });
+            consumers = CatchUpConsumerScope.excluding(excluded);
+        }
+        var work = documents.nextCatchUpWork(consumers);
+        if (historyOutstanding && work.isEmpty()) return new Selection(null, null, consumers, true);
         var candidates = adapter.nextRootInputCandidates(root, entries, () -> work.map(this::order).orElse(null));
         var local = candidates.local();
-        if (local.pending() && local.step() == null) return new Selection(null, null, excluded, true, null);
+        if (local.pending() && local.step() == null) return new Selection(null, null, consumers, true, null);
         var live = candidates.live();
         if (local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
                 && (live.isEmpty() || local.step().sourceOrder().compareTo(live.get().entry().sourceOrderKey()) <= 0)) {
-            return new Selection(null, null, excluded, false, local.step());
+            return new Selection(null, null, consumers, false, local.step());
         }
         if (work.isPresent()) {
             var order = order(work.get());
             if (live.isEmpty() || order.compareTo(live.get().entry().sourceOrderKey()) <= 0) {
-                return new Selection(null, work.get(), excluded, false);
+                return new Selection(null, work.get(), consumers, false);
             }
         }
         if (live.isPresent() && RootedJoinEligibility.blocks(joins, owners, live.get())) {
-            return new Selection(null, null, excluded, true);
+            return new Selection(null, null, consumers, true);
         }
-        return new Selection(live.orElse(null), null, excluded, false);
+        return new Selection(live.orElse(null), null, consumers, false);
     }
 
     /** A transport entry is not a substitute for each root's retained progress. */
@@ -160,11 +167,17 @@ final class RootedCheckpointDriver {
     }
 
     record Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
-                     Set<DocumentId> excludedConsumers, boolean blocked, RootedLocalHistory.Step localHistorical) {
+                     CatchUpConsumerScope consumers, boolean blocked, RootedLocalHistory.Step localHistorical) {
         Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
                 Set<DocumentId> excludedConsumers, boolean blocked) {
-            this(live, historical, excludedConsumers, blocked, null);
+            this(live, historical, CatchUpConsumerScope.excluding(excludedConsumers), blocked, null);
         }
-        Selection { excludedConsumers = Set.copyOf(excludedConsumers); }
+        Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
+                CatchUpConsumerScope consumers, boolean blocked) { this(live, historical, consumers, blocked, null); }
+        Selection(ContractsClosureAdapter.FrozenBatch live, ManagedEpochApplicationWork historical,
+                Set<DocumentId> excluded, boolean blocked, RootedLocalHistory.Step local) {
+            this(live, historical, CatchUpConsumerScope.excluding(excluded), blocked, local);
+        }
+        Selection { java.util.Objects.requireNonNull(consumers); }
     }
 }

@@ -373,11 +373,11 @@ final class ContractsRootFeederWindow {
         }
     }
 
-    private record EventLaneKey(
+    record EventLaneKey(
             String entryBlueId,
             ExternalOrderKey sourceOrder,
             LaneId lane) {
-        private EventLaneKey {
+        EventLaneKey {
             entryBlueId = requireText(entryBlueId, "entryBlueId");
             sourceOrder = Objects.requireNonNull(sourceOrder, "sourceOrder");
             lane = Objects.requireNonNull(lane, "lane");
@@ -450,6 +450,11 @@ final class ContractsRootFeederWindow {
             this.rejectedBirths = maps.rejected();
             this.terminalByEventLane = terminalByEventLane;
             this.terminalFrontierByLane = terminalFrontierByLane;
+        }
+
+        static DurableState logical(StoredMaps maps, Map<EventLaneKey, TerminalProgress> terminal,
+                Map<LaneId, ExternalOrderKey> frontiers) {
+            return new DurableState(maps, Objects.requireNonNull(terminal), Objects.requireNonNull(frontiers));
         }
 
         synchronized DurableState copy() {

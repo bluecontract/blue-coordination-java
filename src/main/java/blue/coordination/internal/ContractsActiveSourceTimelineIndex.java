@@ -49,6 +49,18 @@ final class ContractsActiveSourceTimelineIndex {
         for (DocumentId root : canonical) this.publicRoots = this.publicRoots.put(root, true).map();
     }
 
+    Set<DocumentId> logicalPublicRoots() {
+        if (!publicRoots.isLogical()) throw new IllegalStateException("Not a logical Root index");
+        return new java.util.AbstractSet<>() {
+            public int size() { return publicRoots.size(); }
+            public boolean contains(Object key) { return publicRoots.containsKey((DocumentId) key); }
+            public java.util.Iterator<DocumentId> iterator() { return new PersistentMapView<>(publicRoots).keySet().iterator(); }
+            public boolean add(DocumentId root) {
+                boolean present = publicRoots.containsKey(root); addPublicRoots(Set.of(root)); return !present;
+            }
+        };
+    }
+
     synchronized void addPublicRoots(Collection<DocumentId> roots) {
         var prepared = publicRoots;
         for (DocumentId root : Objects.requireNonNull(roots, "roots")) {

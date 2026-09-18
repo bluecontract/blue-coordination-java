@@ -93,7 +93,7 @@ public final class RootedCalculationFixture {
         if (!profile.rootedCheckpoint() || !profile.executionPolicy().identity().equals(policy.identity()))
             throw new IllegalArgumentException("Expected the actual rooted release-profile SDK fixture");
         return new ManagedEpochInvocationCapturer(engine.contractsClosureAdapter(), engine.runtime(), engine.objects(),
-                engine.documents(), profile, environment).capture(work, selected.excludedConsumers()).invocation().input();
+                engine.documents(), profile, environment).capture(work, selected.consumers()).invocation().input();
     }
 
     /**

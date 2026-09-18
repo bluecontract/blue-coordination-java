@@ -303,7 +303,7 @@ final class SdkRuntimePointMapsTest {
         long processingNanos() { return CoordinationTestControl.attach(runtime.engine()).metricsSnapshot().phaseNanos().getOrDefault("contracts.closure.processor", 0L); }
         @Override public void close() { runtime.close(); }
     }
-    private static final class Bytes implements CoordinationImmutableObjectStore {
+    static final class Bytes implements CoordinationImmutableObjectStore {
         final Map<String, byte[]> values = new LinkedHashMap<>(); int reads, writes, pointReads;
         @Override public byte[] putIfAbsent(String digest, byte[] bytes) { writes++; values.putIfAbsent(digest, bytes.clone()); return values.get(digest).clone(); }
         @Override public Optional<byte[]> get(String digest, int maximum) {
@@ -327,7 +327,7 @@ final class SdkRuntimePointMapsTest {
         expected.roots().forEach((kind, a) -> { var b = actual.roots().get(kind);
             assertArrayEquals(a.keys(), b.keys()); assertArrayEquals(a.order(), b.order()); assertEquals(a.nextSequence(), b.nextSequence()); });
     }
-    private static final class LogicalRecords {
+    static final class LogicalRecords {
         static final blue.coordination.api.storage.CoordinationRecords.Bytes EVIDENCE = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
         static final Address ADDRESS = new Address("sdk-test", "instance");
         final TreeMap<Key, Value> data = new TreeMap<>();

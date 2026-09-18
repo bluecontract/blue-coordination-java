@@ -218,7 +218,8 @@ final class EnginePendingStorage {
             maps.put(kind, map); return new NamedMap<>(map, validate);
         }
 
-        private final class NamedMap<V> extends AbstractMap<String, V> {
+        private final class NamedMap<V> extends AbstractMap<String, V> implements AutoCloseable {
+            @Override public void close() { Scope.this.close(); }
             private final Map<String, Named<V>> map;
             private final BiConsumer<String, V> validate;
             private NamedMap(Map<String, Named<V>> map, BiConsumer<String, V> validate) {

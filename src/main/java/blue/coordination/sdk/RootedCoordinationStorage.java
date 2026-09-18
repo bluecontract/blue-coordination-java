@@ -7,6 +7,9 @@ import blue.coordination.api.storage.CoordinationObjectStorageException;
 import blue.coordination.internal.DefaultCoordinationEngine;
 import blue.coordination.internal.InsertionOrderedStorage;
 import blue.coordination.internal.RootedEngineStorage;
+import blue.coordination.internal.LogicalPointStorage;
+import blue.coordination.api.storage.CoordinationRecordAttempt;
+import blue.coordination.api.storage.CoordinationRecords;
 import blue.language.processor.NoncommittingExecutionException;
 import java.util.Map;
 import java.util.List;
@@ -19,6 +22,11 @@ import java.util.function.Supplier;
  * set of named descriptors and the matching journal, and fences every selected
  * row/predicate when publishing later mutations. Descriptor bytes and hashes are
  * physical evidence, never permission to replace another owner's state.
+ *
+ * <p>The additive {@link #openLogical} path binds granular records to a coherent
+ * caller-owned attempt instead of family descriptors. Its {@link LogicalScope#stage()}
+ * retires the owner after flushing all record mutations. The caller then prepares
+ * and publishes the detached attempt, with the matching journal and host fences.</p>
  *
  * <p>Opening restores actual runtime state under a fresh SDK owner. It performs
  * no journal replay, registration, append, or PROCESS. Point bodies are decoded
@@ -85,6 +93,21 @@ public final class RootedCoordinationStorage {
          */
         public Scope open(Limits limits, Selection selection, ExactNodeProvider provider, TimelineJournalStore journal) {
             return openSelected(objects, limits, selection, provider, journal, null);
+        }
+
+        /**
+         * Opens coherent logical records whose writers are restricted to this library.
+         * The host must enforce the same controlled-writer boundary for records and artifacts.
+         * @param limits physical bounds
+         * @param configuration exact SDK binding
+         * @param attempt coherent record attempt
+         * @param provider exact provider
+         * @param journal matching journal
+         * @return fresh logical owner
+         */
+        public LogicalScope openLogical(Limits limits, Configuration configuration, CoordinationRecordAttempt attempt,
+                ExactNodeProvider provider, TimelineJournalStore journal) {
+            return RootedCoordinationStorage.openLogical(objects, limits, configuration, attempt, provider, journal);
         }
 
         /**
@@ -354,6 +377,104 @@ public final class RootedCoordinationStorage {
                 if (failure instanceof Error error) throw error;
                 if (failure instanceof RuntimeException exception) throw exception;
             }
+        }
+    }
+
+    /** Exact SDK configuration bytes, independent of all mutable runtime records. */
+    public record Configuration(byte[] bytes) {
+        /** Defensively owns the closed configuration frame. @param bytes exact library-produced frame */
+        public Configuration { bytes = Objects.requireNonNull(bytes).clone(); }
+        @Override public byte[] bytes() { return bytes.clone(); }
+    }
+
+    /** Captures configuration only; this does not export mutable state. @param coordination owner @param limits bounds @return exact configuration */
+    public static Configuration configuration(BlueCoordination coordination, Limits limits) {
+        var runtime = Objects.requireNonNull(coordination).runtimeForStorage();
+        synchronized (runtime) {
+            return new Configuration(new SdkStorageCodec(new Object(), limits.sdk().maximumCodecBytes()).encode(runtime.storageConfiguration()));
+        }
+    }
+
+    /**
+     * Opens a fresh SDK and complete engine over one coherent logical attempt.
+     * @param objects immutable artifact store
+     * @param limits physical bounds
+     * @param configuration exact expected SDK configuration
+     * @param attempt caller-owned coherent record attempt
+     * @param provider exact provider
+     * @param journal journal from the same coherent selection
+     * @return owned logical runtime; stage before preparing the attempt's publication
+     */
+    public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits, Configuration configuration,
+            CoordinationRecordAttempt attempt, ExactNodeProvider provider, TimelineJournalStore journal) {
+        Objects.requireNonNull(attempt); var records = new LogicalPointStorage(attempt);
+        var opening = new LogicalOpening();
+        try {
+            var codec = new SdkStorageCodec(new Object(), limits.sdk().maximumCodecBytes());
+            var selected = codec.decode(configuration.bytes(), SdkStorageCodec.Configuration.class);
+            if (!java.util.Arrays.equals(configuration.bytes(), codec.encode(selected)))
+                throw new CoordinationObjectStorageException("Noncanonical logical SDK configuration");
+            var key = new CoordinationRecords.Key(CoordinationRecords.Family.CONFIGURATION,
+                    new CoordinationRecords.Bytes("sdk/configuration/1".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                    new CoordinationRecords.Bytes("profile".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            var expected = new CoordinationRecords.Bytes(configuration.bytes()); var prior = attempt.read(key).content();
+            if (prior == null) attempt.put(key, expected);
+            else if (!prior.equals(expected)) throw new CoordinationObjectStorageException("Logical SDK configuration changed");
+            var coordination = new BlueCoordination(owner -> {
+                opening.runtime = SdkCoordinationRuntime.restore(owner, selected, provider, scopedProvider -> {
+                    opening.engine = RootedEngineStorage.openLogical(objects, limits.engine(), records,
+                            new DefaultCoordinationEngine.ContractsRuntimeBinding(selected.language(), selected.contracts(), selected.policy()),
+                            scopedProvider, journal);
+                    return opening.engine.engine();
+                });
+                opening.maps = SdkRuntimePointMaps.openLogical(opening.runtime, objects, limits.sdk().maps(), records);
+                opening.runtime.installPointMaps(opening.maps.maps()); return opening.runtime;
+            });
+            return new LogicalScope(coordination, opening, records, attempt);
+        } catch (RuntimeException | Error failure) {
+            opening.closeAfter(failure); closeOne(failure, attempt::close); throw failure;
+        }
+    }
+
+    /** Fresh logical owner; staging retires it and leaves a detached attempt ready for publication. */
+    public static final class LogicalScope implements AutoCloseable {
+        private final BlueCoordination coordination;
+        private final LogicalOpening owned;
+        private final LogicalPointStorage records;
+        private final CoordinationRecordAttempt attempt;
+        private boolean closed;
+        private LogicalScope(BlueCoordination coordination, LogicalOpening owned, LogicalPointStorage records, CoordinationRecordAttempt attempt) {
+            this.coordination = coordination; this.owned = owned; this.records = records; this.attempt = attempt;
+        }
+        /** Returns this live facade. @return actual SDK */
+        public BlueCoordination coordination() { guard(); return coordination; }
+        /** Finds a handle without readiness or body materialization. @param id selected identity @return owned handle */
+        public Optional<DocumentHandle> documentHandle(DocumentId id) { guard(); return owned.runtime.findStoredDocumentHandle(id); }
+        /** Finds retained SDK registration. @param id Timeline identity @return owned Timeline handle */
+        public Optional<TimelineHandle> timelineHandle(String id) { guard(); return Optional.ofNullable(owned.maps.maps().timelines().get(id)); }
+        /** Selects and flushes all families, then retires this owner. No database publication occurs here. */
+        public void stage() {
+            guard();
+            try { owned.engine.stage(); records.stage(); close(); }
+            catch (RuntimeException | Error failure) { closeOne(failure, this::close); closeOne(failure, attempt::close); throw failure; }
+        }
+        private void guard() { attempt.address(); if (closed) throw new CoordinationObjectStorageException("Logical SDK owner is closed"); }
+        /** Releases the runtime and physical views; the caller owns the attempt and host stores. */
+        @Override public void close() {
+            if (closed) return; closed = true; var failure = owned.closeAfter(null);
+            if (failure instanceof Error error) throw error;
+            if (failure instanceof RuntimeException runtime) throw runtime;
+        }
+    }
+    private static final class LogicalOpening {
+        private SdkCoordinationRuntime runtime;
+        private RootedEngineStorage.LogicalScope engine;
+        private SdkRuntimePointMaps maps;
+        private Throwable closeAfter(Throwable failure) {
+            if (runtime != null) failure = closeOne(failure, runtime::close);
+            if (maps != null) failure = closeOne(failure, maps::close);
+            if (engine != null) failure = closeOne(failure, engine::close);
+            return failure;
         }
     }
 

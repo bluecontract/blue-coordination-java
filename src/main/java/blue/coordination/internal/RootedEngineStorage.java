@@ -281,6 +281,85 @@ public final class RootedEngineStorage {
         }
     }
 
+    /**
+     * Opens a complete runtime over logical records sharing the caller's attempt.
+     * @param objects immutable artifact namespace @param limits physical bounds @param records owned record binding
+     * @param binding exact rooted release configuration @param provider exact content provider @param journal coherent exact journal
+     * @return cold engine scope; no publication is performed
+     */
+    public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits,
+            LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
+            ExactNodeProvider provider, TimelineJournalStore journal) {
+        Objects.requireNonNull(records);
+        return records.context().protect(() -> new RootedEngineStorage(objects, limits)
+                .new LogicalScope(records, binding, provider, journal));
+    }
+
+    /** Complete logical engine owner. Stage it before flushing the shared record binding. */
+    public final class LogicalScope implements AutoCloseable {
+        private final LogicalPointStorage records;
+        private final StoredDocumentStore.Opened documentScope;
+        private final StoredWholeObjectIndex.Opened initialObjects;
+        private final EnginePendingStorage.Scope pendingScope;
+        private final StoredFeederProgress.Scope feederScope;
+        private DefaultCoordinationEngine engine;
+        private boolean closed;
+        private boolean staged;
+        private LogicalScope(LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
+                ExactNodeProvider provider, TimelineJournalStore journal) {
+            this.records = records; var context = records.context();
+            var controls = new LogicalEngineControl(records, limits.pending(), binding);
+            initialObjects = valueIndexes.openLogical(context);
+            documentScope = documents.openLogical(context, limits.maximumSelectedSessions(), limits.maximumSelectedBuckets());
+            EnginePendingStorage.Scope acquiredPending = null; StoredFeederProgress.Scope acquiredFeeder = null;
+            try {
+                var views = documentScope.viewScope();
+                acquiredPending = pending.openLogical(records, views,
+                        id -> work(engine == null ? documentScope.state() : engine.documents().storedState()).apply(id),
+                        id -> (engine == null ? documentScope.state() : engine.documents().storedState()).admissionReceipts().get(id));
+                acquiredFeeder = feeder.openLogical(records, views);
+                var metrics = new EngineMetrics(); var state = documentScope.state();
+                Function<DocumentId, DocumentSession> session = id -> state.sessionIndex().get(id);
+                var storedRoutes = routes.openLogical(context, metrics, session,
+                        id -> Objects.requireNonNull(session.apply(id)).currentRepresentation().blueId());
+                var storedActive = active.openLogical(context, metrics);
+                engine = DefaultCoordinationEngine.restoreRooted(new DefaultCoordinationEngine.StoredParts(
+                        controls.initialState(), values.open(initialObjects), state, storedRoutes.storedIndexes(),
+                        storedActive.storedIndexes(), acquiredPending.plans(), acquiredPending.sources(), acquiredFeeder.maps(), controls),
+                        Objects.requireNonNull(provider), Objects.requireNonNull(journal));
+                engine.documents().bindStoredPublicationReuse(documentScope.publicationReuse());
+                pendingScope = acquiredPending; feederScope = acquiredFeeder;
+            } catch (RuntimeException | Error failure) {
+                closeAfterFailure(failure, engine, acquiredFeeder, acquiredPending, documentScope); throw failure;
+            }
+        }
+        /** Returns the actual rooted engine for this attempt. @return mutable owned engine */
+        public synchronized DefaultCoordinationEngine engine() { open(); return engine; }
+        /** Selects all final engine records and prewrites artifacts; the caller separately flushes and publishes. */
+        public synchronized void stage() {
+            open(); records.context().protect(() -> {
+                var parts = engine.storedParts(values.open(initialObjects));
+                documentScope.stageLogical(parts.documents());
+                initialObjects.stage(values.retain(engine.objects().changes())).selectLogical();
+                var metrics = new EngineMetrics(); Function<DocumentId, DocumentSession> session = id -> parts.documents().sessionIndex().get(id);
+                StoredRouteIndexes.selectLogical(OperationRouteIndex.restoreIndexes(parts.routes(), metrics, session,
+                        id -> Objects.requireNonNull(session.apply(id)).currentRepresentation().blueId()));
+                StoredActiveSourceIndexes.selectLogical(ContractsActiveSourceTimelineIndex.restoreIndexes(parts.activeSources(), metrics));
+                staged = true; return null;
+            });
+        }
+        private void open() {
+            records.context().checkOpen(); require(!closed && !staged, "Logical engine scope is retired or already staged");
+        }
+        @Override public synchronized void close() {
+            if (closed) return; closed = true;
+            var failure = closeAfterFailure(null, engine, pendingScope, feederScope, documentScope);
+            if (failure instanceof Error error) throw error;
+            if (failure instanceof RuntimeException runtime) throw runtime;
+            if (failure != null) throw new IllegalStateException("Cannot retire logical engine scope", failure);
+        }
+    }
+
     private static Throwable closeAfterFailure(Throwable original, AutoCloseable... resources) {
         Throwable failure = original;
         for (var resource : resources) {

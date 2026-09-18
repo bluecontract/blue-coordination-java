@@ -34,7 +34,7 @@ final class StoredIndexProjections implements AutoCloseable {
             require(Arrays.equals(previous.descriptor(), descriptor) && Objects.equals(previous.logicalIdentity(), logicalIdentity), "Selected nested index changed within one pinned scope");
             return previous.projection().open();
         }
-        require(entries.size() < maximumMaps, "Selected index-map scope bound exceeded");
+        require(entries.size() < maximumMaps, "Selected index-map scope bound exceeded (" + maximumMaps + ") opening " + family);
         var projection = source.projectValues((k, v) -> {
             require(!closed, "Selected index scope is closed"); return read.apply(k, v);
         }, absent == null ? null : k -> { require(!closed, "Selected index scope is closed"); absent.accept(k); });
