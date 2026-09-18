@@ -132,6 +132,12 @@ public final class LogicalPointStorage {
             return context.protect(() -> { guard(); K typed = (K) Objects.requireNonNull(key);
                 return pins.containsKey(typed) ? pins.get(typed) : pin(typed, map.get(typed)); });
         }
+        List<Map.Entry<K, V>> entriesBefore(K upper) {
+            return context.protect(() -> { guard(); var rows = new ArrayList<Map.Entry<K, V>>();
+                var cursor = map.range(null, Objects.requireNonNull(upper));
+                while (cursor.hasNext()) { var row = cursor.next(); rows.add(new SimpleImmutableEntry<>(row.getKey(), get(row.getKey()))); }
+                return List.copyOf(rows); });
+        }
         Map.Entry<K, V> firstAfter(K after) {
             return context.protect(() -> { guard(); var row = map.first(after, after != null, null);
                 return row == null ? null : new SimpleImmutableEntry<>(row.getKey(), get(row.getKey())); });

@@ -1446,8 +1446,11 @@ public final class DefaultCoordinationEngine
         try {
             ensureOpen();
             long started = System.nanoTime();
-            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter, !inspectReadiness)
-                    .select(Objects.requireNonNull(root, "root"), journal.entries());
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, !inspectReadiness);
+            Objects.requireNonNull(root, "root");
+            RootedCheckpointDriver.Selection next = !inspectReadiness && documents.storedState().sessionIndex().isLogical()
+                    ? driver.select(root, selected -> contractsClosureAdapter.rootedJournalEntries(selected, journal))
+                    : driver.select(root, journal.entries());
             if (expectedLocalWork != null && (next.localHistorical() == null
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);

@@ -75,6 +75,77 @@ final class LogicalTimelineJournalStoreTest {
         assertThrows(RuntimeException.class, () -> attempt.prepare("invalid", List.of(), EVIDENCE));
     }
 
+    @Test void selectedTimelineAndExactCauseRemainValidAfterAnUnrelatedAppendButDetectTheirOwnGrowth() {
+        // given
+        for (boolean related : List.of(false, true)) {
+            var records = new LogicalRecordMapTest.Store(); TimelineEntry first;
+            try (var attempt = records.attempt()) {
+                var logical = new LogicalPointStorage(attempt);
+                try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                    first = owner.journal.append(A, OP, 10); logical.stage();
+                    assertTrue(records.publish(attempt.prepare("seed", List.of(), EVIDENCE)));
+                }
+            }
+            var selected = records.attempt(); var logical = new LogicalPointStorage(selected);
+            try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                assertEquals(first.blueId(), owner.journal.entries("a").get(0).blueId());
+                assertEquals(first.blueId(), owner.journal.atExternalOrder(first.sourceOrderKey()).orElseThrow().blueId());
+                logical.stage();
+            }
+            var packet = selected.prepare("read", List.of(), EVIDENCE);
+            // when
+            try (var append = records.attempt()) {
+                var next = new LogicalPointStorage(append);
+                try (var owner = new Owner(new LogicalTimelineJournalStore(next, LIMITS))) {
+                    owner.journal.append(related ? A : B, OP, 20); next.stage();
+                    assertTrue(records.publish(append.prepare("append", List.of(), EVIDENCE)));
+                }
+            }
+            // then
+            assertTrue(packet.points().stream().noneMatch(p -> p.key().family() == Family.JOURNAL_COVERAGE));
+            assertEquals(!related, records.publish(packet));
+        }
+    }
+
+    @Test void scopedCoverageTracksExactSourcePrefixAndAvailabilityWithoutGlobalRevisionConflicts() {
+        // given
+        for (String mode : List.of("unrelated", "before", "after", "unavailable")) {
+            var records = new LogicalRecordMapTest.Store();
+            try (var attempt = records.attempt()) {
+                var logical = new LogicalPointStorage(attempt);
+                try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                    owner.journal.append(B, OP, 10); logical.stage();
+                    assertTrue(records.publish(attempt.prepare("seed", List.of(), EVIDENCE)));
+                }
+            }
+            var selected = records.attempt(); var logical = new LogicalPointStorage(selected);
+            var cutoff = blue.language.processor.ExternalOrderKey.of(List.of(java.math.BigInteger.valueOf(100), "a"));
+            CompletenessEvidence proof;
+            try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                proof = ((HistoricalStep.CompleteEmpty) owner.journal.sourceCoverage(Set.of("a"), cutoff, 2, 3, "surface")).evidence();
+                logical.stage();
+            }
+            var packet = selected.prepare("selected", List.of(), EVIDENCE);
+            // when
+            try (var attempt = records.attempt()) {
+                var next = new LogicalPointStorage(attempt);
+                try (var owner = new Owner(new LogicalTimelineJournalStore(next, LIMITS))) {
+                    if (mode.equals("unavailable")) owner.journal.makeHistoricalUnavailable("offline");
+                    else owner.journal.append(mode.equals("unrelated") ? B : A, OP, mode.equals("after") ? 200 : 20);
+                    next.stage(); assertTrue(records.publish(attempt.prepare("changed", List.of(), EVIDENCE)));
+                }
+            }
+            // then
+            assertEquals(0, proof.journalRevision()); assertTrue(proof.sourceSurfaceIdentity().startsWith("scoped:sha256:"));
+            assertEquals(mode.equals("unrelated") || mode.equals("after"), records.publish(packet));
+            if (mode.equals("after") || mode.equals("unrelated")) {
+                try (var attempt = records.attempt(); var owner = new Owner(new LogicalTimelineJournalStore(new LogicalPointStorage(attempt), LIMITS))) {
+                    assertEquals(proof, ((HistoricalStep.CompleteEmpty) owner.journal.sourceCoverage(Set.of("a"), cutoff, 2, 3, "surface")).evidence());
+                }
+            }
+        }
+    }
+
     private static final class Owner implements AutoCloseable {
         private final EngineMetrics metrics = new EngineMetrics();
         private final WholeObjectStore objects = new WholeObjectStore(metrics);

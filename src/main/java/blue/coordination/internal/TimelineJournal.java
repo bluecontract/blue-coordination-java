@@ -17,6 +17,7 @@ interface TimelineJournal {
     TimelineEntry append(Timeline timeline, Operation operation, long timestampMicros);
     TimelineEntry appendExact(Timeline timeline, ExactValue exactEvent);
     Optional<TimelineEntry> byBlueId(String blueId);
+    Optional<TimelineEntry> atExternalOrder(ExternalOrderKey order);
     List<TimelineEntry> entries();
     List<TimelineEntry> entries(String timelineId);
     blue.coordination.api.TimelineJournalPosition position(String timelineId);
@@ -27,6 +28,9 @@ interface TimelineJournal {
     HistoricalStep nextHistoricalStep(ExternalOrderKey after, ExternalOrderKey cutoff,
             String excluded, Predicate<TimelineEntry> eligible, long routeGeneration,
             long graphGeneration, Supplier<String> sourceSurfaceIdentity);
+    boolean scopedCoverage();
+    HistoricalStep sourceCoverage(java.util.Set<String> timelines, ExternalOrderKey cutoff,
+            long routeGeneration, long graphGeneration, String surfaceIdentity);
     ExternalOrderKey latestExternalOrder();
     int size();
     long revision();

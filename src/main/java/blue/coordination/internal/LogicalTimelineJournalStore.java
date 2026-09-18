@@ -21,6 +21,9 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
     private final Map<Position, String> positions;
     private final LogicalPointStorage.Scope<ExternalOrderKey, String> orders;
     private final Map<String, ExternalOrderKey> latest;
+    private final Map<String, Boolean> indexedTimelines;
+    private final Map<String, Boolean> formats;
+    private final Map<String, LogicalPointStorage.Scope<ExternalOrderKey, String>> timelineOrders = new HashMap<>();
     private int readers;
     private record Position(String timeline, long sequence) { }
 
@@ -37,6 +40,10 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
                 OrderedRecordKey.signedLong(), Position::timeline, Position::sequence, Position::new), values);
         orders = map(Family.JOURNAL_ENTRY, "external", OrderedRecordKey.externalOrder(), values);
         latest = map(Family.JOURNAL_COVERAGE, "latest", text, codec("order", SessionStorageWire::order, SessionStorageWire::order));
+        formats = map(Family.JOURNAL_COVERAGE, "formats", text, codec("membership", Writer::bool, Reader::bool))
+                .validateRows((key, value) -> require(Boolean.TRUE.equals(value), "Invalid journal index format"));
+        indexedTimelines = map(Family.JOURNAL_COVERAGE, "indexed-timelines", text, codec("membership", Writer::bool, Reader::bool))
+                .validateRows((key, value) -> require(Boolean.TRUE.equals(value), "Invalid journal Timeline index membership"));
         control = map(Family.JOURNAL_COVERAGE, "control", text, codec("state", (w, state) -> {
             w.longValue(state.globalSequence()); w.integer(state.entryCount()); w.longValue(state.revision());
             w.text(state.availability().kind().name()); w.nullableText(state.availability().diagnostic());
@@ -45,9 +52,33 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
     }
 
     private State current() { return control.getOrDefault("state", State.empty()); }
+    Availability availability() {
+        var selected = control.get("availability");
+        // Older logical journals remain readable with conservative global validation until their next write.
+        return selected == null ? current().availability() : selected.availability();
+    }
     private Optional<TimelineEntry> row(String id) {
         if (id == null) return Optional.empty();
         var entry = entries.get(id); require(entry != null, "Missing indexed journal entry"); return Optional.of(entry);
+    }
+    private LogicalPointStorage.Scope<ExternalOrderKey, String> timelineOrders(String timeline) {
+        return timelineOrders.computeIfAbsent(timeline, id -> map(Family.JOURNAL_ENTRY, "timeline-external/"
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(OrderedRecordKey.text().encode(id)),
+                OrderedRecordKey.externalOrder(), codec("text", Writer::text, SessionRecordCodec::text)));
+    }
+    Optional<List<TimelineEntry>> prefix(String timeline, ExternalOrderKey cutoff) {
+        return logical.context().protect(() -> {
+            if (!Boolean.TRUE.equals(formats.get("timeline-external/1")) && !indexedTimelines.containsKey(timeline)) {
+                // No rows means a complete empty prefix. Existing older journals use conservative point reads.
+                if (!heads.containsKey(timeline)) return Optional.of(List.of());
+                return Optional.empty();
+            }
+            return Optional.of(timelineOrders(timeline).entriesBefore(cutoff).stream().map(index -> {
+                var entry = row(index.getValue()).orElseThrow();
+                require(entry.timeline().timelineId().equals(timeline) && entry.sourceOrderKey().equals(index.getKey()),
+                        "Foreign source prefix index"); return entry;
+            }).toList());
+        });
     }
     @Override public ReadView openRead() {
         return logical.context().protect(() -> {
@@ -91,6 +122,17 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
                         "Invalid journal Timeline sequence");
                 var position = new Position(entry.timeline().timelineId(), entry.timelineSequence());
                 require(!positions.containsKey(position), "Timeline position already occupied");
+                if (expected.entryCount() == 0) formats.put("timeline-external/1", true);
+                var timelineOrders = timelineOrders(entry.timeline().timelineId());
+                if (!indexedTimelines.containsKey(entry.timeline().timelineId())) {
+                    for (long sequence = 1; sequence < entry.timelineSequence(); sequence++) {
+                        var retained = row(positions.get(new Position(entry.timeline().timelineId(), sequence))).orElseThrow();
+                        timelineOrders.put(retained.sourceOrderKey(), retained.blueId());
+                    }
+                    indexedTimelines.put(entry.timeline().timelineId(), true);
+                }
+                require(!timelineOrders.containsKey(entry.sourceOrderKey()), "Timeline external position already occupied");
+                timelineOrders.put(entry.sourceOrderKey(), entry.blueId());
                 entries.put(entry.blueId(), entry); append.put((long) expected.entryCount(), entry.blueId());
                 positions.put(position, entry.blueId()); orders.put(entry.sourceOrderKey(), entry.blueId());
                 heads.put(entry.timeline().timelineId(), entry.blueId());
@@ -104,6 +146,7 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
                 for (int i = expected.entryCount() - 1; i >= next.entryCount(); i--) {
                     var entry = row(append.remove((long) i)).orElseThrow();
                     entries.remove(entry.blueId()); orders.remove(entry.sourceOrderKey());
+                    timelineOrders(entry.timeline().timelineId()).remove(entry.sourceOrderKey());
                     positions.remove(new Position(entry.timeline().timelineId(), entry.timelineSequence()));
                     if (entry.timelineSequence() == 1) heads.remove(entry.timeline().timelineId());
                     else heads.put(entry.timeline().timelineId(), Objects.requireNonNull(
@@ -116,7 +159,8 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
                         && mutation.next().entryCount() == expected.entryCount()
                         && mutation.next().revision() == expected.revision(), "Invalid availability transition");
             }
-            control.put("state", mutation.next()); return null;
+            control.put("state", mutation.next());
+            control.put("availability", new State(0, 0, 0, mutation.next().availability())); return null;
         });
     }
     private <K, V> LogicalPointStorage.Scope<K, V> map(Family family, String name, PersistentMapCodec<K> keys,

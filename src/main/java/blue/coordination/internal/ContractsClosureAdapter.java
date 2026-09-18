@@ -402,6 +402,21 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return List.copyOf(surfaces);
     }
 
+    /** Complete input Timelines from this root's frozen active forward view, plus its retained cause. */
+    synchronized List<TimelineEntry> rootedJournalEntries(DocumentId root, TimelineJournal journal) {
+        var view = Objects.requireNonNull(documents.require(root).rootedView());
+        var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
+        sourceDiscoverySurfaces(view, root).forEach(surface -> timelines.addAll(surface.routing().externalTimelineIds()));
+        var selected = new java.util.TreeMap<ExternalOrderKey, TimelineEntry>();
+        for (var timeline : timelines) for (var entry : journal.entries(timeline)) selected.put(entry.sourceOrderKey(), entry);
+        if (view.logicalBoundary() != null) {
+            var anchor = journal.atExternalOrder(view.logicalBoundary()).orElseThrow(
+                    () -> new IllegalStateException("Retained root boundary has no accepted causal entry"));
+            selected.put(anchor.sourceOrderKey(), anchor);
+        }
+        return List.copyOf(selected.values());
+    }
+
     record SourceDiscoverySurface(DocumentId documentId, String blueId, RoutingSurface routing) { }
 
     /** Captures one supplied input relative to an explicitly selected root. */

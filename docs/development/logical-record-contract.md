@@ -172,3 +172,25 @@ competing input acceptance may conflict on that authoritative control. It does
 not yet narrow root selection or historical completeness to scoped journal
 predicates. Those reader changes, atomic application ingress/finalization, and
 real application concurrency qualification are still required.
+
+Logical root stages select the exact active forward source Timelines from the
+root's retained view, plus its retained causal entry by external-order point.
+Peer acquisition resolves each peer's own input scope. Library-owned journal
+point verification checks complete exact indexes/predecessors without reading
+the global append frontier. Legacy host journals retain their strict state checks.
+
+Logical source discovery uses complete per-Timeline external-order predicates
+strictly below the original parent cutoff. Its `sourceSurfaceIdentity` starts
+with `scoped:sha256:` and binds the original source surface, cutoff, source set,
+and exact accepted prefix; `journalRevision` is zero in this explicitly scoped
+mode. Fresh selection recomputes the fingerprint and validates the same logical
+read set. Availability is separately conditioned. Unrelated or post-cutoff
+appends leave this proof valid; relevant inserted input or unavailable history
+rejects publication. This changes operational proof identity, not Blue input,
+ordering, gas or result bytes. Previous logical journals without the new complete
+index marker use conservative point/state validation; their next relevant append
+populates the missing Timeline index without changing accepted events.
+
+All complete cold SDK fixtures now publish journal/runtime changes together.
+The remaining legacy whole-journal drain/diagnostic gateways intentionally retain
+whole-journal conditions; the application must use the bounded stage gateways.

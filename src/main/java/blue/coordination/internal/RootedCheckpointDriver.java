@@ -32,6 +32,15 @@ final class RootedCheckpointDriver {
                 "rooted.observation.selectionReuses");
     }
 
+    /** Re-evaluates input scope for every acquired peer; a root's input catalog cannot stand in for a peer's. */
+    Selection select(DocumentId root, java.util.function.Function<DocumentId, List<TimelineEntry>> inputs) {
+        var joins = RootedJoinEligibility.captureForRoot(documents, root);
+        return RootedJoinScheduling.select(root, baseSelection(root, inputs.apply(root), joins), joins, documents,
+                selected -> baseSelection(selected, inputs.apply(selected), joins),
+                (selected, boundary) -> completeThrough(selected, inputs.apply(selected), boundary),
+                adapter::captureTerminalPeers);
+    }
+
     private record SelectionKey(DocumentId root, List<TimelineEntry> entries, boolean scopedStage) { }
     private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
 

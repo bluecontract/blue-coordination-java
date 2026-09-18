@@ -19,9 +19,9 @@ import java.util.Objects;
  * @param sourceBlueId fenced current source identity, or the original authored identity
  * @param workIdentity admission input, LIVE input, or exact retained work identity
  * @param entryBlueId exact LIVE entry, or null for other phases
- * @param journalRevision exact local completeness revision
+ * @param journalRevision exact local completeness revision; zero for logical scoped-prefix coverage
  * @param routeGeneration exact source-provider routing generation
- * @param sourceSurfaceIdentity authenticated effective source surface fingerprint
+ * @param sourceSurfaceIdentity authenticated effective source surface fingerprint; a scoped:sha256: identity also binds exact accepted source prefixes
  * @param diagnostic reason for a wait, or null for executable work
  */
 public record SourceHistoryPrerequisite(String selectionIdentity, DocumentId requestingRoot,

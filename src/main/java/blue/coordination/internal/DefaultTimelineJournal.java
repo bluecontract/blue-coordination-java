@@ -30,7 +30,8 @@ class DefaultTimelineJournal implements TimelineJournal {
         this.entryFactory = Objects.requireNonNull(entryFactory, "entryFactory");
         this.metrics = Objects.requireNonNull(metrics, "metrics");
         this.store = Objects.requireNonNull(store, "store");
-        try (ReadView view = open()) { ownedState = view.state(); }
+        if (!(store instanceof LogicalTimelineJournalStore))
+            try (ReadView view = open()) { ownedState = view.state(); }
     }
 
     @Override public synchronized TimelineEntry append(Timeline timeline,
@@ -115,6 +116,15 @@ class DefaultTimelineJournal implements TimelineJournal {
 
     @Override public synchronized Optional<TimelineEntry> byBlueId(String blueId) {
         try (ReadView view = open()) { return byId(view, Objects.requireNonNull(blueId, "blueId")); }
+    }
+
+    @Override public synchronized Optional<TimelineEntry> atExternalOrder(ExternalOrderKey order) {
+        try (ReadView view = open()) {
+            return view.atExternalOrder(Objects.requireNonNull(order)).map(entry -> {
+                if (!entry.sourceOrderKey().equals(order)) throw corrupt("Wrong external order index");
+                return checked(view, entry);
+            });
+        }
     }
 
     @Override public synchronized List<TimelineEntry> entries() {
@@ -246,6 +256,55 @@ class DefaultTimelineJournal implements TimelineJournal {
         }
     }
 
+    @Override public boolean scopedCoverage() { return store instanceof LogicalTimelineJournalStore; }
+
+    /** Exact bounded source prefixes; later or unrelated accepted inputs do not replace this authority. */
+    @Override public synchronized HistoricalStep sourceCoverage(java.util.Set<String> timelines, ExternalOrderKey cutoff,
+            long routeGeneration, long graphGeneration, String surfaceIdentity) {
+        if (!(store instanceof LogicalTimelineJournalStore logical)) return nextHistoricalStep(null, cutoff, null,
+                ignored -> false, routeGeneration, graphGeneration, () -> surfaceIdentity);
+        var availability = logical.availability();
+        if (availability.kind() == AvailabilityKind.UNAVAILABLE) return new HistoricalStep.Unavailable(availability.diagnostic());
+        if (availability.kind() == AvailabilityKind.INVALID_EVIDENCE) return new HistoricalStep.InvalidEvidence(availability.diagnostic());
+        var selected = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER); selected.addAll(timelines);
+        var fields = new ArrayList<String>(); fields.add(requireText(surfaceIdentity, "surfaceIdentity"));
+        fields.add(java.util.HexFormat.of().formatHex(OrderedRecordKey.externalOrder().encode(cutoff)));
+        boolean found = false;
+        try (ReadView view = open()) {
+            for (var timeline : selected) {
+                fields.add("timeline"); fields.add(requireText(timeline, "timeline"));
+                var indexed = logical.prefix(timeline, cutoff);
+                if (indexed.isPresent()) {
+                    for (var entry : indexed.orElseThrow()) {
+                        checked(view, entry); fields.add("entry"); fields.add(entry.blueId()); found = true;
+                    }
+                    continue;
+                }
+                for (long sequence = 1; ; sequence = Math.addExact(sequence, 1)) {
+                    var row = view.atTimelineSequence(timeline, sequence);
+                    if (row.isEmpty()) break;
+                    var entry = checked(view, row.orElseThrow());
+                    if (!entry.timeline().timelineId().equals(timeline) || entry.timelineSequence() != sequence)
+                        throw corrupt("Wrong source prefix position");
+                    if (entry.sourceOrderKey().compareTo(cutoff) >= 0) break;
+                    fields.add("entry"); fields.add(entry.blueId()); found = true;
+                }
+            }
+        }
+        String identity;
+        try {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            fields.add(0, "blue-coordination/scoped-source-coverage/1");
+            for (var field : fields) {
+                var bytes = OrderedRecordKey.text().encode(field);
+                digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array()); digest.update(bytes);
+            }
+            identity = "scoped:sha256:" + java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        var evidence = new CompletenessEvidence(0, routeGeneration, graphGeneration, cutoff, identity);
+        return found ? new HistoricalStep.Complete(evidence) : new HistoricalStep.CompleteEmpty(evidence);
+    }
+
     @Override public synchronized ExternalOrderKey latestExternalOrder() {
         try (ReadView view = open()) {
             ExternalOrderKey order = view.latestExternalOrder().orElse(null);
@@ -374,8 +433,10 @@ class DefaultTimelineJournal implements TimelineJournal {
     private TimelineEntry checked(ReadView view, TimelineEntry entry) {
         try {
             entryFactory.verifyStoredEntry(entry);
-            if (entry.globalSequence() > view.state().globalSequence()
-                    || entry.globalSequence() > view.state().entryCount()) {
+            // The library-owned logical indexes are atomically written and point-conditioned.
+            // Their exact append membership proves acceptance without a global frontier read.
+            if (!(store instanceof LogicalTimelineJournalStore) && (entry.globalSequence() > view.state().globalSequence()
+                    || entry.globalSequence() > view.state().entryCount())) {
                 throw corrupt("Entry is beyond the pinned journal state");
             }
             requireSame(entry, view.byBlueId(entry.blueId()), "identity");
@@ -426,6 +487,7 @@ class DefaultTimelineJournal implements TimelineJournal {
                         .sameExactValue(right.request().orElseThrow()));
     }
     private void requireOwned(State state) {
+        if (ownedState == null && store instanceof LogicalTimelineJournalStore) ownedState = state;
         if (!state.equals(ownedState)) throw corrupt("Journal state changed outside this owner; reopen required");
     }
     private void apply(State expected, Mutation mutation) {
@@ -435,7 +497,8 @@ class DefaultTimelineJournal implements TimelineJournal {
     private ReadView open() {
         ReadView view = physical(() -> Objects.requireNonNull(store.openRead(), "read view"));
         try {
-            return new SafeReadView(view, physical(() -> Objects.requireNonNull(view.state(), "state")));
+            return new SafeReadView(view, store instanceof LogicalTimelineJournalStore
+                    ? null : physical(() -> Objects.requireNonNull(view.state(), "state")));
         } catch (RuntimeException failure) {
             try { physical(() -> { view.close(); return null; }); }
             catch (RuntimeException closeFailure) { failure.addSuppressed(closeFailure); }
@@ -462,9 +525,13 @@ class DefaultTimelineJournal implements TimelineJournal {
     }
 
     /** Only callback failures are wrapped; semantic predicates stay outside this boundary. */
-    private record SafeReadView(ReadView delegate, State pinned) implements ReadView {
+    private static final class SafeReadView implements ReadView {
+        private final ReadView delegate;
+        private State pinned;
+        SafeReadView(ReadView delegate, State pinned) { this.delegate = delegate; this.pinned = pinned; }
         @Override public State state() {
             State current = physical(() -> Objects.requireNonNull(delegate.state(), "state"));
+            if (pinned == null) pinned = current;
             if (!pinned.equals(current)) throw corrupt("Read view changed its pinned journal state");
             return pinned;
         }

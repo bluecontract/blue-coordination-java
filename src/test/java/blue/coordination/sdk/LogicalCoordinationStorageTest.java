@@ -2,13 +2,12 @@ package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationRecords.*;
-import blue.coordination.internal.ColdStorageJournalFixture;
 import blue.coordination.internal.DefaultCoordinationEngine;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Complete SDK/engine cold assembly; this fixture's journal is separately coherent and host-owned. */
+/** Complete SDK/engine and journal cold assembly over the same logical publication. */
 final class LogicalCoordinationStorageTest {
     private static final RootedCoordinationStorage.Limits LIMITS = logicalLimits();
     private static RootedCoordinationStorage.Limits logicalLimits() {
@@ -70,7 +69,6 @@ final class LogicalCoordinationStorageTest {
         // given
         for (boolean reverse : List.of(false, true)) {
             var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
-            var journal = ColdStorageJournalFixture.empty();
             RootedCoordinationStorage.Configuration configuration;
             var expected = new ArrayList<byte[]>(); var roots = new ArrayList<DocumentId>(); var entries = new ArrayList<String>();
             try (var reference = new RootedSdkFixture()) {
@@ -83,7 +81,7 @@ final class LogicalCoordinationStorageTest {
                 }
             }
             try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration,
-                    attempt, ExactNodeProvider.empty(), journal)) {
+                    attempt, ExactNodeProvider.empty())) {
                 var blue = scope.coordination();
                 for (int i = 0; i < 2; i++) {
                     String timelineId = "independent/" + i; var timeline = blue.timelines().register(timelineId, "alice");
@@ -93,10 +91,9 @@ final class LogicalCoordinationStorageTest {
                 }
                 scope.stage(); assertTrue(records.publish(attempt.prepare("accepted", List.of(), EVIDENCE)));
             }
-            var journalBytes = ColdStorageJournalFixture.retain(journal);
             try (var a = records.attempt(); var b = records.attempt();
-                 var left = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, a, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journalBytes));
-                 var right = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, b, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journalBytes))) {
+                 var left = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, a, ExactNodeProvider.empty());
+                 var right = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, b, ExactNodeProvider.empty())) {
                 // when
                 for (int i = 0; i < 2; i++) {
                     var scope = i == 0 ? left : right; var root = scope.documentHandle(roots.get(i)).orElseThrow();
@@ -107,6 +104,8 @@ final class LogicalCoordinationStorageTest {
                 }
                 var pa = a.prepare("left", List.of(), EVIDENCE); var pb = b.prepare("right", List.of(), EVIDENCE);
                 // then
+                assertTrue(pa.points().stream().noneMatch(p -> p.key().family() == Family.JOURNAL_COVERAGE));
+                assertTrue(pb.points().stream().noneMatch(p -> p.key().family() == Family.JOURNAL_COVERAGE));
                 assertTrue(records.publish(reverse ? pb : pa));
                 var second = reverse ? pa : pb;
                 assertTrue(records.publish(second), () -> "Conflicting records: " + second.points().stream()
@@ -117,7 +116,7 @@ final class LogicalCoordinationStorageTest {
                         .map(q -> q.range().toString()).toList());
             }
             try (var attempt = records.attempt(); var cold = RootedCoordinationStorage.controlledRepository(objects.fresh()).openLogical(LIMITS, configuration,
-                    attempt, ExactNodeProvider.empty(), ColdStorageJournalFixture.open(journalBytes))) {
+                    attempt, ExactNodeProvider.empty())) {
                 for (int i = 0; i < 2; i++) {
                     var root = cold.documentHandle(roots.get(i)).orElseThrow(); assertEquals(5 + i, root.snapshot().longAt("/counter"));
                     assertArrayEquals(expected.get(i), CODEC.encode(cold.coordination().runtimeForStorage().storedMaps().results().get(entries.get(i))));
@@ -146,11 +145,11 @@ final class LogicalCoordinationStorageTest {
             expectedHead = parent.snapshot().blueId(); expectedHistory = reference.history(parent);
         }
         var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
-        var journal = ColdStorageJournalFixture.empty(); DocumentId parentId;
+        DocumentId parentId;
         ExactNodeProvider provider = id -> id.equals(sourceId) ? Optional.of(sourceJson) : Optional.empty();
         // when
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(
-                LIMITS, configuration, attempt, provider, journal)) {
+                LIMITS, configuration, attempt, provider)) {
             var blue = scope.coordination(); var timeline = blue.timelines().register("rcp2/parent", "alice");
             blue.timelines().register("rcp2/source", "alice");
             var parent = blue.documents().admitStaticProcessEmbedded(RootedSdkFixture.resource("parent.yaml"),
@@ -158,23 +157,23 @@ final class LogicalCoordinationStorageTest {
             append(blue, parent, timeline, 200, "child:\n  blueId: " + sourceId, "attach");
             scope.stage(); assertTrue(records.publish(attempt.prepare("parent-accepted", List.of(), EVIDENCE)));
         }
-        var journalBytes = ColdStorageJournalFixture.retain(journal); var actualStages = new ArrayList<String>();
+        var actualStages = new ArrayList<String>();
         blue.coordination.api.SourceHistoryPrerequisite original;
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(
-                LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                LIMITS, configuration, attempt, provider)) {
             var parent = scope.documentHandle(parentId).orElseThrow();
             actualStages.add(stageIdentity(scope.coordination().processing().processNextStage(parent)));
             original = scope.coordination().advanced().sourceHistoryPrerequisites(parent).get(0);
             scope.stage(); assertTrue(records.publish(attempt.prepare("parent-waiting", List.of(), EVIDENCE)));
         }
         for (int i = 0; i < 2; i++) try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(
-                LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                LIMITS, configuration, attempt, provider)) {
             var result = scope.coordination().advanced().processSourceHistoryPrerequisite(original);
             assertTrue(result.admission().orElseThrow().published()); assertEquals(i != 0, result.replayed());
             scope.stage(); assertTrue(records.publish(attempt.prepare("source-" + i, List.of(), EVIDENCE)));
         }
         for (int i = 0; i < 8; i++) try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(
-                LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                LIMITS, configuration, attempt, provider)) {
             var result = scope.coordination().processing().processNextStage(scope.documentHandle(parentId).orElseThrow());
             actualStages.add(stageIdentity(result)); scope.stage();
             assertTrue(records.publish(attempt.prepare("parent-resume-" + i, List.of(), EVIDENCE)));
@@ -184,7 +183,7 @@ final class LogicalCoordinationStorageTest {
         assertEquals(expectedStages, actualStages);
         assertTrue(actualStages.get(actualStages.size() - 1).startsWith("NO_WORK/"), "Bounded continuation must finish");
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects.fresh()).openLogical(
-                LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                LIMITS, configuration, attempt, provider)) {
             assertEquals(expectedHead, scope.documentHandle(parentId).orElseThrow().snapshot().blueId());
             assertEquals(expectedHistory, scope.coordination().advanced().auditManagedEpochs(parentId).stream().map(ManagedEpochReceipt::receiptIdentity).toList());
         }
@@ -202,9 +201,9 @@ final class LogicalCoordinationStorageTest {
                 sourceId = value.blueId(); sourceJson = value.json();
             }
             ExactNodeProvider provider = id -> id.equals(sourceId) ? Optional.of(sourceJson) : Optional.empty();
-            var journal = ColdStorageJournalFixture.empty(); DocumentId parentId; DocumentId otherId;
+            DocumentId parentId; DocumentId otherId;
             try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
-                    .openLogical(LIMITS, configuration, attempt, provider, journal)) {
+                    .openLogical(LIMITS, configuration, attempt, provider)) {
                 var blue = scope.coordination(); var timeline = blue.timelines().register("rcp2/parent", "alice");
                 blue.timelines().register("rcp2/source", "alice"); var otherTimeline = blue.timelines().register("other", "alice");
                 var parent = blue.documents().admitStaticProcessEmbedded(RootedSdkFixture.resource("parent.yaml"),
@@ -215,32 +214,29 @@ final class LogicalCoordinationStorageTest {
                 append(blue, other, otherTimeline, 300, "counterValue: 7");
                 scope.stage(); assertTrue(records.publish(attempt.prepare("seed", List.of(), EVIDENCE)));
             }
-            var journalBytes = ColdStorageJournalFixture.retain(journal);
             blue.coordination.api.SourceHistoryPrerequisite source;
             try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
-                    .openLogical(LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                    .openLogical(LIMITS, configuration, attempt, provider)) {
                 var parent = scope.documentHandle(parentId).orElseThrow();
                 assertEquals(ProcessingStageResult.Disposition.WAITING, scope.coordination().processing().processNextStage(parent).disposition());
                 source = scope.coordination().advanced().sourceHistoryPrerequisites(parent).get(0);
                 scope.stage(); assertTrue(records.publish(attempt.prepare("waiting", List.of(), EVIDENCE)));
             }
             try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
-                    .openLogical(LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                    .openLogical(LIMITS, configuration, attempt, provider)) {
                 assertTrue(scope.coordination().advanced().processSourceHistoryPrerequisite(source).admission().orElseThrow().published());
                 scope.stage(); assertTrue(records.publish(attempt.prepare("source", List.of(), EVIDENCE)));
             }
             try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
-                    .openLogical(LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                    .openLogical(LIMITS, configuration, attempt, provider)) {
                 scope.coordination().processing().processNextStage(scope.documentHandle(parentId).orElseThrow());
                 scope.stage(); assertTrue(records.publish(attempt.prepare("attach", List.of(), EVIDENCE)));
             }
             String parentHead; List<String> history;
             // when
             try (var a = records.attempt(); var b = records.attempt();
-                 var left = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, a, provider,
-                         ColdStorageJournalFixture.open(journalBytes));
-                 var right = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, b, provider,
-                         ColdStorageJournalFixture.open(journalBytes))) {
+                 var left = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, a, provider);
+                 var right = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, b, provider)) {
                 var parent = left.documentHandle(parentId).orElseThrow();
                 var stage = left.coordination().processing().processNextStage(parent);
                 assertFalse(stage.managedEpochApplications().isEmpty(), "Fixture must select retained owner history");
@@ -254,7 +250,7 @@ final class LogicalCoordinationStorageTest {
                 assertTrue(records.publish(reverse ? pb : pa)); assertTrue(records.publish(reverse ? pa : pb));
             }
             try (var attempt = records.attempt(); var cold = RootedCoordinationStorage.controlledRepository(objects.fresh())
-                    .openLogical(LIMITS, configuration, attempt, provider, ColdStorageJournalFixture.open(journalBytes))) {
+                    .openLogical(LIMITS, configuration, attempt, provider)) {
                 assertEquals(parentHead, cold.documentHandle(parentId).orElseThrow().snapshot().blueId());
                 assertEquals(7, cold.documentHandle(otherId).orElseThrow().snapshot().longAt("/counter"));
                 assertEquals(history, cold.coordination().advanced().auditManagedEpochs(parentId).stream().map(ManagedEpochReceipt::receiptIdentity).toList());
