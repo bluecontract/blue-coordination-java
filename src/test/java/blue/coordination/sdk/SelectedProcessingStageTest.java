@@ -11,6 +11,39 @@ import static org.junit.jupiter.api.Assertions.*;
 final class SelectedProcessingStageTest {
     private static final int BYTES = 32 * 1024 * 1024;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void retainedExactInputMaterializesItsStaleDispositionWithoutSubmissionOrProcessReplay(boolean targeted) throws Exception {
+        try (var fixture = new RootedSdkFixture()) {
+            var root = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var first = targeted ? fixture.blue.operations().on(root).from(fixture.timelines.get("rcp2/source"))
+                    .call("setCounter").through("owner").requestYaml("counterValue: 1").submit()
+                    : fixture.append(root, "rcp2/source", "setCounter", 10, "counterValue: 1", true);
+            var stale = targeted ? fixture.blue.operations().on(root).from(fixture.timelines.get("rcp2/source"))
+                    .call("setCounter").through("owner").requestYaml("counterValue: 2").submit()
+                    : fixture.append(root, "rcp2/source", "setCounter", 20, "counterValue: 2", true);
+            var journal = fixture.blue.advanced().auditTimelinePosition("rcp2/source");
+            assertEquals(first.blueId(), fixture.blue.processing().selectNextStageThrough(root, stale.blueId())
+                    .execute().entries().get(0).entry().blueId());
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK,
+                    fixture.blue.processing().selectNextStageThrough(root, stale.blueId()).execute().disposition());
+            var history = fixture.history(root);
+            var selected = fixture.blue.processing().selectStage(root, stale.blueId());
+            var result = selected.execute();
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, result.disposition());
+            assertEquals(targeted ? EntryDisposition.STALE : EntryDisposition.NO_MATCH, result.entry(stale).disposition());
+            if (targeted) assertEquals("STALE_TARGET_DOCUMENT", result.entry(stale).diagnostic().code());
+            assertTrue(result.entry(stale).closures().isEmpty());
+            assertEquals(0, result.stats().gas());
+            assertEquals(0, result.stats().committedTransitions());
+            assertEquals(history, fixture.history(root));
+            assertEquals(journal, fixture.blue.advanced().auditTimelinePosition("rcp2/source"));
+            assertEquals(1, root.snapshot().longAt("/counter"));
+            assertThrows(IllegalStateException.class, selected::execute);
+            assertThrows(RuntimeException.class, () -> fixture.blue.processing().selectStage(root, "missing-input"));
+        }
+    }
+
     @Test void globalReadinessDistinguishesAnUnrelatedRunnableRootFromAnEmptyRootWithoutExecutingEither() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {

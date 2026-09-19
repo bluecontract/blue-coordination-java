@@ -323,3 +323,15 @@ The frozen context carries the exact cutoff identity through its closed codec.
 Measured shape for this addition: 356 production sources, 92,221 lines and
 107 public API types. The focused 13-stage controls include bounded quiescence
 while a later journal entry remains pending globally.
+
+
+A cold host may select one already retained exact input with
+`processing().selectStage(root, entryBlueId)`. This performs a point lookup and
+uses the same frozen single-stage boundary as the handle overload; it never
+submits another input. The host must establish the ordered processing window
+first. Next-work selection may correctly report `NO_WORK` for an input with no
+receiving invocation. If that accepted input still needs its public result, the
+explicit input selection materializes the SDK's existing zero-attempt disposition
+(for example `STALE` for a targeted call whose exact target changed, or `NO_MATCH`
+for an untargeted exact event). Retain that result under the original input before
+completing the command, without inventing a Contracts invocation or gas charge.

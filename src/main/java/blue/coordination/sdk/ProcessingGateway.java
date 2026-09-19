@@ -90,6 +90,18 @@ public final class ProcessingGateway {
     }
 
     /**
+     * Freezes a retained accepted input by identity in a cold runtime, without submission.
+     * The caller must first finish earlier ordered work, as for the handle overload.
+     * @param root authoritative processing root
+     * @param entryBlueId exact input already retained by this runtime
+     * @return one scope-bound selection, including a zero-attempt disposition when inapplicable
+     */
+    public SelectedProcessingStage selectStage(DocumentHandle root, String entryBlueId) {
+        return runtime.selectStage(Objects.requireNonNull(root), runtime.lightweightHandle(
+                SdkPreconditions.requireText(entryBlueId, "entryBlueId")));
+    }
+
+    /**
      * Freezes the next causal root stage through an accepted input's full external order,
      * including earlier local/managed prerequisites. A NO_WORK result refers to this
      * cutoff only; later accepted input remains for its own continuation.
