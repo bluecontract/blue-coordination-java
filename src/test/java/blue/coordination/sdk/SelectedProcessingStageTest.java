@@ -75,6 +75,27 @@ final class SelectedProcessingStageTest {
         assertThrows(RuntimeException.class, () -> ProcessingStageStorage.decode(Arrays.copyOf(encoded, encoded.length + 1), BYTES));
     }
 
+    @Test void resultIdentityExcludesWallTimeButBindsTheCompletedResult() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var root = fixture.start("source.yaml", "rcp2/source", Map.of());
+            fixture.append(root, "rcp2/source", "setCounter", 10, "counterValue: 23");
+            var result = fixture.blue.processing().processNextStage(root); var stats = result.stats(); var evidence = result.evidence();
+            var measured = new ProcessingStats(stats.gas(), stats.committedTransitions(), stats.documentsOpened(),
+                    stats.elapsedNanos() + 1, stats.documentStepOrder(), stats.counters());
+            var copied = new DrainResult(result.entries(), measured, evidence.quiescent(), evidence.paused(), result.diagnostic(),
+                    result.managedEpochApplications(), result.managedEpochApplicationAttempts(), result.managedEpochEvidenceFailures(),
+                    result.rootedRetainedApplications());
+            var other = new ProcessingStageResult(result.disposition(), copied, result.selection(), result.resultOwners(), result.selectionInvalidated());
+            // when
+            var identity = ProcessingStageStorage.resultIdentity(result, BYTES);
+            // then
+            assertEquals(identity, ProcessingStageStorage.resultIdentity(other, BYTES));
+            assertFalse(Arrays.equals(ProcessingStageStorage.encode(result, BYTES), ProcessingStageStorage.encode(other, BYTES)));
+            assertNotEquals(identity, ProcessingStageStorage.resultIdentity(fixture.blue.processing().processNextStage(root), BYTES));
+        }
+    }
+
     @Test void attachmentInvalidatesSelectionWithoutAcquiringIndependentSourceOwner() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {

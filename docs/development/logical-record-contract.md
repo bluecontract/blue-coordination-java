@@ -223,3 +223,10 @@ completed evidence makes no future readiness or command-terminal promise.
 The direct/next-root boundary includes live, local retained, managed history and
 join work selected there. The separate source-prerequisite admission gateway and
 application command continuation integration still require host treatment.
+
+A selected transition identity is not sufficient to name a durable prefix:
+a waiting observation and its later completed execution can share that selection.
+`ProcessingStageStorage.resultIdentity` additionally binds the exact disposition
+and result, excluding only outer elapsed time. Hosts bind that result identity
+to the original command and prior committed prefix; SQL retries retain the exact
+prepared bytes, including their measurements.

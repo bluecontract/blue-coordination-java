@@ -34,6 +34,19 @@ public final class ProcessingStageStorage {
         return "sha256:" + HexFormat.of().formatHex(CoordinationRecords.sha256(new Bytes(encoded)).copy());
     }
 
+    /** Exact selected result identity, excluding only the host elapsed-time measurement. */
+    public static String resultIdentity(ProcessingStageResult stage, int maximumBytes) {
+        var stats = stage.stats();
+        var stable = new ProcessingStats(stats.gas(), stats.committedTransitions(), stats.documentsOpened(), 0L,
+                stats.documentStepOrder(), stats.counters());
+        var evidence = stage.evidence();
+        var detached = new DrainResult(stage.entries(), stable, evidence.quiescent(), evidence.paused(), stage.diagnostic(),
+                stage.managedEpochApplications(), stage.managedEpochApplicationAttempts(), stage.managedEpochEvidenceFailures(),
+                stage.rootedRetainedApplications());
+        var normalized = new ProcessingStageResult(stage.disposition(), detached, stage.selection(), stage.resultOwners(), stage.selectionInvalidated());
+        return "sha256:" + HexFormat.of().formatHex(CoordinationRecords.sha256(new Bytes(encode(normalized, maximumBytes))).copy());
+    }
+
     private static SdkStorageCodec codec(int maximumBytes) { return new SdkStorageCodec(new Object(), maximumBytes); }
     private static List<?> context(ProcessingStageContext value) {
         return List.of(value.kind().name(), value.root(), value.causes(), value.entryOwners().stream().map(owner ->
