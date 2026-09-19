@@ -112,6 +112,16 @@ public final class ProcessingGateway {
                 SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId")));
     }
 
+    /**
+     * Freezes one globally scheduled journal stage without executing it or inspecting later readiness.
+     * Empty means the journal does not own a runnable fair turn; use {@link #inspectReadiness()}
+     * separately when a caller needs a global quiescence observation.
+     * @return the single-use selected journal stage, or empty for another lane or no runnable head
+     */
+    public java.util.Optional<SelectedProcessingStage> selectJournalStage() {
+        return runtime.selectJournalStage();
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

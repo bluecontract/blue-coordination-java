@@ -1549,6 +1549,22 @@ public final class DefaultCoordinationEngine
         return pendingRootStage;
     }
 
+    /** Freezes one global journal fair turn. Absence is a scheduling observation, not global quiescence. */
+    public synchronized Optional<SelectedRootStage> selectJournalStage() {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint())
+            throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
+        if (head == null || rootedSelection(head.selection()).kind() != ProcessingSelection.Kind.JOURNAL) {
+            pendingRootStage = null;
+            return Optional.empty();
+        }
+        pendingRootStage = new SelectedRootStage(head.root(), head.selection(),
+                RootedStageCapture.describe(head.root(), head.selection(), documents), true);
+        return Optional.of(pendingRootStage);
+    }
+
     /** Freezes the next causal stage no later than an original accepted input; later inputs are not readiness evidence. */
     public synchronized SelectedRootStage selectRootStageThrough(DocumentId root, TimelineEntry inclusiveEntry) {
         ensureOpen(); Objects.requireNonNull(root);

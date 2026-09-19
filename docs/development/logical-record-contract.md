@@ -308,3 +308,9 @@ implementation/processor type is exposed. Tests distinguish a local no-work
 result from an unrelated pending root and preserve a resource-waiting input as
 nonquiescent without executing it. Measured shape: 356 production sources,
 92,136 lines and 107 public API types.
+
+The SDK `ProcessingGateway.selectJournalStage()` freezes the current global
+journal fair turn without executing it or widening the completed result to
+future readiness. Its empty return also covers a managed fair turn or blocked
+work and therefore is not a quiescence assertion. Hosts separately observe
+`inspectReadiness()` when preparing a command-level scheduling response.

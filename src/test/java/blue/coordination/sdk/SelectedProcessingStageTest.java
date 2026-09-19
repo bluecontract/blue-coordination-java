@@ -67,6 +67,7 @@ final class SelectedProcessingStageTest {
             var work = fixture.blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
             var sourceHistory = fixture.history(source);
             var parentHistory = fixture.history(parent);
+            assertTrue(fixture.blue.processing().selectJournalStage().isEmpty());
             var control = blue.coordination.internal.CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
             control.failOnceAt(blue.coordination.internal.CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
             // when
@@ -87,6 +88,28 @@ final class SelectedProcessingStageTest {
             assertEquals(sourceHistory, fixture.history(source));
             assertThrows(IllegalStateException.class, selected::execute);
             var fault = assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(parent));
+            assertTrue(control.isInjectedFailure(fault));
+        }
+    }
+
+    @Test void globalJournalSelectionPublishesOnlyOneStageAndDoesNotInspectLaterReadiness() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var root = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var first = fixture.append(root, "rcp2/source", "setCounter", 10, "counterValue: 1");
+            fixture.append(root, "rcp2/source", "setCounter", 20, "counterValue: 2");
+            var control = blue.coordination.internal.CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
+            control.failOnceAt(blue.coordination.internal.CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
+            var stage = fixture.blue.processing().selectJournalStage().orElseThrow();
+            var completed = stage.execute();
+            // then
+            assertEquals(root.id(), stage.context().root());
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, completed.disposition());
+            assertEquals(1, root.snapshot().longAt("/counter"));
+            assertEquals(first.blueId(), completed.entries().get(0).entry().blueId());
+            assertThrows(IllegalStateException.class, stage::execute);
+            var fault = assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(root));
             assertTrue(control.isInjectedFailure(fault));
         }
     }
