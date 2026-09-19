@@ -2250,8 +2250,14 @@ final class ContractsClosureAdapter implements AutoCloseable {
             existingMembers = new LinkedHashSet<>(current.existingMemberSet());
             existingMembers.addAll(attachmentViews.keySet());
         }
-        InMemoryDocumentStore.ClosureSnapshot durable =
-                documents.closureSnapshot(existingMembers);
+        // Existing owners retain live publication fences. Borrowed witnesses already have
+        // authenticated exact views; opening their current sessions here adds unrelated dependencies.
+        Set<DocumentId> liveMembers = new LinkedHashSet<>(existingMembers);
+        if (current.rootedEvidence() != null) liveMembers.removeIf(id ->
+                !current.rootedEvidence().context().entryOwners().contains(closureId(id))
+                        && (current.documents().containsKey(id) || attachmentViews.containsKey(id)));
+        InMemoryDocumentStore.ClosureSnapshot durable = liveMembers.isEmpty()
+                ? documents.admissionSnapshot(liveMembers) : documents.closureSnapshot(liveMembers);
         if (durable.occurrenceInventoryGeneration()
                         != indexed.occurrenceInventoryGeneration()
                 || durable.componentIndexGeneration()
@@ -2264,6 +2270,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
         captured.putAll(current.documents());
         for (DocumentId documentId : existingMembers) {
             CapturedDocument prior = captured.get(documentId);
+            if (!liveMembers.contains(documentId)) {
+                if (prior == null) captured.put(documentId, captureSelectedDocument(documentId,
+                        Objects.requireNonNull(attachmentViews.get(documentId), "Missing exact borrowed source view")));
+                continue;
+            }
             InMemoryDocumentStore.DocumentHead head =
                     durable.requireHead(documentId);
             if (prior != null) {
