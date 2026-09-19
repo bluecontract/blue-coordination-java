@@ -53,6 +53,28 @@ public final class ProcessingGateway {
         return runtime.selectStage(Objects.requireNonNull(root), null);
     }
 
+    /**
+     * Freezes the exact root-local retained work selected by this root's ordering.
+     * Rejects a stale identity before PROCESS; does not fall through to another work item.
+     * @param root authoritative root in this runtime
+     * @param expectedWorkIdentity exact retained local work identity
+     * @return frozen selection whose known owners must be acquired before execution
+     */
+    public SelectedProcessingStage selectRetainedStage(DocumentHandle root, String expectedWorkIdentity) {
+        return runtime.selectRetainedStage(Objects.requireNonNull(root),
+                SdkPreconditions.requireText(expectedWorkIdentity, "expectedWorkIdentity"));
+    }
+
+    /**
+     * Freezes the exact managed work only when it owns the global bounded fair turn.
+     * Execution materializes one complete stage without checking later readiness.
+     * @param expectedWorkIdentity exact work from the public processing selection audit
+     * @return frozen selection and its included publication owners
+     */
+    public SelectedProcessingStage selectManagedEpochApplicationStage(String expectedWorkIdentity) {
+        return runtime.selectManagedApplicationStage(SdkPreconditions.requireText(expectedWorkIdentity, "expectedWorkIdentity"));
+    }
+
     /** Freezes the supplied accepted input without appending or looking ahead. */
     public SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
         return runtime.selectStage(Objects.requireNonNull(root), Objects.requireNonNull(input));

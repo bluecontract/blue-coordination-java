@@ -51,7 +51,7 @@ final class RootedCheckpointDriver {
                 .filter(fence -> through == null || fence.boundary().compareTo(through) <= 0).toList();
     }
     private record SelectionKey(DocumentId root, List<TimelineEntry> entries, boolean scopedStage, ExternalOrderKey through) { }
-    private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
+    private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff, boolean scopedStage, ExternalOrderKey through) { }
 
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
     boolean completeBefore(DocumentId root, List<TimelineEntry> entries, ExternalOrderKey cutoff) {
@@ -132,7 +132,7 @@ final class RootedCheckpointDriver {
 
     /** A transport entry is not a substitute for each root's retained progress. */
     Scan scan(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
-        return adapter.reuseObservation(new ScanKey(List.copyOf(entries), cutoff),
+        return adapter.reuseObservation(new ScanKey(List.copyOf(entries), cutoff, scopedStage, through),
                 () -> scanFresh(entries, cutoff),
                 selected -> !selected.heads().isEmpty() && selected.blockedRoots().isEmpty(),
                 "rooted.observation.scanReuses");

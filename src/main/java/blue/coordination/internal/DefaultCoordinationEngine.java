@@ -1493,6 +1493,15 @@ public final class DefaultCoordinationEngine
 
     /** Internal SDK bridge: freezes one exact stage before the host acquires known owners. */
     public synchronized SelectedRootStage selectRootStage(DocumentId root, TimelineEntry input) {
+        return selectRootStage(root, input, null);
+    }
+
+    /** Freezes only the exact root-local retained obligation, before any PROCESS mutation. */
+    public synchronized SelectedRootStage selectRetainedRootStage(DocumentId root, String expectedWorkIdentity) {
+        return selectRootStage(root, null, Objects.requireNonNull(expectedWorkIdentity));
+    }
+
+    private SelectedRootStage selectRootStage(DocumentId root, TimelineEntry input, String expectedWorkIdentity) {
         ensureOpen(); Objects.requireNonNull(root);
         RootedCheckpointDriver.Selection selected;
         if (input != null) {
@@ -1505,7 +1514,29 @@ public final class DefaultCoordinationEngine
                     ? driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal))
                     : driver.select(root, journal.entries());
         }
+        if (expectedWorkIdentity != null && (selected.localHistorical() == null
+                || !expectedWorkIdentity.equals(selected.localHistorical().work().workIdentity())))
+            throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedWorkIdentity);
         pendingRootStage = new SelectedRootStage(root, selected, RootedStageCapture.describe(root, selected, documents), input == null);
+        return pendingRootStage;
+    }
+
+    /** Freezes the exact managed fair turn, retaining its included publication owners and no future readiness. */
+    public synchronized SelectedRootStage selectManagedApplicationStage(String expectedWorkIdentity) {
+        ensureOpen();
+        String expected = Objects.requireNonNull(expectedWorkIdentity);
+        if (!expected.matches("sha256:[0-9a-f]{64}"))
+            throw new IllegalArgumentException("expectedWorkIdentity must be a lowercase sha256 identity");
+        if (!contractsClosureProfile.rootedCheckpoint())
+            throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
+        var next = head == null ? auditNextProcessingSelection() : rootedSelection(head.selection());
+        if (head == null || next.kind() != ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION
+                || !next.managedEpochApplicationWork().map(ManagedEpochApplicationWork::workIdentity).filter(expected::equals).isPresent())
+            throw processingSelectionMismatch("MANAGED_EPOCH_APPLICATION", next, expected);
+        pendingRootStage = new SelectedRootStage(head.root(), head.selection(),
+                RootedStageCapture.describe(head.root(), head.selection(), documents), true);
         return pendingRootStage;
     }
 

@@ -275,3 +275,20 @@ The existing five-argument context constructor and unbounded gateways remain.
 Focused tests cover earlier/current/future inputs, cold cutoff lookup, closed
 codec binding, and committing a held packet after a later same-Timeline append.
 Measured shape: 355 production sources, 92,038 lines, 106 public API types.
+
+## Exact retained and managed drain selections
+
+`ProcessingGateway.selectRetainedStage(root, workIdentity)` freezes only the
+root-local retained work which currently owns that root's causal turn.
+`selectManagedEpochApplicationStage(workIdentity)` preserves the global bounded
+managed fair-turn check while returning the same single-use stage token. Both
+reject stale identities before PROCESS and expose included publication owners;
+execution performs one stage without a future-readiness scan. Existing drain
+convenience methods retain their behavior.
+
+Root scan observation reuse now includes scoped-owner mode and the causal cutoff
+in its key. A prior compatibility audit using excluded consumers cannot supply
+an incompatible owner set to a later durable stage selection. Tests audit before
+selecting, reject wrong work without changing history, execute exact root-local
+and managed work, and leave an armed optional-readiness fault untouched.
+Measured shape: 355 production sources, 92,102 lines, 106 public API types.

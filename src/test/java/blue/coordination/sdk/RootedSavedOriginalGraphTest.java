@@ -50,8 +50,9 @@ final class RootedSavedOriginalGraphTest {
         assertEquals(3, restoredHeads.size());
     }
 
-    @Test
-    void localPendingHistoryMustFinishBeforeRootIsReady() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void localPendingHistoryMustFinishBeforeRootIsReady(boolean durableStage) throws Exception {
         // given
         String template;
         // when
@@ -111,7 +112,16 @@ final class RootedSavedOriginalGraphTest {
             assertThrows(RuntimeException.class, () -> f.blue.advanced().processRetained(handles.get("A"), "sha256:" + "0".repeat(64)));
             assertEquals(beforeRejected, f.control.selectedView(handles.get("A").id()).closureIdentity());
             assertEquals(sourceHistories, List.of(f.history(handles.get("B")), f.history(handles.get("C"))));
-            var settled = f.blue.advanced().processRetained(handles.get("A"), selectedWork.workIdentity());
+            DrainResult settled;
+            if (durableStage) {
+                assertThrows(IllegalArgumentException.class, () -> f.blue.processing().selectRetainedStage(handles.get("A"), "sha256:" + "0".repeat(64)));
+                var stage = f.blue.processing().selectRetainedStage(handles.get("A"), selectedWork.workIdentity());
+                assertTrue(stage.context().causes().contains(selectedWork.workIdentity()));
+                assertEquals(List.of(handles.get("A").id()), stage.context().entryOwners().stream().map(blue.coordination.api.ProcessingStageContext.Owner::documentId).toList());
+                var completed = stage.execute();
+                assertEquals(ProcessingStageResult.Disposition.COMPLETED, completed.disposition());
+                settled = completed.evidence();
+            } else settled = f.blue.advanced().processRetained(handles.get("A"), selectedWork.workIdentity());
             assertTrue(settled.entries().isEmpty(), "Historical application is not another external operation");
             assertTrue(settled.managedEpochApplications().isEmpty(), "No independent consumer revision was manufactured");
             assertEquals(1, settled.rootedRetainedResults().size());

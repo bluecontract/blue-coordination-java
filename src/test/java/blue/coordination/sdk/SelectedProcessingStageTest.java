@@ -11,6 +11,43 @@ import static org.junit.jupiter.api.Assertions.*;
 final class SelectedProcessingStageTest {
     private static final int BYTES = 32 * 1024 * 1024;
 
+    @Test void exactManagedFairTurnIsFrozenWithoutFutureReadinessOrForeignOwnerClaims() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var source = fixture.start("source.yaml", "rcp2/source", Map.of());
+            String original = fixture.retain(source);
+            var tick = fixture.append(source, "rcp2/source", "tick", 100, "{}");
+            fixture.blue.processing().process(source, tick);
+            var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
+            fixture.append(parent, "rcp2/parent", "attach", 200, "child: {blueId: " + original + "}");
+            fixture.blue.processing().drainJournal(DrainBudget.unlimited());
+            var work = fixture.blue.advanced().auditNextProcessingSelection().managedEpochApplicationWork().orElseThrow();
+            var sourceHistory = fixture.history(source);
+            var parentHistory = fixture.history(parent);
+            var control = blue.coordination.internal.CoordinationTestControl.attach(fixture.blue.advanced().rawEngine());
+            control.failOnceAt(blue.coordination.internal.CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
+            var mismatch = assertThrows(blue.coordination.api.CoordinationException.class,
+                    () -> fixture.blue.processing().selectManagedEpochApplicationStage("sha256:" + "0".repeat(64)));
+            assertEquals(blue.coordination.api.CoordinationErrorCode.PROCESSING_SELECTION_MISMATCH, mismatch.code());
+            assertEquals(parentHistory, fixture.history(parent));
+            var selected = fixture.blue.processing().selectManagedEpochApplicationStage(work.workIdentity());
+            var completed = selected.execute();
+            // then
+            assertEquals(ProcessingStageContext.Kind.MANAGED_HISTORY, selected.context().kind());
+            assertEquals(List.of(parent.id()), selected.context().entryOwners().stream().map(ProcessingStageContext.Owner::documentId).toList());
+            assertTrue(selected.context().causes().contains(work.workIdentity()));
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, completed.disposition());
+            assertEquals(1, completed.managedEpochApplications().size());
+            assertEquals(work.workIdentity(), completed.managedEpochApplicationAttempts().get(0).work().workIdentity());
+            assertEquals(1, parent.snapshot().longAt("/seen"));
+            assertEquals(sourceHistory, fixture.history(source));
+            assertThrows(IllegalStateException.class, selected::execute);
+            var fault = assertThrows(RuntimeException.class, () -> fixture.blue.processing().processNext(parent));
+            assertTrue(control.isInjectedFailure(fault));
+        }
+    }
+
     @Test void acceptedCutoffIncludesEarlierStagesAndNeverConsumesLaterInput() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {
