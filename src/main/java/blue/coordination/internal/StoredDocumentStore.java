@@ -128,6 +128,7 @@ final class StoredDocumentStore {
     final class Opened implements AutoCloseable {
         private final LogicalRecordContext logical;
         private final StoredDocumentIndexes.WorkingSessions selectedSessions;
+        private final StoredHistoricalSources historicalSources;
         private final StoredResultRows results;
         private final StoredPublicationIndexes publication;
         private final PersistentOrderedMap.ValueProjection<String, ContractsClosureAdmissionReceipt, ContractsClosureAdmissionReceipt> admissionValues;
@@ -154,6 +155,7 @@ final class StoredDocumentStore {
             selectedSessions = documents.openWorkingSessions((logical == null ? documents.openSessions(selected.root(Root.SESSIONS)) : documents.openLogicalSessions(logical)),
                     lineages, generations, maximumSelectedSessions,
                     (id, original) -> topology.requireJoinRoot(graph, id, original.retainedView()));
+            historicalSources = logical == null ? null : new StoredHistoricalSources(objects, mapLimits, logical, selectedSessions.viewScope());
             results = new StoredResultRows(objects, sessionLimits, decodedCache);
             StoredDocumentReadChecks openingChecks = null;
             StoredPublicationIndexes openingPublication = null;
@@ -203,6 +205,7 @@ final class StoredDocumentStore {
         InMemoryDocumentStore.StoreState state() { require(!closed, "Document-store scope is closed"); return initial; }
         DocumentSessionStorage.OpenScope viewScope() { require(!closed, "Document-store scope is closed"); return selectedSessions.viewScope(); }
         StoredPublicationReceiptReuse publicationReuse() { require(!closed, "Document-store scope is closed"); return publication.closureReuse(); }
+        StoredHistoricalSources historicalSources() { require(!closed, "Document-store scope is closed"); return Objects.requireNonNull(historicalSources); }
 
         /** Selects typed record changes only; the enclosing engine prepares and publishes the closed attempt. */
         void stageLogical(InMemoryDocumentStore.StoreState complete) {
@@ -215,6 +218,7 @@ final class StoredDocumentStore {
                     admissions.selectLogicalRecords(); closures.selectLogicalRecords();
                     var state = checks.stage(complete);
                     selectedSessions.stage(state.sessionIndex()).selectLogicalRecords();
+                    historicalSources.stage();
                     documents.selectLogicalLineages(state.lineageIndex());
                     state.graphGenerations().storedState().generations().selectLogicalRecords();
                     occurrences.selectLogical(state.occurrenceInventory()); topology.selectLogical(state.componentIndex());

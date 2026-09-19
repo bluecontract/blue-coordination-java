@@ -2171,6 +2171,13 @@ final class MultiDocumentPublicationTransaction {
         return java.util.Collections.unmodifiableSet(affected);
     }
 
+    /** Valid only after prepareReplacement has authenticated the complete rooted result and owner set. */
+    Set<DocumentId> retainedSourceOwners() {
+        if (stagedRootedView == null) return Set.of();
+        return Set.copyOf(stagedAdmissionResult && stagedAdmissionReceipt != null
+                ? expectedAbsent : RootedResultScope.members(stagedRootedView.result()));
+    }
+
     private ComponentStateInventory mergeComponentStates(
             InMemoryDocumentStore.StoreState before,
             Map<DocumentId, DocumentSession> resultingSessions,

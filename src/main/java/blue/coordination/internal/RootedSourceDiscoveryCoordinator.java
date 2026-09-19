@@ -97,7 +97,7 @@ final class RootedSourceDiscoveryCoordinator {
         if (declared || current.rootedEvidence().context().entryOwners()
                 .contains(ContractsClosureAdapter.closureId(occurrence.targetDocumentId()))) return null;
         ExactValue authored;
-        var source = documents.find(occurrence.targetDocumentId()).orElse(null);
+        var source = documents.sourceAdmission(occurrence.targetDocumentId()).orElse(null);
         if (source == null) {
             if (occurrence.targetKind() != ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
                     || occurrence.newDraft() == null || !occurrence.newDraft().contentDerivedIdentity()) return null;
@@ -211,7 +211,11 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     private Prepared prepare(Pending candidate) {
-        var source = documents.find(candidate.source()).orElse(null);
+        var admitted = documents.sourceAdmission(candidate.source());
+        var source = documents.sourceBefore(candidate.source(), candidate.cutoff()).orElse(null);
+        if (admitted.isPresent() && source == null)
+            return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
+                    "missing-retained-source", "Admitted source lacks authenticated pre-boundary history", null);
         Window window;
         try { window = window(candidate, source); }
         catch (blue.language.provider.ProviderUnavailableException unavailable) {
@@ -233,6 +237,11 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.ADMISSION, compiled, null,
                     window.identity(), null, window.evidence());
         }
+        var assessment = RootedSourceHistoryAssessment.assess(candidate.source(), source, candidate.cutoff(),
+                documents, adapter, journal);
+        if (assessment.satisfied()) return null;
+        // Actual source-owned selection retains all ordinary live head, owner and control fences.
+        source = documents.require(candidate.source());
         boolean logical = documents.storedState().sessionIndex().isLogical();
         var driver = new RootedCheckpointDriver(documents, adapter, logical);
         java.util.function.Function<DocumentId, List<TimelineEntry>> inputs = root -> logical

@@ -23,7 +23,12 @@ final class RootedJoinEligibility {
     /** Point lookup uses retained candidate membership, not the requested root's possibly newer graph. */
     static List<Fence> captureForRoot(InMemoryDocumentStore documents, DocumentId root) {
         var session = documents.require(root);
-        var snapshot = java.util.Objects.requireNonNull(session.rootedView()).snapshot();
+        return captureForView(documents, root, java.util.Objects.requireNonNull(session.rootedView()));
+    }
+
+    /** Assess the exact selected source owners without opening their later live heads. */
+    static List<Fence> captureForView(InMemoryDocumentStore documents, DocumentId root, RootedDocumentView view) {
+        var snapshot = view.snapshot();
         var owners = snapshot.components().stream().filter(component -> component.orderedMemberDocumentIds()
                 .contains(ContractsClosureAdapter.closureId(root))).findFirst().orElseThrow().orderedMemberDocumentIds().stream()
                 .map(ContractsClosureAdapter::coordinationId).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));

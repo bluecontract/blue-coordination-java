@@ -278,6 +278,17 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         new AutomaticOccurrenceResolutionCoordinator
                                 .ExpansionBuilder<CohortInvocation>() {
                             @Override
+                            public InMemoryDocumentStore.OccurrenceResolutionSnapshot captureStoreState(CohortInvocation current) {
+                                if (current.rootedEvidence() == null) return captureStoreState();
+                                var boundary = current.rootedEvidence().historicalOrigin() == null
+                                        ? RootedAttachmentCapture.logicalBoundary(current.input(), documents.catchUpPlansSnapshot())
+                                        : current.rootedEvidence().historicalOrigin().logicalBoundary();
+                                var owners = current.rootedEvidence().context().entryOwners().stream()
+                                        .map(ContractsClosureAdapter::coordinationId).collect(java.util.stream.Collectors.toSet());
+                                return documents.historicalOccurrenceResolutionSnapshot(boundary, owners);
+                            }
+
+                            @Override
                             public InMemoryDocumentStore
                                     .OccurrenceResolutionSnapshot
                                     captureStoreState() {
@@ -419,6 +430,32 @@ final class ContractsClosureAdapter implements AutoCloseable {
             selected.put(anchor.sourceOrderKey(), anchor);
         }
         return List.copyOf(selected.values());
+    }
+
+    /** Tests only accepted input strictly before the requirement, using the exact retained source body. */
+    synchronized boolean sourceHasEligibleInputBefore(DocumentId root, RootedDocumentView view,
+            ExternalOrderKey cutoff, TimelineJournal journal) {
+        var surfaces = sourceDiscoverySurfaces(view, root);
+        var active = surfaces.stream().map(SourceDiscoverySurface::documentId).collect(java.util.stream.Collectors.toSet());
+        var localRoutes = new OperationRouteIndex(runtime.metrics(),
+                id -> documents.sourceBefore(id, cutoff).orElseThrow(() ->
+                        new ProjectionUnavailableException("Missing retained operation-target lineage " + id)),
+                id -> view.retainedSnapshot().managedDocument(closureId(id)).blueId());
+        var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
+        for (var surface : surfaces) {
+            localRoutes.replace(surface.documentId(), surface.routing(), view.routes(surface.documentId()));
+            timelines.addAll(surface.routing().externalTimelineIds());
+        }
+        var entries = new java.util.TreeMap<ExternalOrderKey, TimelineEntry>();
+        for (var timeline : timelines) for (var entry : journal.entriesBefore(timeline, cutoff))
+            entries.put(entry.sourceOrderKey(), entry);
+        for (var entry : entries.values()) {
+            var deliveries = localRoutes.selectDirectDeliveries(entry).deliveries().stream()
+                    .map(OperationRouteIndex.FrozenDirectDelivery::toContractsEvidence)
+                    .filter(delivery -> active.contains(coordinationId(delivery.targetDocumentId()))).toList();
+            if (!runtime.eligibleRootDeliveries(view.retainedSnapshot(), deliveries, entry).isEmpty()) return true;
+        }
+        return false;
     }
 
     record SourceDiscoverySurface(DocumentId documentId, String blueId, RoutingSurface routing) { }

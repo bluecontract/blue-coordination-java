@@ -140,6 +140,14 @@ class DefaultTimelineJournal implements TimelineJournal {
         }
     }
 
+    @Override public synchronized List<TimelineEntry> entriesBefore(String timelineId, ExternalOrderKey exclusive) {
+        if (store instanceof LogicalTimelineJournalStore logical) {
+            var prefix = logical.prefix(timelineId, exclusive);
+            if (prefix.isPresent()) return List.copyOf(prefix.orElseThrow());
+        }
+        return TimelineJournal.super.entriesBefore(timelineId, exclusive);
+    }
+
     @Override public synchronized List<TimelineEntry> entriesThrough(String timelineId, ExternalOrderKey through) {
         if (store instanceof LogicalTimelineJournalStore logical) {
             var prefix = logical.prefix(timelineId, through);

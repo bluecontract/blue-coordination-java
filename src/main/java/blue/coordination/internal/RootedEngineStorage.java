@@ -340,6 +340,7 @@ public final class RootedEngineStorage {
                         storedActive.storedIndexes(), acquiredPending.plans(), acquiredPending.sources(), acquiredFeeder.maps(), controls),
                         Objects.requireNonNull(provider), Objects.requireNonNull(journal));
                 engine.documents().bindStoredPublicationReuse(documentScope.publicationReuse());
+                engine.documents().bindHistoricalSources(documentScope.historicalSources());
                 pendingScope = acquiredPending; feederScope = acquiredFeeder;
             } catch (RuntimeException | Error failure) {
                 closeAfterFailure(failure, engine, acquiredFeeder, acquiredPending, documentScope); throw failure;
