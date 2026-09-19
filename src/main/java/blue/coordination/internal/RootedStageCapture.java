@@ -58,6 +58,39 @@ final class RootedStageCapture {
     static boolean invalidatesSelection(ProcessingDrainReceipt result) {
         return results(result).anyMatch(value -> !value.graphChanges().isEmpty());
     }
+    static Set<DocumentId> publishedOwners(ProcessingDrainReceipt result) {
+        var owners = new TreeSet<DocumentId>(); results(result).forEach(value -> owners.addAll(RootedResultScope.members(value)));
+        return owners;
+    }
+
+    static SourceHistoryStageContext source(SourceHistoryPrerequisite expected,
+            RootedSourceDiscoveryCoordinator.Prepared selected, SourceHistoryPrerequisiteResult replay,
+            InMemoryDocumentStore documents) {
+        var owners = new TreeSet<DocumentId>(); owners.add(expected.sourceDocumentId());
+        var invocations = new ArrayList<String>();
+        if (selected != null && selected.step() != null) {
+            var step = selected.step();
+            // The legacy resident selector's exclusion form identifies the same
+            // root component; the durable envelope always names included owners.
+            var included = step.consumers().included() ? step.consumers()
+                    : CatchUpConsumerScope.owners(owners(expected.sourceDocumentId(), documents));
+            var context = describe(expected.sourceDocumentId(), new RootedCheckpointDriver.Selection(
+                    step.live(), step.historical(), included, step.blocked(), step.localHistorical()), documents);
+            context.entryOwners().forEach(owner -> owners.add(owner.documentId()));
+            invocations.addAll(context.invocationIdentities());
+        } else if (selected != null && selected.admission() != null) {
+            invocations.add(selected.admission().invocation().invocationIdentity());
+        }
+        if (replay != null) {
+            replay.admission().ifPresent(receipt -> owners.addAll(receipt.documentIds()));
+            replay.processing().ifPresent(receipt -> owners.addAll(publishedOwners(receipt)));
+        }
+        var predecessors = owners.stream().map(id -> new SourceHistoryStageContext.Owner(id,
+                documents.find(id).map(session -> new ProcessingStageContext.Owner(id, session.epoch(),
+                        session.currentRepresentation().blueId(), session.requireRootedHistory().identity(),
+                        documents.graphGeneration(id), session.rootedView().snapshot().closureIdentity())))).toList();
+        return new SourceHistoryStageContext(expected, predecessors, invocations);
+    }
     private static Stream<ClosureProcessResult> results(ProcessingDrainReceipt receipt) {
         return Stream.concat(Stream.concat(receipt.contractsAttemptsByEntry().values().stream().flatMap(List::stream),
                         receipt.rootedRetainedAttempts().stream().map(ProcessingDrainReceipt.RootedRetainedAttempt::attempt))

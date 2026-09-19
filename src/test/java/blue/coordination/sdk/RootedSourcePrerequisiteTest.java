@@ -1,6 +1,7 @@
 package blue.coordination.sdk;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.storage.SourceHistoryStageStorage;
 import blue.coordination.api.SourceHistoryPrerequisite;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.internal.CoordinationTestControl;
@@ -256,8 +257,9 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test
-    void alreadyKnownSourceRetainedHistoryRunsOneApplicationAtATime() throws IOException {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void alreadyKnownSourceRetainedHistoryRunsOneApplicationAtATime(boolean stageGateway) throws IOException {
         // given
         try (var f = new RootedSdkFixture()) {
             // when
@@ -275,13 +277,13 @@ final class RootedSourcePrerequisiteTest {
             String parentBefore = parent.snapshot().blueId(); var leafHistory = f.history(leaf);
             assertEquals(EntryDisposition.NEEDS_RESOURCES, f.blue.processing().processNext(parent).entry(attachSource).disposition());
             var first = one(f.blue, parent, SourceHistoryPrerequisite.Kind.MANAGED_HISTORY);
-            var firstResult = f.blue.advanced().processSourceHistoryPrerequisite(first);
+            var firstResult = sourceStage(f.blue, first, stageGateway);
             assertEquals(1, firstResult.processing().orElseThrow().managedEpochApplications().size());
             assertTrue(firstResult.processing().orElseThrow().processedEntries().isEmpty());
             assertEquals(parentBefore, parent.snapshot().blueId());
             var second = one(f.blue, parent, SourceHistoryPrerequisite.Kind.MANAGED_HISTORY);
             assertNotEquals(first.workIdentity(), second.workIdentity());
-            var secondResult = f.blue.advanced().processSourceHistoryPrerequisite(second);
+            var secondResult = sourceStage(f.blue, second, stageGateway);
             assertEquals(1, secondResult.processing().orElseThrow().managedEpochApplications().size());
             assertEquals(5L, source.snapshot().longAt("/seen"));
             assertEquals(parentBefore, parent.snapshot().blueId()); assertEquals(leafHistory, f.history(leaf));
@@ -289,8 +291,9 @@ final class RootedSourcePrerequisiteTest {
         }
     }
 
-    @Test
-    void knownSourceRootedRetainedWorkIsOneDistinctPrerequisite() throws IOException {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void knownSourceRootedRetainedWorkIsOneDistinctPrerequisite(boolean stageGateway) throws IOException {
         // given
         try (var f = new RootedSdkFixture()) {
             // when
@@ -316,7 +319,7 @@ final class RootedSourcePrerequisiteTest {
             String before = parent.snapshot().blueId(); var bHistory = f.history(b); var cHistory = f.history(c);
             assertEquals(EntryDisposition.NEEDS_RESOURCES, f.blue.processing().processNext(parent).entry(pa).disposition());
             var selected = one(f.blue, parent, SourceHistoryPrerequisite.Kind.ROOTED_RETAINED);
-            var result = f.blue.advanced().processSourceHistoryPrerequisite(selected);
+            var result = sourceStage(f.blue, selected, stageGateway);
             assertTrue(result.admission().isEmpty());
             assertEquals(1, result.processing().orElseThrow().rootedRetainedAttempts().size());
             assertTrue(result.processing().orElseThrow().processedEntries().isEmpty());
@@ -429,4 +432,16 @@ final class RootedSourcePrerequisiteTest {
         }
     }
     private record SourceInput(String id, String json) { }
+    private static SourceHistoryPrerequisiteResult sourceStage(BlueCoordination blue, SourceHistoryPrerequisite selected, boolean stage) {
+        if (!stage) return blue.advanced().processSourceHistoryPrerequisite(selected);
+        var frozen = blue.advanced().selectSourceHistoryStage(selected);
+        var completed = frozen.execute();
+        assertEquals(frozen.context(), completed.selection());
+        assertFalse(completed.resultOwners().contains(selected.requestingRoot()));
+        byte[] encoded = SourceHistoryStageStorage.encode(completed, 32 * 1024 * 1024, 128);
+        assertArrayEquals(encoded, SourceHistoryStageStorage.encode(
+                SourceHistoryStageStorage.decode(encoded, 32 * 1024 * 1024, 128), 32 * 1024 * 1024, 128));
+        return completed.result();
+    }
+
 }

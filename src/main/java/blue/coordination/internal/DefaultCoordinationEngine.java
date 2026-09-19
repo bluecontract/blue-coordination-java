@@ -1393,6 +1393,12 @@ public final class DefaultCoordinationEngine
         if (replay.isPresent()) return replay.orElseThrow();
         var committed = rootedSourceDiscoveries.committedSelection(expected);
         var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        return executeSourcePrerequisite(expected, selected, committed.isPresent());
+    }
+
+    private blue.coordination.api.SourceHistoryPrerequisiteResult executeSourcePrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected, RootedSourceDiscoveryCoordinator.Prepared selected,
+            boolean replayed) {
         blue.coordination.api.SourceHistoryPrerequisiteResult result;
         if (selected.admission() != null) {
             var admission = selected.admission();
@@ -1400,13 +1406,66 @@ public final class DefaultCoordinationEngine
             var activation = admission.activationInputs();
             var receipt = admitContractsClosure(admission.invocation(), activation.policy(), activation.verifiedFrontier(),
                     rootedSourceProvider);
-            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), committed.isPresent());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), replayed);
         } else {
             var receipt = executeRootSelection(Objects.requireNonNull(selected.step()), System.nanoTime());
-            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), committed.isPresent());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), replayed);
         }
         rootedSourceDiscoveries.retain(result);
         return result;
+    }
+
+    private SelectedSourceStage pendingSourceStage;
+
+    /** Freezes exact source-owned admission/history work before the host acquires execution authority. */
+    public synchronized SelectedSourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); Objects.requireNonNull(expected);
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        if (expected.kind() == blue.coordination.api.SourceHistoryPrerequisite.Kind.WAIT)
+            throw new IllegalArgumentException("A resource wait is not executable source work");
+        var replay = rootedSourceDiscoveries.completed(expected).orElse(null);
+        var committed = replay == null ? rootedSourceDiscoveries.committedSelection(expected) : Optional.<RootedSourceDiscoveryCoordinator.Prepared>empty();
+        var selected = replay != null ? null : committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        var context = RootedStageCapture.source(expected, selected, replay, documents);
+        pendingSourceStage = new SelectedSourceStage(context, selected, replay, committed.isPresent());
+        return pendingSourceStage;
+    }
+
+    /** Single-use source stage; no requesting-parent retry or successor selection is performed. */
+    public final class SelectedSourceStage {
+        private final Thread owner = Thread.currentThread();
+        private final blue.coordination.api.SourceHistoryStageContext context;
+        private final RootedSourceDiscoveryCoordinator.Prepared selected;
+        private final blue.coordination.api.SourceHistoryPrerequisiteResult replay;
+        private final boolean committed;
+        private SelectedSourceStage(blue.coordination.api.SourceHistoryStageContext context,
+                RootedSourceDiscoveryCoordinator.Prepared selected, blue.coordination.api.SourceHistoryPrerequisiteResult replay,
+                boolean committed) {
+            this.context = context; this.selected = selected; this.replay = replay; this.committed = committed;
+        }
+        public blue.coordination.api.SourceHistoryStageContext context() { return context; }
+        public blue.coordination.api.SourceHistoryStageResult execute() {
+            synchronized (DefaultCoordinationEngine.this) {
+                if (closed || pendingSourceStage != this || owner != Thread.currentThread())
+                    throw new IllegalStateException("Source stage is retired, used or belongs to another thread");
+                pendingSourceStage = null;
+                try {
+                    var result = replay != null ? replay : executeSourcePrerequisite(context.prerequisite(), selected, committed);
+                    var owners = new java.util.TreeSet<DocumentId>();
+                    context.entryOwners().forEach(value -> owners.add(value.documentId()));
+                    result.admission().ifPresent(receipt -> owners.addAll(receipt.documentIds()));
+                    result.processing().ifPresent(receipt -> owners.addAll(RootedStageCapture.publishedOwners(receipt)));
+                    boolean invalidated = result.admission().map(ContractsClosureAdmissionReceipt::published).orElse(false)
+                            || result.processing().map(RootedStageCapture::invalidatesSelection).orElse(false);
+                    var completed = new blue.coordination.api.SourceHistoryStageResult(context, result, List.copyOf(owners), invalidated);
+                    if (!completed.committable()) DefaultCoordinationEngine.this.close();
+                    return completed;
+                } catch (RuntimeException | Error failure) {
+                    try { DefaultCoordinationEngine.this.close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+            }
+        }
     }
 
     /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
@@ -3225,6 +3284,7 @@ public final class DefaultCoordinationEngine
     }
 
     private void ensureOpen() {
+        if (pendingSourceStage != null) throw new IllegalStateException("Execute or discard the frozen source stage before other engine work");
         if (pendingRootStage != null) throw new IllegalStateException("Execute or discard the frozen stage before other engine work");
         if (closed) {
             throw new IllegalStateException("DefaultCoordinationEngine is closed");

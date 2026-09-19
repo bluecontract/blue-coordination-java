@@ -16,6 +16,16 @@ import static blue.coordination.internal.SessionStorageWire.*;
 public final class RootedEngineStorage {
     private static final String FORMAT = "blue-coordination/rooted-engine-storage/1";
 
+    /** Cross-package storage facade; encoding does not acquire or publish source authority. */
+    public static byte[] encodeSourceStage(blue.coordination.api.SourceHistoryStageResult value, int maximumBytes, int maximumDepth) {
+        return new SourceStageStorageCodec(maximumBytes, maximumDepth).encode(value);
+    }
+
+    /** Restores closed observations through the existing reviewed storage bridge. */
+    public static blue.coordination.api.SourceHistoryStageResult decodeSourceStage(byte[] value, int maximumBytes, int maximumDepth) {
+        return new SourceStageStorageCodec(maximumBytes, maximumDepth).decode(value);
+    }
+
     /**
      * SDK assembly bridge for an explicitly controlled library-writer namespace.
      * This capability records a host storage-boundary precondition, not content

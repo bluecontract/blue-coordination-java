@@ -878,6 +878,28 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     private SelectedProcessingStage pendingStage;
+    private AdvancedCoordination.SourceStage pendingSourceStage;
+
+    synchronized AdvancedCoordination.SourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); exactNodeProvider.beginLookupScope();
+        try {
+            pendingSourceStage = new AdvancedCoordination.SourceStage(this, engine.selectSourceHistoryStage(expected));
+            return pendingSourceStage;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized blue.coordination.api.SourceHistoryStageResult executeSourceHistoryStage(AdvancedCoordination.SourceStage stage) {
+        if (closed || pendingSourceStage != stage || stage.runtime != this || stage.owner != Thread.currentThread())
+            throw new IllegalStateException("Source stage is retired or belongs to another runtime");
+        exactNodeProvider.beginLookupScope();
+        try {
+            var completed = stage.selected.execute(); pendingSourceStage = null;
+            if (!completed.committable()) close();
+            else completed.result().processing().ifPresent(processing -> sourceHistoryProcessingResults.put(
+                    completed.selection().prerequisite(), retain(mapper.map(processing))));
+            return completed;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
 
     synchronized SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
         requireStageRoot(root);
@@ -1618,7 +1640,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     private void ensureOpen() {
-        if (pendingStage != null) throw new IllegalStateException("Execute or discard the selected stage before other SDK work");
+        if (pendingStage != null || pendingSourceStage != null) throw new IllegalStateException("Execute or discard the selected stage before other SDK work");
         if (closed) {
             throw new IllegalStateException("BlueCoordination is closed");
         }

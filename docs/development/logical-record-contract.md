@@ -221,8 +221,8 @@ The continuation after publication is a fresh selection under the same root;
 completed evidence makes no future readiness or command-terminal promise.
 
 The direct/next-root boundary includes live, local retained, managed history and
-join work selected there. The separate source-prerequisite admission gateway and
-application command continuation integration still require host treatment.
+join work selected there. Source-prerequisite stages now have a separate frozen boundary below;
+application command continuation integration still requires host treatment.
 
 A selected transition identity is not sufficient to name a durable prefix:
 a waiting observation and its later completed execution can share that selection.
@@ -230,3 +230,26 @@ a waiting observation and its later completed execution can share that selection
 and result, excluding only outer elapsed time. Hosts bind that result identity
 to the original command and prior committed prefix; SQL retries retain the exact
 prepared bytes, including their measurements.
+
+## Frozen source stages
+
+`AdvancedCoordination.selectSourceHistoryStage` exposes `SourceHistoryStageContext`
+before ADMIT or PROCESS. It binds the complete original prerequisite, known source
+owners and each existing predecessor, with explicit absence for an unadmitted
+lineage. The requesting parent and immutable source witnesses are not implicit
+publication owners. The scope-bound token is single-use and thread-affine; other
+SDK/engine work is rejected until it executes or the owner is discarded.
+
+`SourceHistoryStageResult` retains the complete entry/result owner union, including
+newly born source members. A failed physical publication makes the owner
+noncommittable and retires it. A genuine missing-resource admission remains an
+explicit wait with its original processor demands. Source execution never retries
+the parent or selects its next action. Reconciliation returns retained exact
+source results without another ADMIT/PROCESS.
+
+`SourceHistoryStageStorage` uses the existing closed prerequisite/admission/drain
+codecs through the reviewed rooted-storage bridge. It restores observations after
+owner retirement, rejects malformed/noncanonical bytes, and enforces caller byte
+and depth bounds. It grants no runtime or publication authority. Tests cover
+admission, LIVE below the frozen cutoff, managed history, root-local retained
+history, absent-source waits, complete ownership and thread/scope retirement.

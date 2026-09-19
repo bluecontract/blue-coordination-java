@@ -720,7 +720,7 @@ def currentProductionShapeLimits = [
         // Public inventory and per-source limits are unchanged; see the Cost38 package note.
         // Cost39: two immutable core/SDK observation records and point-read adapters (+90 lines).
         // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
-        classes: 351,
+        classes: 355,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
         // Completed-stage SDK result/gateways plus three logical-record contract/tracking types.
         // Measured count; see docs/development/logical-record-contract.md.
@@ -734,8 +734,9 @@ def currentProductionShapeLimits = [
         // Closed cross-package logical SDK point-map bridge and five family bindings.
         // Pending/source and feeder point bindings with requesting-root membership predicates.
         // Complete lazy engine/SDK assembly and owner-local control records.
-        lines: 91_676L,
-        publicApiTypes: 103,
+        // Frozen source admission/history stages and closed detached result codec.
+        lines: 91_954L,
+        publicApiTypes: 106,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
