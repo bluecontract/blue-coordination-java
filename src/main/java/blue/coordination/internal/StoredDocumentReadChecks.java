@@ -135,7 +135,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private ProcessEmbeddedComponentIndex topology(ProcessEmbeddedComponentIndex value, boolean stage) {
         var s = value.storedIndexes(); var joins = s.joins().storedIndexes(); var raw = original.componentIndex();
         var component = stage ? maps.stage(s.components()) : checked("topology/component", s.components(), (id, row) -> {
-            require(row.equals(topology.component(raw, id).orElseThrow()), "Selected topology component differs"); return row;
+            require(row.equals(checkedTopologyComponent(raw, id).orElseThrow()), "Selected topology component differs"); return row;
         });
         var targets = topologyBuckets("targets", s.targets(), stage, (owner, member) -> requireMembership(raw.storedIndexes().sources(), member, owner));
         var sources = topologyBuckets("sources", s.sources(), stage, (owner, member) -> requireMembership(raw.storedIndexes().targets(), member, owner));
@@ -155,7 +155,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
         return checked("topology/" + kind, source, (owner, bucket) -> {
             if (bucket.isLogical()) return maps.open("topology/" + kind + "-bucket", owner, bucket, (member, present) -> {
                 if (kind.equals("targets") || kind.equals("sources"))
-                    require(topology.component(original.componentIndex(), owner).isPresent(), "Topology edge owner is missing");
+                    require(checkedTopologyComponent(original.componentIndex(), owner).isPresent(), "Topology edge owner is missing");
                 if (kind.equals("join-members")) topology.requireJoinRoot(original.componentIndex(), owner, selected.apply(owner).retainedView());
                 require(Boolean.TRUE.equals(present), "Topology membership is not true"); check.accept(owner, member); return present;
             }, (key, present) -> present);
@@ -173,6 +173,11 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private static void requireMembership(PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> source,
             DocumentId owner, DocumentId member) {
         var bucket = source.get(owner); require(bucket != null && Boolean.TRUE.equals(bucket.get(member)), "Selected topology reverse membership is missing");
+    }
+
+    private Optional<ProcessEmbeddedComponentIndex.Component> checkedTopologyComponent(ProcessEmbeddedComponentIndex index,
+            DocumentId owner) {
+        return topology.component(index, owner, controlledNamespace && index.storedIndexes().components().isLogical());
     }
 
     private ComponentStateInventory component(ComponentStateInventory value, boolean stage) {

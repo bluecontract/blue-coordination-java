@@ -69,6 +69,18 @@ final class StoredTopologyIndexes {
     }
 
     Optional<ProcessEmbeddedComponentIndex.Component> component(ProcessEmbeddedComponentIndex value, DocumentId document) {
+        return component(value, document, false);
+    }
+
+    /**
+     * A controlled logical writer replaces an owner's outgoing edges and the corresponding
+     * reverse points atomically. Reading its component does not semantically enumerate
+     * other consumers. Selected outgoing edges still authenticate their reverse points;
+     * explicit incoming traversal retains its own complete predicate and member checks.
+     * Raw/import storage keeps the complete bidirectional integrity check.
+     */
+    Optional<ProcessEmbeddedComponentIndex.Component> component(ProcessEmbeddedComponentIndex value, DocumentId document,
+            boolean controlledLogical) {
         return physical(() -> {
             var state = value.storedIndexes(); var row = state.components().get(document);
             if (row == null) {
@@ -79,7 +91,7 @@ final class StoredTopologyIndexes {
             require(row.members().contains(document), "Selected topology component has foreign owner");
             for (var member : row.members()) require(row.equals(state.components().get(member)), "Selected topology component membership differs");
             requireEdges(state.targets(), state.sources(), state.components(), document);
-            requireEdges(state.sources(), state.targets(), state.components(), document);
+            if (!controlledLogical) requireEdges(state.sources(), state.targets(), state.components(), document);
             return Optional.of(row);
         });
     }
