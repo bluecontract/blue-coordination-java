@@ -2054,6 +2054,9 @@ public final class DefaultCoordinationEngine
     synchronized EngineMetrics.MetricsSnapshot metricsSnapshot() {
         return metrics.snapshot();
     }
+    synchronized Map<String, Long> workCounters() {
+        return metrics.publicSnapshot().counters();
+    }
     synchronized void observeTransitions(
             Consumer<SequentialDrainCoordinator.TransitionTrace> observer) {
         requireLegacyOnly("observeTransitions");

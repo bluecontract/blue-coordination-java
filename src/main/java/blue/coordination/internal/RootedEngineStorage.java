@@ -347,6 +347,8 @@ public final class RootedEngineStorage {
         }
         /** Returns the actual rooted engine for this attempt. @return mutable owned engine */
         public synchronized DefaultCoordinationEngine engine() { open(); return engine; }
+        /** Counter-only diagnostics do not read durable catalogs or add publication conditions. */
+        public synchronized Map<String, Long> workCounters() { open(); return engine.workCounters(); }
         /** Selects all final engine records and prewrites artifacts; the caller separately flushes and publishes. */
         public synchronized void stage() {
             open(); records.context().protect(() -> {

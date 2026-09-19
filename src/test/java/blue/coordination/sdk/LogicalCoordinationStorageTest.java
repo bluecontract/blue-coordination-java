@@ -137,6 +137,9 @@ final class LogicalCoordinationStorageTest {
                     var scope = i == 0 ? left : right; var root = scope.documentHandle(roots.get(i)).orElseThrow();
                     var stage = scope.coordination().processing().processNextStage(root);
                     assertEquals(1, stage.stats().committedTransitions());
+                    var counters = scope.workCounters();
+                    assertEquals(1L, counters.get("EXTERNAL_PROCESS_CALLS"));
+                    assertThrows(UnsupportedOperationException.class, () -> counters.put("EXTERNAL_PROCESS_CALLS", 99L));
                     assertArrayEquals(expected.get(i), CODEC.encode(scope.coordination().runtimeForStorage().storedMaps().results().get(entries.get(i))));
                     scope.stage();
                 }

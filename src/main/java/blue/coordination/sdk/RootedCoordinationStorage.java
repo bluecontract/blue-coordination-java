@@ -471,6 +471,12 @@ public final class RootedCoordinationStorage {
         }
         /** Returns this live facade. @return actual SDK */
         public BlueCoordination coordination() { guard(); return coordination; }
+        /**
+         * Captures immutable work counters without reading document, route, journal or object inventories.
+         * Unlike full engine metrics, this does not broaden the selected publication dependencies.
+         * @return this owner's counters, including work whose publication may be discarded
+         */
+        public Map<String, Long> workCounters() { guard(); return Map.copyOf(owned.engine.workCounters()); }
         /** Finds a handle without readiness or body materialization. @param id selected identity @return owned handle */
         public Optional<DocumentHandle> documentHandle(DocumentId id) { guard(); return owned.runtime.findStoredDocumentHandle(id); }
         /** Finds retained SDK registration. @param id Timeline identity @return owned Timeline handle */
