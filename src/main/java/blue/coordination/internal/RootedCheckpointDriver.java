@@ -17,16 +17,21 @@ final class RootedCheckpointDriver {
     private final ContractsClosureAdapter adapter;
 
     private final boolean scopedStage;
+    private final ExternalOrderKey through;
     RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter) { this(documents, adapter, false); }
     RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter, boolean scopedStage) {
+        this(documents, adapter, scopedStage, null);
+    }
+    RootedCheckpointDriver(InMemoryDocumentStore documents, ContractsClosureAdapter adapter, boolean scopedStage, ExternalOrderKey through) {
         this.scopedStage = scopedStage;
+        this.through = through;
         this.documents = documents;
         this.adapter = adapter;
     }
 
     Selection select(DocumentId root, List<TimelineEntry> entries) {
-        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries), scopedStage),
-                () -> select(root, entries, RootedJoinEligibility.captureForRoot(documents, root)),
+        return adapter.reuseObservation(new SelectionKey(root, List.copyOf(entries), scopedStage, through),
+                () -> select(root, entries, joins(root)),
                 selected -> !selected.blocked() && (selected.live() != null
                         || selected.historical() != null || selected.localHistorical() != null),
                 "rooted.observation.selectionReuses");
@@ -34,14 +39,18 @@ final class RootedCheckpointDriver {
 
     /** Re-evaluates input scope for every acquired peer; a root's input catalog cannot stand in for a peer's. */
     Selection select(DocumentId root, java.util.function.Function<DocumentId, List<TimelineEntry>> inputs) {
-        var joins = RootedJoinEligibility.captureForRoot(documents, root);
+        var joins = joins(root);
         return RootedJoinScheduling.select(root, baseSelection(root, inputs.apply(root), joins), joins, documents,
                 selected -> baseSelection(selected, inputs.apply(selected), joins),
                 (selected, boundary) -> completeThrough(selected, inputs.apply(selected), boundary),
                 adapter::captureTerminalPeers);
     }
 
-    private record SelectionKey(DocumentId root, List<TimelineEntry> entries, boolean scopedStage) { }
+    private List<RootedJoinEligibility.Fence> joins(DocumentId root) {
+        return RootedJoinEligibility.captureForRoot(documents, root).stream()
+                .filter(fence -> through == null || fence.boundary().compareTo(through) <= 0).toList();
+    }
+    private record SelectionKey(DocumentId root, List<TimelineEntry> entries, boolean scopedStage, ExternalOrderKey through) { }
     private record ScanKey(List<TimelineEntry> entries, ExternalOrderKey cutoff) { }
 
     /** A same/later join fence does not make an exclusive source prefix incomplete. Never executes the unfenced selection. */
@@ -89,6 +98,7 @@ final class RootedCheckpointDriver {
                 .map(ContractsClosureAdapter::coordinationId).toList());
         CatchUpConsumerScope consumers = CatchUpConsumerScope.owners(owners);
         boolean historyOutstanding = owners.stream().flatMap(id -> documents.catchUpPlans(id).stream())
+                .filter(plan -> through == null || documents.catchUpBarrier(plan.barrierIdentity()).orElseThrow().causeOrder().compareTo(through) <= 0)
                 .anyMatch(p -> p.status() != ManagedCatchUpStatus.COMPLETE
                         && p.status() != ManagedCatchUpStatus.CANCELLED_OCCURRENCE_RETIRED);
         if (!scopedStage) {
@@ -96,13 +106,15 @@ final class RootedCheckpointDriver {
             documents.sessionIds().forEach(id -> { if (!owners.contains(id)) excluded.add(id); });
             consumers = CatchUpConsumerScope.excluding(excluded);
         }
-        var work = documents.nextCatchUpWork(consumers);
+        var work = documents.nextCatchUpWork(consumers).filter(candidate -> through == null
+                || documents.catchUpBarrier(candidate.barrierIdentity()).orElseThrow().causeOrder().compareTo(through) <= 0);
         if (historyOutstanding && work.isEmpty()) return new Selection(null, null, consumers, true);
         var candidates = adapter.nextRootInputCandidates(root, entries, () -> work.map(this::order).orElse(null));
         var local = candidates.local();
-        if (local.pending() && local.step() == null) return new Selection(null, null, consumers, true, null);
+        boolean includeLocal = through == null || view.logicalBoundary() == null || view.logicalBoundary().compareTo(through) <= 0;
+        if (includeLocal && local.pending() && local.step() == null) return new Selection(null, null, consumers, true, null);
         var live = candidates.live();
-        if (local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
+        if (includeLocal && local.step() != null && (work.isEmpty() || local.step().sourceOrder().compareTo(order(work.get())) <= 0)
                 && (live.isEmpty() || local.step().sourceOrder().compareTo(live.get().entry().sourceOrderKey()) <= 0)) {
             return new Selection(null, null, consumers, false, local.step());
         }

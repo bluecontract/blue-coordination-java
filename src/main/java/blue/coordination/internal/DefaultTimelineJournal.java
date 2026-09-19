@@ -140,6 +140,18 @@ class DefaultTimelineJournal implements TimelineJournal {
         }
     }
 
+    @Override public synchronized List<TimelineEntry> entriesThrough(String timelineId, ExternalOrderKey through) {
+        if (store instanceof LogicalTimelineJournalStore logical) {
+            var prefix = logical.prefix(timelineId, through);
+            if (prefix.isPresent()) {
+                var result = new ArrayList<>(prefix.orElseThrow());
+                atExternalOrder(through).filter(entry -> entry.timeline().timelineId().equals(timelineId)).ifPresent(result::add);
+                return List.copyOf(result);
+            }
+        }
+        return TimelineJournal.super.entriesThrough(timelineId, through);
+    }
+
     @Override public synchronized List<TimelineEntry> entries(String timelineId) {
         Objects.requireNonNull(timelineId, "timelineId");
         try (ReadView view = open()) {

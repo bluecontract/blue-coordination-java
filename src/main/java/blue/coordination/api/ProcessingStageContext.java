@@ -5,7 +5,12 @@ import java.util.Objects;
 
 /** Exact selected cause and known publication authority, captured before PROCESS. */
 public record ProcessingStageContext(Kind kind, DocumentId root, List<String> causes,
-        List<Owner> entryOwners, List<String> invocationIdentities) {
+        List<Owner> entryOwners, List<String> invocationIdentities, String inclusiveEntryBlueId) {
+    /** Unbounded or explicitly supplied-input selection, retained for existing callers. */
+    public ProcessingStageContext(Kind kind, DocumentId root, List<String> causes,
+            List<Owner> entryOwners, List<String> invocationIdentities) {
+        this(kind, root, causes, entryOwners, invocationIdentities, null);
+    }
     /** Protocol-selected work, including a coherent absence or prerequisite wait. */
     public enum Kind { JOURNAL, LOCAL_HISTORY, MANAGED_HISTORY, JOIN, WAITING, NONE }
     /** Owner predecessor and topology/history binding. Embedded witnesses are not owners. */
@@ -20,6 +25,7 @@ public record ProcessingStageContext(Kind kind, DocumentId root, List<String> ca
     /** Retains a complete, canonically ordered owner set and exact cause identities. */
     public ProcessingStageContext {
         Objects.requireNonNull(kind); Objects.requireNonNull(root);
+        if (inclusiveEntryBlueId != null) text(inclusiveEntryBlueId);
         causes = List.copyOf(causes); entryOwners = List.copyOf(entryOwners);
         invocationIdentities = List.copyOf(invocationIdentities);
         causes.forEach(ProcessingStageContext::text); invocationIdentities.forEach(ProcessingStageContext::text);

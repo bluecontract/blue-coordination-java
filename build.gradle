@@ -735,7 +735,8 @@ def currentProductionShapeLimits = [
         // Pending/source and feeder point bindings with requesting-root membership predicates.
         // Complete lazy engine/SDK assembly and owner-local control records.
         // Frozen source admission/history stages and closed detached result codec.
-        lines: 91_954L,
+        // Accepted-input cutoff selection and closed cutoff evidence; no new production type.
+        lines: 92_038L,
         publicApiTypes: 106,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

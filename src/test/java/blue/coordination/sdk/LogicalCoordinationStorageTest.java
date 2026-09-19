@@ -22,6 +22,41 @@ final class LogicalCoordinationStorageTest {
     private static final Bytes EVIDENCE = new Bytes(new byte[] {1});
     private static final SdkStorageCodec CODEC = new SdkStorageCodec(new Object(), 32 * 1024 * 1024);
 
+    @Test void laterInputOnTheSameTimelineDoesNotInvalidateTheAcceptedCutoffPacket() throws Exception {
+        // given
+        var records = new SdkRuntimePointMapsTest.LogicalRecords(); var objects = new SdkRuntimePointMapsTest.Bytes();
+        RootedCoordinationStorage.Configuration configuration;
+        try (var blue = BlueCoordination.inMemory()) { configuration = RootedCoordinationStorage.configuration(blue, LIMITS); }
+        DocumentId rootId; String original;
+        try (var rows = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, rows, ExactNodeProvider.empty())) {
+            var blue = scope.coordination(); var timeline = blue.timelines().register("rcp2/source", "alice");
+            var root = blue.documents().admitStaticProcessEmbedded(RootedSdkFixture.resource("source.yaml"), ActivationPolicy.importFullHistory()).document("root");
+            rootId = root.id(); original = append(blue, root, timeline, 10, "counterValue: 5").blueId();
+            scope.stage(); assertTrue(records.publish(rows.prepare("accepted", List.of(), EVIDENCE)));
+        }
+        Publication held;
+        try (var rows = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, rows, ExactNodeProvider.empty())) {
+            var stage = scope.coordination().processing().selectNextStageThrough(scope.documentHandle(rootId).orElseThrow(), original).execute();
+            assertEquals(original, stage.selection().inclusiveEntryBlueId());
+            scope.stage(); held = rows.prepare("held-cutoff", List.of(), EVIDENCE);
+        }
+        // when
+        String later;
+        try (var rows = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, rows, ExactNodeProvider.empty())) {
+            later = append(scope.coordination(), scope.documentHandle(rootId).orElseThrow(), scope.timelineHandle("rcp2/source").orElseThrow(), 20, "counterValue: 9").blueId();
+            scope.stage(); assertTrue(records.publish(rows.prepare("later-input", List.of(), EVIDENCE)));
+        }
+        // then
+        assertTrue(records.publish(held), "Input after the cutoff must not invalidate the already-computed stage");
+        try (var rows = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects).openLogical(LIMITS, configuration, rows, ExactNodeProvider.empty())) {
+            var root = scope.documentHandle(rootId).orElseThrow();
+            assertEquals(5, root.snapshot().longAt("/counter"));
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK, scope.coordination().processing().selectNextStageThrough(root, original).execute().disposition());
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, scope.coordination().processing().selectNextStageThrough(root, later).execute().disposition());
+            assertEquals(9, root.snapshot().longAt("/counter"));
+        }
+    }
+
     @Test void completeLogicalOwnerMatchesResidentResultAndHistoryAcrossColdStages() throws Exception {
         // given
         byte[] expected; String head; List<String> history;
@@ -295,7 +330,7 @@ final class LogicalCoordinationStorageTest {
         return append(blue, root, timeline, time, request, "setCounter");
     }
     private static EntryHandle append(BlueCoordination blue, DocumentHandle root, TimelineHandle timeline, long time, String request, String operation) {
-        return blue.events().from(timeline).exact(blue.values().yaml("""
+        String yaml = """
                 type: Coordination/Timeline Entry
                 timeline: {type: MyOS/MyOS Timeline, timelineId: %s}
                 timestamp: %d
@@ -308,6 +343,9 @@ final class LogicalCoordinationStorageTest {
                   channel: owner
                   request:
                 %s
-                """.formatted(timeline.id(), time, root.snapshot().blueId(), operation, request.indent(4)))).submit();
+                """.formatted(timeline.id(), time, root.snapshot().blueId(), operation, request.indent(4));
+        var previous = blue.advanced().auditTimelinePosition(timeline.id()).head();
+        if (previous.isPresent()) yaml += "\nprevEntry: {blueId: " + previous.orElseThrow().blueId() + "}\n";
+        return blue.events().from(timeline).exact(blue.values().yaml(yaml)).submit();
     }
 }

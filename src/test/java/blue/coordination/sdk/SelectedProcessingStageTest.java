@@ -11,6 +11,32 @@ import static org.junit.jupiter.api.Assertions.*;
 final class SelectedProcessingStageTest {
     private static final int BYTES = 32 * 1024 * 1024;
 
+    @Test void acceptedCutoffIncludesEarlierStagesAndNeverConsumesLaterInput() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var root = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var first = fixture.append(root, "rcp2/source", "setCounter", 10, "counterValue: 1");
+            var cutoff = fixture.append(root, "rcp2/source", "setCounter", 20, "counterValue: 2");
+            var later = fixture.append(root, "rcp2/source", "setCounter", 30, "counterValue: 3");
+            // when
+            var earlier = fixture.blue.processing().selectNextStageThrough(root, cutoff).execute();
+            var included = fixture.blue.processing().selectNextStageThrough(root, cutoff).execute();
+            var complete = fixture.blue.processing().selectNextStageThrough(root, cutoff).execute();
+            // then
+            assertEquals(List.of(first.blueId()), earlier.selection().causes());
+            assertEquals(List.of(cutoff.blueId()), included.selection().causes());
+            assertEquals(cutoff.blueId(), complete.selection().inclusiveEntryBlueId());
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK, complete.disposition());
+            assertEquals(2, root.snapshot().longAt("/counter"));
+            byte[] encoded = ProcessingStageStorage.encode(complete, BYTES);
+            assertEquals(complete.selection(), ProcessingStageStorage.decode(encoded, BYTES).selection());
+            assertArrayEquals(encoded, ProcessingStageStorage.encode(ProcessingStageStorage.decode(encoded, BYTES), BYTES));
+            var next = fixture.blue.processing().selectNextStageThrough(root, later).execute();
+            assertEquals(List.of(later.blueId()), next.selection().causes());
+            assertEquals(3, root.snapshot().longAt("/counter"));
+        }
+    }
+
     @Test void frozenSelectionRequiresExecutionBeforeMutationAndExecutesOnlyOnce() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {

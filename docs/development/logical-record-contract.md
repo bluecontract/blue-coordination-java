@@ -253,3 +253,25 @@ owner retirement, rejects malformed/noncanonical bytes, and enforces caller byte
 and depth bounds. It grants no runtime or publication authority. Tests cover
 admission, LIVE below the frozen cutoff, managed history, root-local retained
 history, absent-source waits, complete ownership and thread/scope retirement.
+
+## Accepted-input cutoff selection
+
+`ProcessingGateway.selectNextStageThrough(root, entry)` selects one causal stage
+no later than that original accepted entry's full external order. The String
+overload restores the accepted cutoff by point lookup in a cold owner; it never
+submits or authors an entry. The context retains `inclusiveEntryBlueId`, including
+for a cutoff-relative NONE or WAITING result. Earlier local/managed prerequisites
+remain eligible; later journal input, join fences and retained causes do not
+become obligations of the earlier command.
+
+Logical Timeline prefix predicates exclude later entries without reading a mutable
+Timeline head. A future append on the same Timeline therefore does not invalidate
+an already computed cutoff packet. Hosts still condition all actual owner heads
+and topology; the cutoff does not weaken genuine conflict checks.
+
+Unbounded stage evidence retains its existing format-1 bytes. Bounded contexts use
+format 2; canonical decoding binds the cutoff and preserves detached observations.
+The existing five-argument context constructor and unbounded gateways remain.
+Focused tests cover earlier/current/future inputs, cold cutoff lookup, closed
+codec binding, and committing a held packet after a later same-Timeline append.
+Measured shape: 355 production sources, 92,038 lines, 106 public API types.

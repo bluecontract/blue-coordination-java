@@ -58,6 +58,29 @@ public final class ProcessingGateway {
         return runtime.selectStage(Objects.requireNonNull(root), Objects.requireNonNull(input));
     }
 
+    /**
+     * Freezes the next causal root stage through an accepted input's full external order,
+     * including earlier local/managed prerequisites. A NO_WORK result refers to this
+     * cutoff only; later accepted input remains for its own continuation.
+     * @param root authoritative processing root
+     * @param inclusiveEntry original accepted command cutoff
+     * @return one frozen stage, without processing or future-readiness lookahead
+     */
+    public SelectedProcessingStage selectNextStageThrough(DocumentHandle root, EntryHandle inclusiveEntry) {
+        return runtime.selectStageThrough(Objects.requireNonNull(root), Objects.requireNonNull(inclusiveEntry));
+    }
+    /**
+     * Restores the cutoff by its retained exact entry identity in a cold owner.
+     * This is a point lookup, never submission or authorship.
+     * @param root authoritative processing root
+     * @param inclusiveEntryBlueId already accepted cutoff entry
+     * @return one frozen stage under the original cutoff
+     */
+    public SelectedProcessingStage selectNextStageThrough(DocumentHandle root, String inclusiveEntryBlueId) {
+        return runtime.selectStageThrough(Objects.requireNonNull(root), runtime.lightweightHandle(
+                SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId")));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

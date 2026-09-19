@@ -9,19 +9,20 @@ import java.util.*;
 /** Closed detached stage evidence. Decoding creates observations, never runtime or publication authority. */
 public final class ProcessingStageStorage {
     private static final String FORMAT = "blue-coordination/processing-stage/1";
+    private static final String BOUNDED_FORMAT = "blue-coordination/processing-stage/2";
     private ProcessingStageStorage() { }
 
     /** Encodes exact completed evidence without consulting the owner or selecting later work. */
     public static byte[] encode(ProcessingStageResult stage, int maximumBytes) {
         Objects.requireNonNull(stage);
-        return codec(maximumBytes).encode(List.of(FORMAT, context(stage.selection()), stage.disposition().name(),
+        return codec(maximumBytes).encode(List.of(format(stage.selection()), context(stage.selection()), stage.disposition().name(),
                 stage.evidence(), stage.resultOwners(), stage.selectionInvalidated()));
     }
 
     /** Restores detached observations under a caller's physical byte bound; rejects noncanonical input. */
     public static ProcessingStageResult decode(byte[] bytes, int maximumBytes) {
         var fields = codec(maximumBytes).decode(Objects.requireNonNull(bytes), List.class);
-        if (fields.size() != 6 || !FORMAT.equals(fields.get(0))) throw new IllegalArgumentException("Wrong stage evidence format");
+        if (fields.size() != 6 || !FORMAT.equals(fields.get(0)) && !BOUNDED_FORMAT.equals(fields.get(0))) throw new IllegalArgumentException("Wrong stage evidence format");
         var stage = new ProcessingStageResult(ProcessingStageResult.Disposition.valueOf((String) fields.get(2)),
                 (DrainResult) fields.get(3), restore(list(fields.get(1))), documents(fields.get(4)), (Boolean) fields.get(5));
         if (!Arrays.equals(bytes, encode(stage, maximumBytes))) throw new IllegalArgumentException("Noncanonical stage evidence");
@@ -30,7 +31,7 @@ public final class ProcessingStageStorage {
 
     /** Stable selected transition identity; excludes elapsed measurements and host retry/attempt counters. */
     public static String selectionIdentity(ProcessingStageContext selection, int maximumBytes) {
-        var encoded = codec(maximumBytes).encode(List.of(FORMAT, context(Objects.requireNonNull(selection))));
+        var encoded = codec(maximumBytes).encode(List.of(format(selection), context(Objects.requireNonNull(selection))));
         return "sha256:" + HexFormat.of().formatHex(CoordinationRecords.sha256(new Bytes(encoded)).copy());
     }
 
@@ -48,13 +49,16 @@ public final class ProcessingStageStorage {
     }
 
     private static SdkStorageCodec codec(int maximumBytes) { return new SdkStorageCodec(new Object(), maximumBytes); }
+    private static String format(ProcessingStageContext value) { return value.inclusiveEntryBlueId() == null ? FORMAT : BOUNDED_FORMAT; }
     private static List<?> context(ProcessingStageContext value) {
-        return List.of(value.kind().name(), value.root(), value.causes(), value.entryOwners().stream().map(owner ->
+        var fields = new ArrayList<Object>(List.of(value.kind().name(), value.root(), value.causes(), value.entryOwners().stream().map(owner ->
                 List.of(owner.documentId(), owner.epoch(), owner.headBlueId(), owner.historyIdentity(),
-                        owner.graphGeneration(), owner.closureIdentity())).toList(), value.invocationIdentities());
+                        owner.graphGeneration(), owner.closureIdentity())).toList(), value.invocationIdentities()));
+        if (value.inclusiveEntryBlueId() != null) fields.add(value.inclusiveEntryBlueId());
+        return List.copyOf(fields);
     }
     private static ProcessingStageContext restore(List<?> fields) {
-        if (fields.size() != 5) throw new IllegalArgumentException("Wrong stage selection fields");
+        if (fields.size() != 5 && fields.size() != 6) throw new IllegalArgumentException("Wrong stage selection fields");
         var owners = new ArrayList<ProcessingStageContext.Owner>();
         for (Object row : list(fields.get(3))) {
             var owner = list(row);
@@ -63,7 +67,8 @@ public final class ProcessingStageStorage {
                     (String) owner.get(3), (Long) owner.get(4), (String) owner.get(5)));
         }
         return new ProcessingStageContext(ProcessingStageContext.Kind.valueOf((String) fields.get(0)),
-                (DocumentId) fields.get(1), strings(fields.get(2)), owners, strings(fields.get(4)));
+                (DocumentId) fields.get(1), strings(fields.get(2)), owners, strings(fields.get(4)),
+                fields.size() == 6 ? (String) fields.get(5) : null);
     }
     private static List<?> list(Object value) { return (List<?>) value; }
     private static List<String> strings(Object value) { return list(value).stream().map(String.class::cast).toList(); }

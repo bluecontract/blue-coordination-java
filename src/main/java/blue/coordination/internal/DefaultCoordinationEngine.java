@@ -1509,6 +1509,19 @@ public final class DefaultCoordinationEngine
         return pendingRootStage;
     }
 
+    /** Freezes the next causal stage no later than an original accepted input; later inputs are not readiness evidence. */
+    public synchronized SelectedRootStage selectRootStageThrough(DocumentId root, TimelineEntry inclusiveEntry) {
+        ensureOpen(); Objects.requireNonNull(root);
+        var cutoff = journal.requireCanonical(Objects.requireNonNull(inclusiveEntry));
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff.sourceOrderKey());
+        var selected = driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal, cutoff.sourceOrderKey()));
+        var captured = RootedStageCapture.describe(root, selected, documents);
+        var context = new blue.coordination.api.ProcessingStageContext(captured.kind(), captured.root(), captured.causes(),
+                captured.entryOwners(), captured.invocationIdentities(), cutoff.blueId());
+        pendingRootStage = new SelectedRootStage(root, selected, context, true);
+        return pendingRootStage;
+    }
+
     /** Single-use, thread-affine frozen selection. No other engine work may intervene. */
     public final class SelectedRootStage {
         private final Thread owner = Thread.currentThread();

@@ -20,6 +20,9 @@ interface TimelineJournal {
     Optional<TimelineEntry> atExternalOrder(ExternalOrderKey order);
     List<TimelineEntry> entries();
     List<TimelineEntry> entries(String timelineId);
+    default List<TimelineEntry> entriesThrough(String timelineId, ExternalOrderKey through) {
+        return entries(timelineId).stream().filter(entry -> entry.sourceOrderKey().compareTo(through) <= 0).toList();
+    }
     blue.coordination.api.TimelineJournalPosition position(String timelineId);
     TimelineEntry requireCanonical(TimelineEntry supplied);
     Optional<TimelineEntry> nextExternal(ExternalOrderKey after, ExternalOrderKey through);
