@@ -239,6 +239,22 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         runtime.metrics());
         this.contracts = new BlueClosureContracts(
                 runtime.documentProcessor(), executionObserver);
+        if (profile.rootedCheckpoint()) {
+            this.activeSourceTimelines.rootedSurfaceResolver(root -> {
+                var session = documents.find(root).orElse(null);
+                // Configured roots may await admission. They have no published
+                // source surface yet; a missing view of an admitted root is an error.
+                if (session == null) return new ContractsRootSourceSurface.Surface(
+                        ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)), List.of(root), Set.of());
+                var view = Objects.requireNonNull(session.rootedView(), "Root has no committed rooted view");
+                var selected = sourceDiscoverySurfaces(view, root);
+                var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
+                selected.forEach(surface -> timelines.addAll(surface.routing().externalTimelineIds()));
+                return new ContractsRootSourceSurface.Surface(
+                        ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)),
+                        selected.stream().map(SourceDiscoverySurface::documentId).toList(), timelines);
+            });
+        }
         ManagedOccurrenceResolver occurrenceResolver =
                 new ManagedOccurrenceResolver(
                         runtime.nodeProvider(), runtime.metrics(), new ManagedRepresentationHistory(documents));

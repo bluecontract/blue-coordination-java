@@ -33,6 +33,14 @@ final class ContractsActiveSourceTimelineIndex {
             PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
     private Set<String> timelineIds = Set.of();
     private LogicalActiveSources logicalSources;
+    private Function<DocumentId, ContractsRootSourceSurface.Surface> rootedSurface;
+
+    /** Installed by the rooted adapter; each owner retains its own exact forward view. */
+    synchronized void rootedSurfaceResolver(Function<DocumentId, ContractsRootSourceSurface.Surface> resolver) {
+        if (rootedSurface != null) throw new IllegalStateException("Rooted surface resolver already installed");
+        rootedSurface = Objects.requireNonNull(resolver);
+    }
+
 
     ContractsActiveSourceTimelineIndex(Collection<DocumentId> publicRoots) {
         this(publicRoots, new EngineMetrics());
@@ -76,6 +84,17 @@ final class ContractsActiveSourceTimelineIndex {
         Objects.requireNonNull(affectedDocuments, "affectedDocuments");
         InMemoryDocumentStore store = Objects.requireNonNull(
                 documents, "documents");
+        if (rootedSurface != null) {
+            Map<DocumentId, ContractsRootSourceSurface.Surface> replacements =
+                    new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId owner : affectedDocuments) {
+                if (!Boolean.TRUE.equals(publicRoots.get(owner))) continue;
+                metrics.increment("sourceSurface.rootsResolved");
+                replacements.put(owner, Objects.requireNonNull(rootedSurface.apply(owner)));
+            }
+            installReplacements(replacements);
+            return;
+        }
         refresh(
                 affectedDocuments,
                 store.occurrenceInventory(),
@@ -131,6 +150,10 @@ final class ContractsActiveSourceTimelineIndex {
                         return resolver.apply(document);
                     }));
         }
+        installReplacements(replacements);
+    }
+
+    private void installReplacements(Map<DocumentId, ContractsRootSourceSurface.Surface> replacements) {
         // Physical writes may fail. Prepare all immutable map changes before
         // publishing any replacement, just as source resolution is staged above.
         var prepared = restoreIndexes(storedIndexes(), metrics);
@@ -146,12 +169,14 @@ final class ContractsActiveSourceTimelineIndex {
     synchronized void rebuild(InMemoryDocumentStore documents) {
         if (logicalSources != null) {
             var prepared = restoreIndexes(storedIndexes(), metrics);
+            prepared.rootedSurface = rootedSurface;
             for (var root : publicRoots.keys()) prepared.replaceSurface(root, new ContractsRootSourceSurface.Surface(
                     ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)), List.of(root), Set.of()));
             prepared.refresh(publicRoots.keys(), documents); install(prepared.storedIndexes()); return;
         }
         var prepared = restoreIndexes(new StoredIndexes(publicRoots, surfacesByRoot.emptyCopy(),
                 rootsByManagedDocument.emptyCopy(), timelineReferences.emptyCopy()), metrics);
+        prepared.rootedSurface = rootedSurface;
         prepared.refresh(publicRoots.keys(), documents);
         install(prepared.storedIndexes());
     }

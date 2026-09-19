@@ -80,7 +80,7 @@ public record ManagedSurfaceEvidence(
 
     /** Automatic resolver target classification. */
     public enum ResolutionKind {
-        /** The authored value matched the exact current state of a lineage. */
+        /** The authored value matched the lineage state selected at the calculation boundary. */
         CURRENT_EXISTING,
         /** The authored value initialized a new managed lineage. */
         NEW_AUTHORED,

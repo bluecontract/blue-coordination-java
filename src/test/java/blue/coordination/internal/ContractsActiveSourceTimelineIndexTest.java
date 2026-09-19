@@ -26,6 +26,33 @@ final class ContractsActiveSourceTimelineIndexTest {
             DocumentId.of("prospective");
 
     @Test
+    void rootedSurfacesChangeOnlyWhenTheirOwnCompleteViewPublishes() {
+        var index = new ContractsActiveSourceTimelineIndex(List.of(ROOT, MEMBER));
+        var selected = new LinkedHashMap<DocumentId, ContractsRootSourceSurface.Surface>();
+        selected.put(ROOT, new ContractsRootSourceSurface.Surface(
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(ROOT)), List.of(ROOT, MEMBER), Set.of("old")));
+        selected.put(MEMBER, new ContractsRootSourceSurface.Surface(
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(MEMBER)), List.of(MEMBER), Set.of("old")));
+        var reads = new java.util.ArrayList<DocumentId>();
+        index.rootedSurfaceResolver(root -> { reads.add(root); return selected.get(root); });
+        var documents = new InMemoryDocumentStore();
+        index.refresh(List.of(ROOT, MEMBER), documents);
+        reads.clear();
+        selected.put(MEMBER, new ContractsRootSourceSurface.Surface(
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(MEMBER)), List.of(MEMBER), Set.of("new")));
+        index.refresh(List.of(MEMBER), documents);
+        assertEquals(List.of(MEMBER), reads, "Publishing a source must not replace another root's selected view");
+        assertEquals(Set.of("old", "new"), index.timelineIds());
+        index.rebuild(documents);
+        assertEquals(Set.of("old", "new"), index.timelineIds(), "Rebuild must use the same exact rooted views");
+        selected.put(ROOT, new ContractsRootSourceSurface.Surface(
+                ContractsRootFeederWindow.LaneId.publicRoots(List.of(ROOT)), List.of(ROOT, MEMBER), Set.of("new")));
+        index.refresh(List.of(ROOT), documents);
+        assertEquals(Set.of("new"), index.timelineIds());
+        assertEquals(java.util.Optional.empty(), documents.find(ROOT), "Rooted surface resolution does not require borrowed live sessions");
+    }
+
+    @Test
     void descendantChangeRefreshesEveryContainingPublicRoot() {
         // given
         ContractsActiveSourceTimelineIndex index =

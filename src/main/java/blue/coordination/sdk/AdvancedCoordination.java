@@ -185,6 +185,16 @@ public final class AdvancedCoordination {
                 Objects.requireNonNull(id, "id"));
     }
 
+    /**
+     * Audits exact resolver facts from a committing publication receipt. Empty
+     * means the publication is absent or did not commit. These historical facts
+     * do not authorize a later transition or assert current source readiness.
+     */
+    public Optional<List<ManagedSurfaceEvidence.OccurrenceResolution>> auditCommittedOccurrenceResolutions(
+            String publicationIdentity) {
+        return runtime.auditCommittedOccurrenceResolutions(requireIdentity(publicationIdentity, "publicationIdentity"));
+    }
+
     /** Reads retained lineage state for one managed source occurrence. */
     public Optional<ManagedOccurrenceAudit> auditManagedOccurrence(
             DocumentId sourceDocumentId,

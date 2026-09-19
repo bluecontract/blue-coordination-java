@@ -435,6 +435,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return engine.retainedExactValue(blueId).map(ExactBlueValue::wrap);
     }
 
+    synchronized Optional<List<ManagedSurfaceEvidence.OccurrenceResolution>> auditCommittedOccurrenceResolutions(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditCommittedOccurrenceResolutions(publicationIdentity)
+                .map(rows -> rows.stream().map(SdkDrainResultMapper::occurrenceResolution).toList());
+    }
+
     synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
             String publicationIdentity) {
         ensureOpen();

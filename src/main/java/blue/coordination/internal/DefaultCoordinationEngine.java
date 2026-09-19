@@ -900,6 +900,23 @@ public final class DefaultCoordinationEngine
                 .map(receipt -> receipt.attempt().processResult());
     }
 
+    /**
+     * Reads resolver facts from one authenticated committing receipt. It does not
+     * open the selected sources' current heads or infer authority from a caller's DTO.
+     */
+    public synchronized Optional<List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution>>
+            auditCommittedOccurrenceResolutions(String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity))
+                .filter(ContractsClosurePublicationReceipt::commits)
+                .map(receipt -> {
+                    var owned = receipt.attempt().processResult().rootedProjection();
+                    return managedOccurrenceResolutions(receipt.managedSurfaceEvidence()).stream()
+                            .filter(resolution -> owned == null || owned.owns(resolution.occurrence().sourceDocumentId()))
+                            .toList();
+                });
+    }
+
     /** Reads the original immutable input retained with a terminal closure decision. */
     public synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
             String publicationIdentity) {
