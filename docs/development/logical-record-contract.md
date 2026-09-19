@@ -292,3 +292,19 @@ an incompatible owner set to a later durable stage selection. Tests audit before
 selecting, reject wrong work without changing history, execute exact root-local
 and managed work, and leave an armed optional-readiness fault untouched.
 Measured shape: 355 production sources, 92,102 lines, 106 public API types.
+
+## Deferred global readiness
+
+`ProcessingGateway.inspectReadiness()` returns the immutable
+`ProcessingReadiness` observation for the current rooted scheduling scan. It
+performs no PROCESS and does not amend any completed-stage result. Global drains
+use this separate publication attempt after retaining their exact stage; a
+single idle root cannot establish global quiescence. An observation with pending
+heads has `paused=true`, including a retained LIVE input which may still need a
+host dependency wake. This is not permission to bypass the host's durable wait.
+
+The SDK boundary allows this one immutable core observation explicitly; no
+implementation/processor type is exposed. Tests distinguish a local no-work
+result from an unrelated pending root and preserve a resource-waiting input as
+nonquiescent without executing it. Measured shape: 356 production sources,
+92,136 lines and 107 public API types.

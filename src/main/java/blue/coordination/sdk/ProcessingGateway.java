@@ -54,6 +54,15 @@ public final class ProcessingGateway {
     }
 
     /**
+     * Observes global rooted readiness in a separate scheduling attempt, without PROCESS.
+     * This can inspect unrelated roots and is intended for global drain completion.
+     * @return coherent current readiness, independent of prior completed-stage evidence
+     */
+    public blue.coordination.api.ProcessingReadiness inspectReadiness() {
+        return runtime.inspectProcessingReadiness();
+    }
+
+    /**
      * Freezes the exact root-local retained work selected by this root's ordering.
      * Rejects a stale identity before PROCESS; does not fall through to another work item.
      * @param root authoritative root in this runtime

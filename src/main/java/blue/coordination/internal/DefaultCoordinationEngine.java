@@ -32,6 +32,7 @@ import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.ProcessingAvailability;
 import blue.coordination.api.ProcessingSelection;
+import blue.coordination.api.ProcessingReadiness;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
@@ -1519,6 +1520,14 @@ public final class DefaultCoordinationEngine
             throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedWorkIdentity);
         pendingRootStage = new SelectedRootStage(root, selected, RootedStageCapture.describe(root, selected, documents), input == null);
         return pendingRootStage;
+    }
+
+    /** Observes current global readiness without executing or publishing a stage. */
+    public synchronized ProcessingReadiness auditRootedProcessingReadiness() {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint()) throw new IllegalStateException("Durable readiness requires the rooted checkpoint profile");
+        var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter, true).scan(journal.entries(), null);
+        return new ProcessingReadiness(scan.quiescent(), !scan.heads().isEmpty());
     }
 
     /** Freezes the exact managed fair turn, retaining its included publication owners and no future readiness. */

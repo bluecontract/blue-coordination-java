@@ -907,6 +907,11 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         pendingStage = new SelectedProcessingStage(this, engine.selectRootStage(root.id(), input == null ? null : requireCoreEntry(input)));
         return pendingStage;
     }
+    synchronized blue.coordination.api.ProcessingReadiness inspectProcessingReadiness() {
+        ensureOpen();
+        return engine.auditRootedProcessingReadiness();
+    }
+
     synchronized SelectedProcessingStage selectRetainedStage(DocumentHandle root, String expectedWorkIdentity) {
         requireStageRoot(root);
         pendingStage = new SelectedProcessingStage(this, engine.selectRetainedRootStage(root.id(), expectedWorkIdentity));

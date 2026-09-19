@@ -11,6 +11,49 @@ import static org.junit.jupiter.api.Assertions.*;
 final class SelectedProcessingStageTest {
     private static final int BYTES = 32 * 1024 * 1024;
 
+    @Test void globalReadinessDistinguishesAnUnrelatedRunnableRootFromAnEmptyRootWithoutExecutingEither() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var source = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
+            fixture.append(source, "rcp2/source", "tick", 100, "{}");
+            // when
+            var local = fixture.blue.processing().selectNextStage(parent).execute();
+            var global = fixture.blue.processing().inspectReadiness();
+            // then
+            assertEquals(ProcessingStageResult.Disposition.NO_WORK, local.disposition());
+            assertFalse(global.quiescent()); assertTrue(global.paused()); assertFalse(global.blocked());
+            assertEquals(0, source.snapshot().longAt("/counter"));
+            fixture.blue.processing().processNextStage(source);
+            var complete = fixture.blue.processing().inspectReadiness();
+            assertTrue(complete.quiescent()); assertFalse(complete.paused()); assertFalse(complete.blocked());
+            assertThrows(IllegalArgumentException.class, () -> new blue.coordination.api.ProcessingReadiness(true, true));
+        }
+    }
+
+    @Test void globalReadinessDoesNotMistakeRetriableResourceWaitingInputForQuiescence() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var parent = fixture.start("parent.yaml", "rcp2/parent", Map.of());
+            var source = fixture.blue.values().yaml(RootedSdkFixture.resource("source.yaml"));
+            fixture.exact.put(source.blueId(), source.json());
+            fixture.timelines.put("rcp2/source", fixture.blue.timelines().register("rcp2/source", "alice"));
+            fixture.appendReference(source.blueId(), "rcp2/source", "tick", 10, "{}", false);
+            fixture.append(parent, "rcp2/parent", "attach", 20, "child: {blueId: " + source.blueId() + "}");
+            var waiting = fixture.blue.processing().processNextStage(parent);
+            var before = parent.snapshot().blueId();
+            // when
+            var readiness = fixture.blue.processing().inspectReadiness();
+            // then
+            assertEquals(ProcessingStageResult.Disposition.WAITING, waiting.disposition());
+            assertFalse(readiness.quiescent());
+            // The retained LIVE input is still a protocol scheduling head. The host's
+            // dependency wait independently prevents repeating this same failed attempt.
+            assertTrue(readiness.paused()); assertFalse(readiness.blocked());
+            assertEquals(before, parent.snapshot().blueId());
+        }
+    }
+
     @Test void exactManagedFairTurnIsFrozenWithoutFutureReadinessOrForeignOwnerClaims() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {
