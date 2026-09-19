@@ -146,6 +146,36 @@ final class LogicalTimelineJournalStoreTest {
         }
     }
 
+    @Test void exclusiveInputPrefixDoesNotDependOnTheEntryAtItsBoundary() {
+        var records = new LogicalRecordMapTest.Store();
+        TimelineEntry first, boundary; Publication appendBoundary;
+        try (var attempt = records.attempt()) {
+            var logical = new LogicalPointStorage(attempt);
+            try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                first = owner.journal.append(A, OP, 10); logical.stage();
+                assertTrue(records.publish(attempt.prepare("first", List.of(), EVIDENCE)));
+            }
+        }
+        try (var attempt = records.attempt()) {
+            var logical = new LogicalPointStorage(attempt);
+            try (var owner = new Owner(new LogicalTimelineJournalStore(logical, LIMITS))) {
+                boundary = owner.journal.append(A, OP, 20); logical.stage();
+                appendBoundary = attempt.prepare("at-boundary", List.of(), EVIDENCE);
+            }
+        }
+        Publication historical;
+        try (var attempt = records.attempt(); var owner = new Owner(new LogicalTimelineJournalStore(new LogicalPointStorage(attempt), LIMITS))) {
+            assertEquals(List.of(first.blueId()), owner.journal.entriesBefore("a", boundary.sourceOrderKey()).stream().map(TimelineEntry::blueId).toList());
+            historical = attempt.prepare("exclusive-prefix", List.of(), EVIDENCE);
+        }
+        assertTrue(records.publish(appendBoundary));
+        assertTrue(records.publish(historical), "An entry exactly at the exclusive boundary is outside the observed input prefix");
+        try (var attempt = records.attempt(); var owner = new Owner(new LogicalTimelineJournalStore(new LogicalPointStorage(attempt), LIMITS))) {
+            assertEquals(List.of(first.blueId()), owner.journal.entriesBefore("a", boundary.sourceOrderKey()).stream().map(TimelineEntry::blueId).toList());
+            assertEquals(List.of(first.blueId(), boundary.blueId()), owner.journal.entriesThrough("a", boundary.sourceOrderKey()).stream().map(TimelineEntry::blueId).toList());
+        }
+    }
+
     private static final class Owner implements AutoCloseable {
         private final EngineMetrics metrics = new EngineMetrics();
         private final WholeObjectStore objects = new WholeObjectStore(metrics);

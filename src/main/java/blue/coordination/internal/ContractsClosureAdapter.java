@@ -278,6 +278,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         new AutomaticOccurrenceResolutionCoordinator
                                 .ExpansionBuilder<CohortInvocation>() {
                             @Override
+                            public CohortInvocation completed(CohortInvocation current, ClosureAttemptResult attempt) {
+                                if (current.rootedEvidence() == null || !attempt.processResult().commits()) return current;
+                                return current.withResultOwnerFences(attempt.processResult(), documents);
+                            }
+
+                            @Override
                             public InMemoryDocumentStore.OccurrenceResolutionSnapshot captureStoreState(CohortInvocation current) {
                                 if (current.rootedEvidence() == null) return captureStoreState();
                                 var boundary = current.rootedEvidence().historicalOrigin() == null
@@ -2859,8 +2865,11 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         != storeState.componentIndexGeneration()) {
             throw stale("Managed occurrence indexes changed before retry");
         }
-        InMemoryDocumentStore.ClosureSnapshot current =
-                documents.closureSnapshot(expanded.existingMemberSet());
+        var liveMembers = expanded.rootedEvidence() == null ? expanded.existingMemberSet()
+                : expanded.rootedEvidence().context().entryOwners().stream().map(ContractsClosureAdapter::coordinationId)
+                    .filter(expanded.existingMemberSet()::contains).collect(java.util.stream.Collectors.toSet());
+        InMemoryDocumentStore.ClosureSnapshot current = liveMembers.isEmpty()
+                ? documents.admissionSnapshot(liveMembers) : documents.closureSnapshot(liveMembers);
         if (expanded.rootedEvidence() == null) requireCohortStillCurrent(expanded, current);
         else for (var owner : expanded.rootedEvidence().context().entryOwners()) {
             DocumentId id = coordinationId(owner);
@@ -4640,6 +4649,15 @@ final class ContractsClosureAdapter implements AutoCloseable {
             this(members, directDeliveries, input, retryInput, documents, managedDraftPlan,
                     automaticExpansion, publicationIdentityMembers, publicationIdentityPublicRoots,
                     rootedAnchor, null);
+        }
+
+        /** Operational fencing only: preserve the already admitted processor input and its exact context. */
+        CohortInvocation withResultOwnerFences(ClosureProcessResult result, InMemoryDocumentStore store) {
+            RootedResultScope.require(result, Objects.requireNonNull(rootedEvidence));
+            var evidence = rootedEvidence.capturePublicationFences(RootedResultScope.members(result), store);
+            return new CohortInvocation(members, directDeliveries, input, retryInput, documents,
+                    managedDraftPlan, automaticExpansion, publicationIdentityMembers,
+                    publicationIdentityPublicRoots, rootedAnchor, evidence);
         }
 
         CohortInvocation withRootedEvidence(RootedInvocationEvidence evidence) {

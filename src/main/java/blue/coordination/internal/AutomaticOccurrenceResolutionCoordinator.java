@@ -90,7 +90,7 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                             resolvedSelectorPaths);
                 }
                 return RunResult.executed(
-                        current, attempt, expansionCount);
+                        expansions.completed(current, attempt), attempt, expansionCount);
             }
             metrics.add(TYPED_DEMANDS, attempt.resourceDemands().size());
             List<String> demandVector = demandVector(
@@ -200,6 +200,8 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                 ManagedOccurrenceResolver.Resolution resolution) {
             return resolution;
         }
+
+        default I completed(I current, ClosureAttemptResult attempt) { return current; }
 
         I expand(
                 I current,
