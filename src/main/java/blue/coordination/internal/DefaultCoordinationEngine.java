@@ -1526,7 +1526,19 @@ public final class DefaultCoordinationEngine
     public synchronized ProcessingReadiness auditRootedProcessingReadiness() {
         ensureOpen();
         if (!contractsClosureProfile.rootedCheckpoint()) throw new IllegalStateException("Durable readiness requires the rooted checkpoint profile");
-        var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter, true).scan(journal.entries(), null);
+        return rootedStageReadiness(null);
+    }
+
+    /** Readiness through the original accepted input, excluding later inputs and their join fences. */
+    public synchronized ProcessingReadiness auditRootedProcessingReadinessThrough(TimelineEntry inclusiveEntry) {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint()) throw new IllegalStateException("Durable readiness requires the rooted checkpoint profile");
+        return rootedStageReadiness(journal.requireCanonical(Objects.requireNonNull(inclusiveEntry)).sourceOrderKey());
+    }
+
+    private ProcessingReadiness rootedStageReadiness(ExternalOrderKey cutoff) {
+        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff).scan(entries, cutoff);
         return new ProcessingReadiness(scan.quiescent(), !scan.heads().isEmpty());
     }
 
@@ -1551,17 +1563,27 @@ public final class DefaultCoordinationEngine
 
     /** Freezes one global journal fair turn. Absence is a scheduling observation, not global quiescence. */
     public synchronized Optional<SelectedRootStage> selectJournalStage() {
+        return selectJournalStageThrough(null);
+    }
+
+    /** Freezes a global journal turn through one already accepted exact input without reauthoring it. */
+    public synchronized Optional<SelectedRootStage> selectJournalStageThrough(TimelineEntry inclusiveEntry) {
         ensureOpen();
         if (!contractsClosureProfile.rootedCheckpoint())
             throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
-        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
-        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
+        var cutoffEntry = inclusiveEntry == null ? null : journal.requireCanonical(inclusiveEntry);
+        var cutoff = cutoffEntry == null ? null : cutoffEntry.sourceOrderKey();
+        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff);
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(entries, cutoff), false, Set.of());
         if (head == null || rootedSelection(head.selection()).kind() != ProcessingSelection.Kind.JOURNAL) {
             pendingRootStage = null;
             return Optional.empty();
         }
-        pendingRootStage = new SelectedRootStage(head.root(), head.selection(),
-                RootedStageCapture.describe(head.root(), head.selection(), documents), true);
+        var captured = RootedStageCapture.describe(head.root(), head.selection(), documents);
+        var context = cutoffEntry == null ? captured : new blue.coordination.api.ProcessingStageContext(captured.kind(),
+                captured.root(), captured.causes(), captured.entryOwners(), captured.invocationIdentities(), cutoffEntry.blueId());
+        pendingRootStage = new SelectedRootStage(head.root(), head.selection(), context, true);
         return Optional.of(pendingRootStage);
     }
 

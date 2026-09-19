@@ -122,6 +122,24 @@ public final class ProcessingGateway {
         return runtime.selectJournalStage();
     }
 
+    /**
+     * Freezes one journal turn through an already retained exact entry, without authorship.
+     * @param inclusiveEntryBlueId original accepted inclusive cutoff
+     * @return one single-use selection, or empty if the bounded journal lane has no runnable turn
+     */
+    public java.util.Optional<SelectedProcessingStage> selectJournalStageThrough(String inclusiveEntryBlueId) {
+        return runtime.selectJournalStageThrough(SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId"));
+    }
+
+    /**
+     * Separately observes readiness through an accepted input; later input is outside this observation.
+     * @param inclusiveEntryBlueId original accepted inclusive cutoff
+     * @return bounded readiness without executing a stage
+     */
+    public blue.coordination.api.ProcessingReadiness inspectReadinessThrough(String inclusiveEntryBlueId) {
+        return runtime.inspectProcessingReadinessThrough(SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId"));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

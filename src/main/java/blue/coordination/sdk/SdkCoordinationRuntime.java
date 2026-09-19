@@ -929,6 +929,18 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return Optional.ofNullable(pendingStage);
     }
 
+    synchronized Optional<SelectedProcessingStage> selectJournalStageThrough(String inclusiveEntryBlueId) {
+        ensureOpen();
+        pendingStage = engine.selectJournalStageThrough(requireCoreEntry(lightweightHandle(inclusiveEntryBlueId)))
+                .map(selected -> new SelectedProcessingStage(this, selected)).orElse(null);
+        return Optional.ofNullable(pendingStage);
+    }
+
+    synchronized blue.coordination.api.ProcessingReadiness inspectProcessingReadinessThrough(String inclusiveEntryBlueId) {
+        ensureOpen();
+        return engine.auditRootedProcessingReadinessThrough(requireCoreEntry(lightweightHandle(inclusiveEntryBlueId)));
+    }
+
     synchronized SelectedProcessingStage selectStageThrough(DocumentHandle root, EntryHandle inclusiveEntry) {
         requireStageRoot(root);
         if (inclusiveEntry.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");

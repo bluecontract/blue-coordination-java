@@ -114,6 +114,29 @@ final class SelectedProcessingStageTest {
         }
     }
 
+    @Test void globalCutoffUsesTheRetainedExactInputAndExcludesLaterWorkFromReadiness() throws Exception {
+        // given
+        try (var fixture = new RootedSdkFixture()) {
+            var root = fixture.start("source.yaml", "rcp2/source", Map.of());
+            var first = fixture.append(root, "rcp2/source", "setCounter", 10, "counterValue: 1");
+            var cutoff = fixture.append(root, "rcp2/source", "setCounter", 20, "counterValue: 2");
+            fixture.append(root, "rcp2/source", "setCounter", 30, "counterValue: 3");
+            var journal = fixture.blue.advanced().auditTimelinePosition("rcp2/source");
+            // when
+            var earlier = fixture.blue.processing().selectJournalStageThrough(cutoff.blueId()).orElseThrow().execute();
+            var included = fixture.blue.processing().selectJournalStageThrough(cutoff.blueId()).orElseThrow().execute();
+            var complete = fixture.blue.processing().selectJournalStageThrough(cutoff.blueId());
+            // then
+            assertEquals(first.blueId(), earlier.entries().get(0).entry().blueId());
+            assertEquals(cutoff.blueId(), included.selection().inclusiveEntryBlueId());
+            assertTrue(complete.isEmpty());
+            assertTrue(fixture.blue.processing().inspectReadinessThrough(cutoff.blueId()).quiescent());
+            assertFalse(fixture.blue.processing().inspectReadiness().quiescent());
+            assertEquals(2, root.snapshot().longAt("/counter"));
+            assertEquals(journal, fixture.blue.advanced().auditTimelinePosition("rcp2/source"));
+        }
+    }
+
     @Test void acceptedCutoffIncludesEarlierStagesAndNeverConsumesLaterInput() throws Exception {
         // given
         try (var fixture = new RootedSdkFixture()) {

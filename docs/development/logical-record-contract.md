@@ -314,3 +314,12 @@ journal fair turn without executing it or widening the completed result to
 future readiness. Its empty return also covers a managed fair turn or blocked
 work and therefore is not a quiescence assertion. Hosts separately observe
 `inspectReadiness()` when preparing a command-level scheduling response.
+
+`selectJournalStageThrough(exactEntryBlueId)` restores a retained cutoff by point
+lookup and freezes one journal stage through that external order. It never
+submits the entry again. `inspectReadinessThrough` separately observes the same
+bounded frontier; later input and later join fences cannot extend the command.
+The frozen context carries the exact cutoff identity through its closed codec.
+Measured shape for this addition: 356 production sources, 92,221 lines and
+107 public API types. The focused 13-stage controls include bounded quiescence
+while a later journal entry remains pending globally.

@@ -736,7 +736,7 @@ def currentProductionShapeLimits = [
         // Complete lazy engine/SDK assembly and owner-local control records.
         // Frozen source admission/history stages and closed detached result codec.
         // Accepted-input cutoff selection and closed cutoff evidence; no new production type.
-        lines: 92_168L,
+        lines: 92_221L,
         publicApiTypes: 107,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

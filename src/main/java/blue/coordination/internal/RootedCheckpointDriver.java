@@ -141,7 +141,8 @@ final class RootedCheckpointDriver {
     private Scan scanFresh(List<TimelineEntry> entries, ExternalOrderKey cutoff) {
         List<Head> heads = new ArrayList<>();
         Set<DocumentId> blocked = new LinkedHashSet<>();
-        var joins = RootedJoinEligibility.capture(documents);
+        var joins = RootedJoinEligibility.capture(documents).stream()
+                .filter(fence -> through == null || fence.boundary().compareTo(through) <= 0).toList();
         for (DocumentSession session : documents.sessions()) {
             if (session.rootedView() == null) continue;
             var component = session.rootedView().snapshot().components().stream()
