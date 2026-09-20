@@ -583,6 +583,20 @@ have intentionally changed; record reflection/serialization compatibility is
 not promised for this RC change. The SDK metadata format is revision 2. Revision 1 is rejected explicitly; no
 old persisted format reader or data migration is supported.
 
+General entries preserve the exact original envelope, including a referenced
+message when supplied. Registered channel functions determine delivery; business
+fields named `channel` or `document` do not invent routing authority. A recognized
+Operation Request with malformed routing or version fields rejects rather than
+falling back to general delivery. Unsupported outer `onBehalfOf` remains rejected.
+Append does not execute a receiver. LIVE selection, source prerequisites and
+historical catch-up use the same full external order policy for both entry kinds.
+A complete entry/graph/catch-up operation remains the atomic processing unit.
+
+Readback validates the retained request body against the exact operation envelope
+without requiring a redundant provider fetch for that body. Referenced messages
+and custom type ancestry still require their verified exact evidence. This is not
+an assurance that a cold host can omit its required provider contents.
+
 `auditOperationRoutes(documentId)` returns the immutable compiled Root-scoped
 operation surface. Each `OperationRouteSnapshot` carries the operation,
 channel, optional exact effective request pattern, and deterministically
