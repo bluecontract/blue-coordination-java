@@ -119,7 +119,13 @@ public final class TimelineProviderSupport {
                 message, "requireExactDocumentVersion");
         Object exactVersionValue = exactVersion == null
                 ? null : exactVersion.getValue();
-        if (exactVersion != null
+        // A materialized optional Boolean schema is not an authored Boolean value.
+        boolean unsetVersion = exactVersion != null && exactVersionValue == null
+                && exactVersion.getType() != null
+                && blue.language.model.wire.BlueLanguageConstants.BOOLEAN_TYPE_BLUE_ID.equals(exactVersion.getType().getBlueId())
+                && exactVersion.getItems() == null
+                && (exactVersion.getProperties() == null || exactVersion.getProperties().isEmpty());
+        if (exactVersion != null && !unsetVersion
                 && !(exactVersionValue instanceof Boolean)) {
             throw new IllegalArgumentException(
                     "requireExactDocumentVersion must be Boolean");

@@ -148,6 +148,23 @@ final class GeneralTimelineClassificationTest {
         }
     }
 
+    @Test
+    void generatedOperationWithOmittedVersionFlagRemainsValidOnReadback() {
+        // given
+        try (var sdk = BlueCoordination.inMemory()) {
+            var engine = sdk.advanced().rawEngine();
+            var timeline = engine.registerTimeline("general-entry", "alice");
+            // when
+            var entry = engine.append(timeline, blue.coordination.api.Operation.withoutRequest("credit", "owner"));
+            var version = entry.exactEvent().frozen().at("/message/requireExactDocumentVersion");
+            assertNotNull(version);
+            assertNull(version.getValue());
+            assertEquals(blue.language.model.wire.BlueLanguageConstants.BOOLEAN_TYPE_BLUE_ID, version.getType().getReferenceBlueId());
+            // then
+            assertEquals(entry.blueId(), ((DefaultCoordinationEngine) engine).auditTimelineEntry(entry.blueId()).orElseThrow().blueId());
+        }
+    }
+
     private static Node operation() {
         return new Node().type(new Node().blueId(OperationRequest.blueId()))
                 .properties("operation", new Node().value("credit"))

@@ -153,7 +153,12 @@ final class WholeRequestEntryFactory {
         String operation = requiredRoutingText(message.property("operation"), "operation");
         String channel = requiredRoutingText(message.property("channel"), "channel");
         FrozenNode version = message.property("requireExactDocumentVersion");
-        if (version != null && !(version.getValue() instanceof Boolean)) {
+        // Materialized optional fields can carry their Boolean schema without a value.
+        boolean unsetVersion = version != null && version.getValue() == null
+                && version.getType() != null
+                && blue.language.model.wire.BlueLanguageConstants.BOOLEAN_TYPE_BLUE_ID.equals(version.getType().getReferenceBlueId())
+                && version.getItems() == null && (version.getProperties() == null || version.getProperties().isEmpty());
+        if (version != null && !unsetVersion && !(version.getValue() instanceof Boolean)) {
             throw new IllegalArgumentException("requireExactDocumentVersion must be Boolean");
         }
         if (version != null && Boolean.TRUE.equals(version.getValue()) && message.property("document") == null) {
