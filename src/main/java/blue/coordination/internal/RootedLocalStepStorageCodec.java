@@ -12,7 +12,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 
 /** Retained submitted-step verification evidence, including the pre-binding capture and selected peer fences. */
 final class RootedLocalStepStorageCodec {
-    private static final String FORMAT = "blue-coordination/rooted-local-step/1";
+    private static final String FORMAT = "blue-coordination/rooted-local-step/2";
     private final int maximumBytes;
     private final int maximumDepth;
     private final SessionRecordCodec rows;

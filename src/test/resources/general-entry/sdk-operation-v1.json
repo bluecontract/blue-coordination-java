@@ -1,0 +1,7 @@
+{
+  "sourceCommit": "bfcc821364d3e4d095e92a505d9e33a4bda69d85",
+  "candidateManifestSha256": "02bad9e211b1cff0cbb69e2c54e83b3ab5e92784d6fc92bce383eb443ded2e6d",
+  "fixtureSha256": "0757b41694ff30d1b1e7a16a83bb563c10488cf28b8adfa2350632cf7feefbde",
+  "producer": "CaptureOperationMetadata.java compiled and executed solely against the merged baseline candidate and its hash-verified dependency tuple",
+  "output": "entry=AkV4mjP848pmsPtwTJNAFYNrB9YEEJ4Dexxo6yga7T28\n"
+}

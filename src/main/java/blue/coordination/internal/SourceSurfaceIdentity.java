@@ -82,6 +82,11 @@ final class SourceSurfaceIdentity {
                 text(digest, source.actorId());
             }
         }
+        number(digest, routingSurface.channels().size());
+        for (var channel : routingSurface.channels()) {
+            text(digest, channel.scopePath()); text(digest, channel.channelKey()); number(digest, channel.sources().size());
+            for (var source : channel.sources()) { text(digest, source.timelineId()); text(digest, source.actorId()); }
+        }
         bool(digest, routingSurface.deliversEmbeddedRevisionEvents());
         return "sha256:" + HexFormat.of().formatHex(digest.digest());
     }

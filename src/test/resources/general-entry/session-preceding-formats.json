@@ -1,0 +1,11 @@
+{
+  "sourceCommit": "bfcc821364d3e4d095e92a505d9e33a4bda69d85",
+  "manifestSha256": "sha256:02bad9e211b1cff0cbb69e2c54e83b3ab5e92784d6fc92bce383eb443ded2e6d",
+  "files": {
+    "session-flat-v2.bin": "sha256:2394833a90fed237365b4ff8e51e90f9997427a2970a73e89c82b61721e53174",
+    "session-inline-v1.bin": "sha256:58207ecab003afc179f88d112e647e5279e699d6add1cbaa4213e3568b2db2d3"
+  },
+  "baselineRoundtrip": "PASS",
+  "producer": "CaptureSessionFrames.java compiled/executed solely against authenticated merged baseline candidate and dependency tuple; both records reopened in baseline reader before capture.",
+  "rejectionControl": "DocumentSessionRevisionStorageTest.precedingSessionFormatsRejectWithoutMigrationAndCurrentEvidenceReopensExactly"
+}

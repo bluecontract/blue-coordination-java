@@ -129,7 +129,7 @@ final class StoredManagedEpochIndexes {
             BiConsumer<Writer, ManagedEpochReceiptStore.StoredReceipt> writer,
             Function<Reader, ManagedEpochReceiptStore.StoredReceipt> reader, RootedStorageCache cache) {
         PersistentMapCodec<ManagedEpochReceiptStore.StoredReceipt> raw = new PersistentMapCodec<>() {
-            public String identity() { return "blue-coordination/managed-epoch-index/receipt/1"; }
+            public String identity() { return "blue-coordination/managed-epoch-index/receipt/2"; }
             public byte[] encode(ManagedEpochReceiptStore.StoredReceipt value) {
                 return SessionStorageWire.encode(limits.valueBytes(), w -> writer.accept(w, value));
             }

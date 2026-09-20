@@ -158,7 +158,7 @@ final class SdkPointStorage {
                             || target == null || !intent.expectedTargetBlueId().equals(target.getBlueId())
                             || !Objects.equals(intent.timelineId(), entry.timeline().timelineId())
                             || !Objects.equals(intent.actorId(), entry.timeline().actorId())
-                            || !Objects.equals(intent.operation(), entry.operation()) || !Objects.equals(intent.channel(), entry.channel()))
+                            || entry.operationDetails().isEmpty() || !Objects.equals(intent.operation(), entry.operation()) || !Objects.equals(intent.channel(), entry.channel()))
                         throw invalid("SDK targeted intent differs from original journal row");
                 } else if (!intent.equals(SdkCoordinationRuntime.EntryIntent.broadcast()))
                     throw invalid("SDK broadcast intent carries targeted operands");

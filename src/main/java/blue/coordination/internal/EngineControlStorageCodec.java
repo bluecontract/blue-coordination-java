@@ -23,7 +23,7 @@ import static blue.language.snapshot.ExactNodeStorageCodec.*;
 
 /** Private bounded physical control component, not a complete engine restore API. */
 final class EngineControlStorageCodec {
-    static final String FORMAT = "blue-coordination/rooted-engine-control/1";
+    static final String FORMAT = "blue-coordination/rooted-engine-control/2";
     private final ExactNodeStorageCodec envelope;
 
     EngineControlStorageCodec(int maximumBytes) { envelope = new ExactNodeStorageCodec(maximumBytes, 128); }

@@ -33,7 +33,7 @@ import static blue.language.snapshot.ExactNodeStorageCodec.*;
  * reflection, handler execution or authority construction occurs here.
  */
 final class SdkStorageCodec {
-    static final String FORMAT = "blue-coordination/rooted-sdk-metadata/1";
+    static final String FORMAT = "blue-coordination/rooted-sdk-metadata/2";
     private final Object owner;
     private final ExactNodeStorageCodec envelope;
     private final ExactValueStorageCodec exact;
@@ -65,19 +65,21 @@ final class SdkStorageCodec {
 
     // This is data, not a TimelineEntry authority factory. Install must resolve the
     // corresponding row through the supplied engine's verified journal and compare it.
-    record CoreEntrySnapshot(ExactBlueValue exactEvent, Optional<ExactBlueValue> request,
+    record CoreEntrySnapshot(ExactBlueValue exactEvent,
+            Optional<TimelineEntrySnapshot.OperationDetails> operationDetails,
             ExternalOrderKey journalOrderKey, ExternalOrderKey sourceOrderKey, Timeline timeline,
-            String operation, String channel, long timestampMicros, long globalSequence, long timelineSequence) {
+            long timestampMicros, long globalSequence, long timelineSequence) {
         CoreEntrySnapshot {
-            Objects.requireNonNull(exactEvent); Objects.requireNonNull(request); Objects.requireNonNull(journalOrderKey);
-            Objects.requireNonNull(sourceOrderKey); Objects.requireNonNull(timeline); Objects.requireNonNull(operation);
-            Objects.requireNonNull(channel);
+            Objects.requireNonNull(exactEvent); Objects.requireNonNull(operationDetails);
+            Objects.requireNonNull(journalOrderKey); Objects.requireNonNull(sourceOrderKey); Objects.requireNonNull(timeline);
             if (timestampMicros <= 0 || globalSequence <= 0 || timelineSequence <= 0)
                 throw invalid("Invalid stored entry coordinates");
         }
         static CoreEntrySnapshot from(TimelineEntry entry) {
-            return new CoreEntrySnapshot(ExactBlueValue.wrap(entry.exactEvent()), entry.request().map(ExactBlueValue::wrap),
-                    entry.journalOrderKey(), entry.sourceOrderKey(), entry.timeline(), entry.operation(), entry.channel(),
+            return new CoreEntrySnapshot(ExactBlueValue.wrap(entry.exactEvent()),
+                    entry.operationDetails().map(details -> new TimelineEntrySnapshot.OperationDetails(
+                            details.operation(), details.channel(), details.request().map(ExactBlueValue::wrap))),
+                    entry.journalOrderKey(), entry.sourceOrderKey(), entry.timeline(),
                     entry.timestampMicros(), entry.globalSequence(), entry.timelineSequence());
         }
     }
@@ -204,7 +206,13 @@ final class SdkStorageCodec {
             if (value instanceof ManagedSurfaceEvidence.SubscriptionOperation v) { fields(58, v.name()); return; }
             if (value instanceof ManagedSurfaceEvidence.ContractPatchOperation v) { fields(59, v.name()); return; }
             if (value instanceof Configuration v) { fields(39, v.language(), v.contracts(), v.bundledRelease(), v.contentDerivedDocumentIds(), v.policy(), v.bundledIdentities()); return; }
-            if (value instanceof CoreEntrySnapshot v) { fields(40, v.exactEvent(), v.request(), v.journalOrderKey(), v.sourceOrderKey(), v.timeline(), v.operation(), v.channel(), v.timestampMicros(), v.globalSequence(), v.timelineSequence()); return; }
+            if (value instanceof CoreEntrySnapshot v) {
+                fields(40, v.exactEvent(), v.operationDetails(), v.journalOrderKey(), v.sourceOrderKey(), v.timeline(),
+                        v.timestampMicros(), v.globalSequence(), v.timelineSequence()); return;
+            }
+            if (value instanceof TimelineEntrySnapshot.OperationDetails v) {
+                fields(74, v.operation(), v.channel(), v.request()); return;
+            }
             if (value instanceof Timeline v) { fields(41, v.timelineId(), v.actorId()); return; }
             if (value instanceof SourceHistoryPrerequisite v) { fields(42, v.selectionIdentity(), v.requestingRoot(), v.requestingInvocationIdentity(), v.demandIdentity(), v.sourceDocumentId(), v.authoredBlueId(), v.cutoffExclusive(), v.kind(), v.sourceEpoch(), v.sourceBlueId(), v.workIdentity(), v.entryBlueId(), v.journalRevision(), v.routeGeneration(), v.sourceSurfaceIdentity(), v.diagnostic()); return; }
             if (value instanceof DrainResult v) { fields(43, v.entries(), v.stats(), v.quiescent(), v.paused(), v.diagnostic(), v.managedEpochApplications(), v.managedEpochApplicationAttempts(), v.managedEpochEvidenceFailures(), v.rootedRetainedApplications()); return; }
@@ -310,7 +318,8 @@ final class SdkStorageCodec {
                 case 58: return ManagedSurfaceEvidence.SubscriptionOperation.valueOf(this.<String>r());
                 case 59: return ManagedSurfaceEvidence.ContractPatchOperation.valueOf(this.<String>r());
                 case 39: return new Configuration(r(), r(), flag(), flag(), r(), r());
-                case 40: return new CoreEntrySnapshot(r(), r(), r(), r(), r(), r(), r(), number(), number(), number());
+                case 40: return new CoreEntrySnapshot(r(), r(), r(), r(), r(), number(), number(), number());
+                case 74: return new TimelineEntrySnapshot.OperationDetails(r(), r(), r());
                 case 41: return new Timeline(r(), r());
                 case 42: return new SourceHistoryPrerequisite(r(), r(), r(), r(), r(), r(), r(), r(), number(), r(), r(), r(), number(), number(), r(), r());
                 case 43: return new DrainResult(r(), r(), flag(), flag(), r(), r(), r(), r(), r());

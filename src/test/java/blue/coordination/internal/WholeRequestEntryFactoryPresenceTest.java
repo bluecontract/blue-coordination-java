@@ -317,6 +317,43 @@ final class WholeRequestEntryFactoryPresenceTest {
         }
     }
 
+    @Test
+    void coldReadbackAuthenticatesRetainedRequestWithoutFetchingItAgain() {
+        // given
+        EngineMetrics writerMetrics = new EngineMetrics();
+        WholeObjectStore writerObjects = new WholeObjectStore(writerMetrics);
+        TimelineEntry entry;
+        ExactValue different;
+        try (BlueRuntime writer = BlueRuntime.create(writerObjects, writerMetrics)) {
+            WholeRequestEntryFactory entries = new WholeRequestEntryFactory(writer, writerObjects, writerMetrics);
+            entry = entries.create(new Timeline("cold-request", "alice"), null,
+                    Operation.yaml("touch", "ownerChannel", "kind: retained-only"), 100L, 1L, 1L);
+            different = entries.parseExactRequest("kind: wrong-body");
+        }
+        EngineMetrics readerMetrics = new EngineMetrics();
+        WholeObjectStore readerObjects = new WholeObjectStore(readerMetrics);
+        try (BlueRuntime reader = BlueRuntime.create(readerObjects, readerMetrics)) {
+            WholeRequestEntryFactory entries = new WholeRequestEntryFactory(reader, readerObjects, readerMetrics);
+            // when
+            assertDoesNotThrow(() -> entries.verifyStoredEntry(entry));
+            // then
+            assertFalse(readerObjects.contains(entry.exactRequest().blueId()));
+            assertThrows(IllegalArgumentException.class, () -> entries.verifyStoredEntry(
+                    withRequest(entry, java.util.Optional.of(different))));
+            assertThrows(IllegalArgumentException.class, () -> entries.verifyStoredEntry(
+                    withRequest(entry, java.util.Optional.empty())));
+            assertThrows(IllegalArgumentException.class, () -> entries.verifyStoredEntry(
+                    withRequest(entry, java.util.Optional.of(ExactValue.fromFrozen(
+                            entry.exactEvent().frozen().at("/message/request"))))));
+        }
+    }
+
+    private static TimelineEntry withRequest(TimelineEntry entry, java.util.Optional<ExactValue> request) {
+        return new TimelineEntry(entry.exactEvent(), request, entry.journalOrderKey(), entry.sourceOrderKey(),
+                entry.timeline(), entry.operation(), entry.channel(), entry.timestampMicros(),
+                entry.globalSequence(), entry.timelineSequence());
+    }
+
     private static ExactValue exact(BexAdmittedValue admitted) {
         return ExactValue.verified(
                 admitted.nodeBlueId(), admitted.node());

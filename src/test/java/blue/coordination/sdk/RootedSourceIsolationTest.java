@@ -23,6 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** Real SDK baseline for the literal RCP-RUN-001/002 source operation. */
 final class RootedSourceIsolationTest {
+    private boolean general;
+    RootedSourceIsolationTest generalEntries() { this.general = true; return this; }
+
     @Test
     void literalSourcePublishesOneTickAndRetainsItAcrossStoreRestart() throws IOException {
         // given
@@ -103,11 +106,11 @@ final class RootedSourceIsolationTest {
         assertEquals(baseline, alternate);
     }
 
-    private static ExecutionIdentity verifyParent(boolean sourceFirst) throws IOException {
+    ExecutionIdentity verifyParent(boolean sourceFirst) throws IOException {
         return verifyParent(sourceFirst, false);
     }
 
-    private static ExecutionIdentity verifyParent(boolean sourceFirst, boolean failSibling) throws IOException {
+    ExecutionIdentity verifyParent(boolean sourceFirst, boolean failSibling) throws IOException {
         Map<String, String> exactContent = new LinkedHashMap<>();
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()
                 .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
@@ -116,7 +119,7 @@ final class RootedSourceIsolationTest {
             TimelineHandle timeline = blue.timelines().register("rcp2/source", "alice");
             blue.timelines().register("rcp2/parent", "alice");
             DocumentHandle source = blue.documents().admitStaticProcessEmbedded(
-                    resource("source.yaml"), ActivationPolicy.importFullHistory()).document("root");
+                    sourceDocument(), ActivationPolicy.importFullHistory()).document("root");
             String sourceInitial = source.snapshot().blueId();
             exactContent.put(sourceInitial, source.snapshot().exact().json());
             DocumentHandle parent = blue.documents().admitStaticProcessEmbedded(resource("parent.yaml")
@@ -135,7 +138,7 @@ final class RootedSourceIsolationTest {
                 siblingHead = sibling.snapshot().blueId();
                 siblingHistory = receipts(blue, sibling.id());
             }
-            EntryHandle input = blue.events().from(timeline).exact(blue.values().yaml("""
+            EntryHandle input = blue.events().from(timeline).exact(blue.values().yaml(inputEnvelope("""
                     type: Coordination/Timeline Entry
                     timeline:
                       type: MyOS/MyOS Timeline
@@ -149,7 +152,7 @@ final class RootedSourceIsolationTest {
                       operation: tick
                       channel: owner
                       request: {}
-                    """)).submit();
+                    """))).submit();
             if (sourceFirst) {
                 assertEquals(EntryDisposition.APPLIED, blue.processing().process(source, input).entry(input).disposition());
             }
@@ -204,7 +207,7 @@ final class RootedSourceIsolationTest {
         }
     }
 
-    private static ExecutionIdentity verifySource(int observerCount) throws IOException {
+    ExecutionIdentity verifySource(int observerCount) throws IOException {
         Map<String, String> exactContent = new LinkedHashMap<>();
         try (BlueCoordination blue = BlueCoordination.builder().contentDerivedDocumentIds()
                 .release(BundledContracts10Release.manifest().blueLanguageSpecification(),
@@ -212,7 +215,7 @@ final class RootedSourceIsolationTest {
                 .exactNodeProvider(id -> Optional.ofNullable(exactContent.get(id))).build()) {
             TimelineHandle timeline = blue.timelines().register("rcp2/source", "alice");
             DocumentHandle source = blue.documents().admitStaticProcessEmbedded(
-                    resource("source.yaml"), ActivationPolicy.importFullHistory()).document("root");
+                    sourceDocument(), ActivationPolicy.importFullHistory()).document("root");
             exactContent.put(source.snapshot().blueId(), source.snapshot().exact().json());
             List<DocumentHandle> parents = new ArrayList<>();
             List<String> parentHeads = new ArrayList<>();
@@ -234,7 +237,7 @@ final class RootedSourceIsolationTest {
                 parentHeads.add(parent.snapshot().blueId());
                 parentReceipts.add(receipts(blue, parent.id()));
             }
-            EntryHandle input = blue.events().from(timeline).exact(blue.values().yaml("""
+            EntryHandle input = blue.events().from(timeline).exact(blue.values().yaml(inputEnvelope("""
                     type: Coordination/Timeline Entry
                     timeline:
                       type: MyOS/MyOS Timeline
@@ -248,7 +251,7 @@ final class RootedSourceIsolationTest {
                       operation: tick
                       channel: owner
                       request: {}
-                    """)).submit();
+                    """))).submit();
 
             // One journal selection, with no fall-through to downstream retained work.
             EntryResult result = blue.processing().drainJournal(new DrainBudget(1, 1)).entry(input);
@@ -274,6 +277,17 @@ final class RootedSourceIsolationTest {
             return new ExecutionIdentity(result.stats().gas(), result.closures().get(0).closureId(), head, history, blue.advanced().closureExecution(
                     result.closures().get(0).closureId()).orElseThrow().gasTraceIdentity());
         }
+    }
+
+    private String sourceDocument() throws IOException {
+        String yaml = resource("source.yaml");
+        return general ? yaml.replace("type: Coordination/Sequential Workflow Operation\n    channel: owner\n    request: {}",
+                "type: Coordination/Sequential Workflow\n    channel: owner\n    event:\n      message:\n        kind: Tick") : yaml;
+    }
+
+    private String inputEnvelope(String operation) {
+        return general ? operation.replace("  type: Coordination/Operation Request\n  operation: tick\n  channel: owner\n  request: {}",
+                "  kind: Tick") : operation;
     }
 
     private record ExecutionIdentity(long gas, String terminalKey, String exactHead, List<String> receiptIdentities,

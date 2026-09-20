@@ -722,7 +722,9 @@ def currentProductionShapeLimits = [
         // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
         // Condition correction: two private historical-source storage/assessment helpers.
         // Exact measured inventory (+2 sources, +454 lines); API and per-source caps stay unchanged.
-        classes: 358,
+        // General entries: two private scoped channel-index/storage helpers; +410 net lines.
+        // Exact inventory; public/per-source caps unchanged. See docs/development/general-timeline-entries.md.
+        classes: 360,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
         // Completed-stage SDK result/gateways plus three logical-record contract/tracking types.
         // Measured count; see docs/development/logical-record-contract.md.
@@ -740,7 +742,8 @@ def currentProductionShapeLimits = [
         // Accepted-input cutoff selection and closed cutoff evidence; no new production type.
         // Counter-only logical owner diagnostics: three accessors, +11 measured lines; no new types.
         // Point-lookup overload for a retained exact input stage: +12 lines, no new type or semantic processing.
-        lines: 92_698L,
+        // R1: verified operation-message resolution in all rooted selectors (+14 lines; no new type).
+        lines: 93_122L,
         publicApiTypes: 107,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

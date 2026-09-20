@@ -36,7 +36,15 @@ final class SourcePrerequisiteResultStorageValidationTest {
 
     @Test void actualLiveCannotBeReplacedByAnotherEntryOrRelabelledTerminalResult() throws Exception {
         // given
-        try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(true)) {
+        boolean general = false;
+        // when
+        org.junit.jupiter.api.function.Executable execution = () -> verifyLiveResponse(general);
+        // then
+        assertDoesNotThrow(execution);
+    }
+
+    void verifyLiveResponse(boolean general) throws Exception {
+        try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(true, resource("source.yaml"), general)) {
             var d = scenario.selection(); var selected = scenario.coordinator().requireSelection(d);
             var response = scenario.f.blue.advanced().processSourceHistoryPrerequisite(d);
             validateWithoutWork(scenario.f, scenario.parent, selected, response);

@@ -85,9 +85,9 @@ public final class ManagedEpochHistory {
     private static ManagedEpochReceipt detached(blue.coordination.api.ManagedEpochReceipt receipt,
             Function<blue.coordination.api.ManagedEpochReceipt, ManagedEpochReceipt> project) {
         var source = project.apply(receipt).sourceEntry().map(entry -> new TimelineEntrySnapshot(
-                entry.exact(), entry.request(), new TimelineHandle(DETACHED_TIMELINES, entry.timeline().id(),
+                entry.exact(), entry.operationDetails(), new TimelineHandle(DETACHED_TIMELINES, entry.timeline().id(),
                         entry.timeline().accountId(), entry.timeline().actorKind()), entry.previousEntryBlueId(),
-                entry.operation(), entry.channel(), entry.timestampMicros(), entry.globalSequence(), entry.timelineSequence()));
+                entry.timestampMicros(), entry.globalSequence(), entry.timelineSequence()));
         return new ManagedEpochReceipt(receipt, source.orElse(null));
     }
 

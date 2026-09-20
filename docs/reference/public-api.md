@@ -567,8 +567,35 @@ non-READY document read for host diagnostics.
 `auditTimelineEntries()` return immutable `TimelineEntrySnapshot` values from
 the engine's canonical journal, including entries appended through
 `rawEngine()`. Each snapshot retains the exact whole entry, Timeline identity,
-predecessor identity, operation/channel, timestamp, and global/per-Timeline
-sequence numbers.
+predecessor identity, optional operation details, timestamp, and global/per-Timeline
+sequence numbers. Both `api.TimelineEntry` and `sdk.TimelineEntrySnapshot` expose
+`operationDetails()`: an empty group for a general message or an immutable
+`OperationDetails(operation, channel, request)` group for a recognized operation.
+A business field named `request`, `operation`, or `channel` remains part of the
+exact general message and does not populate this group.
+
+The preceding operation-only constructor overloads and accessors remain.
+`operation()` and `channel()` are operation-specific and throw
+`NoSuchElementException` on a general entry. `request()` is empty on a general
+entry and continues distinguishing absent operation requests from semantic `{}`.
+Generic consumers must use the optional group. The canonical record components
+have intentionally changed; record reflection/serialization compatibility is
+not promised for this RC change. The SDK metadata format is revision 2. Revision 1 is rejected explicitly; no
+old persisted format reader or data migration is supported.
+
+General entries preserve the exact original envelope, including a referenced
+message when supplied. Registered channel functions determine delivery; business
+fields named `channel` or `document` do not invent routing authority. A recognized
+Operation Request with malformed routing or version fields rejects rather than
+falling back to general delivery. Unsupported outer `onBehalfOf` remains rejected.
+Append does not execute a receiver. LIVE selection, source prerequisites and
+historical catch-up use the same full external order policy for both entry kinds.
+A complete entry/graph/catch-up operation remains the atomic processing unit.
+
+Readback validates the retained request body against the exact operation envelope
+without requiring a redundant provider fetch for that body. Referenced messages
+and custom type ancestry still require their verified exact evidence. This is not
+an assurance that a cold host can omit its required provider contents.
 
 `auditOperationRoutes(documentId)` returns the immutable compiled Root-scoped
 operation surface. Each `OperationRouteSnapshot` carries the operation,

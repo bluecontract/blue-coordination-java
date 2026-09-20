@@ -22,9 +22,8 @@ import static blue.coordination.internal.SessionRecordCodec.*;
  * Neither this class nor an open scope supplies an engine/SDK publication authority.
  */
 final class DocumentSessionStorage {
-    private static final String LEGACY_SESSION = "blue-coordination/document-session-storage/1";
-    private static final String SESSION = "blue-coordination/document-session-storage/2";
-    static final String INDEXED_SESSION = "blue-coordination/document-session-storage/3";
+    private static final String SESSION = "blue-coordination/document-session-storage/4";
+    static final String INDEXED_SESSION = "blue-coordination/document-session-storage/5";
     private static final String VIEW = "blue-coordination/rooted-document-view-storage/1";
     private final CoordinationImmutableObjectStore objects;
     private final Limits limits;
@@ -196,20 +195,17 @@ final class DocumentSessionStorage {
                             ? DocumentSession.restoreControlledIndexed(state, indexedPayloads)
                             : DocumentSession.restoreIndexed(state, indexedPayloads);
                 }
-                DecodedSession decoded = decode(encoded, limits.maximumRecordBytes(), in -> {
-                    String selectedFormat = text(in);
-                    require(SESSION.equals(selectedFormat) || LEGACY_SESSION.equals(selectedFormat), "Wrong session storage format");
-                    boolean legacy = LEGACY_SESSION.equals(selectedFormat);
-                    return new DecodedSession(session(in, this::view, legacy ? null : this::revision), legacy);
+                DocumentSession.StoredState state = decode(encoded, limits.maximumRecordBytes(), in -> {
+                    require(SESSION.equals(text(in)), "Unsupported session storage format");
+                    return session(in, this::view, this::revision);
                 });
-                DocumentSession.StoredState state = decoded.state();
                 require(expectedDocument.equals(state.documentId()), "Selected session address belongs to another document");
                 DocumentSession session = DocumentSession.restoreStored(state);
                 require(Arrays.equals(encoded, encodeSession(session.storedState(), selected -> {
                     // Restored references are guaranteed to come from this exact scope.
                     String selectedAddress = viewAddresses.get(selected);
                     require(selectedAddress != null, "Rooted view escaped its restoration scope"); return selectedAddress;
-                }, decoded.legacy() ? null : selected -> {
+                }, selected -> {
                     String selectedAddress = revisionAddresses.get(selected);
                     require(selectedAddress != null, "Revision escaped its restoration scope"); return selectedAddress;
                 })), "Noncanonical or incomplete session record");
@@ -431,17 +427,13 @@ final class DocumentSessionStorage {
 
     record WithViews<T>(T value, ViewManifest views) { }
 
-    private record DecodedSession(DocumentSession.StoredState state, boolean legacy) { }
-
-    /** Null revision addressing is used only to verify the legacy inline format on read. */
     private byte[] encodeSession(DocumentSession.StoredState state, Function<RootedDocumentView, String> address,
             Function<DocumentRevision, String> revisionAddress) {
         return encode(limits.maximumRecordBytes(), out -> {
-            out.text(revisionAddress == null ? LEGACY_SESSION : SESSION);
+            out.text(SESSION);
             out.text(state.documentId().value()); out.text(state.authoredInitialBlueId());
             list(out, state.activeSubscriptions(), rows::subscription);
-            if (revisionAddress == null) list(out, state.revisions(), rows::revision);
-            else list(out, state.revisions(), (w, row) -> w.text(revisionAddress.apply(row)));
+            list(out, state.revisions(), (w, row) -> w.text(revisionAddress.apply(row)));
             stringSet(out, state.terminalEntryBlueIds()); stringSet(out, state.transitionReceipts());
             list(out, state.representationTransitions(), (w, row) -> {
                 w.longValue(row.epoch()); w.text(row.beforeBlueId()); w.text(row.afterBlueId());
@@ -464,7 +456,7 @@ final class DocumentSessionStorage {
     private DocumentSession.StoredState session(Reader in, Function<String, RootedDocumentView> view,
             Function<String, DocumentRevision> revision) {
         return new DocumentSession.StoredState(DocumentId.of(text(in)), text(in), list(in, rows::subscription),
-                revision == null ? list(in, rows::revision) : list(in, r -> revision.apply(text(r))), stringSet(in), stringSet(in),
+                list(in, r -> revision.apply(text(r))), stringSet(in), stringSet(in),
                 list(in, r -> new DocumentSession.ComponentRepresentationTransition(r.longValue(), text(r), text(r), text(r), nullableText(r))),
                 optional(in, r -> rows.history(r, view)), optional(in, r -> view.apply(text(r))),
                 list(in, r -> new DocumentSession.RootedViewPosition(view.apply(text(r)), optional(r, SessionStorageWire::order))),

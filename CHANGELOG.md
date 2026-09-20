@@ -5,6 +5,22 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Preserve document and exact-version restrictions for referenced Operation Requests
+  across live, historical and earlier-source routing. Resolve verified message
+  content without rewriting the original envelope; unavailable evidence never
+  widens delivery to other documents.
+
+- Accept exact general Timeline messages through managed entry admission and
+  registered channel routing, with optional operation details. General entries
+  participate in full-key ordering, historical source work and atomic graph
+  processing without synthetic operation envelopes.
+- Write and read only the new entry-bearing storage formats. Preceding formats
+  reject explicitly; no backward reader, migration or automatic reset is provided.
+  Existing operation convenience APIs remain, while generic consumers must use
+  the optional operation facet.
+- Authenticate retained operation request bodies during cold readback without
+  fetching the same body again; missing or mismatched evidence still rejects.
+
 - Add host-selected complete processing stages with separate readiness inspection,
   frozen input cutoffs, source prerequisites and detached result evidence. Complete
   entry, graph and catch-up operations remain atomic; hosts may batch their outcomes.

@@ -703,8 +703,12 @@ final class ContractsClosureAdapterTest {
             String timeline,
             String actor,
             String channel) {
-        ExactValue event = ExactValue.verified(new Node().value(
-                timeline + "|" + actor + "|event"));
+        ExactValue event = ExactValue.verified(new Node()
+                .properties("timeline", new Node().value(timeline))
+                .properties("actor", new Node().value(actor))
+                .properties("message", new Node()
+                        .properties("operation", new Node().value("increment"))
+                        .properties("channel", new Node().value(channel))));
         ExactValue request = ExactValue.verified(new Node().value("request"));
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
                 1L, timeline, event.blueId()));

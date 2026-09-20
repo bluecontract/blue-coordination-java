@@ -130,7 +130,10 @@ final class SourcePrerequisiteResultStorageValidation {
     private static boolean sameEntry(TimelineEntry left, TimelineEntry right) {
         return left.journalOrderKey().equals(right.journalOrderKey())
                 && left.sourceOrderKey().equals(right.sourceOrderKey()) && left.timeline().equals(right.timeline())
-                && left.operation().equals(right.operation()) && left.channel().equals(right.channel())
+                && left.operationDetails().map(TimelineEntry.OperationDetails::operation)
+                        .equals(right.operationDetails().map(TimelineEntry.OperationDetails::operation))
+                && left.operationDetails().map(TimelineEntry.OperationDetails::channel)
+                        .equals(right.operationDetails().map(TimelineEntry.OperationDetails::channel))
                 && left.timestampMicros() == right.timestampMicros() && left.globalSequence() == right.globalSequence()
                 && left.timelineSequence() == right.timelineSequence() && left.request().isPresent() == right.request().isPresent()
                 && left.exactEvent().sameExactValue(right.exactEvent())

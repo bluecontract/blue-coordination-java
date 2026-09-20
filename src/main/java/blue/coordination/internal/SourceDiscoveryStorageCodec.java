@@ -15,8 +15,8 @@ import static blue.coordination.internal.SessionStorageWire.*;
 /** Exact stopped demand and submitted source step; decoding never selects or executes work. */
 final class SourceDiscoveryStorageCodec {
     private static final String PENDING = "blue-coordination/source-pending/1";
-    private static final String PREPARED = "blue-coordination/source-prepared/2";
-    private static final String PREPARED_SCOPED = "blue-coordination/source-prepared/3";
+    private static final String PREPARED = "blue-coordination/source-prepared/4";
+    private static final String PREPARED_SCOPED = "blue-coordination/source-prepared/5";
     private final int maximumBytes;
     private final SessionRecordCodec rows;
     private final CohortInvocationStorageCodec cohorts;

@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -127,11 +129,12 @@ final class StoredRouteIndexesTest {
         assertTrue(cold.open(emptyRoots::get, b.generation(), new EngineMetrics(), ignored -> null, ignored -> null).route(entry("timeline/final")).isEmpty());
     }
 
-    @Test void openingAndOneRouteDoNotReplayOrResolveUnrelatedDocuments() {
+    @ParameterizedTest @ValueSource(ints = {1, 31, 255})
+    void openingAndOneRouteDoNotReplayOrResolveUnrelatedDocuments(int documentCount) {
         // given
         var bytes = new Bytes(); var storage = new StoredRouteIndexes(bytes, LIMITS);
         var index = new OperationRouteIndex(new EngineMetrics());
-        for (int i = 0; i < 255; i++) replace(index, i, "timeline/" + i);
+        for (int i = 0; i < documentCount; i++) replace(index, i, "timeline/" + i);
         var stored = storage.retainPartition(index, new EngineMetrics(), ignored -> { throw new AssertionError("session scan"); },
                 ignored -> { throw new AssertionError("head scan"); });
         var roots = roots(storage, stored); var coldBytes = bytes.fresh(); var cold = new StoredRouteIndexes(coldBytes, LIMITS);
@@ -140,9 +143,10 @@ final class StoredRouteIndexesTest {
         var opened = cold.open(roots::get, index.generation(), metrics, ignored -> { throw new AssertionError("session scan"); },
                 ignored -> { throw new AssertionError("head scan"); });
         // then
-        assertEquals(2, coldBytes.reads, "only the two selected root metadata nodes");
+        assertEquals(4, coldBytes.reads,
+                "Exactly four metadata roots: operation rows/document keys and general buckets/document keys; independent of catalog size");
         assertEquals(new EngineMetrics().snapshot().counters(), metrics.snapshot().counters());
-        assertEquals(List.of(id(127)), opened.route(entry("timeline/127")));
+        assertEquals(List.of(id(documentCount / 2)), opened.route(entry("timeline/" + documentCount / 2)));
         assertTrue(coldBytes.reads < 50, "exact route reads AVL paths, not the route catalog");
         assertEquals(0, coldBytes.writes);
     }
@@ -229,7 +233,9 @@ final class StoredRouteIndexesTest {
     }
     static void replace(OperationRouteIndex index, int document, String timeline) { index.prepareReplacement(List.of(replacement(document, timeline))).publish(); }
     static TimelineEntry entry(String timeline) {
-        var event = ExactValue.verified(new Node().value(timeline));
+        var event = ExactValue.verified(new Node().properties("fixtureTimeline", new Node().value(timeline))
+                .properties("message", new Node().properties("operation", new Node().value("increment"))
+                        .properties("channel", new Node().value("owner"))));
         var order = ExternalOrderKey.of(List.of(java.math.BigInteger.ONE.shiftLeft(70), timeline, event.blueId()));
         return new TimelineEntry(event, Optional.of(ExactValue.verified(new Node().value("request"))), order, order,
                 new Timeline(timeline, "alice"), "increment", "owner", 1L, 1L, 1L);

@@ -100,7 +100,7 @@ final class LogicalEngineControl {
     }
     private <T> PersistentMapCodec<T> codec(String name, BiConsumer<Writer, T> write, Function<Reader, T> read) {
         return new PersistentMapCodec<>() {
-            public String identity() { return "blue-coordination/control-record/1/" + name; }
+            public String identity() { return "blue-coordination/control-record/2/" + name; }
             public byte[] encode(T value) { return SessionStorageWire.encode(limits.maximumRecordBytes(), w -> {
                 w.text(identity()); write.accept(w, value);
             }); }
