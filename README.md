@@ -171,7 +171,7 @@ state to operational tooling.
 
 ## Build and verification
 
-The rc.14 release requires verification through the Maven-Central-only
+The rc.15 release requires verification through the Maven-Central-only
 artifact lane:
 
 ```bash
@@ -194,7 +194,7 @@ Central. The build and published POM retain the Repository and BEX transitive
 exclusions and directly own the complete Language rc.32 graph. Local
 composites and Maven Local are rejected.
 
-The public rc.14 release lane uses the published-artifact mode by default. An
+The public rc.15 release lane uses the published-artifact mode by default. An
 invocation-owned immutable Contracts stage remains available only for
 development-candidate handoffs; its retained RC lock template still pins
 Language RC25. When using it, pin its absolute repository and manifest identity
@@ -220,17 +220,17 @@ Coordination versions plus both immutable repository manifest identities. The
 complete `releaseCheck` replays those same pins inside the extracted source
 archive; it never substitutes the published Language or BEX versions. This is
 candidate-verification evidence only. `verifyRcReadiness`, `stageRelease`, and
-JReleaser remain restricted to the published rc.14 lane.
+JReleaser remain restricted to the published rc.15 lane.
 
 Once those gates genuinely pass on a clean committed checkout, use the
 [immutable Coordination handoff](docs/development/immutable-staged-coordination.md)
 to export and consumer-test an invocation-owned development Maven stage. A staged
 handoff is not a public release.
 
-The rc.14 release workflow runs the same gates, stages signed artifacts,
+The rc.15 release workflow runs the same gates, stages signed artifacts,
 atomically reserves its version commit and tag before uploading through
 JReleaser, and waits for Maven Central to confirm publication. See the [release procedure](docs/development/releasing.md) and
-[rc.14 release decision](docs/releases/3.0.0-rc.14.md).
+[rc.15 release decision](docs/releases/3.0.0-rc.15.md).
 
 `releaseCheck` does not read or execute `../blue-basic`. That sibling is
 retained only as a historical performance/metrics laboratory.
@@ -243,7 +243,7 @@ limitations.
 ## Historical release-candidate evidence
 
 The current release authority is the
-[3.0.0-rc.14 decision](docs/releases/3.0.0-rc.14.md). The documents below are
+[3.0.0-rc.15 decision](docs/releases/3.0.0-rc.15.md). The documents below are
 retained evidence for rc.1 and are not reused as current artifact hashes.
 
 The retained 3.0.0-rc.1 report covers the earlier Round 10.1 Process Embedded
@@ -275,7 +275,7 @@ Developer references:
 - [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)
-- [3.0.0-rc.14 release decision](docs/releases/3.0.0-rc.14.md)
+- [3.0.0-rc.15 release decision](docs/releases/3.0.0-rc.15.md)
 - [3.0.0-rc.10 historical release decision](docs/releases/3.0.0-rc.10.md)
 - [3.0.0-rc.7 historical release decision](docs/releases/3.0.0-rc.7.md)
 - [3.0.0-rc.6 historical release decision](docs/releases/3.0.0-rc.6.md)

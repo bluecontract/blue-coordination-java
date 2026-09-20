@@ -2306,6 +2306,7 @@ tasks.register('verifyReleaseMetadata') {
                 'docs/development/build-and-test.md',
                 'docs/development/test-strategy.md',
                 'docs/development/releasing.md',
+                'docs/releases/3.0.0-rc.15.md',
                 'docs/releases/3.0.0-rc.14.md',
                 'docs/releases/3.0.0-rc.13.md',
                 'docs/releases/3.0.0-rc.12.md',
@@ -5416,7 +5417,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     description = 'Runs the published-dependency gate for the bounded external-pilot RC.'
     inputs.files('.cz.toml', 'settings.gradle', 'build.gradle',
             'gradle/published-artifact.lockfile',
-            'docs/releases/3.0.0-rc.14.md')
+            'docs/releases/3.0.0-rc.15.md')
     def rcTestSources = files(
             fileTree('src/test/java') { include '**/*Test.java' },
             fileTree('src/testSupport/java') { include '**/*.java' },
@@ -5434,12 +5435,12 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
     dependsOn 'releaseCheck', 'dependencyPreflight',
             'jar', 'sourcesJar', 'javadocJar', 'testFixturesJar'
     def readinessReport = layout.buildDirectory.file(
-            'reports/release/3.0.0-rc.14-readiness.json')
+            'reports/release/3.0.0-rc.15-readiness.json')
     outputs.file(readinessReport)
     doLast {
         def failures = []
-        if (version.toString() != '3.0.0-rc.14') {
-            failures << "release version is ${version}; expected 3.0.0-rc.14"
+        if (version.toString() != '3.0.0-rc.15') {
+            failures << "release version is ${version}; expected 3.0.0-rc.15"
         }
         if (dependencyMode != 'published-artifact') {
             failures << 'published-artifact is not the active dependency mode'
@@ -5458,6 +5459,9 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
         }
 
         def requiredCapabilityTests = [
+                'src/test/java/blue/coordination/sdk/ReferencedOperationTargetTest.java',
+                'src/test/java/blue/coordination/sdk/ReferencedOperationSourceHistoryTest.java',
+                'src/test/java/blue/coordination/sdk/ReferencedOperationColdTargetTest.java',
                 'src/test/java/blue/coordination/internal/ContractsCheckpointSettlementPublicationTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationAtomicRollbackTest.java',
                 'src/test/java/blue/coordination/internal/ManagedEpochApplicationResponseLossTest.java',
@@ -5488,20 +5492,20 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
             if (!testSource.isFile()
                     || !(testSource.getText('UTF-8') =~
                             /(?m)^\s*@(Test|ParameterizedTest)\b/).find()) {
-                failures << "required rc.14 capability evidence is missing ${source}"
+                failures << "required rc.15 capability evidence is missing ${source}"
             }
         }
-        String releaseNotes = file('docs/releases/3.0.0-rc.14.md')
+        String releaseNotes = file('docs/releases/3.0.0-rc.15.md')
                 .getText('UTF-8')
         if (!releaseNotes.contains(
-                'RC14_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
+                'RC15_RELEASE_TIER: BOUNDED_EXTERNAL_PILOT')
                 || !releaseNotes.contains(
-                'RC14_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
+                'RC15_DEPENDENCY_MODE: PUBLISHED_ARTIFACTS_ONLY')
                 || !releaseNotes.contains(
-                'RC14_PUBLIC_ARTIFACT_READY: true')
+                'RC15_PUBLIC_ARTIFACT_READY: true')
                 || !releaseNotes.contains(
-                'RC14_PRODUCTION_READY: false')) {
-            failures << 'rc.14 release notes do not state the exact release tier'
+                'RC15_PRODUCTION_READY: false')) {
+            failures << 'rc.15 release notes do not state the exact release tier'
         }
 
         if (System.getenv('CI') != null) {
@@ -5549,7 +5553,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
                         dependencies: publishedBlueCoordinates,
                         testMethods: testMethods,
                         semanticEvidence: 'complete current releaseCheck plus '
-                                + 'the rc.14 capability test inventory',
+                                + 'the rc.15 capability test inventory',
                         publicArtifactReady: true,
                         productionReady: false,
                         stableLatencySlaClaimed: false,
@@ -5566,7 +5570,7 @@ def rcReadiness = tasks.register('verifyRcReadiness') {
 tasks.register('stageRelease') {
     group = 'publishing'
     description = 'Builds the verified Maven Central staging repository.'
-    dependsOn(version.toString() == '3.0.0-rc.14'
+    dependsOn(version.toString() == '3.0.0-rc.15'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight',
@@ -5581,7 +5585,7 @@ tasks.register('stageRelease') {
 }
 
 tasks.named('publishMavenJavaPublicationToStagingRepository') {
-    dependsOn(version.toString() == '3.0.0-rc.14'
+    dependsOn(version.toString() == '3.0.0-rc.15'
             ? rcReadiness
             : tasks.named('releaseCheck'))
     dependsOn 'dependencyPreflight'
