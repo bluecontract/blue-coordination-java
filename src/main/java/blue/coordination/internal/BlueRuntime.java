@@ -286,11 +286,28 @@ final class BlueRuntime implements AutoCloseable {
                             event, blue.language.processor.GasChargeContext.empty());
                     eligible[index] = classified.state()
                             == blue.language.processor.ManagedExternalDeliveryClassification.State.ACCEPTED_NEW
-                            && classified.handlerMatched();
+                            && (entry.operationDetails().isEmpty() || classified.handlerMatched());
                 }
                 return eligible;
             }
         }));
+    }
+
+    /** Registered Phase-B channel functions derive identity without executing a handler. */
+    java.util.Optional<String> generalDelivery(Node selectedRoot, String channel, blue.coordination.api.TimelineEntry entry) {
+        ensureOpen();
+        if (entry.operationDetails().isPresent()) throw new IllegalArgumentException("Expected general entry");
+        return processor.withCapturedConfiguration(() -> {
+            var event = blue.language.processor.ExactEventIdentityEvidence.verify(contracts.runtimeAccess(),
+                    entry.exactEvent().copyNode(), entry.blueId(), null);
+            try (var comparison = new blue.language.processor.ManagedDocumentStepRuntime(processor)) {
+                metrics.increment("routing.generalRegisteredComparisons");
+                var classified = comparison.classifyExternalDelivery(selectedRoot, channel, event,
+                        blue.language.processor.GasChargeContext.empty());
+                return classified.state() == blue.language.processor.ManagedExternalDeliveryClassification.State.ACCEPTED_NEW
+                        ? java.util.Optional.of(classified.candidate().logicalDeliveryKey()) : java.util.Optional.empty();
+            }
+        });
     }
 
     /** Clears disposable snapshots and eligibility memos, retaining exact evidence. */

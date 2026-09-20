@@ -20,7 +20,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 
 /** Closed rows belonging to a session, not a new processor serialization or execution layer. */
 final class SessionRecordCodec {
-    private static final String REVISION = "blue-coordination/document-revision-storage/1";
+    private static final String REVISION = "blue-coordination/document-revision-storage/2";
     final int maximumBytes;
     private final int maximumDepth;
     private final ExactValueStorageCodec exactValues;
@@ -172,16 +172,25 @@ final class SessionRecordCodec {
                 optional(in, this::receipt));
     }
     void entry(Writer out, TimelineEntry row) {
-        exact(out, row.exactEvent()); optional(out, row.request().orElse(null), this::exact);
+        out.text("blue-coordination/timeline-entry-storage/2");
+        exact(out, row.exactEvent());
+        optional(out, row.operationDetails().orElse(null), (w, details) -> {
+            w.text(details.operation()); w.text(details.channel()); optional(w, details.request().orElse(null), this::exact);
+        });
         order(out, row.journalOrderKey()); order(out, row.sourceOrderKey());
-        out.text(row.timeline().timelineId()); out.text(row.timeline().actorId()); out.text(row.operation()); out.text(row.channel());
+        out.text(row.timeline().timelineId()); out.text(row.timeline().actorId());
         out.longValue(row.timestampMicros()); out.longValue(row.globalSequence()); out.longValue(row.timelineSequence());
     }
     TimelineEntry entry(Reader in) {
-        return new TimelineEntry(exact(in), Optional.ofNullable(optional(in, this::exact)), order(in), order(in),
-                new Timeline(text(in), text(in)), text(in), text(in), in.longValue(), in.longValue(), in.longValue());
+        require("blue-coordination/timeline-entry-storage/2".equals(text(in)), "Unsupported Timeline entry storage format");
+        var event = exact(in);
+        Optional<TimelineEntry.OperationDetails> details = Optional.ofNullable(optional(in, r -> new TimelineEntry.OperationDetails(
+                text(r), text(r), Optional.ofNullable(optional(r, this::exact)))));
+        return new TimelineEntry(event, details, order(in), order(in), new Timeline(text(in), text(in)),
+                in.longValue(), in.longValue(), in.longValue());
     }
     void receipt(Writer out, ManagedEpochReceipt row) {
+        out.text("blue-coordination/managed-epoch-receipt-storage/2");
         out.text(row.receiptIdentity()); out.text(row.documentId().value()); out.longValue(row.epoch()); out.text(row.kind().name());
         out.nullableText(row.beforeBlueId().orElse(null)); exact(out, row.afterDocument()); out.text(row.originalCauseIdentity());
         optional(out, row.sourceEntry().orElse(null), this::entry); optional(out, row.sourceOrder().orElse(null), SessionStorageWire::order);
@@ -194,6 +203,7 @@ final class SessionRecordCodec {
         out.longValue(row.processingGas());
     }
     ManagedEpochReceipt receipt(Reader in) {
+        require("blue-coordination/managed-epoch-receipt-storage/2".equals(text(in)), "Unsupported managed receipt storage format");
         return new ManagedEpochReceipt(text(in), DocumentId.of(text(in)), in.longValue(), DocumentRevision.Kind.valueOf(text(in)),
                 nullableText(in), exact(in), text(in), optional(in, this::entry), optional(in, SessionStorageWire::order), text(in), text(in),
                 list(in, r -> new ManagedEventOccurrence(text(r), r.longValue(), r.longValue(), DocumentId.of(text(r)),
@@ -201,6 +211,7 @@ final class SessionRecordCodec {
     }
 
     void layout(Writer out, EmbeddedOnlyLayout value) {
+        out.text("blue-coordination/embedded-layout-storage/2");
         exact(out, value.semanticRoot()); frozen(out, value.processingFrozen());
         var shells = new LinkedHashMap<String, ExactValue>(); value.scopePaths().forEach(path -> shells.put(path, value.stored(path)));
         orderedMap(out, shells, this::exact);
@@ -218,6 +229,7 @@ final class SessionRecordCodec {
         });
     }
     EmbeddedOnlyLayout layout(Reader in) {
+        require("blue-coordination/embedded-layout-storage/2".equals(text(in)), "Unsupported embedded layout storage format");
         ExactValue semantic = exact(in); FrozenNode processing = frozen(in); var shells = orderedMap(in, this::exact);
         var boundaries = list(in, r -> new EmbeddedBoundary(text(r), text(r), text(r), EmbeddedScopePlanView.Origin.valueOf(text(r)), r.bool()));
         var occurrences = list(in, r -> new EmbeddedOccurrence(text(r), DocumentId.of(text(r)), exact(r)));
@@ -236,11 +248,13 @@ final class SessionRecordCodec {
         list(out, routes.operationDefinitions(), (w, row) -> {
             w.text(row.scopePath()); w.text(row.operation()); w.text(row.channelKey()); optional(w, row.requestPattern(), this::frozen); sources(w, row.sources());
         });
+        list(out, routes.channels(), (w, row) -> { w.text(row.scopePath()); w.text(row.channelKey()); sources(w, row.sources()); });
         out.bool(routes.deliversEmbeddedRevisionEvents());
     }
     private RoutingSurface routing(Reader in) {
         return new RoutingSurface(list(in, r -> new RoutingSurface.Definition(text(r), text(r), text(r), sources(r))),
-                list(in, r -> new RoutingSurface.OperationDefinition(text(r), text(r), text(r), optional(r, this::frozen), sources(r))), in.bool());
+                list(in, r -> new RoutingSurface.OperationDefinition(text(r), text(r), text(r), optional(r, this::frozen), sources(r))),
+                list(in, r -> new RoutingSurface.ChannelDefinition(text(r), text(r), sources(r))), in.bool());
     }
 
     void subscription(Writer out, SubscriptionDelta.Entry row) {

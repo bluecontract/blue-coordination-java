@@ -522,7 +522,7 @@ final class RootedCoordinationStorageTest {
         private static boolean isSessionFrame(byte[] bytes) {
             // Test-only identification of the closed SessionStorageWire header,
             // not an alternate decoder or source of runtime authority.
-            return isSessionFrame(bytes, "1") || isSessionFrame(bytes, "2");
+            return isSessionFrame(bytes, "4") || isSessionFrame(bytes, "5");
         }
         private static boolean isSessionFrame(byte[] bytes, String version) {
             byte[] format = ("blue-coordination/document-session-storage/" + version).getBytes(java.nio.charset.StandardCharsets.UTF_16BE);

@@ -318,6 +318,16 @@ final class RootedSourceDiscoveryCoordinator {
                 if (old != null && !old.equals(source.actorId())) throw new IllegalArgumentException("Conflicting source actor catalog");
             }
         }
+        frames.add(Integer.toString(surface.channels().size()));
+        for (var channel : surface.channels()) {
+            frames.add(channel.scopePath()); frames.add(channel.channelKey());
+            frames.add(Integer.toString(channel.sources().size()));
+            for (var source : channel.sources()) {
+                frames.add(source.timelineId()); frames.add(source.actorId());
+                String old = required.putIfAbsent(source.timelineId(), source.actorId());
+                if (old != null && !old.equals(source.actorId())) throw new IllegalArgumentException("Conflicting source actor catalog");
+            }
+        }
         frames.add(Boolean.toString(surface.deliversEmbeddedRevisionEvents()));
     }
 

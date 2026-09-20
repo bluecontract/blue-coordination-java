@@ -15,11 +15,16 @@ import static blue.coordination.internal.SessionStorageWire.*;
 /** Exact operation-route rows and retained AVL shape; selected roots are caller-pinned, not CAS authority. */
 final class StoredRouteIndexes {
     enum Root { ROWS, DOCUMENT_KEYS }
+    private static final String FORMAT = "blue-coordination/channel-route-root/2";
+    private final PersistentMapStorage.Limits limits;
+    private final StoredGeneralRouteIndexes general;
     private final StoreIndexCodecs.Binding<OperationRouteIndex.RouteKey, List<OperationRouteIndex.RouteRow>> rows;
     private final StoreIndexCodecs.Binding<DocumentId, Set<OperationRouteIndex.RouteKey>> documents;
     private final StoreIndexCodecs.Binding<DocumentId, List<OperationRouteIndex.RouteRow>> documentRows;
 
     StoredRouteIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
+        this.limits = limits;
+        general = new StoredGeneralRouteIndexes(objects, limits);
         var c = new StoreIndexCodecs(objects, limits);
         var keys = c.codec("route/key", StoredRouteIndexes::key, StoredRouteIndexes::key);
         var values = c.codec("route/rows", (Writer w, List<OperationRouteIndex.RouteRow> value) -> {
@@ -72,12 +77,13 @@ final class StoredRouteIndexes {
         var logical = new LogicalRouteRows(context, members);
         return OperationRouteIndex.restoreIndexes(new OperationRouteIndex.StoredIndexes(logical.all(),
                 documents.openLogical(context, Family.ROUTE_DOCUMENT, LogicalRecordContext.runtimeScope(), OrderedRecordKey.document()),
-                0, logical), metrics, sessions, selectedHeads);
+                0, logical, general.openLogical(context)), metrics, sessions, selectedHeads);
     }
     static void selectLogical(OperationRouteIndex index) {
         var state = index.storedIndexes();
         java.util.Objects.requireNonNull(state.logicalRows(), "Not a logical route index").select();
         state.keysByDocument().selectLogicalRecords();
+        state.general().selectLogical();
     }
     private static OrderedRecordKey<OperationRouteIndex.RouteKey> orderedRouteKey() {
         return new OrderedRecordKey<>() {
@@ -97,22 +103,31 @@ final class StoredRouteIndexes {
         return physical(() -> {
             var s = value.storedIndexes();
             return OperationRouteIndex.restoreIndexes(new OperationRouteIndex.StoredIndexes(
-                    rows.retain(s.rows()), documents.retain(s.keysByDocument()), s.generation()), metrics, sessions, selectedHeads);
+                    rows.retain(s.rows()), documents.retain(s.keysByDocument()), s.generation(), null,
+                    general.retain(s.general())), metrics, sessions, selectedHeads);
         });
     }
 
     OperationRouteIndex open(Function<Root, byte[]> selected, long generation, EngineMetrics metrics,
             Function<DocumentId, DocumentSession> sessions, Function<DocumentId, String> selectedHeads) {
-        return physical(() -> OperationRouteIndex.restoreIndexes(new OperationRouteIndex.StoredIndexes(
-                rows.open(required(selected.apply(Root.ROWS))), documents.open(required(selected.apply(Root.DOCUMENT_KEYS))),
-                generation), metrics, sessions, selectedHeads));
+        return physical(() -> {
+            var state = SessionStorageWire.decode(required(selected.apply(Root.ROWS)), limits.descriptorBytes(), in -> {
+                require(FORMAT.equals(text(in)), "Unsupported channel route root format");
+                return new OperationRouteIndex.StoredIndexes(rows.open(in.bytes(limits.descriptorBytes())),
+                        documents.open(required(selected.apply(Root.DOCUMENT_KEYS))), generation, null,
+                        general.read(in, limits.descriptorBytes()));
+            });
+            return OperationRouteIndex.restoreIndexes(state, metrics, sessions, selectedHeads);
+        });
     }
 
     byte[] root(OperationRouteIndex value, Root root) {
         return physical(() -> {
             var s = value.storedIndexes();
             return switch (root) {
-                case ROWS -> s.rows().storedRootDescriptor();
+                case ROWS -> SessionStorageWire.encode(limits.descriptorBytes(), out -> {
+                    out.text(FORMAT); out.bytes(s.rows().storedRootDescriptor()); general.write(out, s.general());
+                });
                 case DOCUMENT_KEYS -> s.keysByDocument().storedRootDescriptor();
             };
         });

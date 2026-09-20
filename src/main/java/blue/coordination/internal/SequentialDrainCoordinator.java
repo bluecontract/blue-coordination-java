@@ -1077,6 +1077,7 @@ final class SequentialDrainCoordinator {
         boolean sameSurface = before.plan() == after.plan()
                 || before.routingSurface().definitions().equals(
                 after.routingSurface().definitions())
+                && before.routingSurface().channels().equals(after.routingSurface().channels())
                 && before.routingSurface().deliversEmbeddedRevisionEvents()
                 == after.routingSurface().deliversEmbeddedRevisionEvents();
         return !sameSurface || !beforeSubscriptions.equals(afterSubscriptions);

@@ -32,6 +32,12 @@ final class OperationRouteIndex {
             "routing.directRevalidationSnapshots";
 
     private LogicalRouteRows logicalRows;
+    private GeneralRouteIndex general = GeneralRouteIndex.empty();
+    private java.util.function.BiFunction<GeneralRouteIndex.Row, TimelineEntry, Optional<String>> generalDelivery;
+
+    void generalDeliveryResolver(java.util.function.BiFunction<GeneralRouteIndex.Row, TimelineEntry, Optional<String>> resolver) {
+        generalDelivery = Objects.requireNonNull(resolver, "general delivery resolver");
+    }
     private PersistentOrderedMap<RouteKey, List<RouteRow>> rows =
             PersistentOrderedMap.empty(RouteKey.ORDER);
     private PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument =
@@ -82,6 +88,17 @@ final class OperationRouteIndex {
      */
     synchronized PreparedReplacement prepareReplacement(
             List<Replacement> replacements) {
+        GeneralRouteIndex nextGeneral = general;
+        for (var replacement : replacements) nextGeneral = nextGeneral.replace(replacement.documentId(),
+                replacement.surface(), replacement.activeSubscriptions());
+        var prepared = prepareOperationReplacement(replacements);
+        prepared.general = nextGeneral;
+        if (nextGeneral != general && prepared.resultingGeneration == generation)
+            prepared.resultingGeneration = Math.addExact(generation, 1L);
+        return prepared;
+    }
+
+    private PreparedReplacement prepareOperationReplacement(List<Replacement> replacements) {
         List<Replacement> canonical = new ArrayList<>(Objects.requireNonNull(
                 replacements, "replacements"));
         canonical.sort(Comparator.comparing(
@@ -445,6 +462,7 @@ final class OperationRouteIndex {
         logicalRows = replacement.logicalRows;
         keysByDocument = replacement.keysByDocument;
         generation = replacement.resultingGeneration;
+        general = replacement.general;
         replacement.published = true;
         metrics.add("routing.routeKeysRetained", replacement.retainedKeys);
         metrics.add("routing.routeIndexComparisons", replacement.comparisons);
@@ -461,6 +479,7 @@ final class OperationRouteIndex {
 
     public synchronized List<DocumentId> route(TimelineEntry entry) {
         Objects.requireNonNull(entry, "entry");
+        if (entry.operationDetails().isEmpty()) return selectGeneralDeliveries(entry).documentIds();
         long started = System.nanoTime();
         metrics.increment("routing.lookups");
         DocumentTarget target = DocumentTarget.from(entry);
@@ -505,6 +524,7 @@ final class OperationRouteIndex {
             TimelineEntry entry,
             boolean revalidation) {
         Objects.requireNonNull(entry, "entry");
+        if (entry.operationDetails().isEmpty()) return selectGeneralDeliveries(entry);
         long started = System.nanoTime();
         metrics.increment("routing.lookups");
         metrics.increment(revalidation
@@ -568,6 +588,22 @@ final class OperationRouteIndex {
         return result;
     }
 
+    private FrozenDirectDeliverySelection selectGeneralDeliveries(TimelineEntry entry) {
+        var deliveries = new ArrayList<FrozenDirectDelivery>();
+        var seen = new LinkedHashSet<DirectDeliveryKey>();
+        for (var row : general.candidates(entry, metrics)) {
+            if (!"/".equals(row.scopePath())) continue;
+            var logical = Objects.requireNonNull(generalDelivery, "General routing requires registered functions")
+                    .apply(row, entry);
+            if (logical.isEmpty()) continue;
+            var key = new DirectDeliveryKey(row.documentId(), row.scopePath(), row.channelKey(), logical.orElseThrow());
+            if (seen.add(key)) deliveries.add(new FrozenDirectDelivery(row.documentId(), row.channelKey(),
+                    logical.orElseThrow(), deliveries.size()));
+        }
+        metrics.add("routing.generalDeliveriesSelected", deliveries.size());
+        return new FrozenDirectDeliverySelection(generation, deliveries);
+    }
+
     /**
      * Revalidates one cohort's frozen direct rows after an unrelated route
      * publication. Original raw occurrence orders remain part of the frozen
@@ -606,28 +642,21 @@ final class OperationRouteIndex {
 
     public synchronized void remove(DocumentId documentId) {
         Objects.requireNonNull(documentId, "documentId");
-        if (!keysByDocument.containsKey(documentId)) {
-            return;
-        }
-        prepareReplacement(List.of(new Replacement(
-                documentId, new RoutingSurface(List.of(), false), List.of())))
-                .publish();
+        if (keysByDocument.containsKey(documentId) || general.contains(documentId))
+            replace(documentId, new RoutingSurface(List.of(), false), List.of());
     }
 
-    public synchronized int rowCount() {
-        return rows.size();
-    }
+    public synchronized int rowCount() { return rows.size(); }
 
     /** Monotonic identity of the currently published routing surface. */
-    public synchronized long generation() {
-        return generation;
-    }
+    public synchronized long generation() { return generation; }
 
     public synchronized void clear() {
-        if (rows.isEmpty() && keysByDocument.isEmpty()) {
+        if (rows.isEmpty() && keysByDocument.isEmpty() && general.documents().isEmpty()) {
             return;
         }
         long nextGeneration = Math.addExact(generation, 1L);
+        general = general.cleared();
         if (logicalRows != null) {
             var prepared = logicalRows;
             for (var document : keysByDocument.entries())
@@ -646,7 +675,7 @@ final class OperationRouteIndex {
 
     /** Internal selected-root state; not publication authority or a route rebuild. */
     synchronized StoredIndexes storedIndexes() {
-        return new StoredIndexes(rows, keysByDocument, generation, logicalRows);
+        return new StoredIndexes(rows, keysByDocument, generation, logicalRows, general);
     }
 
     static OperationRouteIndex restoreIndexes(
@@ -658,20 +687,26 @@ final class OperationRouteIndex {
         restored.logicalRows = state.logicalRows();
         restored.keysByDocument = state.keysByDocument();
         restored.generation = state.generation();
+        restored.general = state.general();
         return restored;
     }
 
     record StoredIndexes(
             PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
             PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument,
-            long generation, LogicalRouteRows logicalRows) {
+            long generation, LogicalRouteRows logicalRows, GeneralRouteIndex general) {
+        StoredIndexes(PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
+                PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument, long generation, LogicalRouteRows logicalRows) {
+            this(rows, keysByDocument, generation, logicalRows, GeneralRouteIndex.empty());
+        }
         StoredIndexes(PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
                 PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument, long generation) {
-            this(rows, keysByDocument, generation, null);
+            this(rows, keysByDocument, generation, null, GeneralRouteIndex.empty());
         }
         StoredIndexes {
             Objects.requireNonNull(rows, "rows");
             Objects.requireNonNull(keysByDocument, "keysByDocument");
+            Objects.requireNonNull(general, "general");
             if (generation < 0L) throw new IllegalArgumentException("Negative stored route generation");
         }
     }
@@ -756,7 +791,8 @@ final class OperationRouteIndex {
         private final OperationRouteIndex owner;
         private final LogicalRouteRows logicalRows;
         private final long expectedGeneration;
-        private final long resultingGeneration;
+        private long resultingGeneration;
+        private GeneralRouteIndex general;
         private final PersistentOrderedMap<RouteKey, List<RouteRow>> rows;
         private final PersistentOrderedMap<DocumentId, Set<RouteKey>>
                 keysByDocument;

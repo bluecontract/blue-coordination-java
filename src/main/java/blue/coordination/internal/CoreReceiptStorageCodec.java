@@ -15,7 +15,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 /** Complete immutable host result rows; these observations do not select or execute an invocation. */
 final class CoreReceiptStorageCodec {
     private static final String ADMISSION = "blue-coordination/admission-receipt-storage/1";
-    private static final String DRAIN = "blue-coordination/processing-drain-storage/1";
+    private static final String DRAIN = "blue-coordination/processing-drain-storage/2";
     private final int maximumBytes;
     private final ClosureExecutionEvidenceStorageCodec evidence;
     private final StoredClosureResultCodec results;
