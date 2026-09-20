@@ -580,8 +580,8 @@ The preceding operation-only constructor overloads and accessors remain.
 entry and continues distinguishing absent operation requests from semantic `{}`.
 Generic consumers must use the optional group. The canonical record components
 have intentionally changed; record reflection/serialization compatibility is
-not promised for this RC change. The SDK metadata writer emits revision 2 and
-can read revision 1 operation metadata without reauthoring the accepted input.
+not promised for this RC change. The SDK metadata format is revision 2. Revision 1 is rejected explicitly; no
+old persisted format reader or data migration is supported.
 
 `auditOperationRoutes(documentId)` returns the immutable compiled Root-scoped
 operation surface. Each `OperationRouteSnapshot` carries the operation,

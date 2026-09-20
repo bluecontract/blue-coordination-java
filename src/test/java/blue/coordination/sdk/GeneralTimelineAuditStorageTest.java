@@ -6,7 +6,7 @@ import java.util.NoSuchElementException;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Generic SDK audit and one-generation compatibility through real accepted entries. */
+/** Generic SDK audit and explicit new-format-only storage through real accepted entries. */
 final class GeneralTimelineAuditStorageTest {
     private static final int MAX = 32 * 1024 * 1024;
 
@@ -49,34 +49,15 @@ final class GeneralTimelineAuditStorageTest {
         }
     }
 
-    @Test void readsActualPrecedingOperationMetadataAndWritesOnlyNewRevision() throws Exception {
+    @Test void rejectsPrecedingOperationMetadataWithoutMigration() throws Exception {
         // given: fixture emitted by merged bfcc821's unmodified candidate JAR.
         byte[] previous;
         try (var resource = getClass().getResourceAsStream("/general-entry/sdk-operation-v1.bin")) {
             previous = java.util.Objects.requireNonNull(resource).readAllBytes();
         }
         var codec = new SdkStorageCodec(new Object(), MAX);
-        // when
-        var restored = codec.decode(previous, SdkStorageCodec.Metadata.class);
-        byte[] current = codec.encode(restored);
-        var reopened = codec.decode(current, SdkStorageCodec.Metadata.class);
-        // then
-        String identity = "AkV4mjP848pmsPtwTJNAFYNrB9YEEJ4Dexxo6yga7T28";
-        assertEquals(1, restored.entries().size());
-        var row = reopened.entries().get(identity);
-        assertNotNull(row);
-        assertEquals(identity, row.exactEvent().blueId());
-        assertEquals("credit", row.operationDetails().orElseThrow().operation());
-        assertEquals("owner", row.operationDetails().orElseThrow().channel());
-        assertTrue(row.operationDetails().orElseThrow().request().isPresent());
-        assertEquals(1, row.globalSequence()); assertEquals(1, row.timelineSequence());
-        assertFalse(Arrays.equals(previous, current));
-        assertArrayEquals(current, codec.encode(reopened));
-        var unknown = current.clone();
-        int versionByte = 8 + 2 * SdkStorageCodec.FORMAT.length() - 1;
-        assertEquals('2', unknown[versionByte]);
-        unknown[versionByte] = '9';
-        assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(unknown, SdkStorageCodec.Metadata.class));
+        // when / then
+        assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(previous, SdkStorageCodec.Metadata.class));
         assertThrows(CoordinationObjectStorageException.class,
                 () -> codec.decode(Arrays.copyOf(previous, previous.length - 1), SdkStorageCodec.Metadata.class));
     }
