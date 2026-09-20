@@ -32,6 +32,15 @@ final class ContractsActiveSourceTimelineIndex {
     private PersistentOrderedMap<String, Long> timelineReferences =
             PersistentOrderedMap.empty(EmbeddingBinding.TEXT_ORDER);
     private Set<String> timelineIds = Set.of();
+    private LogicalActiveSources logicalSources;
+    private Function<DocumentId, ContractsRootSourceSurface.Surface> rootedSurface;
+
+    /** Installed by the rooted adapter; each owner retains its own exact forward view. */
+    synchronized void rootedSurfaceResolver(Function<DocumentId, ContractsRootSourceSurface.Surface> resolver) {
+        if (rootedSurface != null) throw new IllegalStateException("Rooted surface resolver already installed");
+        rootedSurface = Objects.requireNonNull(resolver);
+    }
+
 
     ContractsActiveSourceTimelineIndex(Collection<DocumentId> publicRoots) {
         this(publicRoots, new EngineMetrics());
@@ -46,6 +55,18 @@ final class ContractsActiveSourceTimelineIndex {
         Objects.requireNonNull(publicRoots, "publicRoots").forEach(root ->
                 canonical.add(Objects.requireNonNull(root, "publicRoot")));
         for (DocumentId root : canonical) this.publicRoots = this.publicRoots.put(root, true).map();
+    }
+
+    Set<DocumentId> logicalPublicRoots() {
+        if (!publicRoots.isLogical()) throw new IllegalStateException("Not a logical Root index");
+        return new java.util.AbstractSet<>() {
+            public int size() { return publicRoots.size(); }
+            public boolean contains(Object key) { return publicRoots.containsKey((DocumentId) key); }
+            public java.util.Iterator<DocumentId> iterator() { return new PersistentMapView<>(publicRoots).keySet().iterator(); }
+            public boolean add(DocumentId root) {
+                boolean present = publicRoots.containsKey(root); addPublicRoots(Set.of(root)); return !present;
+            }
+        };
     }
 
     synchronized void addPublicRoots(Collection<DocumentId> roots) {
@@ -63,6 +84,19 @@ final class ContractsActiveSourceTimelineIndex {
         Objects.requireNonNull(affectedDocuments, "affectedDocuments");
         InMemoryDocumentStore store = Objects.requireNonNull(
                 documents, "documents");
+        if (rootedSurface != null) {
+            Map<DocumentId, ContractsRootSourceSurface.Surface> replacements =
+                    new TreeMap<>(EmbeddingBinding.DOCUMENT_ORDER);
+            for (DocumentId owner : affectedDocuments) {
+                if (!Boolean.TRUE.equals(publicRoots.get(owner))) continue;
+                metrics.increment("sourceSurface.rootsResolved");
+                var surface = Objects.requireNonNull(rootedSurface.apply(owner));
+                surface.managedDocuments().forEach(ignored -> metrics.increment("sourceSurface.documentsResolved"));
+                replacements.put(owner, surface);
+            }
+            installReplacements(replacements);
+            return;
+        }
         refresh(
                 affectedDocuments,
                 store.occurrenceInventory(),
@@ -118,6 +152,10 @@ final class ContractsActiveSourceTimelineIndex {
                         return resolver.apply(document);
                     }));
         }
+        installReplacements(replacements);
+    }
+
+    private void installReplacements(Map<DocumentId, ContractsRootSourceSurface.Surface> replacements) {
         // Physical writes may fail. Prepare all immutable map changes before
         // publishing any replacement, just as source resolution is staged above.
         var prepared = restoreIndexes(storedIndexes(), metrics);
@@ -131,8 +169,16 @@ final class ContractsActiveSourceTimelineIndex {
 
     /** Rebuilds the entire disposable index after a process restart. */
     synchronized void rebuild(InMemoryDocumentStore documents) {
+        if (logicalSources != null) {
+            var prepared = restoreIndexes(storedIndexes(), metrics);
+            prepared.rootedSurface = rootedSurface;
+            for (var root : publicRoots.keys()) prepared.replaceSurface(root, new ContractsRootSourceSurface.Surface(
+                    ContractsRootFeederWindow.LaneId.publicRoots(List.of(root)), List.of(root), Set.of()));
+            prepared.refresh(publicRoots.keys(), documents); install(prepared.storedIndexes()); return;
+        }
         var prepared = restoreIndexes(new StoredIndexes(publicRoots, surfacesByRoot.emptyCopy(),
                 rootsByManagedDocument.emptyCopy(), timelineReferences.emptyCopy()), metrics);
+        prepared.rootedSurface = rootedSurface;
         prepared.refresh(publicRoots.keys(), documents);
         install(prepared.storedIndexes());
     }
@@ -147,6 +193,15 @@ final class ContractsActiveSourceTimelineIndex {
             ContractsRootSourceSurface.Surface surface) {
         ContractsRootSourceSurface.Surface prior = surfacesByRoot.get(root);
         if (surface.equals(prior)) {
+            return;
+        }
+        if (logicalSources != null) {
+            if (prior != null) SessionStorageWire.require(prior.lane().equals(ContractsRootFeederWindow.LaneId.publicRoots(List.of(root))),
+                    "Retained source surface has foreign Root");
+            var changed = logicalSources.replace(root, prior, surface);
+            var nextSurfaces = surfacesByRoot.put(root, surface).map();
+            logicalSources = changed; surfacesByRoot = nextSurfaces;
+            rootsByManagedDocument = changed.memberships(); timelineReferences = changed.counts();
             return;
         }
         if (prior != null) {
@@ -192,7 +247,7 @@ final class ContractsActiveSourceTimelineIndex {
     }
 
     synchronized StoredIndexes storedIndexes() {
-        return new StoredIndexes(publicRoots, surfacesByRoot, rootsByManagedDocument, timelineReferences);
+        return new StoredIndexes(publicRoots, surfacesByRoot, rootsByManagedDocument, timelineReferences, logicalSources);
     }
 
     static ContractsActiveSourceTimelineIndex restoreIndexes(StoredIndexes state, EngineMetrics metrics) {
@@ -202,6 +257,7 @@ final class ContractsActiveSourceTimelineIndex {
     }
 
     private void install(StoredIndexes state) {
+        logicalSources = state.logicalSources();
         publicRoots = state.publicRoots();
         surfacesByRoot = state.surfaces();
         rootsByManagedDocument = state.memberships();
@@ -213,7 +269,12 @@ final class ContractsActiveSourceTimelineIndex {
             PersistentOrderedMap<DocumentId, Boolean> publicRoots,
             PersistentOrderedMap<DocumentId, ContractsRootSourceSurface.Surface> surfaces,
             PersistentOrderedMap<DocumentId, Set<DocumentId>> memberships,
-            PersistentOrderedMap<String, Long> timelineReferences) {
+            PersistentOrderedMap<String, Long> timelineReferences, LogicalActiveSources logicalSources) {
+        StoredIndexes(PersistentOrderedMap<DocumentId, Boolean> publicRoots,
+                PersistentOrderedMap<DocumentId, ContractsRootSourceSurface.Surface> surfaces,
+                PersistentOrderedMap<DocumentId, Set<DocumentId>> memberships, PersistentOrderedMap<String, Long> timelineReferences) {
+            this(publicRoots, surfaces, memberships, timelineReferences, null);
+        }
         StoredIndexes {
             Objects.requireNonNull(publicRoots, "publicRoots");
             Objects.requireNonNull(surfaces, "surfaces");

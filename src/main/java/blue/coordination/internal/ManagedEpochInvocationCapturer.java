@@ -66,8 +66,12 @@ final class ManagedEpochInvocationCapturer {
     Capture capture(
             ManagedEpochApplicationWork work,
             Set<DocumentId> excludedConsumers) {
+        return capture(work, CatchUpConsumerScope.excluding(excludedConsumers));
+    }
+
+    Capture capture(ManagedEpochApplicationWork work, CatchUpConsumerScope consumers) {
         ManagedEpochApplicationWork canonical = documents
-                .nextCatchUpWorkExcluding(excludedConsumers)
+                .nextCatchUpWork(consumers)
                 .orElseThrow(() -> new IllegalStateException(
                         "No retained managed epoch application is due"));
         if (!canonical.workIdentity().equals(work.workIdentity())) {
@@ -336,11 +340,11 @@ final class ManagedEpochInvocationCapturer {
     }
 
     /** Keeps an actual receiving root's input while authenticating the registered terminal application it performs. */
-    Capture captureRootedJoin(ManagedEpochApplicationWork work, Set<DocumentId> excludedConsumers,
+    Capture captureRootedJoin(ManagedEpochApplicationWork work, CatchUpConsumerScope consumers,
             RootedLocalHistory.Step local) {
         // This still verifies canonical due order, the original plan, source receipt/proof,
         // occurrence position and independent consumer head through the ordinary capturer.
-        Capture registered = capture(work, excludedConsumers);
+        Capture registered = capture(work, consumers);
         var actual = local.invocation();
         var state = local.capturedState();
         local.requireCurrentInput(documents);

@@ -135,7 +135,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private ProcessEmbeddedComponentIndex topology(ProcessEmbeddedComponentIndex value, boolean stage) {
         var s = value.storedIndexes(); var joins = s.joins().storedIndexes(); var raw = original.componentIndex();
         var component = stage ? maps.stage(s.components()) : checked("topology/component", s.components(), (id, row) -> {
-            require(row.equals(topology.component(raw, id).orElseThrow()), "Selected topology component differs"); return row;
+            require(row.equals(checkedTopologyComponent(raw, id).orElseThrow()), "Selected topology component differs"); return row;
         });
         var targets = topologyBuckets("targets", s.targets(), stage, (owner, member) -> requireMembership(raw.storedIndexes().sources(), member, owner));
         var sources = topologyBuckets("sources", s.sources(), stage, (owner, member) -> requireMembership(raw.storedIndexes().targets(), member, owner));
@@ -153,6 +153,12 @@ final class StoredDocumentReadChecks implements AutoCloseable {
             java.util.function.BiConsumer<DocumentId, DocumentId> check) {
         if (stage) return maps.stage(source);
         return checked("topology/" + kind, source, (owner, bucket) -> {
+            if (bucket.isLogical()) return maps.open("topology/" + kind + "-bucket", owner, bucket, (member, present) -> {
+                if (kind.equals("targets") || kind.equals("sources"))
+                    require(checkedTopologyComponent(original.componentIndex(), owner).isPresent(), "Topology edge owner is missing");
+                if (kind.equals("join-members")) topology.requireJoinRoot(original.componentIndex(), owner, selected.apply(owner).retainedView());
+                require(Boolean.TRUE.equals(present), "Topology membership is not true"); check.accept(owner, member); return present;
+            }, (key, present) -> present);
             // These APIs enumerate keys. Validate the complete selected membership bucket at its value boundary,
             // not by mapping descendant values (which keys() deliberately never opens).
             if (kind.equals("targets") || kind.equals("sources"))
@@ -162,11 +168,16 @@ final class StoredDocumentReadChecks implements AutoCloseable {
                 require(Boolean.TRUE.equals(entry.getValue()), "Topology membership is not true"); check.accept(owner, entry.getKey());
             }
             return bucket;
-        });
+        }, (owner, bucket) -> maps.stage(bucket));
     }
     private static void requireMembership(PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> source,
             DocumentId owner, DocumentId member) {
         var bucket = source.get(owner); require(bucket != null && Boolean.TRUE.equals(bucket.get(member)), "Selected topology reverse membership is missing");
+    }
+
+    private Optional<ProcessEmbeddedComponentIndex.Component> checkedTopologyComponent(ProcessEmbeddedComponentIndex index,
+            DocumentId owner) {
+        return topology.component(index, owner, controlledNamespace && index.storedIndexes().components().isLogical());
     }
 
     private ComponentStateInventory component(ComponentStateInventory value, boolean stage) {
@@ -218,13 +229,13 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private ManagedEpochReceiptStore receipt(ManagedEpochReceiptStore value, boolean stage) {
         var s = value.storedState(); var raw = original.managedEpochReceipts();
         var documents = stage ? maps.stage(s.documents()) : checked("receipt/documents", s.documents(), (id, history) -> {
-            var h = history.storedState(); require(id.equals(h.document()), "Receipt history owner differs from its key");
-            var epochs = maps.open("receipt/epochs", id, h.receipts(), (epoch, row) -> {
+            require(id.equals(history.documentId()), "Receipt history owner differs from its key");
+            var epochs = maps.open("receipt/epochs", id, history.receiptMap(), (epoch, row) -> {
                 require(row.publicReceipt().documentId().equals(id) && row.publicReceipt().epoch() == epoch, "Receipt epoch key differs");
                 receipts.exact(raw, id, epoch); return row;
-            }, (k, v) -> v, epoch -> require(epoch < 0 || epoch > h.latestEpoch(), "Missing selected in-range receipt"));
-            return history(h, epochs);
-        }, (id, history) -> history(history.storedState(), maps.stage(history.storedState().receipts())));
+            }, (k, v) -> v, epoch -> require(epoch < 0 || epoch > history.latestEpoch(), "Missing selected in-range receipt"));
+            return history.withReceipts(epochs);
+        }, (id, history) -> history.withReceipts(maps.stage(history.receiptMap())));
         var identities = stage ? maps.stage(s.identities()) : checked("receipt/identity", s.identities(), (id, row) -> {
             require(id.equals(row.publicReceipt().receiptIdentity()), "Receipt identity key differs");
             var selected = receipts.exact(raw, row.publicReceipt().documentId(), row.publicReceipt().epoch());
@@ -232,12 +243,6 @@ final class StoredDocumentReadChecks implements AutoCloseable {
         });
         return ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(documents, identities, s.comparisons(), s.copiedNodes()));
     }
-    private static ManagedEpochReceiptStore.DocumentHistory history(ManagedEpochReceiptStore.DocumentHistory.StoredState h,
-            PersistentOrderedMap<Long, ManagedEpochReceiptStore.StoredReceipt> epochs) {
-        return ManagedEpochReceiptStore.DocumentHistory.restoreStored(new ManagedEpochReceiptStore.DocumentHistory.StoredState(
-                h.document(), epochs, h.latestEpoch(), h.currentRepresentation(), h.comparisons(), h.copiedNodes()));
-    }
-
     private CatchUpPlanStore catchUp(CatchUpPlanStore value, boolean stage) {
         var s = value.storedState(); var p = s.plans().storedIndexes(); var raw = original.catchUpPlans().storedState();
         var identities = stage ? maps.stage(p.identities()) : checked("plan/identities", p.identities(), (id, row) -> {

@@ -18,6 +18,42 @@ final class StoredManagedEpochIndexesTest {
     private static final int MAX = 8 * 1024 * 1024;
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(MAX, 4096, MAX - 8192, 8192, 32);
 
+    @Test void oldLogicalReceiptWitnessDoesNotFenceALaterSourceEpoch() throws Exception {
+        // given
+        try (var f = new DocumentSessionStorageTest.Fixture()) {
+            var source = f.start(resource("source.yaml"), "rcp2/source", ActivationPolicy.importFullHistory());
+            f.process(source, f.append(source, "rcp2/source", "tick"));
+            f.process(source, f.append(source, "rcp2/source", "tick"));
+            var original = state(f).managedEpochReceipts(); var storage = storage(f.bytes);
+            var execution = new ClosureExecutionEvidenceStorageCodec(MAX, 128);
+            var store = new LogicalRecordMapTest.Store(); var seed = store.attempt(); var seedContext = new LogicalRecordContext(seed);
+            var initial = storage.openLogical(seedContext);
+            for (long epoch = 0; epoch <= 1; epoch++) {
+                var row = original.exactEvidence(source.id(), epoch); initial = initial.withReceipt(row.receipt(), row.transitionReceipt());
+            }
+            storage.selectLogical(initial); seedContext.flush(); var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+            assertTrue(store.publish(seed.prepare("seed", List.of(), evidence)));
+            var reader = store.attempt(); var writer = store.attempt();
+            var rc = new LogicalRecordContext(reader); var wc = new LogicalRecordContext(writer);
+            // when
+            var old = storage.exact(storage.openLogical(rc), source.id(), 1);
+            var newer = original.exactEvidence(source.id(), 2);
+            storage.selectLogical(storage.openLogical(wc).withReceipt(newer.receipt(), newer.transitionReceipt()));
+            rc.flush(); wc.flush(); var read = reader.prepare("witness", List.of(), evidence); var write = writer.prepare("advance", List.of(), evidence);
+            // then
+            assertArrayEquals(execution.encodeTransitionReceipt(original.exactEvidence(source.id(), 1).transitionReceipt()),
+                    execution.encodeTransitionReceipt(old.transitionReceipt()));
+            assertTrue(read.points().stream().noneMatch(point -> OrderedRecordKey.text().decode(point.key().scope().copy()).endsWith("receipt-heads")));
+            assertTrue(store.publish(write)); assertTrue(store.publish(read));
+            try (var cold = store.attempt()) {
+                var retained = storage.openLogical(new LogicalRecordContext(cold));
+                assertEquals(2, retained.latestEpoch(source.id()));
+                assertArrayEquals(execution.encodeTransitionReceipt(newer.transitionReceipt()),
+                        execution.encodeTransitionReceipt(storage.exact(retained, source.id(), 2).transitionReceipt()));
+            }
+        }
+    }
+
     @Test void actualEventsAndCompleteReceiptEvidenceSurviveProducerClosure() throws Exception {
         // given
         DocumentSessionStorageTest.Bytes bytes; Map<StoredManagedEpochIndexes.Root, byte[]> roots;

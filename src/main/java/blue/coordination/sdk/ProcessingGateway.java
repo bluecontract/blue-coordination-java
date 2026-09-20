@@ -25,6 +25,133 @@ public final class ProcessingGateway {
         return runtime.processNextRoot(Objects.requireNonNull(root, "root"));
     }
 
+    /**
+     * Executes the supplied accepted input and materializes its current result,
+     * without selecting later work. Requires a caller-established ordered window.
+     * No input is appended by this call. Host preparation/publication is separate.
+     * @param root authoritative root in this runtime
+     * @param input exact already accepted input in this runtime
+     * @return current-stage evidence without a quiescence/command-completion claim
+     */
+    public ProcessingStageResult processStage(DocumentHandle root, EntryHandle input) {
+        return runtime.processRootStage(Objects.requireNonNull(root, "root"), Objects.requireNonNull(input, "input"));
+    }
+
+    /**
+     * Selects and executes one earliest LIVE, retained-local or managed stage.
+     * Materializes and retains its result before returning, with no readiness
+     * lookahead. A throwing invocation requires discarding its mutable owner.
+     * @param root authoritative root in this runtime
+     * @return current-stage evidence, still subject to host publication
+     */
+    public ProcessingStageResult processNextStage(DocumentHandle root) {
+        return runtime.processNextRootStage(Objects.requireNonNull(root, "root"));
+    }
+
+    /** Freezes one root's next stage; acquire context entry owners before executing the returned token. */
+    public SelectedProcessingStage selectNextStage(DocumentHandle root) {
+        return runtime.selectStage(Objects.requireNonNull(root), null);
+    }
+
+    /**
+     * Observes global rooted readiness in a separate scheduling attempt, without PROCESS.
+     * This can inspect unrelated roots and is intended for global drain completion.
+     * @return coherent current readiness, independent of prior completed-stage evidence
+     */
+    public blue.coordination.api.ProcessingReadiness inspectReadiness() {
+        return runtime.inspectProcessingReadiness();
+    }
+
+    /**
+     * Freezes the exact root-local retained work selected by this root's ordering.
+     * Rejects a stale identity before PROCESS; does not fall through to another work item.
+     * @param root authoritative root in this runtime
+     * @param expectedWorkIdentity exact retained local work identity
+     * @return frozen selection whose known owners must be acquired before execution
+     */
+    public SelectedProcessingStage selectRetainedStage(DocumentHandle root, String expectedWorkIdentity) {
+        return runtime.selectRetainedStage(Objects.requireNonNull(root),
+                SdkPreconditions.requireText(expectedWorkIdentity, "expectedWorkIdentity"));
+    }
+
+    /**
+     * Freezes the exact managed work only when it owns the global bounded fair turn.
+     * Execution materializes one complete stage without checking later readiness.
+     * @param expectedWorkIdentity exact work from the public processing selection audit
+     * @return frozen selection and its included publication owners
+     */
+    public SelectedProcessingStage selectManagedEpochApplicationStage(String expectedWorkIdentity) {
+        return runtime.selectManagedApplicationStage(SdkPreconditions.requireText(expectedWorkIdentity, "expectedWorkIdentity"));
+    }
+
+    /** Freezes the supplied accepted input without appending or looking ahead. */
+    public SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
+        return runtime.selectStage(Objects.requireNonNull(root), Objects.requireNonNull(input));
+    }
+
+    /**
+     * Freezes a retained accepted input by identity in a cold runtime, without submission.
+     * The caller must first finish earlier ordered work, as for the handle overload.
+     * @param root authoritative processing root
+     * @param entryBlueId exact input already retained by this runtime
+     * @return one scope-bound selection, including a zero-attempt disposition when inapplicable
+     */
+    public SelectedProcessingStage selectStage(DocumentHandle root, String entryBlueId) {
+        return runtime.selectStage(Objects.requireNonNull(root), runtime.lightweightHandle(
+                SdkPreconditions.requireText(entryBlueId, "entryBlueId")));
+    }
+
+    /**
+     * Freezes the next causal root stage through an accepted input's full external order,
+     * including earlier local/managed prerequisites. A NO_WORK result refers to this
+     * cutoff only; later accepted input remains for its own continuation.
+     * @param root authoritative processing root
+     * @param inclusiveEntry original accepted command cutoff
+     * @return one frozen stage, without processing or future-readiness lookahead
+     */
+    public SelectedProcessingStage selectNextStageThrough(DocumentHandle root, EntryHandle inclusiveEntry) {
+        return runtime.selectStageThrough(Objects.requireNonNull(root), Objects.requireNonNull(inclusiveEntry));
+    }
+    /**
+     * Restores the cutoff by its retained exact entry identity in a cold owner.
+     * This is a point lookup, never submission or authorship.
+     * @param root authoritative processing root
+     * @param inclusiveEntryBlueId already accepted cutoff entry
+     * @return one frozen stage under the original cutoff
+     */
+    public SelectedProcessingStage selectNextStageThrough(DocumentHandle root, String inclusiveEntryBlueId) {
+        return runtime.selectStageThrough(Objects.requireNonNull(root), runtime.lightweightHandle(
+                SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId")));
+    }
+
+    /**
+     * Freezes one globally scheduled journal stage without executing it or inspecting later readiness.
+     * Empty means the journal does not own a runnable fair turn; use {@link #inspectReadiness()}
+     * separately when a caller needs a global quiescence observation.
+     * @return the single-use selected journal stage, or empty for another lane or no runnable head
+     */
+    public java.util.Optional<SelectedProcessingStage> selectJournalStage() {
+        return runtime.selectJournalStage();
+    }
+
+    /**
+     * Freezes one journal turn through an already retained exact entry, without authorship.
+     * @param inclusiveEntryBlueId original accepted inclusive cutoff
+     * @return one single-use selection, or empty if the bounded journal lane has no runnable turn
+     */
+    public java.util.Optional<SelectedProcessingStage> selectJournalStageThrough(String inclusiveEntryBlueId) {
+        return runtime.selectJournalStageThrough(SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId"));
+    }
+
+    /**
+     * Separately observes readiness through an accepted input; later input is outside this observation.
+     * @param inclusiveEntryBlueId original accepted inclusive cutoff
+     * @return bounded readiness without executing a stage
+     */
+    public blue.coordination.api.ProcessingReadiness inspectReadinessThrough(String inclusiveEntryBlueId) {
+        return runtime.inspectProcessingReadinessThrough(SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId"));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

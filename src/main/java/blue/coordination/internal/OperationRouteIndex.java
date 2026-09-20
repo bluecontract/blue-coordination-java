@@ -31,6 +31,7 @@ final class OperationRouteIndex {
     static final String DIRECT_ROUTE_REVALIDATION_SNAPSHOTS =
             "routing.directRevalidationSnapshots";
 
+    private LogicalRouteRows logicalRows;
     private PersistentOrderedMap<RouteKey, List<RouteRow>> rows =
             PersistentOrderedMap.empty(RouteKey.ORDER);
     private PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument =
@@ -104,6 +105,7 @@ final class OperationRouteIndex {
                             checked.activeSubscriptions()));
         }
 
+        if (logicalRows != null) return prepareLogicalReplacement(canonical, compiled);
         PersistentOrderedMap<RouteKey, List<RouteRow>> preparedRows = rows;
         PersistentOrderedMap<DocumentId, Set<RouteKey>> preparedKeys =
                 keysByDocument;
@@ -234,7 +236,39 @@ final class OperationRouteIndex {
                 insertedRows,
                 comparisons,
                 copiedNodes,
-                operationRouteChanges);
+                operationRouteChanges, null);
+    }
+
+    private PreparedReplacement prepareLogicalReplacement(List<Replacement> replacements,
+            Map<DocumentId, Map<RouteKey, List<RouteRow>>> compiled) {
+        var prepared = logicalRows; var preparedKeys = keysByDocument;
+        var changedKeys = new LinkedHashSet<RouteKey>(); var transitions = new ArrayList<OperationRouteChange>();
+        long retained = 0, comparisons = 0, copies = 0;
+        for (var replacement : replacements) {
+            var document = replacement.documentId(); var inserted = compiled.get(document);
+            var previous = preparedKeys.get(document); comparisons++;
+            var existing = previous == null ? Set.<RouteKey>of() : previous;
+            var before = new LinkedHashMap<RouteKey, List<RouteRow>>();
+            for (var key : existing) { before.put(key, prepared.forDocument(key, document)); comparisons++; }
+            transitions.addAll(operationRouteChanges(document, operationRoutes(document, before), operationRoutes(document, inserted)));
+            var candidates = new LinkedHashSet<>(existing); candidates.addAll(inserted.keySet());
+            boolean changed = false;
+            for (var key : candidates) {
+                var current = before.containsKey(key) ? before.get(key) : prepared.forDocument(key, document);
+                var next = inserted.getOrDefault(key, List.of()); comparisons++;
+                if (current.equals(next)) { retained++; continue; }
+                prepared = prepared.replace(key, document, next); copies++; changedKeys.add(key); changed = true;
+            }
+            if (changed) {
+                preparedKeys = inserted.isEmpty() ? preparedKeys.remove(document).map()
+                        : preparedKeys.put(document, Collections.unmodifiableSet(new LinkedHashSet<>(inserted.keySet()))).map();
+                copies++;
+            }
+        }
+        long resultingGeneration = changedKeys.isEmpty() ? generation : Math.addExact(generation, 1L);
+        long insertedRows = compiled.values().stream().flatMap(value -> value.values().stream()).mapToLong(List::size).sum();
+        return new PreparedReplacement(generation, resultingGeneration, prepared.all(), preparedKeys,
+                changedKeys.size(), retained, insertedRows, comparisons, copies, transitions, prepared);
     }
 
     private static OperationRouteProjection operationRoutes(
@@ -408,6 +442,7 @@ final class OperationRouteIndex {
                             + generation);
         }
         rows = replacement.rows;
+        logicalRows = replacement.logicalRows;
         keysByDocument = replacement.keysByDocument;
         generation = replacement.resultingGeneration;
         replacement.published = true;
@@ -593,8 +628,15 @@ final class OperationRouteIndex {
             return;
         }
         long nextGeneration = Math.addExact(generation, 1L);
-        rows = rows.emptyCopy();
-        keysByDocument = keysByDocument.emptyCopy();
+        if (logicalRows != null) {
+            var prepared = logicalRows;
+            for (var document : keysByDocument.entries())
+                for (var key : document.getValue()) prepared = prepared.replace(key, document.getKey(), List.of());
+            var clearedKeys = keysByDocument.emptyCopy();
+            rows = prepared.all(); logicalRows = prepared; keysByDocument = clearedKeys;
+        } else {
+            rows = rows.emptyCopy(); keysByDocument = keysByDocument.emptyCopy();
+        }
         generation = nextGeneration;
     }
 
@@ -604,7 +646,7 @@ final class OperationRouteIndex {
 
     /** Internal selected-root state; not publication authority or a route rebuild. */
     synchronized StoredIndexes storedIndexes() {
-        return new StoredIndexes(rows, keysByDocument, generation);
+        return new StoredIndexes(rows, keysByDocument, generation, logicalRows);
     }
 
     static OperationRouteIndex restoreIndexes(
@@ -613,6 +655,7 @@ final class OperationRouteIndex {
             Function<DocumentId, String> selectedHeads) {
         OperationRouteIndex restored = new OperationRouteIndex(metrics, sessions, selectedHeads);
         restored.rows = state.rows();
+        restored.logicalRows = state.logicalRows();
         restored.keysByDocument = state.keysByDocument();
         restored.generation = state.generation();
         return restored;
@@ -621,7 +664,11 @@ final class OperationRouteIndex {
     record StoredIndexes(
             PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
             PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument,
-            long generation) {
+            long generation, LogicalRouteRows logicalRows) {
+        StoredIndexes(PersistentOrderedMap<RouteKey, List<RouteRow>> rows,
+                PersistentOrderedMap<DocumentId, Set<RouteKey>> keysByDocument, long generation) {
+            this(rows, keysByDocument, generation, null);
+        }
         StoredIndexes {
             Objects.requireNonNull(rows, "rows");
             Objects.requireNonNull(keysByDocument, "keysByDocument");
@@ -707,6 +754,7 @@ final class OperationRouteIndex {
 
     final class PreparedReplacement {
         private final OperationRouteIndex owner;
+        private final LogicalRouteRows logicalRows;
         private final long expectedGeneration;
         private final long resultingGeneration;
         private final PersistentOrderedMap<RouteKey, List<RouteRow>> rows;
@@ -731,7 +779,8 @@ final class OperationRouteIndex {
                 long insertedRows,
                 long comparisons,
                 long copiedNodes,
-                List<OperationRouteChange> operationRouteChanges) {
+                List<OperationRouteChange> operationRouteChanges, LogicalRouteRows logicalRows) {
+            this.logicalRows = logicalRows;
             this.owner = OperationRouteIndex.this;
             this.expectedGeneration = expectedGeneration;
             this.resultingGeneration = resultingGeneration;

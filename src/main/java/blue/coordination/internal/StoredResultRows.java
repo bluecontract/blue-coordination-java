@@ -63,6 +63,19 @@ final class StoredResultRows implements AutoCloseable {
         });
     }
 
+    PersistentAppendLog<PublicEventOccurrence> logicalOutbox(LogicalRecordContext context, PersistentMapStorage.Limits mapLimits) {
+        return PersistentAppendLog.logical(new LogicalAppendLog<>(context, objects, mapLimits,
+                blue.coordination.api.storage.CoordinationRecords.Family.RUNTIME_OUTBOX, outboxCodec(),
+                row -> row.publicRootDocumentId().value()));
+    }
+    PersistentAppendLog<CheckpointWrite> logicalCheckpoints(LogicalRecordContext context, PersistentMapStorage.Limits mapLimits) {
+        return PersistentAppendLog.logical(new LogicalAppendLog<>(context, objects, mapLimits,
+                blue.coordination.api.storage.CoordinationRecords.Family.CHECKPOINT, checkpointCodec(), row -> {
+                    var member = Objects.requireNonNull(checkpoints.get(row), "Checkpoint has no original result");
+                    return RootedResultScope.members(member.result()).stream().findFirst().orElseThrow().value();
+                }));
+    }
+
     PersistentMapCodec<PublicEventOccurrence> outboxCodec() {
         return new PersistentMapCodec<>() {
             public String identity() { return "blue-coordination/outbox-original-result-row/1"; }

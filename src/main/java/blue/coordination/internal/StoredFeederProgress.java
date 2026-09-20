@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
 import blue.coordination.internal.ContractsRootFeederWindow.AttemptTicket;
 import blue.coordination.internal.ContractsRootFeederWindow.DurableState.StoredMaps;
@@ -58,12 +59,21 @@ final class StoredFeederProgress {
     }
     Scope empty(DocumentSessionStorage.OpenScope views) { return new Scope(null, views); }
 
+    Scope openLogical(LogicalPointStorage logical, DocumentSessionStorage.OpenScope views) {
+        return new Scope(null, views, Objects.requireNonNull(logical));
+    }
+
     final class Scope implements AutoCloseable {
-        private final Map<Kind, StoredInsertionOrderedMap<?, ?>> owned = new EnumMap<>(Kind.class);
+        private final LogicalPointStorage logical;
+        private final Map<Kind, Map<?, ?>> owned = new EnumMap<>(Kind.class);
         private final StoredMaps maps;
         private boolean closed;
 
         private Scope(Snapshot selected, DocumentSessionStorage.OpenScope views) {
+            this(selected, views, null);
+        }
+        private Scope(Snapshot selected, DocumentSessionStorage.OpenScope views, LogicalPointStorage logical) {
+            this.logical = logical;
             Objects.requireNonNull(views, "shared views");
             try {
                 PersistentMapCodec<LaneId> lanes = codec("lane", UnaryOperator.identity(), value -> encode(limits.indexes().keyBytes(), w -> lane(w, value)),
@@ -82,18 +92,21 @@ final class StoredFeederProgress {
             } catch (RuntimeException | Error failure) { close(); throw failure; }
         }
 
-        private <K, V> StoredInsertionOrderedMap<K, V> create(Kind kind, Snapshot selected,
+        private <K, V> Map<K, V> create(Kind kind, Snapshot selected,
                 Comparator<K> order, PersistentMapCodec<K> keys, PersistentMapCodec<V> values) {
             var storage = new StoredInsertionOrderedMap.Storage<>(objects, limits, FORMAT + "/" + kind,
                     FORMAT + "/order/" + kind, order, keys, values);
-            var map = selected == null ? storage.empty() : storage.open(selected.roots().get(kind));
+            Map<K, V> map = logical == null ? selected == null ? storage.empty() : storage.open(selected.roots().get(kind))
+                    : logical.open(kind == Kind.PENDING ? Family.FEEDER_PENDING : Family.FEEDER_REJECTED,
+                            "engine/feeder/1", keys, values, limits);
             owned.put(kind, map); return map;
         }
 
         StoredMaps maps() { requireOpen(); return maps; }
         Snapshot snapshot() {
-            requireOpen(); var roots = new EnumMap<Kind, StoredInsertionOrderedMap.Snapshot>(Kind.class);
-            owned.forEach((kind, map) -> roots.put(kind, map.snapshot())); return new Snapshot(roots);
+            requireOpen(); require(logical == null, "Logical feeder maps cannot become descriptors");
+            var roots = new EnumMap<Kind, StoredInsertionOrderedMap.Snapshot>(Kind.class);
+            owned.forEach((kind, map) -> roots.put(kind, ((StoredInsertionOrderedMap<?, ?>) map).snapshot())); return new Snapshot(roots);
         }
         /** Explicit bootstrap/import only; a failed multi-map retain cannot expose partial roots. */
         void retain(StoredMaps original) {
@@ -101,16 +114,21 @@ final class StoredFeederProgress {
             try { maps.pending().putAll(original.pending()); maps.rejected().putAll(original.rejected()); }
             catch (RuntimeException | Error failure) { close(); throw failure; }
         }
+        private static void closeMap(Map<?, ?> map) {
+            try { ((AutoCloseable) map).close(); }
+            catch (RuntimeException failure) { throw failure; }
+            catch (Exception failure) { throw new IllegalStateException("Feeder map close failed", failure); }
+        }
         private void requireOpen() { require(!closed, "Closed feeder progress scope"); }
         @Override public void close() {
-            if (closed) return; closed = true; owned.values().forEach(StoredInsertionOrderedMap::close);
+            if (closed) return; closed = true; owned.values().forEach(Scope::closeMap);
         }
 
         /** Bind selected payloads to their actual index keys, not merely their individual valid bytes. */
         private final class CheckedMap<K, V> extends AbstractMap<K, V> {
-            private final StoredInsertionOrderedMap<K, V> delegate;
+            private final Map<K, V> delegate;
             private final Function<V, K> keyOf;
-            CheckedMap(StoredInsertionOrderedMap<K, V> delegate, Function<V, K> keyOf) {
+            CheckedMap(Map<K, V> delegate, Function<V, K> keyOf) {
                 this.delegate = delegate; this.keyOf = keyOf;
             }
             private V checked(Object key, V value) {

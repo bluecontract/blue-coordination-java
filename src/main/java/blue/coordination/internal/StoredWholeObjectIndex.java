@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.identity.BlueIds;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +36,14 @@ final class StoredWholeObjectIndex {
         members = c.binding("whole-object/members", EmbeddingBinding.TEXT_ORDER, c.text, memberSet.nested());
     }
 
+    Opened openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        return new Opened(entries.openLogical(context, Family.OBJECT_ENTRY, scope, OrderedRecordKey.text()),
+                proofs.openLogical(context, Family.OBJECT_PROOF, scope, OrderedRecordKey.text()),
+                memberSet.openLogicalBuckets(context, Family.OBJECT_MEMBER, scope, EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), OrderedRecordKey.text()));
+    }
+
     Opened empty() { return new Opened(entries.open(null), proofs.open(null), members.open(null)); }
     Opened open(Selection selected) {
         Objects.requireNonNull(selected);
@@ -54,7 +63,7 @@ final class StoredWholeObjectIndex {
         @Override public int size() { return entryRows.size(); }
         @Override public Iterable<String> cyclicMembers(String master) {
             return physical(() -> {
-                var selected = memberRows.get(master); if (selected == null) return List.of();
+                var selected = memberRows.get(master); if (selected == null || selected.isEmpty()) return List.of();
                 require(proofRows.containsKey(master), "Retained cyclic member set has no proof");
                 var result = new ArrayList<String>();
                 for (var row : selected.entries()) {
@@ -66,6 +75,7 @@ final class StoredWholeObjectIndex {
                 return List.copyOf(result);
             });
         }
+        void selectLogical() { entryRows.selectLogicalRecords(); proofRows.selectLogicalRecords(); memberRows.selectLogicalRecords(); }
         Selection selection() { return new Selection(entryRows.storedRootDescriptor(), proofRows.storedRootDescriptor(), memberRows.storedRootDescriptor()); }
 
         /** Stage a new immutable view; even a later write failure cannot change this selected view. */
@@ -81,7 +91,7 @@ final class StoredWholeObjectIndex {
                         require(master.equals(BlueIds.cyclicSetMasterBlueId(id)) && newEntries.containsKey(id), "Foreign or missing cyclic member");
                         selected = selected.put(id, true).map();
                     }
-                    if (!selected.isEmpty()) newMembers = newMembers.put(master, selected).map();
+                    if (selected.isLogical() || !selected.isEmpty()) newMembers = newMembers.put(master, selected).map();
                 }
                 return new Opened(newEntries, newProofs, newMembers);
             });

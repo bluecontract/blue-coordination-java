@@ -16,6 +16,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 final class SourceDiscoveryStorageCodec {
     private static final String PENDING = "blue-coordination/source-pending/1";
     private static final String PREPARED = "blue-coordination/source-prepared/2";
+    private static final String PREPARED_SCOPED = "blue-coordination/source-prepared/3";
     private final int maximumBytes;
     private final SessionRecordCodec rows;
     private final CohortInvocationStorageCodec cohorts;
@@ -78,7 +79,7 @@ final class SourceDiscoveryStorageCodec {
     byte[] encodePrepared(RootedSourceDiscoveryCoordinator.Prepared value, Function<RootedDocumentView, String> views) {
         requirePrepared(value);
         return SessionStorageWire.encode(maximumBytes, w -> {
-            w.text(PREPARED); descriptor(w, value.descriptor()); optional(w, value.admission(), this::admission);
+            w.text(value.step() != null && value.step().consumers().included() ? PREPARED_SCOPED : PREPARED); descriptor(w, value.descriptor()); optional(w, value.admission(), this::admission);
             optional(w, value.step(), (out, step) -> step(out, step, views));
             optional(w, value.completeness(), (out, proof) -> {
                 out.longValue(proof.journalRevision()); out.longValue(proof.routeIndexGeneration()); out.longValue(proof.graphGeneration());
@@ -90,9 +91,9 @@ final class SourceDiscoveryStorageCodec {
     RootedSourceDiscoveryCoordinator.Prepared decodePrepared(String expectedSelection, byte[] bytes, DocumentSessionStorage.OpenScope scope) {
         return physical(() -> {
             var value = SessionStorageWire.decode(bytes, maximumBytes, r -> {
-                require(PREPARED.equals(text(r)), "Wrong prepared source format");
+                var format = text(r); require(PREPARED.equals(format) || PREPARED_SCOPED.equals(format), "Wrong prepared source format");
                 return new RootedSourceDiscoveryCoordinator.Prepared(descriptor(r), optional(r, this::admission),
-                        optional(r, in -> step(in, scope)), optional(r, in -> new CompletenessEvidence(
+                        optional(r, in -> step(in, scope, PREPARED_SCOPED.equals(format))), optional(r, in -> new CompletenessEvidence(
                                 in.longValue(), in.longValue(), in.longValue(), order(in), text(in))));
             });
             requirePrepared(value); require(expectedSelection.equals(value.descriptor().selectionIdentity()), "Prepared source belongs to another selection");
@@ -180,7 +181,7 @@ final class SourceDiscoveryStorageCodec {
     }
 
     private void step(Writer w, RootedCheckpointDriver.Selection s, Function<RootedDocumentView, String> views) {
-        list(w, s.excludedConsumers().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList(), (out, id) -> out.text(id.value()));
+        list(w, s.consumers().documents().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList(), (out, id) -> out.text(id.value()));
         w.bool(s.blocked()); optional(w, s.live(), (out, live) -> {
             rows.entry(out, live.entry()); out.longValue(live.routeGeneration());
             list(out, live.invocations(), (inner, invocation) -> inner.bytes(cohorts.encode(invocation, views)));
@@ -189,13 +190,14 @@ final class SourceDiscoveryStorageCodec {
         optional(w, s.localHistorical(), (out, local) -> out.bytes(localSteps.encode(local, views)));
     }
 
-    private RootedCheckpointDriver.Selection step(Reader r, DocumentSessionStorage.OpenScope scope) {
+    private RootedCheckpointDriver.Selection step(Reader r, DocumentSessionStorage.OpenScope scope, boolean included) {
         var excluded = list(r, in -> DocumentId.of(text(in))); require(new LinkedHashSet<>(excluded).size() == excluded.size(), "Duplicate excluded source consumer");
         boolean blocked = r.bool();
         var live = optional(r, in -> new ContractsClosureAdapter.FrozenBatch(rows.entry(in), in.longValue(),
                 list(in, inner -> cohorts.decode(inner.bytes(maximumBytes), scope))));
         var history = optional(r, works::work);
         var local = optional(r, in -> localSteps.decode(in.bytes(maximumBytes), scope));
-        return new RootedCheckpointDriver.Selection(live, history, new LinkedHashSet<>(excluded), blocked, local);
+        return new RootedCheckpointDriver.Selection(live, history, included ? CatchUpConsumerScope.owners(new LinkedHashSet<>(excluded))
+                : CatchUpConsumerScope.excluding(new LinkedHashSet<>(excluded)), blocked, local);
     }
 }

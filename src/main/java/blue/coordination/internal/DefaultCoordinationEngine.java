@@ -32,6 +32,7 @@ import blue.coordination.api.ManagedOccurrenceCatchUpPlan;
 import blue.coordination.api.ProcessingDrainReceipt;
 import blue.coordination.api.ProcessingAvailability;
 import blue.coordination.api.ProcessingSelection;
+import blue.coordination.api.ProcessingReadiness;
 import blue.coordination.api.TimelineAppendReceipt;
 import blue.coordination.api.ActivationMode;
 import blue.coordination.api.DocumentDispatchOutcome;
@@ -75,7 +76,8 @@ public final class DefaultCoordinationEngine
         AFTER_STAGING_CHILD_SESSION,
         AFTER_APPLYING_CHILD_REVISION,
         BEFORE_COMMIT_VALIDATION,
-        AFTER_STATE_SWAP_BEFORE_RETURN
+        AFTER_STATE_SWAP_BEFORE_RETURN,
+        BEFORE_ROOTED_READINESS
     }
 
     static final class InjectedFailureException extends RuntimeException {
@@ -164,9 +166,9 @@ public final class DefaultCoordinationEngine
     private ContractsJournalDrainCoordinator contractsJournalCoordinator;
     private final RootedSourceDiscoveryCoordinator rootedSourceDiscoveries;
     private final blue.coordination.sdk.ExactNodeProvider rootedSourceProvider;
-    private final Map<String, Timeline> timelines = new LinkedHashMap<>();
-    private final Map<String, String> timelineActorKinds =
-            new LinkedHashMap<>();
+    private final Map<String, Timeline> timelines;
+    private final Map<String, String> timelineActorKinds;
+    private final LogicalEngineControl logicalControl;
     private Consumer<FailurePoint> failureInjector = ignored -> { };
     private long logicalClockMicros = BASE_TIMESTAMP_MICROS;
     private long applicationClockMicros = BASE_TIMESTAMP_MICROS;
@@ -189,7 +191,7 @@ public final class DefaultCoordinationEngine
                 timelines, timelineActorKinds, logicalClockMicros, applicationClockMicros,
                 List.copyOf(contractsClosureProfile.publicRoots()), contractsRecoveryState.rootedSchedule.storageState(),
                 List.copyOf(contractsRecoveryState.deferredManagedConsumers),
-                List.copyOf(contractsRecoveryState.isolatedManagedConsumers), contractsRecoveryState.managedEpochTurn,
+                List.copyOf(contractsRecoveryState.isolatedManagedConsumers), contractsRecoveryState.managedEpochTurn(),
                 contractsRecoveryState.feederWindow.storageState(requireEmptyPendingComponents), contractsRecoveryState.journalDrain.storageState());
     }
 
@@ -233,10 +235,15 @@ public final class DefaultCoordinationEngine
                 contractsBootstrap.blueLanguageSpecificationIdentity(), contractsBootstrap.contractsSpecificationIdentity(),
                 contractsBootstrap.executionPolicy());
         metrics = new EngineMetrics();
+        logicalControl = stored == null ? null : stored.logicalControl();
+        timelines = logicalControl == null ? new LinkedHashMap<>() : logicalControl.timelines();
+        timelineActorKinds = logicalControl == null ? new LinkedHashMap<>() : logicalControl.actorKinds();
         if (stored != null) {
             if (!stored.control().binding().equals(contractsRuntimeBinding) || journalStore == null)
                 throw new blue.coordination.api.storage.CoordinationObjectStorageException("Complete engine storage has another release or no exact journal");
-            timelines.putAll(stored.control().timelines()); timelineActorKinds.putAll(stored.control().actorKinds());
+            if (logicalControl == null) {
+                timelines.putAll(stored.control().timelines()); timelineActorKinds.putAll(stored.control().actorKinds());
+            }
             logicalClockMicros = stored.control().logicalClockMicros();
             applicationClockMicros = stored.control().applicationClockMicros();
         }
@@ -297,6 +304,7 @@ public final class DefaultCoordinationEngine
             contractsActiveSourceTimelines = stored == null
                     ? new ContractsActiveSourceTimelineIndex(profile.publicRoots(), metrics)
                     : ContractsActiveSourceTimelineIndex.restoreIndexes(stored.activeSources(), metrics);
+            if (logicalControl != null) profile.bindLogicalPublicRoots(contractsActiveSourceTimelines.logicalPublicRoots());
             contractsClosureAdapter = new ContractsClosureAdapter(
                     runtime,
                     objects,
@@ -321,7 +329,9 @@ public final class DefaultCoordinationEngine
                     contractsClosureAdapter, journal, layoutBuilder, routeIndex, timelines, rootedSourceProvider,
                     stored == null ? RootedSourceDiscoveryCoordinator.StoredMaps.empty() : stored.sources()) : null;
             if (rootedSourceDiscoveries != null) contractsClosureAdapter.sourceDiscoveryCoordinator(rootedSourceDiscoveries);
-            contractsRecoveryState = stored == null ? new ContractsRecoveryState() : recoveryStateFromStorage(stored.control(), stored.feederMaps());
+            contractsRecoveryState = stored == null ? new ContractsRecoveryState()
+                    : logicalControl == null ? recoveryStateFromStorage(stored.control(), stored.feederMaps())
+                    : logicalControl.recovery(stored.feederMaps());
             contractsClosureAdapter.feederDecisions(contractsRecoveryState.feederWindow);
             contractsFeederCoordinator = createContractsFeederCoordinator();
             contractsJournalCoordinator = createContractsJournalCoordinator();
@@ -332,7 +342,14 @@ public final class DefaultCoordinationEngine
     record StoredParts(EngineControlStorageCodec.State control, WholeObjectBacking objects,
             InMemoryDocumentStore.StoreState documents, OperationRouteIndex.StoredIndexes routes,
             ContractsActiveSourceTimelineIndex.StoredIndexes activeSources, ContractsClosureAdapter.StoredPlans plans,
-            RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+            RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps,
+            LogicalEngineControl logicalControl) {
+        StoredParts(EngineControlStorageCodec.State control, WholeObjectBacking objects,
+                InMemoryDocumentStore.StoreState documents, OperationRouteIndex.StoredIndexes routes,
+                ContractsActiveSourceTimelineIndex.StoredIndexes activeSources, ContractsClosureAdapter.StoredPlans plans,
+                RootedSourceDiscoveryCoordinator.StoredMaps sources, ContractsRootFeederWindow.DurableState.StoredMaps feederMaps) {
+            this(control, objects, documents, routes, activeSources, plans, sources, feederMaps, null);
+        }
         StoredParts {
             Objects.requireNonNull(control); Objects.requireNonNull(objects); Objects.requireNonNull(documents);
             Objects.requireNonNull(routes); Objects.requireNonNull(activeSources); Objects.requireNonNull(plans); Objects.requireNonNull(sources);
@@ -351,9 +368,9 @@ public final class DefaultCoordinationEngine
     /** Current owning scope only; the storage layer must detach every family before retiring this runtime. */
     synchronized StoredParts storedParts(WholeObjectBacking retainedObjects) {
         ensureOpen();
-        return new StoredParts(controlStateForStorage(false), retainedObjects, documents.storedState(), routeIndex.storedIndexes(),
+        return new StoredParts(logicalControl == null ? controlStateForStorage(false) : logicalControl.initialState(), retainedObjects, documents.storedState(), routeIndex.storedIndexes(),
                 contractsActiveSourceTimelines.storedIndexes(), contractsClosureAdapter.storedPlans(), rootedSourceDiscoveries.storedMaps(),
-                contractsRecoveryState.feederWindow.storedMaps());
+                contractsRecoveryState.feederWindow.storedMaps(), logicalControl);
     }
 
     /** Creates the legacy Process Embedded temporal-profile engine. */
@@ -883,6 +900,23 @@ public final class DefaultCoordinationEngine
                 .map(receipt -> receipt.attempt().processResult());
     }
 
+    /**
+     * Reads resolver facts from one authenticated committing receipt. It does not
+     * open the selected sources' current heads or infer authority from a caller's DTO.
+     */
+    public synchronized Optional<List<ContractsClosureDispatchAttempt.ManagedOccurrenceResolution>>
+            auditCommittedOccurrenceResolutions(String publicationIdentity) {
+        ensureOpen();
+        return documents.closurePublicationReceipt(Objects.requireNonNull(publicationIdentity))
+                .filter(ContractsClosurePublicationReceipt::commits)
+                .map(receipt -> {
+                    var owned = receipt.attempt().processResult().rootedProjection();
+                    return managedOccurrenceResolutions(receipt.managedSurfaceEvidence()).stream()
+                            .filter(resolution -> owned == null || owned.owns(resolution.occurrence().sourceDocumentId()))
+                            .toList();
+                });
+    }
+
     /** Reads the original immutable input retained with a terminal closure decision. */
     public synchronized Optional<blue.language.processor.closure.ClosureInvocationInput> auditClosureInvocation(
             String publicationIdentity) {
@@ -956,7 +990,7 @@ public final class DefaultCoordinationEngine
             Operation operation) {
         ensureOpen();
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
-        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        long candidateTimestamp = Math.addExact(currentLogicalClock(), 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         try {
@@ -967,7 +1001,7 @@ public final class DefaultCoordinationEngine
                             operation,
                             candidateTimestamp));
             requireAfterProcessedFrontier(entry);
-            logicalClockMicros = candidateTimestamp;
+            setLogicalClock(candidateTimestamp);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1062,8 +1096,8 @@ public final class DefaultCoordinationEngine
                     "Managed draft and epoch selector plans capture different "
                             + "operation target heads");
         }
-        long previousLogicalClock = logicalClockMicros;
-        long candidateTimestamp = Math.addExact(logicalClockMicros, 1L);
+        long previousLogicalClock = currentLogicalClock();
+        long candidateTimestamp = Math.addExact(currentLogicalClock(), 1L);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         String registeredDraftEntryBlueId = null;
@@ -1099,7 +1133,7 @@ public final class DefaultCoordinationEngine
                 inject(FailurePoint
                         .AFTER_MANAGED_EPOCH_SELECTION_PLAN_REGISTERED);
             }
-            logicalClockMicros = candidateTimestamp;
+            setLogicalClock(candidateTimestamp);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1132,7 +1166,7 @@ public final class DefaultCoordinationEngine
             } catch (RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
-            logicalClockMicros = previousLogicalClock;
+            setLogicalClock(previousLogicalClock);
             throw failure;
         }
     }
@@ -1144,7 +1178,7 @@ public final class DefaultCoordinationEngine
             long timestampMicros) {
         ensureOpen();
         Timeline canonicalTimeline = requireRegisteredTimeline(timeline);
-        long nextClock = Math.max(logicalClockMicros, timestampMicros);
+        long nextClock = Math.max(currentLogicalClock(), timestampMicros);
         InMemoryTimelineJournal.Mark mark = journal.mark();
         WholeObjectStore.Mark objectMark = objects.mark();
         try {
@@ -1152,7 +1186,7 @@ public final class DefaultCoordinationEngine
                     () -> journal.append(
                             canonicalTimeline, operation, timestampMicros));
             requireAfterProcessedFrontier(entry);
-            logicalClockMicros = nextClock;
+            setLogicalClock(nextClock);
             objects.commit(objectMark);
             return entry;
         } catch (RuntimeException failure) {
@@ -1186,7 +1220,7 @@ public final class DefaultCoordinationEngine
             if (stored) {
                 requireAfterProcessedFrontier(admitted);
             }
-            logicalClockMicros = Math.max(logicalClockMicros, timestamp);
+            setLogicalClock(Math.max(currentLogicalClock(), timestamp));
             objects.commit(objectMark);
             return new TimelineAppendReceipt(
                     admitted,
@@ -1242,13 +1276,32 @@ public final class DefaultCoordinationEngine
     /** Executes the supplied root input using one frozen invocation budget. */
     public synchronized ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
             blue.coordination.api.ContractsExecutionPolicy policy) {
+        return processRootInput(root, input, policy, true);
+    }
+
+    /**
+     * Completes only the supplied root stage. Receipt flags describe this stage,
+     * not the existence of later eligible work. No readiness selection is made.
+     * @param root authoritative root
+     * @param input exact accepted journal input
+     * @param policy optional invocation policy, or null for the configured policy
+     * @return complete current-stage evidence, still subject to host publication
+     */
+    public synchronized ProcessingDrainReceipt processRootInputStage(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy) {
+        return processRootInput(root, input, policy, false);
+    }
+
+    private ProcessingDrainReceipt processRootInput(DocumentId root, TimelineEntry input,
+            blue.coordination.api.ContractsExecutionPolicy policy, boolean inspectReadiness) {
         try {
             ensureOpen();
             TimelineEntry entry = journal.requireCanonical(Objects.requireNonNull(input, "input"));
             long started = System.nanoTime();
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
-            return rootedReadiness(root, executeRootBatch(batch, started), started);
+            var completed = executeRootBatch(batch, started);
+            return inspectReadiness ? rootedReadiness(root, completed, started) : completed;
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
@@ -1358,6 +1411,12 @@ public final class DefaultCoordinationEngine
         if (replay.isPresent()) return replay.orElseThrow();
         var committed = rootedSourceDiscoveries.committedSelection(expected);
         var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        return executeSourcePrerequisite(expected, selected, committed.isPresent());
+    }
+
+    private blue.coordination.api.SourceHistoryPrerequisiteResult executeSourcePrerequisite(
+            blue.coordination.api.SourceHistoryPrerequisite expected, RootedSourceDiscoveryCoordinator.Prepared selected,
+            boolean replayed) {
         blue.coordination.api.SourceHistoryPrerequisiteResult result;
         if (selected.admission() != null) {
             var admission = selected.admission();
@@ -1365,13 +1424,66 @@ public final class DefaultCoordinationEngine
             var activation = admission.activationInputs();
             var receipt = admitContractsClosure(admission.invocation(), activation.policy(), activation.verifiedFrontier(),
                     rootedSourceProvider);
-            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), committed.isPresent());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.of(receipt), Optional.empty(), replayed);
         } else {
             var receipt = executeRootSelection(Objects.requireNonNull(selected.step()), System.nanoTime());
-            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), committed.isPresent());
+            result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), replayed);
         }
         rootedSourceDiscoveries.retain(result);
         return result;
+    }
+
+    private SelectedSourceStage pendingSourceStage;
+
+    /** Freezes exact source-owned admission/history work before the host acquires execution authority. */
+    public synchronized SelectedSourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); Objects.requireNonNull(expected);
+        if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
+        if (expected.kind() == blue.coordination.api.SourceHistoryPrerequisite.Kind.WAIT)
+            throw new IllegalArgumentException("A resource wait is not executable source work");
+        var replay = rootedSourceDiscoveries.completed(expected).orElse(null);
+        var committed = replay == null ? rootedSourceDiscoveries.committedSelection(expected) : Optional.<RootedSourceDiscoveryCoordinator.Prepared>empty();
+        var selected = replay != null ? null : committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
+        var context = RootedStageCapture.source(expected, selected, replay, documents);
+        pendingSourceStage = new SelectedSourceStage(context, selected, replay, committed.isPresent());
+        return pendingSourceStage;
+    }
+
+    /** Single-use source stage; no requesting-parent retry or successor selection is performed. */
+    public final class SelectedSourceStage {
+        private final Thread owner = Thread.currentThread();
+        private final blue.coordination.api.SourceHistoryStageContext context;
+        private final RootedSourceDiscoveryCoordinator.Prepared selected;
+        private final blue.coordination.api.SourceHistoryPrerequisiteResult replay;
+        private final boolean committed;
+        private SelectedSourceStage(blue.coordination.api.SourceHistoryStageContext context,
+                RootedSourceDiscoveryCoordinator.Prepared selected, blue.coordination.api.SourceHistoryPrerequisiteResult replay,
+                boolean committed) {
+            this.context = context; this.selected = selected; this.replay = replay; this.committed = committed;
+        }
+        public blue.coordination.api.SourceHistoryStageContext context() { return context; }
+        public blue.coordination.api.SourceHistoryStageResult execute() {
+            synchronized (DefaultCoordinationEngine.this) {
+                if (closed || pendingSourceStage != this || owner != Thread.currentThread())
+                    throw new IllegalStateException("Source stage is retired, used or belongs to another thread");
+                pendingSourceStage = null;
+                try {
+                    var result = replay != null ? replay : executeSourcePrerequisite(context.prerequisite(), selected, committed);
+                    var owners = new java.util.TreeSet<DocumentId>();
+                    context.entryOwners().forEach(value -> owners.add(value.documentId()));
+                    result.admission().ifPresent(receipt -> owners.addAll(receipt.documentIds()));
+                    result.processing().ifPresent(receipt -> owners.addAll(RootedStageCapture.publishedOwners(receipt)));
+                    boolean invalidated = result.admission().map(ContractsClosureAdmissionReceipt::published).orElse(false)
+                            || result.processing().map(RootedStageCapture::invalidatesSelection).orElse(false);
+                    var completed = new blue.coordination.api.SourceHistoryStageResult(context, result, List.copyOf(owners), invalidated);
+                    if (!completed.committable()) DefaultCoordinationEngine.this.close();
+                    return completed;
+                } catch (RuntimeException | Error failure) {
+                    try { DefaultCoordinationEngine.this.close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+            }
+        }
     }
 
     /** Processes at most one earliest eligible obligation from the selected root's exact progress. */
@@ -1392,22 +1504,183 @@ public final class DefaultCoordinationEngine
 
     /** Executes only the exact retained local work selected for this root, before any mutation. */
     public synchronized ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork) {
+        return processNextRoot(root, expectedLocalWork, true);
+    }
+
+    private SelectedRootStage pendingRootStage;
+
+    /** Internal SDK bridge: freezes one exact stage before the host acquires known owners. */
+    public synchronized SelectedRootStage selectRootStage(DocumentId root, TimelineEntry input) {
+        return selectRootStage(root, input, null);
+    }
+
+    /** Freezes only the exact root-local retained obligation, before any PROCESS mutation. */
+    public synchronized SelectedRootStage selectRetainedRootStage(DocumentId root, String expectedWorkIdentity) {
+        return selectRootStage(root, null, Objects.requireNonNull(expectedWorkIdentity));
+    }
+
+    private SelectedRootStage selectRootStage(DocumentId root, TimelineEntry input, String expectedWorkIdentity) {
+        ensureOpen(); Objects.requireNonNull(root);
+        RootedCheckpointDriver.Selection selected;
+        if (input != null) {
+            var entry = journal.requireCanonical(input);
+            selected = new RootedCheckpointDriver.Selection(contractsClosureAdapter.captureRoot(root, entry, null), null,
+                    CatchUpConsumerScope.owners(RootedStageCapture.owners(root, documents)), false);
+        } else {
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
+            selected = documents.storedState().sessionIndex().isLogical()
+                    ? driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal))
+                    : driver.select(root, journal.entries());
+        }
+        if (expectedWorkIdentity != null && (selected.localHistorical() == null
+                || !expectedWorkIdentity.equals(selected.localHistorical().work().workIdentity())))
+            throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedWorkIdentity);
+        pendingRootStage = new SelectedRootStage(root, selected, RootedStageCapture.describe(root, selected, documents), input == null);
+        return pendingRootStage;
+    }
+
+    /** Observes current global readiness without executing or publishing a stage. */
+    public synchronized ProcessingReadiness auditRootedProcessingReadiness() {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint()) throw new IllegalStateException("Durable readiness requires the rooted checkpoint profile");
+        return rootedStageReadiness(null);
+    }
+
+    /** Readiness through the original accepted input, excluding later inputs and their join fences. */
+    public synchronized ProcessingReadiness auditRootedProcessingReadinessThrough(TimelineEntry inclusiveEntry) {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint()) throw new IllegalStateException("Durable readiness requires the rooted checkpoint profile");
+        return rootedStageReadiness(journal.requireCanonical(Objects.requireNonNull(inclusiveEntry)).sourceOrderKey());
+    }
+
+    private ProcessingReadiness rootedStageReadiness(ExternalOrderKey cutoff) {
+        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff).scan(entries, cutoff);
+        return new ProcessingReadiness(scan.quiescent(), !scan.heads().isEmpty());
+    }
+
+    /** Freezes the exact managed fair turn, retaining its included publication owners and no future readiness. */
+    public synchronized SelectedRootStage selectManagedApplicationStage(String expectedWorkIdentity) {
+        ensureOpen();
+        String expected = Objects.requireNonNull(expectedWorkIdentity);
+        if (!expected.matches("sha256:[0-9a-f]{64}"))
+            throw new IllegalArgumentException("expectedWorkIdentity must be a lowercase sha256 identity");
+        if (!contractsClosureProfile.rootedCheckpoint())
+            throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
+        var next = head == null ? auditNextProcessingSelection() : rootedSelection(head.selection());
+        if (head == null || next.kind() != ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION
+                || !next.managedEpochApplicationWork().map(ManagedEpochApplicationWork::workIdentity).filter(expected::equals).isPresent())
+            throw processingSelectionMismatch("MANAGED_EPOCH_APPLICATION", next, expected);
+        pendingRootStage = new SelectedRootStage(head.root(), head.selection(),
+                RootedStageCapture.describe(head.root(), head.selection(), documents), true);
+        return pendingRootStage;
+    }
+
+    /** Freezes one global journal fair turn. Absence is a scheduling observation, not global quiescence. */
+    public synchronized Optional<SelectedRootStage> selectJournalStage() {
+        return selectJournalStageThrough(null);
+    }
+
+    /** Freezes a global journal turn through one already accepted exact input without reauthoring it. */
+    public synchronized Optional<SelectedRootStage> selectJournalStageThrough(TimelineEntry inclusiveEntry) {
+        ensureOpen();
+        if (!contractsClosureProfile.rootedCheckpoint())
+            throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
+        var cutoffEntry = inclusiveEntry == null ? null : journal.requireCanonical(inclusiveEntry);
+        var cutoff = cutoffEntry == null ? null : cutoffEntry.sourceOrderKey();
+        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff);
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(entries, cutoff), false, Set.of());
+        if (head == null || rootedSelection(head.selection()).kind() != ProcessingSelection.Kind.JOURNAL) {
+            pendingRootStage = null;
+            return Optional.empty();
+        }
+        var captured = RootedStageCapture.describe(head.root(), head.selection(), documents);
+        var context = cutoffEntry == null ? captured : new blue.coordination.api.ProcessingStageContext(captured.kind(),
+                captured.root(), captured.causes(), captured.entryOwners(), captured.invocationIdentities(), cutoffEntry.blueId());
+        pendingRootStage = new SelectedRootStage(head.root(), head.selection(), context, true);
+        return Optional.of(pendingRootStage);
+    }
+
+    /** Freezes the next causal stage no later than an original accepted input; later inputs are not readiness evidence. */
+    public synchronized SelectedRootStage selectRootStageThrough(DocumentId root, TimelineEntry inclusiveEntry) {
+        ensureOpen(); Objects.requireNonNull(root);
+        var cutoff = journal.requireCanonical(Objects.requireNonNull(inclusiveEntry));
+        var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff.sourceOrderKey());
+        var selected = driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal, cutoff.sourceOrderKey()));
+        var captured = RootedStageCapture.describe(root, selected, documents);
+        var context = new blue.coordination.api.ProcessingStageContext(captured.kind(), captured.root(), captured.causes(),
+                captured.entryOwners(), captured.invocationIdentities(), cutoff.blueId());
+        pendingRootStage = new SelectedRootStage(root, selected, context, true);
+        return pendingRootStage;
+    }
+
+    /** Single-use, thread-affine frozen selection. No other engine work may intervene. */
+    public final class SelectedRootStage {
+        private final Thread owner = Thread.currentThread();
+        private final DocumentId root;
+        private final RootedCheckpointDriver.Selection selected;
+        private final blue.coordination.api.ProcessingStageContext context;
+        private final boolean scheduled;
+        private SelectedRootStage(DocumentId root, RootedCheckpointDriver.Selection selected,
+                blue.coordination.api.ProcessingStageContext context, boolean scheduled) {
+            this.root = root; this.selected = selected; this.context = context; this.scheduled = scheduled;
+        }
+        public blue.coordination.api.ProcessingStageContext context() { return context; }
+        public ProcessingDrainReceipt execute() {
+            synchronized (DefaultCoordinationEngine.this) {
+                if (closed || pendingRootStage != this || owner != Thread.currentThread())
+                    throw new IllegalStateException("Stage selection is retired, used or belongs to another thread");
+                pendingRootStage = null;
+                try {
+                    var completed = executeRootSelection(selected, System.nanoTime());
+                    var anchor = selected.localHistorical() != null ? selected.localHistorical().root() : root;
+                    if (scheduled) contractsRecoveryState.rootedSchedule.completed(anchor, selected, completed);
+                    return completed;
+                } catch (RuntimeException | Error failure) {
+                    try { DefaultCoordinationEngine.this.close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+            }
+        }
+        public List<DocumentId> resultOwners(ProcessingDrainReceipt completed) { return RootedStageCapture.resultOwners(context, completed); }
+        public boolean invalidatesSelection(ProcessingDrainReceipt completed) { return RootedStageCapture.invalidatesSelection(completed); }
+    }
+
+    /**
+     * Executes one selected LIVE, retained-local or managed historical stage
+     * without inspecting future readiness. This is an internal bridge for the
+     * durable host boundary; the legacy convenience drain retains lookahead.
+     * @param root authoritative root requesting progress
+     * @param expectedLocalWork optional exact retained-local work identity
+     * @return current-stage evidence, not a claim that the root is quiescent
+     */
+    public synchronized ProcessingDrainReceipt processNextRootStage(DocumentId root, String expectedLocalWork) {
+        return processNextRoot(root, expectedLocalWork, false);
+    }
+
+    private ProcessingDrainReceipt processNextRoot(DocumentId root, String expectedLocalWork, boolean inspectReadiness) {
         try {
             ensureOpen();
             long started = System.nanoTime();
-            RootedCheckpointDriver.Selection next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
-                    .select(Objects.requireNonNull(root, "root"), journal.entries());
+            var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, !inspectReadiness);
+            Objects.requireNonNull(root, "root");
+            RootedCheckpointDriver.Selection next = !inspectReadiness && documents.storedState().sessionIndex().isLogical()
+                    ? driver.select(root, selected -> contractsClosureAdapter.rootedJournalEntries(selected, journal))
+                    : driver.select(root, journal.entries());
             if (expectedLocalWork != null && (next.localHistorical() == null
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
             }
             var anchor = next.localHistorical() != null ? next.localHistorical().root()
-                    : documents.sessionIds().stream()
-                    .filter(id -> !next.excludedConsumers().contains(id))
+                    : !inspectReadiness ? root : documents.sessionIds().stream()
+                    .filter(id -> next.consumers().contains(id))
                     .min(EmbeddingBinding.DOCUMENT_ORDER).orElse(root);
             var completed = executeRootSelection(next, started);
             contractsRecoveryState.rootedSchedule.completed(anchor, next, completed);
-            return rootedReadiness(root, completed, started);
+            return inspectReadiness ? rootedReadiness(root, completed, started) : completed;
         } catch (RuntimeException failure) {
             throw translateDispatchFailure(failure);
         }
@@ -1437,8 +1710,8 @@ public final class DefaultCoordinationEngine
         if (next.historical() != null) {
             try {
                 var outcome = next.localHistorical() == null
-                        ? contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.excludedConsumers())
-                        : contractsClosureAdapter.executeRootedJoinApplication(next.historical(), next.excludedConsumers(), next.localHistorical());
+                        ? contractsClosureAdapter.executeManagedEpochApplication(next.historical(), next.consumers())
+                        : contractsClosureAdapter.executeRootedJoinApplication(next.historical(), next.consumers(), next.localHistorical());
                 return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
                         outcome.published(), false, outcome.published() && !outcome.replayed()
                                 ? RootedResultScope.processTransitionCount(outcome.attempt().processResult()) : 0L,
@@ -1458,6 +1731,7 @@ public final class DefaultCoordinationEngine
     /** Recomputes pending work after the selected step; the one-step budget is not a resource wait. */
     private ProcessingDrainReceipt rootedReadiness(DocumentId root, ProcessingDrainReceipt completed, long started) {
         if (!completed.quiescent()) return completed;
+        inject(FailurePoint.BEFORE_ROOTED_READINESS);
         RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
                 .select(root, journal.entries());
         boolean pending = remaining.live() != null || remaining.historical() != null || remaining.localHistorical() != null;
@@ -1514,7 +1788,7 @@ public final class DefaultCoordinationEngine
                 // inactive, or resource-blocked journal rows. A compatibility
                 // drain would now fall through to its managed phase in this
                 // same call; retain that continuation as the next sliced turn.
-                contractsRecoveryState.managedEpochTurn = true;
+                contractsRecoveryState.managedEpochTurn(true);
             }
             return drained;
         } catch (RuntimeException failure) {
@@ -1797,6 +2071,9 @@ public final class DefaultCoordinationEngine
     synchronized EngineMetrics.MetricsSnapshot metricsSnapshot() {
         return metrics.snapshot();
     }
+    synchronized Map<String, Long> workCounters() {
+        return metrics.publicSnapshot().counters();
+    }
     synchronized void observeTransitions(
             Consumer<SequentialDrainCoordinator.TransitionTrace> observer) {
         requireLegacyOnly("observeTransitions");
@@ -1824,7 +2101,7 @@ public final class DefaultCoordinationEngine
     }
 
     synchronized long logicalClockMicros() {
-        return logicalClockMicros;
+        return currentLogicalClock();
     }
 
     synchronized InMemoryDocumentStore documents() {
@@ -1999,7 +2276,7 @@ public final class DefaultCoordinationEngine
         boolean journal = contractsJournalCoordinator
                 .hasPendingJournalTurn()
                 || supplied.journalAdmissionAvailable();
-        if (contractsRecoveryState.managedEpochTurn
+        if (contractsRecoveryState.managedEpochTurn()
                 && managed.isPresent()) {
             return ProcessingSelection.managedEpochApplication(
                     managed.orElseThrow());
@@ -2209,7 +2486,7 @@ public final class DefaultCoordinationEngine
                 routeIndex.rowCount(),
                 journal.size(),
                 objects.size(),
-                logicalClockMicros);
+                currentLogicalClock());
     }
 
     private DocumentSnapshot snapshot(
@@ -2498,7 +2775,7 @@ public final class DefaultCoordinationEngine
         do {
             madeProgress = false;
             boolean managedFirst = managedAllowed
-                    && contractsRecoveryState.managedEpochTurn;
+                    && contractsRecoveryState.managedEpochTurn();
             int phaseCount = managedAllowed ? 2 : 1;
             for (int phase = 0; phase < phaseCount; phase++) {
                 if (committedTransitions
@@ -2533,7 +2810,7 @@ public final class DefaultCoordinationEngine
                             progress.committedTransitions());
                     if (selectedThisPass != 0L
                             || progress.committedTransitions() != 0L) {
-                        contractsRecoveryState.managedEpochTurn = true;
+                        contractsRecoveryState.managedEpochTurn(true);
                     }
                     madeProgress = madeProgress
                             || !progress.completedEntries().isEmpty()
@@ -2570,19 +2847,19 @@ public final class DefaultCoordinationEngine
                         contractsRecoveryState.deferManagedEpochConsumer(
                                 failure.work().consumerDocumentId());
                         selectedManaged = true;
-                        contractsRecoveryState.managedEpochTurn = false;
+                        contractsRecoveryState.managedEpochTurn(false);
                         madeProgress = true;
                         continue;
                     }
                     if (managed.isEmpty()) {
                         if (!selectedManaged) {
-                            contractsRecoveryState.managedEpochTurn = false;
+                            contractsRecoveryState.managedEpochTurn(false);
                         }
                         break;
                     }
                     selectedManaged = true;
                     selectedEntries = Math.addExact(selectedEntries, 1L);
-                    contractsRecoveryState.managedEpochTurn = false;
+                    contractsRecoveryState.managedEpochTurn(false);
                     ContractsClosureAdapter.ManagedApplicationOutcome outcome =
                             managed.orElseThrow();
                     managedAttempts.add(managedApplicationAttempt(outcome));
@@ -2914,13 +3191,12 @@ public final class DefaultCoordinationEngine
         private final ContractsRootFeederWindow.DurableState feederWindow;
         private final ContractsJournalDrainCoordinator.DurableState
                 journalDrain;
-        private final LinkedHashSet<DocumentId> deferredManagedConsumers =
-                new LinkedHashSet<>();
+        private final Set<DocumentId> deferredManagedConsumers;
         /** Failed/suspended consumers isolated across exact processing slices. */
-        private final LinkedHashSet<DocumentId> isolatedManagedConsumers =
-                new LinkedHashSet<>();
+        private final Set<DocumentId> isolatedManagedConsumers;
         /** Retained fair turn between external and managed transition lanes. */
         private boolean managedEpochTurn;
+        private final LogicalEngineControl logical;
 
         private ContractsRecoveryState() {
             this(new RootedProcessingSchedule(), new ContractsRootFeederWindow.DurableState(),
@@ -2930,9 +3206,25 @@ public final class DefaultCoordinationEngine
         private ContractsRecoveryState(RootedProcessingSchedule schedule,
                 ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
                 List<DocumentId> deferred, List<DocumentId> isolated, boolean managedTurn) {
-            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal;
-            deferredManagedConsumers.addAll(deferred); isolatedManagedConsumers.addAll(isolated);
+            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal; logical = null;
+            deferredManagedConsumers = new LinkedHashSet<>(deferred); isolatedManagedConsumers = new LinkedHashSet<>(isolated);
             managedEpochTurn = managedTurn;
+        }
+
+        private ContractsRecoveryState(RootedProcessingSchedule schedule,
+                ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
+                Set<DocumentId> deferred, Set<DocumentId> isolated, LogicalEngineControl logical) {
+            rootedSchedule = schedule; feederWindow = feeder; journalDrain = journal;
+            deferredManagedConsumers = deferred; isolatedManagedConsumers = isolated; this.logical = logical;
+        }
+        static ContractsRecoveryState logical(RootedProcessingSchedule schedule,
+                ContractsRootFeederWindow.DurableState feeder, ContractsJournalDrainCoordinator.DurableState journal,
+                Set<DocumentId> deferred, Set<DocumentId> isolated, LogicalEngineControl logical) {
+            return new ContractsRecoveryState(schedule, feeder, journal, deferred, isolated, logical);
+        }
+        private boolean managedEpochTurn() { return logical == null ? managedEpochTurn : logical.managedTurn(); }
+        private void managedEpochTurn(boolean value) {
+            if (logical == null) managedEpochTurn = value; else logical.managedTurn(value);
         }
 
         private Set<DocumentId> deferredManagedConsumers() {
@@ -2982,10 +3274,16 @@ public final class DefaultCoordinationEngine
         }
     }
 
+    private long currentLogicalClock() { return logicalControl == null ? logicalClockMicros : logicalControl.clock("logical"); }
+    private void setLogicalClock(long value) {
+        if (logicalControl == null) logicalClockMicros = value; else logicalControl.clock("logical", value);
+    }
+
     private long nextApplicationTimestamp() {
-        applicationClockMicros = Math.addExact(
-                Math.max(applicationClockMicros, logicalClockMicros), 1L);
-        return applicationClockMicros;
+        long next = Math.addExact(Math.max(logicalControl == null ? applicationClockMicros
+                : logicalControl.clock("application"), currentLogicalClock()), 1L);
+        if (logicalControl == null) applicationClockMicros = next; else logicalControl.clock("application", next);
+        return next;
     }
 
     private ExternalOrderKey currentAdmissionFrontier(DocumentId documentId) {
@@ -3097,6 +3395,8 @@ public final class DefaultCoordinationEngine
     }
 
     private void ensureOpen() {
+        if (pendingSourceStage != null) throw new IllegalStateException("Execute or discard the frozen source stage before other engine work");
+        if (pendingRootStage != null) throw new IllegalStateException("Execute or discard the frozen stage before other engine work");
         if (closed) {
             throw new IllegalStateException("DefaultCoordinationEngine is closed");
         }

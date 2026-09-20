@@ -880,8 +880,8 @@ final class MultiDocumentPublicationTransaction {
                             update.transitionReceipt());
         }
         if (expectedCatchUpPlans != null
-                && (before.catchUpPlans().hasActiveBarriers()
-                        || publicationCatchUpPlans.hasActiveBarriers())) {
+                && (before.catchUpPlans().mayHaveActiveBarriers()
+                        || publicationCatchUpPlans.mayHaveActiveBarriers())) {
             // This is status-only dependency publication, not additional Root
             // processing. Parents without typed demands are outside the
             // Contracts cohort; derive their replacement from the current
@@ -2169,6 +2169,13 @@ final class MultiDocumentPublicationTransaction {
         affected.addAll(expectedHeads.keySet());
         affected.addAll(expectedAbsent);
         return java.util.Collections.unmodifiableSet(affected);
+    }
+
+    /** Valid only after prepareReplacement has authenticated the complete rooted result and owner set. */
+    Set<DocumentId> retainedSourceOwners() {
+        if (stagedRootedView == null) return Set.of();
+        return Set.copyOf(stagedAdmissionResult && stagedAdmissionReceipt != null
+                ? expectedAbsent : RootedResultScope.members(stagedRootedView.result()));
     }
 
     private ComponentStateInventory mergeComponentStates(

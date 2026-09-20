@@ -67,7 +67,7 @@ final class RootedJoinScheduling {
                         .contains(ContractsClosureAdapter.closureId(root))) return blocked(selected);
                 // Both coordinates are retained: the actual local input executes, and the
                 // registered work is settled by the ordinary atomic application publisher.
-                return new RootedCheckpointDriver.Selection(null, terminal.work(), terminal.excludedConsumers(), false, chosen);
+                return new RootedCheckpointDriver.Selection(null, terminal.work(), terminal.consumers(), false, chosen);
             }
             if (localTerminal) return blocked(selected);
         }
@@ -75,7 +75,7 @@ final class RootedJoinScheduling {
     }
 
     private static RootedCheckpointDriver.Selection blocked(RootedCheckpointDriver.Selection selected) {
-        return new RootedCheckpointDriver.Selection(null, null, selected.excludedConsumers(), true);
+        return new RootedCheckpointDriver.Selection(null, null, selected.consumers(), true);
     }
 
     private static boolean localTerminal(RootedLocalHistory.Step local, RootedJoinEligibility.Fence fence) {

@@ -17,6 +17,71 @@ final class StoredFeederProgressTest {
             new PersistentMapStorage.Limits(40 * 1024 * 1024, 16384, MAX, 4096, 8), MAX, 128L * 1024 * 1024, 100);
     private static final String RESOURCE = "4N8X8mM4K6cYz9V1j8Qv5A6C4a2Qj6C7v1G5d8E3r2P1";
 
+    @Test void logicalSuspendedLanesPublishIndependentlyAndColdReadKeepsDemandBytes() {
+        // given
+        for (boolean reverse : List.of(false, true)) {
+            var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
+            try (var f = ContractsRootFeederWindowTest.fixture(); var binding = new Binding(bytes);
+                 var left = records.attempt(); var right = records.attempt()) {
+                var tickets = new ContractsRootFeederWindow().select(f.adapter().capture(f.eventOne()));
+                var a = pending(tickets.get(0)); var b = pending(tickets.get(1));
+                var ca = new LogicalPointStorage(left); var cb = new LogicalPointStorage(right);
+                try (var ma = binding.storage.openLogical(ca, binding.views);
+                     var mb = binding.storage.openLogical(cb, binding.views)) {
+                    // when
+                    ma.maps().pending().put(a.ticket().lane(), a); mb.maps().pending().put(b.ticket().lane(), b);
+                    ca.stage(); cb.stage();
+                    var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+                    var pa = left.prepare("a", List.of(), evidence); var pb = right.prepare("b", List.of(), evidence);
+                    // then
+                    assertTrue(pa.queries().isEmpty()); assertTrue(pb.queries().isEmpty());
+                    assertTrue(records.publish(reverse ? pb : pa)); assertTrue(records.publish(reverse ? pa : pb));
+                    var coldBytes = bytes.fresh();
+                    try (var coldBinding = new Binding(coldBytes); var attempt = records.attempt();
+                         var cold = coldBinding.storage.openLogical(new LogicalPointStorage(attempt), coldBinding.views)) {
+                        assertEquals(0, coldBytes.writes);
+                        for (var original : List.of(a, b)) {
+                            var restored = cold.maps().pending().get(original.ticket().lane());
+                            assertEquals(original.ticket(), restored.ticket());
+                            assertSame(restored, cold.maps().pending().get(original.ticket().lane()));
+                            assertArrayEquals(execution().encodeResourceDemand(original.resourceDemands().get(0)),
+                                    execution().encodeResourceDemand(restored.resourceDemands().get(0)));
+                        }
+                        assertEquals(0, coldBytes.writes);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test void logicalBirthRejectionRetainsOriginalProcessorAuthorityAfterColdOpen() throws Exception {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes(); String key; byte[] expected;
+        try (var f = new RootedDeclaredBirthRejectionTest.Scenario(); var binding = new Binding(bytes);
+             var attempt = records.attempt()) {
+            var logical = new LogicalPointStorage(attempt);
+            try (var stored = binding.storage.openLogical(logical, binding.views)) {
+                var rejection = f.adapter.executeAndPublish(f.batch, f.invocation).rejectedBirth();
+                key = rejection.terminalKey();
+                expected = new PublicationReceiptStorageCodec(MAX, 256).encodeRejection(rejection, binding.sessions::retainView);
+                // when
+                stored.maps().rejected().put(key, rejection); logical.stage();
+                // then
+                assertTrue(records.publish(attempt.prepare("rejected", List.of(),
+                        new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}))));
+            }
+        }
+        var coldBytes = bytes.fresh();
+        try (var binding = new Binding(coldBytes); var attempt = records.attempt();
+             var cold = binding.storage.openLogical(new LogicalPointStorage(attempt), binding.views)) {
+            var rejection = cold.maps().rejected().get(key);
+            var state = rejection.storedState(); rejection.requireSameObligation(state.selected());
+            assertSame(state.attempt().resourceDemands().get(0), state.issues().get(0).demand());
+            assertArrayEquals(expected, new PublicationReceiptStorageCodec(MAX, 256).encodeRejection(rejection, binding.views::addressOf));
+            assertEquals(0, coldBytes.writes);
+        }
+    }
+
     @Test void closedProducerColdPendingKeepsExactBarrierWhileAnotherLaneAdvances() {
         // given
         var bytes = new Bytes(); StoredFeederProgress.Snapshot snapshot; StorageState control; AttemptTicket blocked;

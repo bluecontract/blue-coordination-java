@@ -28,6 +28,7 @@ final class PersistentOrderedMap<K, V> {
     private final PersistentMapStorage<K, V> storage;
     private final PersistentMapStorage<?, ?> readStorage;
     private final Object projectionOwner;
+    private final LogicalRecordMap<K, V> records;
 
     private PersistentOrderedMap(
             Comparator<? super K> order,
@@ -42,6 +43,13 @@ final class PersistentOrderedMap<K, V> {
 
     private PersistentOrderedMap(Comparator<? super K> order, TreeNode<K, V> root,
             PersistentMapStorage<K, V> storage, PersistentMapStorage<?, ?> readStorage, Object projectionOwner) {
+        this(order, root, storage, readStorage, projectionOwner, null);
+    }
+
+    private PersistentOrderedMap(Comparator<? super K> order, TreeNode<K, V> root,
+            PersistentMapStorage<K, V> storage, PersistentMapStorage<?, ?> readStorage, Object projectionOwner,
+            LogicalRecordMap<K, V> records) {
+        this.records = records;
         this.order = Objects.requireNonNull(order, "order");
         this.root = root;
         this.storage = storage;
@@ -52,6 +60,47 @@ final class PersistentOrderedMap<K, V> {
     static <K, V> PersistentOrderedMap<K, V> empty(
             Comparator<? super K> order) {
         return new PersistentOrderedMap<>(order, null);
+    }
+
+    static <K, V> PersistentOrderedMap<K, V> logical(Comparator<? super K> order, LogicalRecordContext context,
+            blue.coordination.api.storage.CoordinationRecords.Family family,
+            blue.coordination.api.storage.CoordinationRecords.Bytes scope, OrderedRecordKey<K> keys,
+            PersistentMapCodec<V> values, int maximumKeyBytes, int maximumValueBytes) {
+        return new PersistentOrderedMap<>(order, null, null, null, null,
+                LogicalRecordMap.open(order, context, family, scope, keys, values, maximumKeyBytes, maximumValueBytes));
+    }
+
+    static <K, V> PersistentOrderedMap<K, V> logical(Comparator<? super K> order, LogicalRecordMap<K, V> records) {
+        return new PersistentOrderedMap<>(order, null, null, null, null, Objects.requireNonNull(records));
+    }
+
+    boolean isLogical() { return records != null; }
+    boolean logicalBindingIs(LogicalRecordContext context, blue.coordination.api.storage.CoordinationRecords.Family family,
+            blue.coordination.api.storage.CoordinationRecords.Bytes scope, blue.coordination.api.storage.CoordinationRecords.Bytes lower) {
+        return records != null && records.bindingIs(context, family, scope, lower);
+    }
+
+    Object logicalSnapshotIdentity() {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return records.snapshotIdentity();
+    }
+
+    LogicalRecordContext logicalContext() {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return records.context();
+    }
+    <T> PersistentOrderedMap<K, T> logicalValues(java.util.function.Function<V, T> read,
+            java.util.function.Function<T, V> write, java.util.function.Predicate<T> present) {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        return logical(order, records.convert(read, write, present));
+    }
+
+    void selectLogicalRecords() {
+        if (records == null) throw new IllegalStateException("Not a logical-record map");
+        records.select();
+    }
+    private PersistentOrderedMap<K, V> withRecords(LogicalRecordMap<K, V> changed) {
+        return new PersistentOrderedMap<>(order, null, null, null, projectionOwner, changed);
     }
 
     /** Opens only an authenticated root, not its descendants. Null means empty. */
@@ -74,12 +123,13 @@ final class PersistentOrderedMap<K, V> {
     boolean isStored() { return storage != null; }
 
     /** An empty map retaining the same ordering and physical codec binding. */
-    PersistentOrderedMap<K, V> emptyCopy() { return new PersistentOrderedMap<>(order, null, storage, readStorage, projectionOwner); }
+    PersistentOrderedMap<K, V> emptyCopy() { if (records != null) return withRecords(records.empty()); return new PersistentOrderedMap<>(order, null, storage, readStorage, projectionOwner); }
 
     /** Attaches physical storage without changing the retained AVL tree shape. */
     PersistentOrderedMap<K, V> storedCopy(String orderingIdentity,
             PersistentMapCodec<K> keyCodec, PersistentMapCodec<V> valueCodec,
             CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
+        if (records != null) throw new IllegalStateException("Logical records cannot become a shared descriptor");
         if (storage != null) {
             return stored(order, orderingIdentity, keyCodec, valueCodec, objects, limits,
                     storedRootDescriptor());
@@ -100,6 +150,11 @@ final class PersistentOrderedMap<K, V> {
     /** Explicit physical conversion of a selected tree; preserves ordering and AVL shape, not a point operation. */
     <T> PersistentOrderedMap<K, T> mapValuesPreservingShape(java.util.function.Function<? super V, ? extends T> mapping) {
         Objects.requireNonNull(mapping, "mapping");
+        if (records != null) {
+            PersistentOrderedMap<K, T> mapped = empty(order);
+            for (var row : records.entries()) mapped = mapped.put(row.getKey(), mapping.apply(row.getValue())).map();
+            return mapped;
+        }
         return scoped(() -> new PersistentOrderedMap<>(order, mapValues(root, mapping)));
     }
 
@@ -115,7 +170,7 @@ final class PersistentOrderedMap<K, V> {
     }
 
     ReadResult<V> read(K key) {
-        return scoped(() -> readInScope(key));
+        return records == null ? scoped(() -> readInScope(key)) : new ReadResult<>(records.get(key), 1);
     }
 
     private ReadResult<V> readInScope(K key) {
@@ -139,11 +194,12 @@ final class PersistentOrderedMap<K, V> {
     }
 
     boolean containsKey(K key) {
-        return read(key).found();
+        return records == null ? read(key).found() : records.contains(key);
     }
 
     /** Authenticated key-path membership only; deliberately does not project the value. */
     boolean containsKeyWithoutValue(K key) {
+        if (records != null) return records.contains(key);
         return scoped(() -> {
             K selected = Objects.requireNonNull(key, "key");
             TreeNode<K, V> node = root;
@@ -163,7 +219,7 @@ final class PersistentOrderedMap<K, V> {
 
     /** Exact minimum on one root path; physical checks do not add logical rows. */
     MinimumResult<K, V> minimum() {
-        return scoped(this::minimumInScope);
+        return records == null ? scoped(this::minimumInScope) : new MinimumResult<>(records.first(null, false, null), 1);
     }
 
     private MinimumResult<K, V> minimumInScope() {
@@ -181,6 +237,10 @@ final class PersistentOrderedMap<K, V> {
 
     /** Exact maximum on one root path, symmetrical to minimum(). */
     MinimumResult<K, V> maximum() {
+        if (records != null) {
+            var rows = records.entries();
+            return new MinimumResult<>(rows.isEmpty() ? null : rows.get(rows.size() - 1), rows.size());
+        }
         return scoped(this::maximumInScope);
     }
 
@@ -198,7 +258,7 @@ final class PersistentOrderedMap<K, V> {
 
     /** Returns the least entry strictly after the supplied key on one root path. */
     MinimumResult<K, V> higherThan(K key) {
-        return scoped(() -> higherThanInScope(key));
+        return records == null ? scoped(() -> higherThanInScope(key)) : new MinimumResult<>(records.first(key, true, null), 1);
     }
 
     private MinimumResult<K, V> higherThanInScope(K key) {
@@ -224,6 +284,7 @@ final class PersistentOrderedMap<K, V> {
     }
 
     Mutation<K, V> put(K key, V value) {
+        if (records != null) return new Mutation<>(withRecords(records.put(key, value)), true, new MutationMetrics(1, 1));
         return scoped(() -> putInScope(key, value));
     }
 
@@ -240,6 +301,9 @@ final class PersistentOrderedMap<K, V> {
     }
 
     Mutation<K, V> remove(K key) {
+        if (records != null) return records.contains(key)
+                ? new Mutation<>(withRecords(records.remove(key)), true, new MutationMetrics(1, 1))
+                : new Mutation<>(this, false, new MutationMetrics(1, 0));
         return scoped(() -> removeInScope(key));
     }
 
@@ -258,15 +322,15 @@ final class PersistentOrderedMap<K, V> {
     }
 
     int size() {
-        return TreeNode.size(root);
+        return records == null ? TreeNode.size(root) : records.entries().size();
     }
 
     boolean isEmpty() {
-        return root == null;
+        return records == null ? root == null : records.first(null, false, null) == null;
     }
 
     List<K> keys() {
-        return scoped(this::keysInScope);
+        return records == null ? scoped(this::keysInScope) : records.entries().stream().map(Map.Entry::getKey).toList();
     }
 
     private List<K> keysInScope() {
@@ -276,7 +340,7 @@ final class PersistentOrderedMap<K, V> {
     }
 
     List<V> values() {
-        return scoped(this::valuesInScope);
+        return records == null ? scoped(this::valuesInScope) : records.entries().stream().map(Map.Entry::getValue).toList();
     }
 
     private List<V> valuesInScope() {
@@ -286,7 +350,7 @@ final class PersistentOrderedMap<K, V> {
     }
 
     List<Map.Entry<K, V>> entries() {
-        return scoped(this::entriesInScope);
+        return records == null ? scoped(this::entriesInScope) : records.entries();
     }
 
     private List<Map.Entry<K, V>> entriesInScope() {
@@ -303,6 +367,7 @@ final class PersistentOrderedMap<K, V> {
 
     /** Ordered lazy range: inclusive lower bound, exclusive upper bound; null is unbounded. */
     Iterator<Map.Entry<K, V>> range(K fromInclusive, K toExclusive) {
+        if (records != null) return records.range(fromInclusive, toExclusive);
         if (fromInclusive != null && toExclusive != null
                 && order.compare(fromInclusive, toExclusive) > 0) {
             throw new IllegalArgumentException("Range lower bound follows upper bound");
@@ -341,6 +406,7 @@ final class PersistentOrderedMap<K, V> {
 
     /** Exhaustive invariant check intended for focused structure tests. */
     void assertStructurallyValid() {
+        if (records != null) { records.entries(); return; }
         scoped(() -> { validateInScope(); return null; });
     }
 
@@ -566,7 +632,7 @@ final class PersistentOrderedMap<K, V> {
 
     <T> ValueProjection<K, V, T> projectValues(java.util.function.BiFunction<K, V, T> mapping,
             java.util.function.Consumer<K> absentFromOriginal) {
-        if (storage == null) throw new IllegalStateException("Value projection requires a physical source tree");
+        if (storage == null && records == null) throw new IllegalStateException("Value projection requires a physical source tree");
         return new ValueProjection<>(this, mapping, absentFromOriginal);
     }
 
@@ -587,6 +653,8 @@ final class PersistentOrderedMap<K, V> {
             if (absentFromOriginal != null && !source.containsKey((K) key)) absentFromOriginal.accept((K) key);
         }
         PersistentOrderedMap<K, T> open() {
+            if (source.records != null) return new PersistentOrderedMap<>(source.order, null, null, null, this,
+                    source.records.project(mapping, absentFromOriginal));
             return new PersistentOrderedMap<>(source.order, wrap(source.root), null, source.storage, this);
         }
         private TreeNode<K, T> wrap(TreeNode<K, S> node) { return node == null ? null : new ProjectedNode<>(this, node); }
@@ -595,6 +663,7 @@ final class PersistentOrderedMap<K, V> {
         PersistentOrderedMap<K, S> stage(PersistentOrderedMap<K, T> working, java.util.function.BiFunction<K, T, S> retain) {
             if (working.projectionOwner != this) throw new IllegalArgumentException("Working values belong to another selected tree");
             Objects.requireNonNull(retain);
+            if (source.records != null) return source.withRecords(source.records.stageProjection(working.records, retain));
             return source.scoped(() -> new PersistentOrderedMap<>(source.order, stageNode(working.root, retain), source.storage));
         }
         @SuppressWarnings("unchecked")

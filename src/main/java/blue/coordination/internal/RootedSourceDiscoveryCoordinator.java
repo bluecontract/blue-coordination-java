@@ -6,6 +6,7 @@ import blue.coordination.api.SourceHistoryPrerequisite;
 import blue.coordination.api.SourceHistoryPrerequisiteObservation;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.Timeline;
+import blue.coordination.api.TimelineEntry;
 import blue.coordination.sdk.ExactNodeProvider;
 import blue.language.processor.ExternalOrderKey;
 import blue.language.processor.closure.ClosureAttemptResult;
@@ -96,7 +97,7 @@ final class RootedSourceDiscoveryCoordinator {
         if (declared || current.rootedEvidence().context().entryOwners()
                 .contains(ContractsClosureAdapter.closureId(occurrence.targetDocumentId()))) return null;
         ExactValue authored;
-        var source = documents.find(occurrence.targetDocumentId()).orElse(null);
+        var source = documents.sourceAdmission(occurrence.targetDocumentId()).orElse(null);
         if (source == null) {
             if (occurrence.targetKind() != ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
                     || occurrence.newDraft() == null || !occurrence.newDraft().contentDerivedIdentity()) return null;
@@ -123,9 +124,12 @@ final class RootedSourceDiscoveryCoordinator {
         return new Pending(current, attempt, demand, occurrence.targetDocumentId(), authored, cutoff);
     }
 
+    interface PendingSelections { List<Pending> forRoot(DocumentId root); }
+
     List<SourceHistoryPrerequisite> selections(DocumentId requestingRoot) {
         var values = new ArrayList<SourceHistoryPrerequisite>();
-        for (var candidate : List.copyOf(pending.values())) {
+        for (var candidate : pending instanceof PendingSelections selected
+                ? selected.forRoot(requestingRoot) : List.copyOf(pending.values())) {
             if (!candidate.owns(requestingRoot)) continue;
             if (!stillCurrent(candidate)) { pending.remove(candidate.key()); continue; }
             Prepared next = prepare(candidate);
@@ -207,7 +211,11 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     private Prepared prepare(Pending candidate) {
-        var source = documents.find(candidate.source()).orElse(null);
+        var admitted = documents.sourceAdmission(candidate.source());
+        var source = documents.sourceBefore(candidate.source(), candidate.cutoff()).orElse(null);
+        if (admitted.isPresent() && source == null)
+            return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
+                    "missing-retained-source", "Admitted source lacks authenticated pre-boundary history", null);
         Window window;
         try { window = window(candidate, source); }
         catch (blue.language.provider.ProviderUnavailableException unavailable) {
@@ -229,10 +237,18 @@ final class RootedSourceDiscoveryCoordinator {
             return selected(candidate, SourceHistoryPrerequisite.Kind.ADMISSION, compiled, null,
                     window.identity(), null, window.evidence());
         }
-        var driver = new RootedCheckpointDriver(documents, adapter);
-        var next = driver.select(candidate.source(), journal.entries());
+        var assessment = RootedSourceHistoryAssessment.assess(candidate.source(), source, candidate.cutoff(),
+                documents, adapter, journal);
+        if (assessment.satisfied()) return null;
+        // Actual source-owned selection retains all ordinary live head, owner and control fences.
+        source = documents.require(candidate.source());
+        boolean logical = documents.storedState().sessionIndex().isLogical();
+        var driver = new RootedCheckpointDriver(documents, adapter, logical);
+        java.util.function.Function<DocumentId, List<TimelineEntry>> inputs = root -> logical
+                ? adapter.rootedJournalEntries(root, journal) : journal.entries();
+        var next = driver.select(candidate.source(), inputs);
         if (next.blocked()) {
-            if (driver.completeBefore(candidate.source(), journal.entries(), candidate.cutoff())) return null;
+            if (driver.completeBefore(candidate.source(), inputs.apply(candidate.source()), candidate.cutoff())) return null;
             String reason = RootedJoinPrerequisites.pendingBefore(candidate.source(),
                     source.rootedViewBefore(candidate.cutoff()), candidate.cutoff(), documents);
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
@@ -277,16 +293,17 @@ final class RootedSourceDiscoveryCoordinator {
             if (!registered.actorId().equals(item.getValue()))
                 throw new IllegalArgumentException("Required source Timeline actor differs: " + item.getKey());
         }
-        var step = journal.nextHistoricalStep(null, candidate.cutoff(), null, ignored -> false,
-                routes.generation(), candidate.invocation().input().snapshot().graphGeneration(), () -> identity);
+        var step = journal.sourceCoverage(required.keySet(), candidate.cutoff(),
+                routes.generation(), candidate.invocation().input().snapshot().graphGeneration(), identity);
         if (step instanceof HistoricalStep.Unavailable wait) return new Window(identity, null, wait.diagnostic());
         if (step instanceof HistoricalStep.InvalidEvidence invalid) throw new IllegalArgumentException(invalid.diagnostic());
         CompletenessEvidence evidence = step instanceof HistoricalStep.Complete full ? full.evidence()
                 : step instanceof HistoricalStep.CompleteEmpty empty ? empty.evidence() : null;
-        if (evidence == null || !evidence.isCurrentFor(journal.revision(), routes.generation(),
-                candidate.invocation().input().snapshot().graphGeneration(), candidate.cutoff(), identity))
+        if (evidence == null || !evidence.isCurrentFor(journal.scopedCoverage() ? 0 : journal.revision(), routes.generation(),
+                candidate.invocation().input().snapshot().graphGeneration(), candidate.cutoff(),
+                journal.scopedCoverage() ? evidence.sourceSurfaceIdentity() : identity))
             throw new IllegalArgumentException("Source completeness does not bind the exact pending window");
-        return new Window(identity, evidence, null);
+        return new Window(evidence.sourceSurfaceIdentity(), evidence, null);
     }
 
     private static void addSurface(List<String> frames, Map<String, String> required, String id,
@@ -316,15 +333,16 @@ final class RootedSourceDiscoveryCoordinator {
                 : step.historical() != null ? step.historical().workIdentity() : step.localHistorical().work().workIdentity();
         String entry = step != null && step.live() != null ? step.live().entry().blueId() : null;
         String root = candidate.invocation().rootedEvidence().context().canonicalRootDocumentId().value();
+        long journalRevision = journal.scopedCoverage() ? 0 : journal.revision();
         var fields = new ArrayList<String>(List.of(root, candidate.invocation().input().invocationIdentity(),
                 candidate.demand().demandIdentity(), candidate.source().value(), candidate.authored().blueId(),
                 kind.name(), Long.toString(epoch), head, work, Objects.toString(entry, ""),
-                Long.toString(journal.revision()), Long.toString(routes.generation()), surface, Objects.toString(diagnostic, "")));
+                Long.toString(journalRevision), Long.toString(routes.generation()), surface, Objects.toString(diagnostic, "")));
         candidate.cutoff().components().forEach(value -> fields.add(value.toString()));
         var descriptor = new SourceHistoryPrerequisite(hash("blue.coordination/source-history-prerequisite/1", fields),
                 DocumentId.of(root), candidate.invocation().input().invocationIdentity(), candidate.demand().demandIdentity(),
                 candidate.source(), candidate.authored().blueId(), candidate.cutoff(), kind, epoch, head, work, entry,
-                journal.revision(), routes.generation(), surface, diagnostic);
+                journalRevision, routes.generation(), surface, diagnostic);
         return new Prepared(descriptor, admission, step, evidence);
     }
 

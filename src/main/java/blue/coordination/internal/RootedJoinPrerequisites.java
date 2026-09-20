@@ -28,9 +28,9 @@ final class RootedJoinPrerequisites {
         for (var occurrence : resolution.resolvedOccurrences()) {
             DocumentId source = occurrence.targetDocumentId();
             if (occurrence.targetKind() != ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
-                    && !owners.contains(source) && documents.find(source).isPresent()
+                    && !owners.contains(source) && documents.sourceBefore(source, boundary).isPresent()
                     && returnsToOwner(source, owners, boundary, documents)) {
-                var selected = documents.require(source).rootedViewBefore(boundary);
+                var selected = documents.sourceBefore(source, boundary).orElseThrow().rootedViewBefore(boundary);
                 String pending = pendingBefore(source, selected, boundary, documents);
                 if (pending != null) {
                     missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
@@ -108,7 +108,7 @@ final class RootedJoinPrerequisites {
     /** Reads authenticated pre-boundary forward graphs only; incoming indexes and newer heads are excluded. */
     private static boolean returnsToOwner(DocumentId source, Set<DocumentId> owners,
             ExternalOrderKey boundary, InMemoryDocumentStore documents) {
-        var session = documents.find(source).orElse(null);
+        var session = documents.sourceBefore(source, boundary).orElse(null);
         if (session == null || session.rootedView() == null) return false;
         var view = session.rootedViewBefore(boundary);
         var pending = new ArrayDeque<DocumentId>();

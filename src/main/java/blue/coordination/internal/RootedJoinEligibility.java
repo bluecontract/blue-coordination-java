@@ -23,7 +23,12 @@ final class RootedJoinEligibility {
     /** Point lookup uses retained candidate membership, not the requested root's possibly newer graph. */
     static List<Fence> captureForRoot(InMemoryDocumentStore documents, DocumentId root) {
         var session = documents.require(root);
-        var snapshot = java.util.Objects.requireNonNull(session.rootedView()).snapshot();
+        return captureForView(documents, root, java.util.Objects.requireNonNull(session.rootedView()));
+    }
+
+    /** Assess the exact selected source owners without opening their later live heads. */
+    static List<Fence> captureForView(InMemoryDocumentStore documents, DocumentId root, RootedDocumentView view) {
+        var snapshot = view.snapshot();
         var owners = snapshot.components().stream().filter(component -> component.orderedMemberDocumentIds()
                 .contains(ContractsClosureAdapter.closureId(root))).findFirst().orElseThrow().orderedMemberDocumentIds().stream()
                 .map(ContractsClosureAdapter::coordinationId).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
@@ -165,13 +170,12 @@ final class RootedJoinEligibility {
         var work = pending.work();
         if (work.sourceEpoch() != plan.requiredThroughSourceEpoch() || work.successorRepresentationCause().isPresent()
                 || work.isRepresentationApplication() && !work.representationCause().orElseThrow().terminalPositionReached()) return null;
-        var excluded = documents.sessions().stream().map(DocumentSession::documentId).filter(id -> !owners.contains(id))
-                .collect(java.util.stream.Collectors.toSet());
-        if (documents.nextCatchUpWorkExcluding(excluded).filter(next -> next.workIdentity().equals(work.workIdentity())).isEmpty()) return null;
+        var consumers = CatchUpConsumerScope.owners(owners);
+        if (documents.nextCatchUpWork(consumers).filter(next -> next.workIdentity().equals(work.workIdentity())).isEmpty()) return null;
         var interior = new LinkedHashSet<>(receivers);
         interior.removeAll(owners);
         if (interior.isEmpty()) return null;
-        return new Terminal(work, interior, excluded);
+        return new Terminal(work, interior, consumers);
     }
 
     /** Only vertices on a start-to-goal path participate; reachable side branches are not protected. */
@@ -216,8 +220,8 @@ final class RootedJoinEligibility {
     }
 
     record Terminal(blue.coordination.api.ManagedEpochApplicationWork work,
-            Set<DocumentId> interiorOwners, Set<DocumentId> excludedConsumers) {
-        Terminal { interiorOwners = Set.copyOf(interiorOwners); excludedConsumers = Set.copyOf(excludedConsumers); }
+            Set<DocumentId> interiorOwners, CatchUpConsumerScope consumers) {
+        Terminal { interiorOwners = Set.copyOf(interiorOwners); java.util.Objects.requireNonNull(consumers); }
     }
 
     record Fence(ExternalOrderKey boundary, Set<DocumentId> owners, Set<DocumentId> receivers, String causeIdentity,

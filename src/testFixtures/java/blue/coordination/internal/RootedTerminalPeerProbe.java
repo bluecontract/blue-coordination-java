@@ -34,7 +34,7 @@ public final class RootedTerminalPeerProbe {
 
     public ClosureProcessResult publish(Selection selected) {
         var next = selected.selected;
-        return engine.contractsClosureAdapter().executeRootedJoinApplication(next.historical(), next.excludedConsumers(),
+        return engine.contractsClosureAdapter().executeRootedJoinApplication(next.historical(), next.consumers(),
                 next.localHistorical()).attempt().processResult();
     }
 
@@ -48,7 +48,7 @@ public final class RootedTerminalPeerProbe {
         if (local == null || !local.work().workIdentity().equals(original.work().workIdentity()))
             throw new IllegalStateException("Policy capture changed the exact retained terminal");
         return new Selection(new RootedCheckpointDriver.Selection(null, selected.selected.historical(),
-                selected.selected.excludedConsumers(), false, local), selected.original, selected.fence);
+                selected.selected.consumers(), false, local), selected.original, selected.fence);
     }
 
     public ClosureProcessResult retained(Selection selected) {

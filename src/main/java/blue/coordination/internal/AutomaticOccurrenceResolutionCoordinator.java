@@ -90,7 +90,7 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
                             resolvedSelectorPaths);
                 }
                 return RunResult.executed(
-                        current, attempt, expansionCount);
+                        expansions.completed(current, attempt), attempt, expansionCount);
             }
             metrics.add(TYPED_DEMANDS, attempt.resourceDemands().size());
             List<String> demandVector = demandVector(
@@ -106,7 +106,7 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
             }
 
             InMemoryDocumentStore.OccurrenceResolutionSnapshot storeState =
-                    expansions.captureStoreState();
+                    expansions.captureStoreState(current);
             ManagedOccurrenceResolver.Resolution resolution = resolver.resolve(
                     ManagedOccurrenceResolver.ResolutionRequest.from(
                             inputs.input(current),
@@ -192,11 +192,16 @@ final class AutomaticOccurrenceResolutionCoordinator<I> {
 
     interface ExpansionBuilder<I> {
         InMemoryDocumentStore.OccurrenceResolutionSnapshot captureStoreState();
+        default InMemoryDocumentStore.OccurrenceResolutionSnapshot captureStoreState(I current) {
+            return captureStoreState();
+        }
 
         default ManagedOccurrenceResolver.Resolution requirePrerequisites(I current, ClosureAttemptResult attempt,
                 ManagedOccurrenceResolver.Resolution resolution) {
             return resolution;
         }
+
+        default I completed(I current, ClosureAttemptResult attempt) { return current; }
 
         I expand(
                 I current,

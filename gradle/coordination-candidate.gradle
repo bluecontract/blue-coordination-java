@@ -1,0 +1,134 @@
+import groovy.json.JsonOutput
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.security.MessageDigest
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
+import org.gradle.api.publish.maven.tasks.PublishToMavenLocal
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+
+// Outgoing Coordination-only candidates keep the ordinary published dependency
+// graph. The existing immutable multi-library lanes retain their own contracts.
+def commit = providers.gradleProperty('coordinationCandidateCommit').orNull
+def candidate = commit != null
+def gitValue = { List<String> arguments ->
+    def process = new ProcessBuilder(['git'] + arguments).directory(rootDir)
+            .redirectErrorStream(true).start()
+    def output = process.inputStream.getText('UTF-8').trim()
+    if (process.waitFor() != 0) throw new GradleException('Candidate source inspection failed: ' + output)
+    output
+}
+def hash = { File file ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+    }
+    'sha256:' + digest.digest().encodeHex().toString()
+}
+def sourceIdentity = {
+    if (!candidate || !(commit ==~ /[0-9a-f]{40}/)
+            || version.toString() != '3.0.0-dev.' + commit) {
+        throw new GradleException('Use -PcoordinationCandidateCommit=<exact clean HEAD> to build a local candidate')
+    }
+    if (gitValue(['rev-parse', 'HEAD']) != commit
+            || !gitValue(['status', '--porcelain', '--untracked-files=normal']).isEmpty()) {
+        throw new GradleException('Coordination candidate requires the exact clean committed source; commit changes before staging')
+    }
+    [sourceCommit: commit, sourceTree: gitValue(['rev-parse', 'HEAD^{tree}']), sourceDirty: false]
+}
+
+def verifySource = tasks.register('verifyCoordinationCandidateSource') {
+    group = 'verification'
+    description = 'Requires an exact clean source identity for the Coordination-only candidate.'
+    outputs.upToDateWhen { false }
+    doLast { sourceIdentity() }
+}
+
+if (candidate) {
+    tasks.withType(JavaCompile).configureEach { dependsOn verifySource }
+    tasks.withType(AbstractArchiveTask).configureEach {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
+    }
+    tasks.named('javadoc') { options.noTimestamp = true }
+    tasks.named('jar') {
+        dependsOn verifySource
+        inputs.property('coordinationCandidateCommit', commit)
+        doFirst {
+            def source = sourceIdentity()
+            manifest.attributes('Coordination-Source-Commit': source.sourceCommit,
+                    'Coordination-Source-Tree': source.sourceTree,
+                    'Coordination-Candidate': 'true')
+        }
+    }
+    // Fail before any task executes, including publish dependencies. Candidate
+    // export below copies a local payload and is deliberately not a publish task.
+    gradle.taskGraph.whenReady { graph ->
+        def forbidden = graph.allTasks.findAll {
+            it instanceof PublishToMavenRepository || it instanceof PublishToMavenLocal
+                    || it.name == 'stageRelease' || it.name.startsWith('jreleaser')
+        }
+        if (!forbidden.empty) throw new GradleException('Local candidates cannot invoke release/publication tasks: '
+                + forbidden.collect { it.path })
+    }
+}
+
+tasks.register('exportCoordinationCandidate') {
+    group = 'build'
+    description = 'Exports a non-overwriting, source-bound local Coordination Maven repository; never releases.'
+    dependsOn verifySource, 'stageCoordinationCandidatePublications', 'verifyPublicationPom',
+            'verifyArtifactContents', 'verifyPublishedArtifactDependencies'
+    outputs.upToDateWhen { false }
+    doLast {
+        def source = sourceIdentity()
+        def location = providers.gradleProperty('coordinationCandidateRepository').orNull
+        if (!location) throw new GradleException('Set coordinationCandidateRepository to a new isolated output directory')
+        File repository = file(location).canonicalFile
+        if (repository.toPath().normalize().startsWith(rootDir.toPath().toAbsolutePath().normalize())) {
+            throw new GradleException('Export the candidate outside the source checkout')
+        }
+        if (Files.exists(repository.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+            throw new GradleException('Candidate output already exists; use a new directory: ' + repository)
+        }
+        File parent = repository.parentFile
+        if (!parent.isDirectory() || Files.isSymbolicLink(parent.toPath())) {
+            throw new GradleException('Candidate parent must be an existing real directory')
+        }
+        String coordinate = project.group.toString() + ':' + project.name + ':' + project.version
+        String base = (project.group.toString().replace('.', '/') + '/' + project.name + '/' + project.version
+                + '/' + project.name + '-' + project.version)
+        def artifacts = [runtime: '.jar', sources: '-sources.jar', javadoc: '-javadoc.jar', pom: '.pom'].collect { kind, suffix ->
+            String relative = base + suffix
+            File payload = layout.buildDirectory.file('dynamic-evolution-staging/' + relative).get().asFile
+            if (!Files.isRegularFile(payload.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                throw new GradleException('Missing candidate payload: ' + relative)
+            }
+            [kind: kind, coordinate: coordinate, path: relative, sha256: hash(payload), bytes: payload.length()]
+        }
+        def dependencies = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts.collect { artifact ->
+            [coordinate: artifact.moduleVersion.id.group + ':' + artifact.name + ':' + artifact.moduleVersion.id.version,
+             classifier: artifact.classifier, sha256: hash(artifact.file)]
+        }.sort { a, b -> (a.coordinate + ':' + a.classifier) <=> (b.coordinate + ':' + b.classifier) }
+        def manifest = [schema: 'blue-coordination/local-candidate/1', releaseReadinessClaimed: false,
+                        groupId: project.group.toString(), artifactId: project.name, version: version.toString(),
+                        javaRelease: 17, artifacts: artifacts, dependencies: dependencies] + source
+        File staging = Files.createTempDirectory(parent.toPath(), '.coordination-candidate-').toFile()
+        try {
+            artifacts.each { artifact ->
+                File destination = new File(staging, artifact.path)
+                destination.parentFile.mkdirs()
+                Files.copy(layout.buildDirectory.file('dynamic-evolution-staging/' + artifact.path).get().asFile.toPath(), destination.toPath())
+                if (hash(destination) != artifact.sha256) throw new GradleException('Candidate changed while exporting')
+            }
+            File manifestFile = new File(staging, 'candidate.json')
+            manifestFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + '\n', 'UTF-8')
+            new File(staging, 'candidate.json.sha256').setText(hash(manifestFile).substring(7) + '  candidate.json\n', 'UTF-8')
+            sourceIdentity() // An edit during the build invalidates the export.
+            Files.move(staging.toPath(), repository.toPath())
+            logger.lifecycle('COORDINATION_CANDIDATE ' + repository + ' ' + hash(new File(repository, 'candidate.json')))
+        } finally {
+            if (staging.exists()) project.delete(staging)
+        }
+    }
+}

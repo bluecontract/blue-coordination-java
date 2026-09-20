@@ -569,7 +569,7 @@ final class SdkDrainResultMapper {
                         .toList());
     }
 
-    private static ManagedSurfaceEvidence.OccurrenceResolution
+    static ManagedSurfaceEvidence.OccurrenceResolution
             occurrenceResolution(
                     ContractsClosureDispatchAttempt
                             .ManagedOccurrenceResolution resolution) {

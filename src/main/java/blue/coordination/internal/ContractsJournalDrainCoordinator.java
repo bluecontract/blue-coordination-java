@@ -84,7 +84,7 @@ final class ContractsJournalDrainCoordinator {
             ExternalOrderKey inclusiveCutoff,
             DrainBudget budget) {
         DrainBudget limits = Objects.requireNonNull(budget, "budget");
-        ExternalOrderKey scanAfter = durableState.processedThrough;
+        ExternalOrderKey scanAfter = durableState.processedThrough();
         List<ContractsRootFeederCoordinator.EventProgress> attempts =
                 new ArrayList<>();
         long committedTransitions = 0L;
@@ -133,18 +133,18 @@ final class ContractsJournalDrainCoordinator {
         List<TimelineEntry> completed = advanceContiguousFrontier(
                 inclusiveCutoff);
         boolean quiescent = !paused && journal.nextExternal(
-                durableState.processedThrough, inclusiveCutoff).isEmpty();
+                durableState.processedThrough(), inclusiveCutoff).isEmpty();
         return new DrainProgress(
                 attempts,
                 completed,
-                durableState.processedThrough,
+                durableState.processedThrough(),
                 quiescent,
                 paused,
                 committedTransitions);
     }
 
     synchronized ExternalOrderKey processedThrough() {
-        return durableState.processedThrough;
+        return durableState.processedThrough();
     }
 
     /** Transport-only completion is a journal turn, but cannot pass a blocked root. */
@@ -165,8 +165,8 @@ final class ContractsJournalDrainCoordinator {
             if (durableState.terminalEntries.add(EntryKey.from(entry))) {
                 terminalEntryObserver.accept(entry);
                 completed.add(entry);
-                if (durableState.processedThrough == null || entry.sourceOrderKey().compareTo(durableState.processedThrough) > 0) {
-                    durableState.processedThrough = entry.sourceOrderKey();
+                if (durableState.processedThrough() == null || entry.sourceOrderKey().compareTo(durableState.processedThrough()) > 0) {
+                    durableState.processedThrough(entry.sourceOrderKey());
                 }
             }
         }
@@ -184,7 +184,7 @@ final class ContractsJournalDrainCoordinator {
     /** Whether the ordinary lane has journal work at its retained frontier. */
     synchronized boolean hasPendingJournalTurn() {
         return journal.nextExternal(
-                durableState.processedThrough, null).isPresent();
+                durableState.processedThrough(), null).isPresent();
     }
 
     synchronized DurableState durableState() {
@@ -196,7 +196,7 @@ final class ContractsJournalDrainCoordinator {
         List<TimelineEntry> completed = new ArrayList<>();
         while (true) {
             Optional<TimelineEntry> next = journal.nextExternal(
-                    durableState.processedThrough, inclusiveCutoff);
+                    durableState.processedThrough(), inclusiveCutoff);
             if (next.isEmpty()) {
                 return List.copyOf(completed);
             }
@@ -205,7 +205,7 @@ final class ContractsJournalDrainCoordinator {
                     EntryKey.from(entry))) {
                 return List.copyOf(completed);
             }
-            durableState.processedThrough = entry.sourceOrderKey();
+            durableState.processedThrough(entry.sourceOrderKey());
             completed.add(entry);
         }
     }
@@ -255,10 +255,25 @@ final class ContractsJournalDrainCoordinator {
     }
 
     static final class DurableState {
-        private final Set<EntryKey> terminalEntries = new LinkedHashSet<>();
+        private final Set<EntryKey> terminalEntries;
+        private final java.util.Map<String, ExternalOrderKey> logicalFrontier;
         private ExternalOrderKey processedThrough;
+        DurableState() { this(new LinkedHashSet<>(), null); }
+        private DurableState(Set<EntryKey> entries, java.util.Map<String, ExternalOrderKey> frontier) {
+            terminalEntries = Objects.requireNonNull(entries); logicalFrontier = frontier;
+        }
+        static DurableState logical(Set<EntryKey> entries, java.util.Map<String, ExternalOrderKey> frontier) {
+            return new DurableState(entries, Objects.requireNonNull(frontier));
+        }
+        private ExternalOrderKey processedThrough() {
+            return logicalFrontier == null ? processedThrough : logicalFrontier.get("processed-through");
+        }
+        private void processedThrough(ExternalOrderKey value) {
+            if (logicalFrontier == null) processedThrough = value;
+            else logicalFrontier.put("processed-through", Objects.requireNonNull(value));
+        }
 
-        StorageState storageState() { return new StorageState(List.copyOf(terminalEntries), processedThrough); }
+        StorageState storageState() { return new StorageState(List.copyOf(terminalEntries), processedThrough()); }
 
         static DurableState fromStorage(StorageState state) {
             var restored = new DurableState();

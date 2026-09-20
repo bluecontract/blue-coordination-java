@@ -1040,7 +1040,7 @@ final class ManagedOccurrenceInventory {
             PersistentOrderedMap<RowOrderKey, ManagedOccurrenceBinding>
                     changedBucket = removeRequired(
                     read.value(), rowOrderKey, label);
-            return changedBucket.isEmpty()
+            return !changedBucket.isLogical() && changedBucket.isEmpty()
                     ? removeRequired(index, documentId, label + " bucket")
                     : put(index, documentId, changedBucket);
         }

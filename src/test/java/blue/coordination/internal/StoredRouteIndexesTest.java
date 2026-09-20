@@ -21,6 +21,73 @@ final class StoredRouteIndexesTest {
     static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(65536, 4096, 60000, 2048, 64);
     @TempDir Path temporary;
 
+    @Test void logicalDocumentRouteMutationsShareBucketsWithoutSharingPublicationConditions() {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
+        var packets = new ArrayList<blue.coordination.api.storage.CoordinationRecords.Publication>();
+        // when
+        for (int document : List.of(1, 2)) {
+            try (var attempt = records.attempt()) {
+                var context = new LogicalRecordContext(attempt);
+                var index = new StoredRouteIndexes(bytes, LIMITS).openLogical(context, new EngineMetrics(), ignored -> null, ignored -> null);
+                replace(index, document, "shared/timeline"); StoredRouteIndexes.selectLogical(index); context.flush();
+                packets.add(attempt.prepare("route-" + document, List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1})));
+            }
+        }
+        // then
+        for (boolean reverse : List.of(false, true)) {
+            var target = new LogicalRecordMapTest.Store();
+            assertTrue(target.publish(packets.get(reverse ? 1 : 0))); assertTrue(target.publish(packets.get(reverse ? 0 : 1)));
+            try (var attempt = target.attempt()) {
+                var context = new LogicalRecordContext(attempt);
+                var cold = new StoredRouteIndexes(bytes, LIMITS).openLogical(context, new EngineMetrics(), ignored -> null, ignored -> null);
+                assertEquals(List.of(id(1), id(2)), cold.route(entry("shared/timeline")));
+                var resident = new OperationRouteIndex(new EngineMetrics()); replace(resident, 1, "shared/timeline"); replace(resident, 2, "shared/timeline");
+                var expected = resident.prepareReplacement(List.of(replacement(1, "new/timeline")));
+                var actual = cold.prepareReplacement(List.of(replacement(1, "new/timeline")));
+                assertEquals(expected.operationRouteChanges(), actual.operationRouteChanges());
+                actual.publish(); expected.publish();
+                assertEquals(resident.route(entry("shared/timeline")), cold.route(entry("shared/timeline")));
+                assertEquals(resident.route(entry("new/timeline")), cold.route(entry("new/timeline")));
+            }
+        }
+        assertTrue(packets.stream().allMatch(packet -> packet.queries().isEmpty()), "Document-only route replacement must not read complete shared membership");
+    }
+
+    @Test void logicalRouteSelectionDetectsNewMatchingMembershipAndRemovalPreservesOtherDocuments() {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
+        var storage = new StoredRouteIndexes(bytes, LIMITS);
+        try (var attempt = records.attempt()) {
+            var context = new LogicalRecordContext(attempt); var index = storage.openLogical(context, new EngineMetrics(), ignored -> null, ignored -> null);
+            replace(index, 1, "shared"); StoredRouteIndexes.selectLogical(index); context.flush();
+            assertTrue(records.publish(attempt.prepare("seed", List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}))));
+        }
+        blue.coordination.api.storage.CoordinationRecords.Publication selected, removed, inserted;
+        // when
+        try (var attempt = records.attempt()) {
+            var index = storage.openLogical(new LogicalRecordContext(attempt), new EngineMetrics(), ignored -> null, ignored -> null);
+            assertEquals(List.of(id(1)), index.route(entry("shared")));
+            selected = attempt.prepare("selected", List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}));
+        }
+        try (var attempt = records.attempt()) {
+            var context = new LogicalRecordContext(attempt); var index = storage.openLogical(context, new EngineMetrics(), ignored -> null, ignored -> null);
+            index.remove(id(1)); StoredRouteIndexes.selectLogical(index); context.flush();
+            removed = attempt.prepare("removed", List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}));
+        }
+        try (var attempt = records.attempt()) {
+            var context = new LogicalRecordContext(attempt); var index = storage.openLogical(context, new EngineMetrics(), ignored -> null, ignored -> null);
+            replace(index, 2, "shared"); StoredRouteIndexes.selectLogical(index); context.flush();
+            inserted = attempt.prepare("inserted", List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1}));
+        }
+        // then
+        assertTrue(records.publish(inserted)); assertFalse(records.publish(selected)); assertTrue(records.publish(removed));
+        try (var attempt = records.attempt()) {
+            var index = storage.openLogical(new LogicalRecordContext(attempt), new EngineMetrics(), ignored -> null, ignored -> null);
+            assertEquals(List.of(id(2)), index.route(entry("shared")));
+        }
+    }
+
     @Test void coldRoutesPreserveExactShapeDeliveriesGenerationAndMutationCounters() {
         // given
         var bytes = new Bytes(); var writer = new StoredRouteIndexes(bytes, LIMITS);

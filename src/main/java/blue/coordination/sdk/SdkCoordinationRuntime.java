@@ -435,6 +435,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return engine.retainedExactValue(blueId).map(ExactBlueValue::wrap);
     }
 
+    synchronized Optional<List<ManagedSurfaceEvidence.OccurrenceResolution>> auditCommittedOccurrenceResolutions(
+            String publicationIdentity) {
+        ensureOpen();
+        return engine.auditCommittedOccurrenceResolutions(publicationIdentity)
+                .map(rows -> rows.stream().map(SdkDrainResultMapper::occurrenceResolution).toList());
+    }
+
     synchronized Optional<blue.language.processor.closure.ClosureProcessResult> auditClosureExecution(
             String publicationIdentity) {
         ensureOpen();
@@ -875,6 +882,117 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         }
         requireDocument(root.id());
         return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
+    }
+
+    private SelectedProcessingStage pendingStage;
+    private AdvancedCoordination.SourceStage pendingSourceStage;
+
+    synchronized AdvancedCoordination.SourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); exactNodeProvider.beginLookupScope();
+        try {
+            pendingSourceStage = new AdvancedCoordination.SourceStage(this, engine.selectSourceHistoryStage(expected));
+            return pendingSourceStage;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized blue.coordination.api.SourceHistoryStageResult executeSourceHistoryStage(AdvancedCoordination.SourceStage stage) {
+        if (closed || pendingSourceStage != stage || stage.runtime != this || stage.owner != Thread.currentThread())
+            throw new IllegalStateException("Source stage is retired or belongs to another runtime");
+        exactNodeProvider.beginLookupScope();
+        try {
+            var completed = stage.selected.execute(); pendingSourceStage = null;
+            if (!completed.committable()) close();
+            else completed.result().processing().ifPresent(processing -> sourceHistoryProcessingResults.put(
+                    completed.selection().prerequisite(), retain(mapper.map(processing))));
+            return completed;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized SelectedProcessingStage selectStage(DocumentHandle root, EntryHandle input) {
+        requireStageRoot(root);
+        if (input != null && input.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");
+        pendingStage = new SelectedProcessingStage(this, engine.selectRootStage(root.id(), input == null ? null : requireCoreEntry(input)));
+        return pendingStage;
+    }
+    synchronized blue.coordination.api.ProcessingReadiness inspectProcessingReadiness() {
+        ensureOpen();
+        return engine.auditRootedProcessingReadiness();
+    }
+
+    synchronized SelectedProcessingStage selectRetainedStage(DocumentHandle root, String expectedWorkIdentity) {
+        requireStageRoot(root);
+        pendingStage = new SelectedProcessingStage(this, engine.selectRetainedRootStage(root.id(), expectedWorkIdentity));
+        return pendingStage;
+    }
+    synchronized SelectedProcessingStage selectManagedApplicationStage(String expectedWorkIdentity) {
+        ensureOpen();
+        pendingStage = new SelectedProcessingStage(this, engine.selectManagedApplicationStage(expectedWorkIdentity));
+        return pendingStage;
+    }
+
+    synchronized Optional<SelectedProcessingStage> selectJournalStage() {
+        ensureOpen();
+        pendingStage = engine.selectJournalStage().map(selected -> new SelectedProcessingStage(this, selected)).orElse(null);
+        return Optional.ofNullable(pendingStage);
+    }
+
+    synchronized Optional<SelectedProcessingStage> selectJournalStageThrough(String inclusiveEntryBlueId) {
+        ensureOpen();
+        pendingStage = engine.selectJournalStageThrough(requireCoreEntry(lightweightHandle(inclusiveEntryBlueId)))
+                .map(selected -> new SelectedProcessingStage(this, selected)).orElse(null);
+        return Optional.ofNullable(pendingStage);
+    }
+
+    synchronized blue.coordination.api.ProcessingReadiness inspectProcessingReadinessThrough(String inclusiveEntryBlueId) {
+        ensureOpen();
+        return engine.auditRootedProcessingReadinessThrough(requireCoreEntry(lightweightHandle(inclusiveEntryBlueId)));
+    }
+
+    synchronized SelectedProcessingStage selectStageThrough(DocumentHandle root, EntryHandle inclusiveEntry) {
+        requireStageRoot(root);
+        if (inclusiveEntry.owner() != owner) throw new IllegalArgumentException("Entry belongs to another runtime");
+        pendingStage = new SelectedProcessingStage(this, engine.selectRootStageThrough(root.id(), requireCoreEntry(inclusiveEntry)));
+        return pendingStage;
+    }
+
+    synchronized ProcessingStageResult executeSelectedStage(SelectedProcessingStage stage) {
+        if (closed || pendingStage != stage || stage.runtime != this)
+            throw new IllegalStateException("Stage selection is retired or belongs to another runtime");
+        // The engine also checks thread affinity before consuming the frozen selection.
+        var receipt = stage.selected.execute(); pendingStage = null;
+        return stageResult(receipt, stage);
+    }
+
+    synchronized ProcessingStageResult processRootStage(DocumentHandle root, EntryHandle input) {
+        return selectStage(root, Objects.requireNonNull(input)).execute();
+    }
+
+    synchronized ProcessingStageResult processNextRootStage(DocumentHandle root) {
+        return selectStage(root, null).execute();
+    }
+
+    private void requireStageRoot(DocumentHandle root) {
+        ensureOpen();
+        if (!(root instanceof SdkDocumentHandle handle) || handle.runtime != this)
+            throw new IllegalArgumentException("Document belongs to another runtime");
+        requireDocument(root.id());
+    }
+
+    private ProcessingStageResult stageResult(ProcessingDrainReceipt receipt, SelectedProcessingStage stage) {
+        boolean failed = receipt.managedEpochApplicationAttempts().stream().anyMatch(a -> a.publicationFailure().isPresent())
+                || java.util.stream.Stream.concat(receipt.contractsAttemptsByEntry().values().stream().flatMap(List::stream),
+                        receipt.rootedRetainedAttempts().stream().map(ProcessingDrainReceipt.RootedRetainedAttempt::attempt))
+                .anyMatch(a -> a.attempt().isComplete() && a.attempt().processResult().commits() && !a.published());
+        var mapped = mapper.map(receipt);
+        boolean selected = !mapped.entries().isEmpty() || !mapped.rootedRetainedApplications().isEmpty()
+                || !mapped.managedEpochApplicationAttempts().isEmpty() || !mapped.managedEpochEvidenceFailures().isEmpty();
+        var disposition = failed ? ProcessingStageResult.Disposition.NONCOMMITTING
+                : !receipt.quiescent() ? ProcessingStageResult.Disposition.WAITING
+                : selected ? ProcessingStageResult.Disposition.COMPLETED : ProcessingStageResult.Disposition.NO_WORK;
+        if (!failed) retain(mapped);
+        else close(); // A rejected publication cannot leave a stageable mutable owner.
+        return new ProcessingStageResult(disposition, mapped, stage.context(), stage.selected.resultOwners(receipt),
+                stage.selected.invalidatesSelection(receipt));
     }
 
     synchronized DrainResult drain() {
@@ -1569,6 +1687,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     private void ensureOpen() {
+        if (pendingStage != null || pendingSourceStage != null) throw new IllegalStateException("Execute or discard the selected stage before other SDK work");
         if (closed) {
             throw new IllegalStateException("BlueCoordination is closed");
         }

@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.*;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Set;
@@ -62,6 +63,37 @@ final class StoredCatchUpWorkIndexes {
                     s.due().storedCopy(DUE_BINDING, dueKeys, textRows, objects, limits), s.comparisons(), s.copiedNodes()));
         });
     }
+    ManagedCatchUpWorkIndex openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        var keys = new OrderedRecordKey<ManagedCatchUpWorkIndex.DueKey>() {
+            public String identity() { return "blue-coordination/ordered-key/due-work/1"; }
+            public byte[] encode(ManagedCatchUpWorkIndex.DueKey key) {
+                return OrderedRecordKey.tuple(OrderedRecordKey.externalOrder().encode(key.barrierCauseOrder()),
+                        OrderedRecordKey.externalOrder().encode(key.sourceOrder()), OrderedRecordKey.document().encode(key.sourceDocumentId()),
+                        OrderedRecordKey.signedLong().encode(key.sourceEpoch()), OrderedRecordKey.document().encode(key.consumerDocumentId()),
+                        OrderedRecordKey.text().encode(key.targetPath()), OrderedRecordKey.signedLong().encode(key.activationGeneration()));
+            }
+            public ManagedCatchUpWorkIndex.DueKey decode(byte[] bytes) {
+                var parts = OrderedRecordKey.split(bytes, 7);
+                return new ManagedCatchUpWorkIndex.DueKey(OrderedRecordKey.externalOrder().decode(parts[0]),
+                        OrderedRecordKey.externalOrder().decode(parts[1]), OrderedRecordKey.document().decode(parts[2]),
+                        OrderedRecordKey.signedLong().decode(parts[3]), OrderedRecordKey.document().decode(parts[4]),
+                        OrderedRecordKey.text().decode(parts[5]), OrderedRecordKey.signedLong().decode(parts[6]));
+            }
+        };
+        return ManagedCatchUpWorkIndex.restoreIndexes(new ManagedCatchUpWorkIndex.StoredIndexes(
+                work.openLogical(context, Family.WORK, scope, OrderedRecordKey.text()),
+                pending.openLogical(context, Family.WORK_PENDING, scope, OrderedRecordKey.text()),
+                applications.openLogical(context, Family.WORK_APPLICATION, scope, OrderedRecordKey.text()),
+                applicationsByWork.openLogical(context, Family.WORK_APPLICATION_BY_WORK, scope, OrderedRecordKey.text()),
+                PersistentMinimumMap.logical(ManagedCatchUpWorkIndex.DUE_ORDER, context, Family.WORK_DUE, scope, keys, textRows, limits), 0, 0));
+    }
+
+    void selectLogical(ManagedCatchUpWorkIndex value) {
+        var s = value.storedIndexes(); s.work().selectLogicalRecords(); s.pending().selectLogicalRecords();
+        s.applications().selectLogicalRecords(); s.applicationsByWork().selectLogicalRecords(); s.due().selectLogicalRecords();
+    }
+
     ManagedCatchUpWorkIndex open(Function<Root, byte[]> selected, int comparisons, int copiedNodes) {
         return physical(() -> ManagedCatchUpWorkIndex.restoreIndexes(new ManagedCatchUpWorkIndex.StoredIndexes(
                 work.open(selected.apply(Root.WORK)), pending.open(selected.apply(Root.PENDING)), applications.open(selected.apply(Root.APPLICATION)),

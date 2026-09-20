@@ -76,9 +76,14 @@ record RootedInvocationEvidence(RootedProcessingContext context, String delivery
 
     /** Operational source fences never replace selected values or enter their semantic identity. */
     RootedInvocationEvidence capturePublicationFences(ClosureInvocationInput input, InMemoryDocumentStore documents) {
+        return capturePublicationFences(context.entryOwners().stream()
+                .map(ContractsClosureAdapter::coordinationId).toList(), documents);
+    }
+
+    /** Once PROCESS establishes additional result owners, validate their actual selected heads too. */
+    RootedInvocationEvidence capturePublicationFences(java.util.Collection<DocumentId> owners, InMemoryDocumentStore documents) {
         Map<DocumentId, PublicationFence> fences = new LinkedHashMap<>(publicationFences);
-        for (var selected : input.snapshot().managedDocuments()) {
-            DocumentId id = ContractsClosureAdapter.coordinationId(selected.documentId());
+        for (DocumentId id : owners) {
             if (fences.containsKey(id)) continue;
             documents.find(id).ifPresent(session -> fences.put(id, new PublicationFence(
                     new InMemoryDocumentStore.DocumentHead(session.epoch(), session.currentRepresentation().blueId()),

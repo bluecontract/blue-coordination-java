@@ -8,7 +8,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 /** Bounded private registry of selected nested maps; never a catalog or decoded-history cache. */
 final class StoredIndexProjections implements AutoCloseable {
     private record Key(String family, Object owner) { }
-    private record Entry<K, V>(byte[] descriptor, PersistentOrderedMap.ValueProjection<K, V, V> projection,
+    private record Entry<K, V>(byte[] descriptor, Object logicalIdentity, PersistentOrderedMap.ValueProjection<K, V, V> projection,
             BiFunction<K, V, V> writer) { }
     private final Map<Key, Entry<?, ?>> entries = new HashMap<>();
     private final Map<Object, Entry<?, ?>> tokens = new IdentityHashMap<>();
@@ -27,17 +27,18 @@ final class StoredIndexProjections implements AutoCloseable {
             BiFunction<K, V, V> read, BiFunction<K, V, V> write, Consumer<K> absent) {
         require(!closed, "Selected index scope is closed");
         var key = new Key(Objects.requireNonNull(family), Objects.requireNonNull(owner));
-        byte[] descriptor = source.storedRootDescriptor();
+        byte[] descriptor = source.isLogical() ? null : source.storedRootDescriptor();
+        Object logicalIdentity = source.isLogical() ? source.logicalSnapshotIdentity() : null;
         var previous = (Entry<K, V>) entries.get(key);
         if (previous != null) {
-            require(Arrays.equals(previous.descriptor(), descriptor), "Selected nested index changed within one pinned scope");
+            require(Arrays.equals(previous.descriptor(), descriptor) && Objects.equals(previous.logicalIdentity(), logicalIdentity), "Selected nested index changed within one pinned scope");
             return previous.projection().open();
         }
-        require(entries.size() < maximumMaps, "Selected index-map scope bound exceeded");
+        require(entries.size() < maximumMaps, "Selected index-map scope bound exceeded (" + maximumMaps + ") opening " + family);
         var projection = source.projectValues((k, v) -> {
             require(!closed, "Selected index scope is closed"); return read.apply(k, v);
         }, absent == null ? null : k -> { require(!closed, "Selected index scope is closed"); absent.accept(k); });
-        var entry = new Entry<>(descriptor, projection, write);
+        var entry = new Entry<>(descriptor, logicalIdentity, projection, write);
         entries.put(key, entry); tokens.put(projection, entry); return projection.open();
     }
     @SuppressWarnings("unchecked")

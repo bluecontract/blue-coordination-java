@@ -82,6 +82,26 @@ public final class AdvancedCoordination {
         return runtime.processSourceHistoryPrerequisite(Objects.requireNonNull(expected, "expected"));
     }
 
+    /** Freezes one source action and exposes its known owners before any PROCESS or ADMIT call. */
+    public SourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        return runtime.selectSourceHistoryStage(Objects.requireNonNull(expected));
+    }
+
+    /** Source selection is scope-bound, thread-affine and executable once. */
+    public static final class SourceStage {
+        final Thread owner = Thread.currentThread();
+        final SdkCoordinationRuntime runtime;
+        final blue.coordination.internal.DefaultCoordinationEngine.SelectedSourceStage selected;
+        SourceStage(SdkCoordinationRuntime runtime,
+                blue.coordination.internal.DefaultCoordinationEngine.SelectedSourceStage selected) {
+            this.runtime = runtime; this.selected = selected;
+        }
+        /** Exact prerequisite, absent/existing predecessors and complete known source owners. */
+        public blue.coordination.api.SourceHistoryStageContext context() { return selected.context(); }
+        /** Completes only this source action; requesting-parent execution remains a separate stage. */
+        public blue.coordination.api.SourceHistoryStageResult execute() { return runtime.executeSourceHistoryStage(this); }
+    }
+
     /**
      * Reads the SDK view retained by one completed source execution, without executing another obligation.
      * @param expected complete exact descriptor used for that source execution
@@ -163,6 +183,16 @@ public final class AdvancedCoordination {
     public Optional<ExactNodeEvidence> auditExactNodeEvidence(DocumentId id) {
         return runtime.auditExactNodeEvidence(
                 Objects.requireNonNull(id, "id"));
+    }
+
+    /**
+     * Audits exact resolver facts from a committing publication receipt. Empty
+     * means the publication is absent or did not commit. These historical facts
+     * do not authorize a later transition or assert current source readiness.
+     */
+    public Optional<List<ManagedSurfaceEvidence.OccurrenceResolution>> auditCommittedOccurrenceResolutions(
+            String publicationIdentity) {
+        return runtime.auditCommittedOccurrenceResolutions(requireIdentity(publicationIdentity, "publicationIdentity"));
     }
 
     /** Reads retained lineage state for one managed source occurrence. */

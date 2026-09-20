@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.*;
 import java.util.function.Function;
 import static blue.coordination.internal.SessionStorageWire.*;
@@ -10,16 +11,36 @@ import static blue.coordination.internal.SessionStorageWire.*;
 final class StoredTopologyIndexes {
     enum Root { COMPONENT, TARGET, SOURCE, JOIN_MEMBERS, JOIN_ROOTS }
     private final StoreIndexCodecs.Binding<DocumentId, ProcessEmbeddedComponentIndex.Component> components;
+    private final StoreIndexCodecs.Binding<DocumentId, Boolean> members;
     private final StoreIndexCodecs.Binding<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> targets, sources, joinMembers, joinRoots;
 
     StoredTopologyIndexes(CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
         var c = new StoreIndexCodecs(objects, limits);
         components = c.binding("topology/component", EmbeddingBinding.DOCUMENT_ORDER, c.documents, c.components);
-        var members = c.binding("topology/member-bucket", EmbeddingBinding.DOCUMENT_ORDER, c.documents, c.membership);
+        members = c.binding("topology/member-bucket", EmbeddingBinding.DOCUMENT_ORDER, c.documents, c.membership);
         targets = c.binding("topology/targets", EmbeddingBinding.DOCUMENT_ORDER, c.documents, members.nested());
         sources = c.binding("topology/sources", EmbeddingBinding.DOCUMENT_ORDER, c.documents, members.nested());
         joinMembers = c.binding("topology/join-members", EmbeddingBinding.DOCUMENT_ORDER, c.documents, members.nested());
         joinRoots = c.binding("topology/join-roots", EmbeddingBinding.DOCUMENT_ORDER, c.documents, members.nested());
+    }
+
+    ProcessEmbeddedComponentIndex openLogical(LogicalRecordContext context) {
+        var scope = LogicalRecordContext.runtimeScope();
+        var joins = RootedJoinCandidateIndex.restoreIndexes(new RootedJoinCandidateIndex.StoredIndexes(
+                logicalMembers(context, Family.TOPOLOGY_JOIN_MEMBER), logicalMembers(context, Family.TOPOLOGY_JOIN_ROOT)));
+        return ProcessEmbeddedComponentIndex.restoreIndexes(new ProcessEmbeddedComponentIndex.StoredIndexes(
+                components.openLogical(context, Family.TOPOLOGY_COMPONENT, scope, OrderedRecordKey.document()),
+                logicalMembers(context, Family.TOPOLOGY_TARGET), logicalMembers(context, Family.TOPOLOGY_SOURCE), true, joins));
+    }
+
+    private PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> logicalMembers(LogicalRecordContext context, Family family) {
+        return members.openLogicalBuckets(context, family, LogicalRecordContext.runtimeScope(), EmbeddingBinding.DOCUMENT_ORDER,
+                OrderedRecordKey.document(), OrderedRecordKey.document());
+    }
+
+    void selectLogical(ProcessEmbeddedComponentIndex value) {
+        var s = value.storedIndexes(); s.components().selectLogicalRecords(); s.targets().selectLogicalRecords(); s.sources().selectLogicalRecords();
+        s.joins().storedIndexes().members().selectLogicalRecords(); s.joins().storedIndexes().roots().selectLogicalRecords();
     }
 
     ProcessEmbeddedComponentIndex retainPartition(ProcessEmbeddedComponentIndex value) {
@@ -48,17 +69,29 @@ final class StoredTopologyIndexes {
     }
 
     Optional<ProcessEmbeddedComponentIndex.Component> component(ProcessEmbeddedComponentIndex value, DocumentId document) {
+        return component(value, document, false);
+    }
+
+    /**
+     * A controlled logical writer replaces an owner's outgoing edges and the corresponding
+     * reverse points atomically. Reading its component does not semantically enumerate
+     * other consumers. Selected outgoing edges still authenticate their reverse points;
+     * explicit incoming traversal retains its own complete predicate and member checks.
+     * Raw/import storage keeps the complete bidirectional integrity check.
+     */
+    Optional<ProcessEmbeddedComponentIndex.Component> component(ProcessEmbeddedComponentIndex value, DocumentId document,
+            boolean controlledLogical) {
         return physical(() -> {
             var state = value.storedIndexes(); var row = state.components().get(document);
             if (row == null) {
-                require(state.targets().get(document) == null && state.sources().get(document) == null,
+                require(empty(state.targets().get(document)) && empty(state.sources().get(document)),
                         "Absent topology owner has retained edges");
                 return Optional.empty();
             }
             require(row.members().contains(document), "Selected topology component has foreign owner");
             for (var member : row.members()) require(row.equals(state.components().get(member)), "Selected topology component membership differs");
             requireEdges(state.targets(), state.sources(), state.components(), document);
-            requireEdges(state.sources(), state.targets(), state.components(), document);
+            if (!controlledLogical) requireEdges(state.sources(), state.targets(), state.components(), document);
             return Optional.of(row);
         });
     }
@@ -91,6 +124,8 @@ final class StoredTopologyIndexes {
             return result;
         });
     }
+
+    private static boolean empty(PersistentOrderedMap<?, ?> bucket) { return bucket == null || bucket.isEmpty(); }
 
     private static void requireEdges(PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> forward,
             PersistentOrderedMap<DocumentId, PersistentOrderedMap<DocumentId, Boolean>> reverse,

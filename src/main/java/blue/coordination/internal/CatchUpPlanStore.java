@@ -50,9 +50,9 @@ final class CatchUpPlanStore {
         this.plans = Objects.requireNonNull(plans, "plans");
         this.barriers = Objects.requireNonNull(barriers, "barriers");
         this.work = Objects.requireNonNull(work, "work");
-        this.activeBarrierCount = requireNonNegative(
+        this.activeBarrierCount = barriers.isLogical() ? 0 : requireNonNegative(
                 activeBarrierCount, "activeBarrierCount");
-        if (activeBarrierCount > barriers.size()) {
+        if (!barriers.isLogical() && activeBarrierCount > barriers.size()) {
             throw new IllegalArgumentException(
                     "activeBarrierCount exceeds retained barriers");
         }
@@ -118,7 +118,7 @@ final class CatchUpPlanStore {
         }
         PersistentOrderedMap.Mutation<String, ManagedCatchUpBarrier> mutation =
                 barriers.put(selected.barrierIdentity(), selected);
-        int nextActiveBarrierCount = Math.addExact(
+        int nextActiveBarrierCount = barriers.isLogical() ? 0 : Math.addExact(
                 activeBarrierCount,
                 activeDelta(read.value(), selected));
         return new CatchUpPlanStore(
@@ -429,6 +429,11 @@ final class CatchUpPlanStore {
             ManagedEpochApplicationWork applicationWork,
             ManagedEpochApplicationReceipt applicationReceipt,
             Set<DocumentId> excludedConsumers) {
+        return withCommittedApplication(applicationWork, applicationReceipt, CatchUpConsumerScope.excluding(excludedConsumers));
+    }
+
+    CatchUpPlanStore withCommittedApplication(ManagedEpochApplicationWork applicationWork,
+            ManagedEpochApplicationReceipt applicationReceipt, CatchUpConsumerScope consumers) {
         ManagedEpochApplicationWork selectedWork = Objects.requireNonNull(
                 applicationWork, "applicationWork");
         ManagedEpochApplicationReceipt receipt = Objects.requireNonNull(
@@ -450,8 +455,7 @@ final class CatchUpPlanStore {
                     "Cannot commit unregistered catch-up work");
         }
         ManagedCatchUpWorkIndex.DueWorkRead canonicalDue =
-                work.nextDueWorkExcluding(Objects.requireNonNull(
-                        excludedConsumers, "excludedConsumers"));
+                nextDueWork(Objects.requireNonNull(consumers, "consumers"));
         if (!canonicalDue.found()
                 || !canonicalDue.work().workIdentity().equals(
                         selectedWork.workIdentity())) {
@@ -514,8 +518,11 @@ final class CatchUpPlanStore {
     }
 
     boolean hasActiveBarriers() {
-        return activeBarrierCount != 0;
+        return barriers.isLogical() ? barriers.values().stream().anyMatch(CatchUpPlanStore::isActive) : activeBarrierCount != 0;
     }
+
+    /** A fast-path hint only: logical callers must inspect their own reachable consumer barriers. */
+    boolean mayHaveActiveBarriers() { return barriers.isLogical() || activeBarrierCount != 0; }
 
     boolean hasActivePlanForSource(DocumentId sourceDocumentId) {
         return plans.hasActivePlanForSource(Objects.requireNonNull(
@@ -596,6 +603,14 @@ final class CatchUpPlanStore {
         return work.nextDueWork();
     }
 
+    ManagedCatchUpWorkIndex.DueWorkRead nextDueWork(CatchUpConsumerScope consumers) {
+        if (!consumers.included()) return work.nextDueWorkExcluding(consumers.documents());
+        var selectedPlans = new java.util.ArrayList<ManagedOccurrenceCatchUpPlan>();
+        for (var owner : consumers.documents().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList())
+            selectedPlans.addAll(plans.forConsumer(owner).plans());
+        return work.nextDueWorkForPlans(selectedPlans);
+    }
+
     ManagedCatchUpWorkIndex.DueWorkRead nextDueWorkExcluding(
             Set<DocumentId> excludedConsumers) {
         return work.nextDueWorkExcluding(excludedConsumers);
@@ -655,7 +670,7 @@ final class CatchUpPlanStore {
         long actualActive = barriers.values().stream()
                 .filter(CatchUpPlanStore::isActive)
                 .count();
-        if (actualActive != activeBarrierCount) {
+        if (!barriers.isLogical() && actualActive != activeBarrierCount) {
             throw new IllegalStateException(
                     "Active catch-up barrier count disagrees with index: "
                             + activeBarrierCount + " != " + actualActive);
@@ -719,7 +734,7 @@ final class CatchUpPlanStore {
                 plans,
                 mutation.map(),
                 work,
-                Math.addExact(
+                barriers.isLogical() ? 0 : Math.addExact(
                         activeBarrierCount,
                         activeDelta(read.value(), canonical)),
                 sum(

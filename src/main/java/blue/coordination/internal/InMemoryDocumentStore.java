@@ -63,6 +63,29 @@ final class InMemoryDocumentStore {
     private StoredPublicationReceiptReuse storedPublicationReuse;
     private Object publicationRetentionEpoch;
     private StoreState state;
+    private StoredHistoricalSources historicalSources;
+
+    synchronized void bindHistoricalSources(StoredHistoricalSources sources) {
+        if (historicalSources != null) throw new IllegalStateException("Historical source access already bound");
+        historicalSources = Objects.requireNonNull(sources);
+    }
+
+    synchronized Optional<DocumentSession> sourceAdmission(DocumentId id) {
+        return historicalSources == null ? find(id) : historicalSources.admission(id);
+    }
+
+    synchronized Optional<DocumentSession> sourceBefore(DocumentId id, blue.language.processor.ExternalOrderKey cutoff) {
+        return historicalSources == null ? find(id) : historicalSources.before(id, cutoff);
+    }
+
+    synchronized OccurrenceResolutionSnapshot historicalOccurrenceResolutionSnapshot(
+            blue.language.processor.ExternalOrderKey cutoff, Set<DocumentId> owners) {
+        var current = occurrenceResolutionSnapshot();
+        if (historicalSources == null) return current;
+        return new OccurrenceResolutionSnapshot(historicalSources.lineages(cutoff, current.lineageIndex(), owners),
+                current.occurrenceInventory(), current.componentIndex(), current.occurrenceInventoryGeneration(),
+                current.componentIndexGeneration());
+    }
 
     InMemoryDocumentStore() {
         this(new EngineMetrics());
@@ -623,6 +646,10 @@ final class InMemoryDocumentStore {
                 .work());
     }
 
+    synchronized Optional<ManagedEpochApplicationWork> nextCatchUpWork(CatchUpConsumerScope consumers) {
+        return Optional.ofNullable(state.catchUpPlans().nextDueWork(consumers).work());
+    }
+
     /**
      * Atomically records a pre-PROCESS immutable-evidence failure. Document
      * sessions, committed/ready heads, occurrence cursors, and receipt history
@@ -767,6 +794,7 @@ final class InMemoryDocumentStore {
         MultiDocumentPublicationTransaction selected = Objects.requireNonNull(
                 transaction, "transaction");
         StoreState replacement = selected.prepareReplacement(state);
+        if (historicalSources != null) historicalSources.published(selected.retainedSourceOwners(), replacement);
         state = replacement;
     }
 

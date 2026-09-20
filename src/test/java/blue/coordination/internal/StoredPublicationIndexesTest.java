@@ -16,6 +16,56 @@ final class StoredPublicationIndexesTest {
     private static final DocumentSessionStorage.Limits LIMITS = new DocumentSessionStorage.Limits(MAX, 256, 256L * 1024 * 1024);
     private static final PersistentMapStorage.Limits MAPS = new PersistentMapStorage.Limits(40 * 1024 * 1024, 4096, MAX, 4096, 8);
 
+    @Test void logicalReceiptsReopenExactResultsAndIndependentPublicationMemberships() throws Exception {
+        // given
+        var records = new LogicalRecordMapTest.Store(); var bytes = new Bytes();
+        var packets = new ArrayList<blue.coordination.api.storage.CoordinationRecords.Publication>();
+        var expected = new LinkedHashMap<String, byte[]>();
+        var expectedEvents = new ArrayList<String>(); var expectedCheckpoints = new ArrayList<String>();
+        var codec = new ClosureProcessResultStorageCodec(MAX, 256);
+        try (var fixture = new DocumentSessionStorageTest.Fixture()) {
+            // when
+            for (String timeline : List.of("rcp2/source", "other/source")) {
+                var root = fixture.start(resource("rooted", "source.yaml").replace("rcp2/source", timeline), timeline, ActivationPolicy.fromNow());
+                fixture.process(root, fixture.append(root, timeline, "tick"));
+                var state = fixture.engine.documents().storedState();
+                var receipt = state.closurePublicationReceiptIndex().entries().stream()
+                        .map(Map.Entry::getValue).filter(row -> row.documentIds().contains(root.id()))
+                        .findFirst().orElseThrow();
+                try (var binding = new Binding(bytes); var attempt = records.attempt()) {
+                    var context = new LogicalRecordContext(attempt); String id = receipt.publicationIdentity();
+                    binding.indexes.openLogicalGeneric(context).put(id, true).map().selectLogicalRecords();
+                    binding.indexes.openLogicalClosures(context).put(id, receipt).map().selectLogicalRecords();
+                    var result = receipt.attempt().processResult();
+                    assertFalse(RootedResultScope.events(result).isEmpty()); assertFalse(RootedResultScope.checkpoints(result).isEmpty());
+                    binding.results.logicalOutbox(context, MAPS).appendAll(RootedResultScope.events(result)).selectLogicalRecords();
+                    binding.results.logicalCheckpoints(context, MAPS).appendAll(RootedResultScope.checkpoints(result)).selectLogicalRecords();
+                    for (var event : RootedResultScope.events(result)) expectedEvents.add(HexFormat.of().formatHex(binding.results.outboxCodec().encode(event)));
+                    for (var checkpoint : RootedResultScope.checkpoints(result)) expectedCheckpoints.add(HexFormat.of().formatHex(binding.results.checkpointCodec().encode(checkpoint)));
+                    context.flush(); packets.add(attempt.prepare(id, List.of(), new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1})));
+                    expected.put(id, codec.encode(receipt.attempt().processResult()));
+                }
+            }
+        }
+        // then
+        for (boolean reverse : List.of(false, true)) {
+            var target = new LogicalRecordMapTest.Store();
+            assertTrue(target.publish(packets.get(reverse ? 1 : 0))); assertTrue(target.publish(packets.get(reverse ? 0 : 1)));
+            try (var binding = new Binding(bytes.copy()); var attempt = target.attempt()) {
+                var context = new LogicalRecordContext(attempt); var generic = binding.indexes.openLogicalGeneric(context);
+                var admissions = binding.indexes.openLogicalAdmissions(context); var closures = binding.indexes.openLogicalClosures(context);
+                for (var row : expected.entrySet()) {
+                    var receipt = StoredPublicationIndexes.checkedClosure(row.getKey(), closures.get(row.getKey()), generic, admissions);
+                    assertArrayEquals(row.getValue(), codec.encode(receipt.attempt().processResult()));
+                }
+                assertEquals(expectedEvents.stream().sorted().toList(), binding.results.logicalOutbox(context, MAPS).values().stream()
+                        .map(row -> HexFormat.of().formatHex(binding.results.outboxCodec().encode(row))).sorted().toList());
+                assertEquals(expectedCheckpoints.stream().sorted().toList(), binding.results.logicalCheckpoints(context, MAPS).values().stream()
+                        .map(row -> HexFormat.of().formatHex(binding.results.checkpointCodec().encode(row))).sorted().toList());
+            }
+        }
+    }
+
     @Test void coldSelectedPublicationAndOriginalRowsShareOneViewScopeWithoutWrites() throws Exception {
         // given
         var bytes = new Bytes(); byte[] genericRoot, admissionRoot, closureRoot, event, checkpoint;

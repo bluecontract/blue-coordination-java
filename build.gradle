@@ -54,6 +54,12 @@ if (!versionMatches.find()) {
     throw new GradleException('Missing version in .cz.toml')
 }
 def declaredProjectVersion = versionMatches.group(1)
+def coordinationCandidateCommit = providers.gradleProperty('coordinationCandidateCommit').orNull
+def localCoordinationCandidate = coordinationCandidateCommit != null
+if (localCoordinationCandidate && (dependencyMode != 'published-artifact'
+        || !(coordinationCandidateCommit ==~ /[0-9a-f]{40}/))) {
+    throw new GradleException('coordinationCandidateCommit requires an exact commit and published lower-layer dependencies')
+}
 def developmentProjectVersion = providers.gradleProperty(
         'blueDevelopmentVersion').orNull
 if (immutableDevelopmentContracts
@@ -68,7 +74,8 @@ if (!immutableDevelopmentContracts && developmentProjectVersion != null) {
     throw new GradleException(
             'blueDevelopmentVersion is only valid with immutable-development-contracts')
 }
-version = developmentProjectVersion ?: declaredProjectVersion
+version = localCoordinationCandidate ? '3.0.0-dev.' + coordinationCandidateCommit
+        : developmentProjectVersion ?: declaredProjectVersion
 if (immutableDevelopmentContracts
         && !((localRc ? immutableStagedLanguageVersion ==~ /3\.1\.0-rc\.[1-9][0-9]*/ : immutableStagedLanguageVersion
         ==~ /3\.1\.0-dev\.[0-9a-f]{40}/))) {
@@ -713,10 +720,28 @@ def currentProductionShapeLimits = [
         // Public inventory and per-source limits are unchanged; see the Cost38 package note.
         // Cost39: two immutable core/SDK observation records and point-read adapters (+90 lines).
         // No new mutation/authority port; see docs/poc-cost39-indexed-journal-position.md.
-        classes: 327,
+        // Condition correction: two private historical-source storage/assessment helpers.
+        // Exact measured inventory (+2 sources, +454 lines); API and per-source caps stay unchanged.
+        classes: 358,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
-        lines: 87_765L,
-        publicApiTypes: 96,
+        // Completed-stage SDK result/gateways plus three logical-record contract/tracking types.
+        // Measured count; see docs/development/logical-record-contract.md.
+        // Logical runtime maps, strict ordered keys and primary family bindings; private types only.
+        // Flattened secondary memberships and explicit graph-family bindings.
+        // Catch-up/receipt bindings, derived source counts and lazy historical evidence.
+        // Insert-once physical proof/member facts; object entries retain upgrade conditions.
+        // Logical publication, per-document route members and derived source unions.
+        // Scoped barrier hints and explicit-root stage fairness.
+        // Owner-scoped evidence logs and complete lazy document-family assembly.
+        // Closed cross-package logical SDK point-map bridge and five family bindings.
+        // Pending/source and feeder point bindings with requesting-root membership predicates.
+        // Complete lazy engine/SDK assembly and owner-local control records.
+        // Frozen source admission/history stages and closed detached result codec.
+        // Accepted-input cutoff selection and closed cutoff evidence; no new production type.
+        // Counter-only logical owner diagnostics: three accessors, +11 measured lines; no new types.
+        // Point-lookup overload for a retained exact input stage: +12 lines, no new type or semantic processing.
+        lines: 92_698L,
+        publicApiTypes: 107,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -882,6 +907,7 @@ tasks.register('verifyPublicApiBoundary') {
                 // Named advanced-storage assembly bridges used across the SDK package.
                 'src/main/java/blue/coordination/internal/ExactValueStorageCodec.java',
                 'src/main/java/blue/coordination/internal/InsertionOrderedStorage.java',
+                'src/main/java/blue/coordination/internal/LogicalPointStorage.java',
                 'src/main/java/blue/coordination/internal/RootedEngineStorage.java'
         ] as Set
         fileTree('src/main/java/blue/coordination/internal') {
@@ -1017,6 +1043,17 @@ tasks.register('verifySdkPublicApiBoundary') {
                                 /blue\.coordination\.api\.ContractsExecutionPolicy\b/,
                                 '')
                 }
+                // Exact immutable stage authority is the sole additional core observation
+                // on these durable host boundaries; implementation and processor types still fail.
+                if (className in ['blue.coordination.sdk.SelectedProcessingStage',
+                        'blue.coordination.sdk.ProcessingStageResult', 'blue.coordination.sdk.ProcessingStageStorage']) {
+                    normalSignature = normalSignature.replaceAll(
+                            /blue\.coordination\.api\.ProcessingStageContext\b/, '')
+                }
+                // Pure readiness is separate from a completed result and exposes no engine/storage handle.
+                if (className == 'blue.coordination.sdk.ProcessingGateway') {
+                    normalSignature = normalSignature.replaceAll(/blue\.coordination\.api\.ProcessingReadiness\b/, '')
+                }
                 // This host-only facade is not exempt from the boundary check:
                 // only its four reviewed storage types are permitted. Other API,
                 // processor or internal types in it or its nested types still fail.
@@ -1025,6 +1062,7 @@ tasks.register('verifySdkPublicApiBoundary') {
                     [
                             'blue.coordination.api.TimelineJournalStore',
                             'blue.coordination.api.storage.CoordinationImmutableObjectStore',
+                            'blue.coordination.api.storage.CoordinationRecordAttempt',
                             'blue.coordination.internal.RootedEngineStorage$Limits',
                             'blue.coordination.internal.InsertionOrderedStorage$Limits'
                     ].each { allowed ->
@@ -2229,7 +2267,7 @@ def verifyReleaseVersionPolicy = tasks.register(
         }
         def failures = releaseVersionPolicyFailures(
                 candidate,
-                immutableDevelopmentContracts,
+                immutableDevelopmentContracts || localCoordinationCandidate,
                 headCommit,
                 cleanWorktree)
         if (!failures.empty) {
@@ -5567,5 +5605,6 @@ tasks.named('check') {
 }
 
 apply from: 'gradle/coordination-staging.gradle'
+apply from: 'gradle/coordination-candidate.gradle'
 apply from: 'gradle/test-execution-scope.gradle'
 apply from: 'gradle/topology-test-evidence.gradle'

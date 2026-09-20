@@ -30,7 +30,7 @@ final class ContractsClosureProfile {
     private final Map<String, Long> portableLimits;
     private final long sharedGasLimit;
     private final String executionPolicyLabel;
-    private final TreeSet<DocumentId> publicRoots;
+    private Set<DocumentId> publicRoots;
 
     ContractsClosureProfile(
             String blueLanguageSpecificationIdentity,
@@ -140,13 +140,19 @@ final class ContractsClosureProfile {
         return release.contractsRelease();
     }
 
+    synchronized void bindLogicalPublicRoots(Set<DocumentId> roots) {
+        if (!publicRoots.isEmpty()) throw new IllegalStateException("Logical Roots must be bound before registration");
+        publicRoots = Objects.requireNonNull(roots);
+    }
+
     synchronized boolean isPublicRoot(DocumentId documentId) {
         return publicRoots.contains(Objects.requireNonNull(
                 documentId, "documentId"));
     }
 
     synchronized Set<DocumentId> publicRoots() {
-        return Collections.unmodifiableSet(new TreeSet<>(publicRoots));
+        var ordered = new TreeSet<DocumentId>(EmbeddingBinding.DOCUMENT_ORDER); ordered.addAll(publicRoots);
+        return Collections.unmodifiableSet(ordered);
     }
 
     synchronized void addPublicRoots(Collection<DocumentId> roots) {

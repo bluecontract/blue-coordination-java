@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual complete SDK/engine installation; all cold state comes from immutable bytes plus the exact journal. */
 final class RootedCoordinationStorageTest {
     private static final int MAX = 32 * 1024 * 1024;
-    private static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
+    static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
             // Same complete-receipt capacities as RootedEngineStorageTest;
             // a cyclic publication contains more than a 256 KiB scalar row.
             new RootedEngineStorage.Limits(40 * 1024 * 1024, 64 * 1024, MAX, 8192, 32,
@@ -33,6 +33,48 @@ final class RootedCoordinationStorageTest {
             new RootedCoordinationStorage.SdkLimits(new InsertionOrderedStorage.Limits(512 * 1024, 64 * 1024,
                     64 * 1024, 8192, 32, 256 * 1024, 4L * 1024 * 1024, 100), MAX, 128 * 1024, MAX, 100, 256 * 1024));
     private static final SdkStorageCodec CODEC = new SdkStorageCodec(new Object(), MAX);
+
+    @Test void completedStageCanBeStoredAndColdReopenedBeforeReadiness() throws Exception {
+        // given
+        var objects = new Bytes();
+        RootedCoordinationStorage.Selection selected;
+        ColdStorageJournalFixture.Snapshot journalBytes;
+        DocumentId id; byte[] expectedHistory, expectedResult; String expectedHead, entryId;
+        try (var original = new RootedSdkFixture()) {
+            var document = original.start("source.yaml", "rcp2/source", Map.of());
+            id = document.id();
+            var entry = original.append(document, "rcp2/source", "setCounter", 10, "counterValue: 5");
+            entryId = entry.blueId();
+            var engine = (DefaultCoordinationEngine) original.blue.advanced().rawEngine();
+            var control = CoordinationTestControl.attach(engine);
+            control.failOnceAt(CoordinationTestControl.FailurePoint.BEFORE_ROOTED_READINESS);
+            // when
+            var stage = original.blue.processing().processNextStage(document);
+            // then
+            assertEquals(ProcessingStageResult.Disposition.COMPLETED, stage.disposition());
+            assertEquals(1, stage.stats().committedTransitions());
+            expectedResult = CODEC.encode(stage.entry(entry));
+            expectedHistory = history(document); expectedHead = document.snapshot().blueId();
+            selected = RootedCoordinationStorage.retainPartition(original.blue, objects, LIMITS);
+            journalBytes = ColdStorageJournalFixture.retain(engine);
+            var failure = assertThrows(RuntimeException.class,
+                    () -> original.blue.processing().processNext(document));
+            assertTrue(control.isInjectedFailure(failure), "Storage must not consume the armed readiness fault");
+        }
+        var journal = ColdStorageJournalFixture.open(journalBytes);
+        try (var scope = RootedCoordinationStorage.open(objects.fresh(), LIMITS, selected,
+                ExactNodeProvider.empty(), journal)) {
+            var document = scope.documentHandle(id).orElseThrow();
+            assertEquals(expectedHead, document.snapshot().blueId());
+            assertArrayEquals(expectedHistory, history(document));
+            assertEquals(5, document.snapshot().longAt("/counter"));
+            assertArrayEquals(expectedResult, CODEC.encode(scope.coordination().runtimeForStorage().storedMaps().results().get(entryId)));
+            var next = scope.coordination().processing().processNext(document);
+            assertEquals(0, next.stats().committedTransitions());
+            assertArrayEquals(expectedHistory, history(document));
+            assertEquals(0, journal.mutations(), "Reopening must not reappend the accepted input");
+        }
+    }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"zeroMatches", "wrongPath"})

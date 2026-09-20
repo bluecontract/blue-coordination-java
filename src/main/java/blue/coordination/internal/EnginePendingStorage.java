@@ -1,6 +1,7 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.ManagedEpochApplicationWork;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.coordination.api.ContractsClosureAdmissionReceipt;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
@@ -62,14 +63,21 @@ final class EnginePendingStorage {
         return new Scope(null, views, originalWork, originalAdmission);
     }
 
+    Scope openLogical(LogicalPointStorage logical, DocumentSessionStorage.OpenScope views,
+            Function<String, ManagedEpochApplicationWork> originalWork,
+            Function<String, ContractsClosureAdmissionReceipt> originalAdmission) {
+        return new Scope(null, views, originalWork, originalAdmission, Objects.requireNonNull(logical));
+    }
+
     final class Scope implements AutoCloseable {
-        private final Map<Kind, StoredInsertionOrderedMap<String, ?>> maps = new EnumMap<>(Kind.class);
+        private final LogicalPointStorage logical;
+        private final Map<Kind, Map<String, ?>> maps = new EnumMap<>(Kind.class);
         private final DocumentSessionStorage.OpenScope views;
         private final Function<String, ManagedEpochApplicationWork> originalWork;
         private final Function<String, ContractsClosureAdmissionReceipt> originalAdmission;
         private final NamedMap<ContractsManagedDraftPlan> drafts;
         private final NamedMap<ContractsManagedEpochSelectionPlan> selections;
-        private final NamedMap<RootedSourceDiscoveryCoordinator.Pending> pending;
+        private final Map<String, RootedSourceDiscoveryCoordinator.Pending> pending;
         private final NamedMap<RootedSourceDiscoveryCoordinator.Prepared> submitted;
         private final NamedMap<SourceHistoryPrerequisiteResult> completed;
         private boolean closed;
@@ -77,6 +85,12 @@ final class EnginePendingStorage {
         private Scope(Snapshot selected, DocumentSessionStorage.OpenScope views,
                 Function<String, ManagedEpochApplicationWork> originalWork,
                 Function<String, ContractsClosureAdmissionReceipt> originalAdmission) {
+            this(selected, views, originalWork, originalAdmission, null);
+        }
+        private Scope(Snapshot selected, DocumentSessionStorage.OpenScope views,
+                Function<String, ManagedEpochApplicationWork> originalWork,
+                Function<String, ContractsClosureAdmissionReceipt> originalAdmission, LogicalPointStorage logical) {
+            this.logical = logical;
             this.views = Objects.requireNonNull(views); this.originalWork = Objects.requireNonNull(originalWork);
             this.originalAdmission = Objects.requireNonNull(originalAdmission);
             try {
@@ -92,7 +106,7 @@ final class EnginePendingStorage {
                             var p = plans.decode(key, bytes); require(p.draft() == null, "Selection row also contains another plan");
                             return Objects.requireNonNull(p.selection());
                         }, (key, value) -> { });
-                pending = map(Kind.SOURCE_PENDING, selected,
+                var pendingRows = map(Kind.SOURCE_PENDING, selected,
                         (key, value) -> sources.encodePending(value, views::retainView),
                         (key, bytes) -> sources.decodePending(key, bytes, views),
                         (key, value) -> {
@@ -101,12 +115,13 @@ final class EnginePendingStorage {
                             require(historical == null || value.cutoff().equals(historical.logicalBoundary()),
                                     "Pending source changed its original historical boundary");
                         });
+                pending = logical == null ? pendingRows : new LogicalSourcePendingMap(logical, pendingRows, limits.indexes());
                 submitted = map(Kind.SOURCE_SUBMITTED, selected,
                         (key, value) -> sources.encodePrepared(value, views::retainView),
                         (key, bytes) -> sources.decodePrepared(key, bytes, views), this::validateSubmitted);
                 completed = map(Kind.SOURCE_COMPLETED, selected, this::encodeCompleted, this::decodeCompleted, this::validateCompleted);
             } catch (RuntimeException failure) {
-                maps.values().forEach(StoredInsertionOrderedMap::close); throw failure;
+                maps.values().forEach(Scope::closeMap); throw failure;
             }
         }
 
@@ -116,8 +131,9 @@ final class EnginePendingStorage {
         }
 
         Snapshot snapshot() {
-            ensureOpen(); var selected = new EnumMap<Kind, StoredInsertionOrderedMap.Snapshot>(Kind.class);
-            maps.forEach((kind, map) -> selected.put(kind, map.snapshot())); return new Snapshot(selected);
+            ensureOpen(); require(logical == null, "Logical pending maps cannot become descriptors");
+            var selected = new EnumMap<Kind, StoredInsertionOrderedMap.Snapshot>(Kind.class);
+            maps.forEach((kind, map) -> selected.put(kind, ((StoredInsertionOrderedMap<?, ?>) map).snapshot())); return new Snapshot(selected);
         }
 
         /** Explicit transfer of only the supplied selected owner's resident maps. Cold open never calls this. */
@@ -196,14 +212,17 @@ final class EnginePendingStorage {
             };
             var storage = new StoredInsertionOrderedMap.Storage<>(objects, limits, "engine/" + kind.name(),
                     "blue-codepoint-text/1", EmbeddingBinding.TEXT_ORDER, keys, codec);
-            var map = selected == null ? storage.empty() : storage.open(selected.roots().get(kind));
+            Map<String, Named<V>> map = logical == null
+                    ? selected == null ? storage.empty() : storage.open(selected.roots().get(kind))
+                    : logical.open(family(kind), "engine/pending/1", keys, codec, limits);
             maps.put(kind, map); return new NamedMap<>(map, validate);
         }
 
-        private final class NamedMap<V> extends AbstractMap<String, V> {
-            private final StoredInsertionOrderedMap<String, Named<V>> map;
+        private final class NamedMap<V> extends AbstractMap<String, V> implements AutoCloseable {
+            @Override public void close() { Scope.this.close(); }
+            private final Map<String, Named<V>> map;
             private final BiConsumer<String, V> validate;
-            private NamedMap(StoredInsertionOrderedMap<String, Named<V>> map, BiConsumer<String, V> validate) {
+            private NamedMap(Map<String, Named<V>> map, BiConsumer<String, V> validate) {
                 this.map = map; this.validate = validate;
             }
             private V selected(String key, Named<V> row) {
@@ -247,8 +266,23 @@ final class EnginePendingStorage {
             }
         }
 
+        private static void closeMap(Map<?, ?> map) {
+            try { ((AutoCloseable) map).close(); }
+            catch (RuntimeException failure) { throw failure; }
+            catch (Exception failure) { throw new IllegalStateException("Pending map close failed", failure); }
+        }
         private void ensureOpen() { require(!closed, "Engine pending storage scope is closed"); }
-        @Override public void close() { if (!closed) { closed = true; maps.values().forEach(StoredInsertionOrderedMap::close); } }
+        @Override public void close() { if (!closed) { closed = true; maps.values().forEach(Scope::closeMap); } }
+    }
+
+    private static Family family(Kind kind) {
+        return switch (kind) {
+            case DRAFT -> Family.PENDING_DRAFT;
+            case SELECTION -> Family.PENDING_SELECTION;
+            case SOURCE_PENDING -> Family.SOURCE_PENDING;
+            case SOURCE_SUBMITTED -> Family.SOURCE_SUBMITTED;
+            case SOURCE_COMPLETED -> Family.SOURCE_COMPLETED;
+        };
     }
 
     private record Named<V>(String key, V value, byte[] packet) { }

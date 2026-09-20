@@ -11,6 +11,35 @@ import static org.junit.jupiter.api.Assertions.*;
 final class StoredCatchUpWorkIndexesTest {
     private static final PersistentMapStorage.Limits LIMITS = new PersistentMapStorage.Limits(1024 * 1024, 4096, 512 * 1024, 4096, 8);
 
+    @Test void logicalDueWorkAndApplicationsColdReopenWithSelectiveMinimum() {
+        // given
+        var store = new LogicalRecordMapTest.Store(); var storage = storage(new DocumentSessionStorageTest.Bytes());
+        var early = fixture(1, "early"); var late = fixture(9, "late");
+        var a = store.attempt(); var b = store.attempt(); var ca = new LogicalRecordContext(a); var cb = new LogicalRecordContext(b);
+        // when
+        storage.selectLogical(storage.openLogical(ca).withWork(early.work, early.barrier, early.source));
+        storage.selectLogical(storage.openLogical(cb).withWork(late.work, late.barrier, late.source));
+        ca.flush(); cb.flush(); var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {2});
+        var pa = a.prepare("a", List.of(), evidence); var pb = b.prepare("b", List.of(), evidence);
+        // then
+        assertTrue(store.publish(pb)); assertTrue(store.publish(pa));
+        try (var select = store.attempt(); var apply = store.attempt()) {
+            var cs = new LogicalRecordContext(select); var cp = new LogicalRecordContext(apply);
+            var selected = storage.openLogical(cs); var changing = storage.openLogical(cp);
+            assertEquals(early.work.workIdentity(), selected.nextDueWorkExcluding(Set.of()).work().workIdentity());
+            storage.selectLogical(changing.withApplication(late.work, application(late.work, 100)));
+            cs.flush(); cp.flush(); var ps = select.prepare("selection", List.of(), evidence); var pp = apply.prepare("application", List.of(), evidence);
+            assertTrue(store.publish(pp)); assertTrue(store.publish(ps), "Later work completion cannot invalidate the earliest due row");
+        }
+        try (var cold = store.attempt()) {
+            var restored = storage.openLogical(new LogicalRecordContext(cold));
+            assertEquals(early.work.workIdentity(), storage.nextDue(restored, Set.of(),
+                    id -> early.barrier, ignored -> early.source).work().workIdentity());
+            assertTrue(storage.applicationByWork(restored, late.work.workIdentity()).found());
+            assertFalse(storage.pending(restored, late.work.planIdentity()).found());
+        }
+    }
+
     @Test void warmWorkAndApplicationFramesStillRequireCurrentCrosslinks() {
         // given
         try (var cache = new RootedStorageCache(16 * 1024 * 1024, 100, 16 * 1024 * 1024)) {

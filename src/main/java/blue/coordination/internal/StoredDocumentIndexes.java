@@ -2,6 +2,7 @@ package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import java.util.*;
 import java.util.function.Function;
 import static blue.coordination.internal.SessionStorageWire.*;
@@ -18,6 +19,8 @@ final class StoredDocumentIndexes {
     private final StoreIndexCodecs.Binding<DocumentId, StoreIndexCodecs.SessionAddress> addresses;
     private final StoreIndexCodecs.Binding<DocumentId, Long> generations;
     private final StoreIndexCodecs.Binding<DocumentId, ManagedLineageIndex.Lineage> lineages;
+    private final StoreIndexCodecs.Binding<DocumentId, ManagedLineageIndex.Lineage> lineageBucket;
+    private final StoreIndexCodecs.Binding<ManagedLineageIndex.RetainedKey, ManagedLineageIndex.RetainedState> retainedBucket;
     private final StoreIndexCodecs.Binding<String, PersistentOrderedMap<DocumentId, ManagedLineageIndex.Lineage>> authored;
     private final StoreIndexCodecs.Binding<String, PersistentOrderedMap<DocumentId, ManagedLineageIndex.Lineage>> initialized;
     private final StoreIndexCodecs.Binding<String, PersistentOrderedMap<DocumentId, ManagedLineageIndex.Lineage>> current;
@@ -36,12 +39,53 @@ final class StoredDocumentIndexes {
         addresses = codecs.binding("sessions", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.sessions);
         generations = codecs.binding("graph-generations", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.generations);
         lineages = codecs.binding("lineage/documents", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.lineages);
-        var lineageBucket = codecs.binding("lineage/document-bucket", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.lineages);
-        var retainedBucket = codecs.binding("lineage/retained-bucket", ManagedLineageIndex.RETAINED_ORDER, codecs.retainedKeys, codecs.retainedStates);
+        lineageBucket = codecs.binding("lineage/document-bucket", EmbeddingBinding.DOCUMENT_ORDER, codecs.documents, codecs.lineages);
+        retainedBucket = codecs.binding("lineage/retained-bucket", ManagedLineageIndex.RETAINED_ORDER, codecs.retainedKeys, codecs.retainedStates);
         authored = codecs.binding("lineage/authored", EmbeddingBinding.TEXT_ORDER, codecs.text, lineageBucket.nested());
         initialized = codecs.binding("lineage/initialized", EmbeddingBinding.TEXT_ORDER, codecs.text, lineageBucket.nested());
         current = codecs.binding("lineage/current", EmbeddingBinding.TEXT_ORDER, codecs.text, lineageBucket.nested());
         retained = codecs.binding("lineage/retained", EmbeddingBinding.TEXT_ORDER, codecs.text, retainedBucket.nested());
+    }
+
+    /** Fine-grained primary rows; session/history bodies remain immutable library artifacts. */
+    PersistentOrderedMap<DocumentId, StoreIndexCodecs.SessionAddress> openLogicalSessions(LogicalRecordContext context) {
+        return addresses.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.SESSION,
+                logicalScope(), OrderedRecordKey.document());
+    }
+
+    ClosureGraphGenerationInventory openLogicalGenerations(LogicalRecordContext context) {
+        return ClosureGraphGenerationInventory.restoreStored(new ClosureGraphGenerationInventory.StoredState(
+                generations.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.GRAPH_GENERATION,
+                        logicalScope(), OrderedRecordKey.document()), 0, 0));
+    }
+
+    PersistentOrderedMap<DocumentId, ManagedLineageIndex.Lineage> openLogicalLineageDocuments(LogicalRecordContext context) {
+        return lineages.openLogical(context, blue.coordination.api.storage.CoordinationRecords.Family.LINEAGE_DOCUMENT,
+                logicalScope(), OrderedRecordKey.document());
+    }
+
+    ManagedLineageIndex openLogicalLineages(LogicalRecordContext context) {
+        var retainedKeys = OrderedRecordKey.pair("retained-lineage", OrderedRecordKey.document(), OrderedRecordKey.signedLong(),
+                ManagedLineageIndex.RetainedKey::documentId, ManagedLineageIndex.RetainedKey::epoch, ManagedLineageIndex.RetainedKey::new);
+        return ManagedLineageIndex.restoreStored(new ManagedLineageIndex.StoredState(openLogicalLineageDocuments(context),
+                lineageBucket.openLogicalBuckets(context, Family.LINEAGE_AUTHORED, logicalScope(), EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), OrderedRecordKey.document()),
+                lineageBucket.openLogicalBuckets(context, Family.LINEAGE_INITIALIZED, logicalScope(), EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), OrderedRecordKey.document()),
+                retainedBucket.openLogicalBuckets(context, Family.LINEAGE_RETAINED, logicalScope(), EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), retainedKeys),
+                lineageBucket.openLogicalBuckets(context, Family.LINEAGE_CURRENT, logicalScope(), EmbeddingBinding.TEXT_ORDER,
+                        OrderedRecordKey.text(), OrderedRecordKey.document()), 0));
+    }
+
+    void selectLogicalLineages(ManagedLineageIndex selected) {
+        var state = selected.storedState();
+        state.documents().selectLogicalRecords(); state.authored().selectLogicalRecords();
+        state.initialized().selectLogicalRecords(); state.retained().selectLogicalRecords(); state.current().selectLogicalRecords();
+    }
+
+    private static blue.coordination.api.storage.CoordinationRecords.Bytes logicalScope() {
+        return LogicalRecordContext.runtimeScope();
     }
 
     StoreIndexCodecs.SessionAddress retainSession(DocumentSession session) {

@@ -501,7 +501,7 @@ final class ManagedLineageIndex {
         }
         PersistentOrderedMap.Mutation<K, V> inner = bucket.remove(key);
         PersistentOrderedMap.Mutation<String, PersistentOrderedMap<K, V>>
-                outer = inner.map().isEmpty()
+                outer = !inner.map().isLogical() && inner.map().isEmpty()
                         ? index.remove(selected)
                         : index.put(selected, inner.map());
         return new BucketMutation<>(outer.map(), Math.addExact(

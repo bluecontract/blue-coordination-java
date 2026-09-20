@@ -11,6 +11,7 @@ import java.util.Objects;
 
 /** Immutable AVL map with an exact logarithmic minimum-entry read. */
 final class PersistentMinimumMap<K, V> {
+    private final PersistentOrderedMap<K, V> logical;
     private final Comparator<? super K> order;
     private final TreeNode<K, V> root;
     private final PersistentMapStorage<K, V> storage;
@@ -27,6 +28,12 @@ final class PersistentMinimumMap<K, V> {
 
     private PersistentMinimumMap(Comparator<? super K> order, TreeNode<K, V> root, PersistentMapStorage<K, V> storage,
             java.util.function.BiConsumer<K, V> retainedReadCheck) {
+        this(order, root, storage, retainedReadCheck, null);
+    }
+
+    private PersistentMinimumMap(Comparator<? super K> order, TreeNode<K, V> root, PersistentMapStorage<K, V> storage,
+            java.util.function.BiConsumer<K, V> retainedReadCheck, PersistentOrderedMap<K, V> logical) {
+        this.logical = logical;
         this.order = Objects.requireNonNull(order, "order");
         this.root = root;
         this.storage = storage;
@@ -35,8 +42,8 @@ final class PersistentMinimumMap<K, V> {
 
     /** Private selected-read validation only; copied rows and mutation accounting remain unchanged. */
     PersistentMinimumMap<K, V> withRetainedReadCheck(java.util.function.BiConsumer<K, V> check) {
-        if (storage == null || retainedReadCheck != null) throw new IllegalStateException("Expected one original physical minimum map");
-        return new PersistentMinimumMap<>(order, root, storage, Objects.requireNonNull(check));
+        if ((storage == null && logical == null) || retainedReadCheck != null) throw new IllegalStateException("Expected one original physical minimum map");
+        return new PersistentMinimumMap<>(order, root, storage, Objects.requireNonNull(check), logical);
     }
 
     private V checkedValue(TreeNode<K, V> node) {
@@ -50,6 +57,27 @@ final class PersistentMinimumMap<K, V> {
         return new PersistentMinimumMap<>(order, storage.open(descriptor), storage);
     }
 
+    static <K, V> PersistentMinimumMap<K, V> logical(Comparator<? super K> order, LogicalRecordContext context,
+            blue.coordination.api.storage.CoordinationRecords.Family family,
+            blue.coordination.api.storage.CoordinationRecords.Bytes scope, OrderedRecordKey<K> keys,
+            PersistentMapCodec<V> values, PersistentMapStorage.Limits limits) {
+        return new PersistentMinimumMap<>(order, null, null, null,
+                PersistentOrderedMap.logical(order, context, family, scope, keys, values, limits.keyBytes(), limits.valueBytes()));
+    }
+
+    void selectLogicalRecords() {
+        if (logical == null) throw new IllegalStateException("Not a logical minimum map");
+        logical.selectLogicalRecords();
+    }
+    boolean isLogical() { return logical != null; }
+    private PersistentMinimumMap<K, V> logicalCopy(PersistentOrderedMap<K, V> map) {
+        return new PersistentMinimumMap<>(order, null, null, retainedReadCheck, map);
+    }
+    private MinimumResult<K, V> checked(PersistentOrderedMap.MinimumResult<K, V> selected) {
+        if (selected.found() && retainedReadCheck != null) retainedReadCheck.accept(selected.entry().getKey(), selected.entry().getValue());
+        return new MinimumResult<>(selected.entry(), selected.rowsRead());
+    }
+
     byte[] storedRootDescriptor() {
         if (storage == null) throw new IllegalStateException("Not a storage-backed minimum map");
         return storage.descriptor(root);
@@ -58,6 +86,7 @@ final class PersistentMinimumMap<K, V> {
     /** Explicit selected partition conversion; not an eager cold-runtime constructor. */
     PersistentMinimumMap<K, V> storedCopy(String orderingIdentity, PersistentMapCodec<K> keys, PersistentMapCodec<V> values,
             CoordinationImmutableObjectStore objects, PersistentMapStorage.Limits limits) {
+        if (logical != null) return this;
         if (storage != null) return stored(order, orderingIdentity, keys, values, objects, limits, storedRootDescriptor());
         var target = new PersistentMapStorage<>(order, orderingIdentity, keys, values, objects, limits);
         return target.scoped(() -> new PersistentMinimumMap<>(order, retainShape(root, target), target));
@@ -76,7 +105,12 @@ final class PersistentMinimumMap<K, V> {
         return new PersistentMinimumMap<>(order, null);
     }
 
-    ReadResult<V> read(K key) { return scoped(() -> readInScope(key)); }
+    ReadResult<V> read(K key) {
+        if (logical == null) return scoped(() -> readInScope(key));
+        var result = logical.read(key);
+        if (result.found() && retainedReadCheck != null) retainedReadCheck.accept(key, result.value());
+        return new ReadResult<>(result.value(), result.comparisons());
+    }
 
     private ReadResult<V> readInScope(K key) {
         K selected = Objects.requireNonNull(key, "key");
@@ -93,7 +127,7 @@ final class PersistentMinimumMap<K, V> {
         return new ReadResult<>(null, comparisons);
     }
 
-    MinimumResult<K, V> minimum() { return scoped(this::minimumInScope); }
+    MinimumResult<K, V> minimum() { return logical == null ? scoped(this::minimumInScope) : checked(logical.minimum()); }
 
     private MinimumResult<K, V> minimumInScope() {
         int rows = 0;
@@ -112,7 +146,7 @@ final class PersistentMinimumMap<K, V> {
     }
 
     /** Returns the least entry whose key is strictly greater than {@code key}. */
-    MinimumResult<K, V> higherThan(K key) { return scoped(() -> higherThanInScope(key)); }
+    MinimumResult<K, V> higherThan(K key) { return logical == null ? scoped(() -> higherThanInScope(key)) : checked(logical.higherThan(key)); }
 
     private MinimumResult<K, V> higherThanInScope(K key) {
         K selected = Objects.requireNonNull(key, "key");
@@ -136,7 +170,10 @@ final class PersistentMinimumMap<K, V> {
                 rows);
     }
 
-    Mutation<K, V> put(K key, V value) { return scoped(() -> putInScope(key, value)); }
+    Mutation<K, V> put(K key, V value) {
+        if (logical == null) return scoped(() -> putInScope(key, value));
+        var result = logical.put(key, value); return new Mutation<>(logicalCopy(result.map()), result.changed(), result.comparisons(), result.copiedNodes());
+    }
 
     private Mutation<K, V> putInScope(K key, V value) {
         Counter work = new Counter();
@@ -152,7 +189,10 @@ final class PersistentMinimumMap<K, V> {
                 work.copiedNodes);
     }
 
-    Mutation<K, V> remove(K key) { return scoped(() -> removeInScope(key)); }
+    Mutation<K, V> remove(K key) {
+        if (logical == null) return scoped(() -> removeInScope(key));
+        var result = logical.remove(key); return new Mutation<>(logicalCopy(result.map()), result.changed(), result.comparisons(), result.copiedNodes());
+    }
 
     private Mutation<K, V> removeInScope(K key) {
         Counter work = new Counter();
@@ -168,10 +208,10 @@ final class PersistentMinimumMap<K, V> {
     }
 
     int size() {
-        return TreeNode.size(root);
+        return logical == null ? TreeNode.size(root) : logical.size();
     }
 
-    void assertStructurallyValid() { scoped(() -> { validateInScope(); return null; }); }
+    void assertStructurallyValid() { if (logical != null) { logical.assertStructurallyValid(); return; } scoped(() -> { validateInScope(); return null; }); }
 
     private void validateInScope() {
         Validation<K> validation = validate(root);

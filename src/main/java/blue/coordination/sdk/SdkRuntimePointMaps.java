@@ -4,6 +4,8 @@ import blue.coordination.api.SourceHistoryPrerequisite;
 import blue.coordination.api.storage.CoordinationImmutableObjectStore;
 import blue.coordination.api.storage.CoordinationObjectStorageException;
 import blue.coordination.internal.InsertionOrderedStorage;
+import blue.coordination.internal.LogicalPointStorage;
+import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.NoncommittingExecutionException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -46,6 +48,7 @@ final class SdkRuntimePointMaps implements AutoCloseable {
     }
     private record Row<K, V>(K key, SdkPointStorage.Descriptor descriptor, V value) { }
 
+    private final LogicalPointStorage logical;
     private final SdkCoordinationRuntime owner;
     private final Limits limits;
     private final SdkStorageCodec codec;
@@ -69,6 +72,11 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         return physical(() -> new SdkRuntimePointMaps(owner, objects, limits, snapshot));
     }
 
+    static SdkRuntimePointMaps openLogical(SdkCoordinationRuntime owner, CoordinationImmutableObjectStore objects,
+            Limits limits, LogicalPointStorage logical) {
+        return physical(() -> new SdkRuntimePointMaps(owner, objects, limits, null, Objects.requireNonNull(logical)));
+    }
+
     /** Explicit initial resident conversion; cold open never calls this or enumerates runtime maps. */
     static SdkRuntimePointMaps retain(SdkCoordinationRuntime owner, CoordinationImmutableObjectStore objects, Limits limits) {
         var retained = empty(owner, objects, limits);
@@ -85,6 +93,12 @@ final class SdkRuntimePointMaps implements AutoCloseable {
 
     private SdkRuntimePointMaps(SdkCoordinationRuntime owner, CoordinationImmutableObjectStore objects,
             Limits limits, Snapshot snapshot) {
+        this(owner, objects, limits, snapshot, null);
+    }
+
+    private SdkRuntimePointMaps(SdkCoordinationRuntime owner, CoordinationImmutableObjectStore objects,
+            Limits limits, Snapshot snapshot, LogicalPointStorage logical) {
+        this.logical = logical;
         this.owner = Objects.requireNonNull(owner); this.limits = Objects.requireNonNull(limits);
         this.codec = new SdkStorageCodec(new Object(), limits.codecBytes());
         configurationBinding = digest(codec.encode(owner.storageConfiguration()));
@@ -109,8 +123,9 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         guard(); return new SdkCoordinationRuntime.StoredMaps(timelines, intents, results, entries, sourceResults);
     }
     synchronized Snapshot snapshot() {
-        guard(); var roots = new EnumMap<Kind, InsertionOrderedStorage.Snapshot>(Kind.class);
-        all.forEach((kind, map) -> roots.put(kind, map.backing.snapshot())); return new Snapshot(roots);
+        guard(); require(logical == null, "Logical SDK maps cannot become descriptor snapshots");
+        var roots = new EnumMap<Kind, InsertionOrderedStorage.Snapshot>(Kind.class);
+        all.forEach((kind, map) -> roots.put(kind, map.snapshot())); return new Snapshot(roots);
     }
 
     private <K, V> NativeMap<K, V> create(CoordinationImmutableObjectStore objects, Snapshot snapshot, Kind kind,
@@ -139,7 +154,10 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         };
         var storage = new InsertionOrderedStorage<>(objects, limits.maps(), FORMAT + "/" + kind + "/" + configurationBinding,
                 FORMAT + "/complete-canonical-key-order", order, keys, rows);
-        var map = new NativeMap<>(kind, snapshot == null ? storage.empty() : storage.open(snapshot.roots().get(kind)), retain, read);
+        Map<K, Row<K, V>> backing = logical == null
+                ? snapshot == null ? storage.empty() : storage.open(snapshot.roots().get(kind))
+                : logical.open(logicalFamily(kind), "sdk/point-maps/1", keys, rows, limits.maps());
+        var map = new NativeMap<>(kind, backing, retain, read);
         all.put(kind, map); return map;
     }
 
@@ -150,12 +168,21 @@ final class SdkRuntimePointMaps implements AutoCloseable {
 
     private final class NativeMap<K, V> extends AbstractMap<K, V> implements AutoCloseable {
         private final Kind kind;
-        private final InsertionOrderedStorage.Scope<K, Row<K, V>> backing;
+        private final Map<K, Row<K, V>> backing;
         private final BiFunction<K, V, SdkPointStorage.Descriptor> retain;
         private final BiFunction<K, SdkPointStorage.Descriptor, V> read;
-        private NativeMap(Kind kind, InsertionOrderedStorage.Scope<K, Row<K, V>> backing,
+        private NativeMap(Kind kind, Map<K, Row<K, V>> backing,
                 BiFunction<K, V, SdkPointStorage.Descriptor> retain, BiFunction<K, SdkPointStorage.Descriptor, V> read) {
             this.kind = kind; this.backing = backing; this.retain = retain; this.read = read;
+        }
+        @SuppressWarnings("unchecked")
+        private InsertionOrderedStorage.Snapshot snapshot() {
+            return ((InsertionOrderedStorage.Scope<K, Row<K, V>>) backing).snapshot();
+        }
+        private void closeBacking() {
+            try { ((AutoCloseable) backing).close(); }
+            catch (RuntimeException failure) { throw failure; }
+            catch (Exception failure) { throw new CoordinationObjectStorageException("Could not close SDK map", failure); }
         }
         @Override public int size() { guard(); return backing.size(); }
         @Override public boolean containsKey(Object key) { guard(); return backing.containsKey(key); }
@@ -225,6 +252,16 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         }
     }
 
+    private static Family logicalFamily(Kind kind) {
+        return switch (kind) {
+            case TIMELINES -> Family.SDK_TIMELINE;
+            case INTENTS -> Family.SDK_INTENT;
+            case RESULTS -> Family.SDK_RESULT;
+            case ENTRIES -> Family.SDK_ENTRY;
+            case SOURCE_RESULTS -> Family.SDK_SOURCE_RESULT;
+        };
+    }
+
     private static void validateOriginalOwner(Kind kind, Object original, Object verified) {
         if (kind == Kind.TIMELINES) require(((TimelineHandle) original).owner() == ((TimelineHandle) verified).owner(), "Foreign SDK Timeline owner");
         else if (kind == Kind.RESULTS) require(((EntryResult) original).entry().owner() == ((EntryResult) verified).entry().owner(), "Foreign SDK result owner");
@@ -235,7 +272,7 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         }
     }
     @Override public synchronized void close() {
-        if (!closed) { closed = true; all.values().forEach(map -> map.backing.close()); pointScope.close(); }
+        if (!closed) { closed = true; all.values().forEach(NativeMap::closeBacking); pointScope.close(); }
     }
     private void guard() {
         require(!closed, "SDK point map scope is closed");

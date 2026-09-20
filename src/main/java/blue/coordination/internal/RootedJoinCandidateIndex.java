@@ -54,7 +54,7 @@ final class RootedJoinCandidateIndex {
         var reverse = rootsByMember;
         for (var member : prior.keys()) if (!members.contains(member)) {
             var roots = bucket(reverse, member).remove(root).map();
-            reverse = roots.isEmpty() ? reverse.remove(member).map() : reverse.put(member, roots).map();
+            reverse = !roots.isLogical() && roots.isEmpty() ? reverse.remove(member).map() : reverse.put(member, roots).map();
         }
         var selected = PersistentOrderedMap.<DocumentId, Boolean>empty(EmbeddingBinding.DOCUMENT_ORDER);
         for (var member : members) {

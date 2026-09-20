@@ -15,6 +15,31 @@ final class SourceDiscoveryStorageCodecTest {
     private static final int MAX = 32 * 1024 * 1024;
     private static final DocumentSessionStorage.Limits LIMITS = new DocumentSessionStorage.Limits(MAX, 128, 128L * 1024 * 1024);
 
+    @Test void includedSourceOwnersSurviveClosedPreparationWithoutBecomingLegacyExclusions() throws Exception {
+        // given
+        byte[] packet; String identity; DocumentSessionStorageTest.Bytes objects;
+        java.util.Set<blue.coordination.api.DocumentId> owners;
+        try (var scenario = new Scenario(true)) {
+            var original = scenario.coordinator().requireSelection(scenario.selection()); var step = original.step();
+            owners = step.live().invocations().stream().flatMap(i -> i.rootedEvidence().context().entryOwners().stream())
+                    .map(ContractsClosureAdapter::coordinationId).collect(java.util.stream.Collectors.toSet());
+            var scoped = new RootedSourceDiscoveryCoordinator.Prepared(original.descriptor(), original.admission(),
+                    new RootedCheckpointDriver.Selection(step.live(), step.historical(), CatchUpConsumerScope.owners(owners),
+                            step.blocked(), step.localHistorical()), original.completeness());
+            identity = scoped.descriptor().selectionIdentity();
+            packet = codec().encodePrepared(scoped, scenario.f.storage::retainView); objects = scenario.f.bytes.copy();
+        }
+        // when
+        try (var cold = new DocumentSessionStorage(objects, LIMITS).openScope()) {
+            var restored = codec().decodePrepared(identity, packet, cold);
+            // then
+            assertTrue(restored.step().consumers().included());
+            assertEquals(owners, restored.step().consumers().documents());
+            assertArrayEquals(packet, codec().encodePrepared(restored, cold::addressOf));
+            assertThrows(IllegalArgumentException.class, () -> CatchUpConsumerScope.owners(java.util.Set.of()));
+        }
+    }
+
     @Test void actualPendingAdmissionSurvivesProducerClosureWithoutProviderOrProcessing() throws Exception {
         // given
         byte[] pendingBytes, preparedBytes; String key, selection;
