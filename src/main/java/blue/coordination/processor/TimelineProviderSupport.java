@@ -119,7 +119,7 @@ public final class TimelineProviderSupport {
                 message, "requireExactDocumentVersion");
         Object exactVersionValue = exactVersion == null
                 ? null : exactVersion.getValue();
-        if (exactVersionValue != null
+        if (exactVersion != null
                 && !(exactVersionValue instanceof Boolean)) {
             throw new IllegalArgumentException(
                     "requireExactDocumentVersion must be Boolean");

@@ -153,7 +153,7 @@ final class WholeRequestEntryFactory {
         String operation = requiredRoutingText(message.property("operation"), "operation");
         String channel = requiredRoutingText(message.property("channel"), "channel");
         FrozenNode version = message.property("requireExactDocumentVersion");
-        if (version != null && version.getValue() != null && !(version.getValue() instanceof Boolean)) {
+        if (version != null && !(version.getValue() instanceof Boolean)) {
             throw new IllegalArgumentException("requireExactDocumentVersion must be Boolean");
         }
         if (version != null && Boolean.TRUE.equals(version.getValue()) && message.property("document") == null) {

@@ -75,6 +75,8 @@ final class GeneralTimelineClassificationTest {
                 operation().properties("channel", new Node().value(7L)),
                 new Node().type(new Node().blueId(OperationRequest.blueId())),
                 operation().properties("requireExactDocumentVersion", new Node().value("true")),
+                operation().properties("requireExactDocumentVersion", Nodes.emptyObject()),
+                operation().properties("requireExactDocumentVersion", new Node().items(List.of(new Node().value(true)))),
                 operation().properties("requireExactDocumentVersion", new Node().value(true)));
         for (Node message : bad) {
             try (var sdk = BlueCoordination.inMemory()) {
