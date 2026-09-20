@@ -11,13 +11,12 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Private session/2 physical delta, never a shortcut for current-session or publication validation. */
+/** Private session/4 physical delta, never a shortcut for current-session or publication validation. */
 final class DocumentSessionRevisionStorageTest {
     private static final DocumentSessionStorage.Limits LIMITS =
             new DocumentSessionStorage.Limits(4 * 1024 * 1024, 256, 32L * 1024 * 1024);
@@ -150,29 +149,40 @@ final class DocumentSessionRevisionStorageTest {
         }
     }
 
-    @Test void legacyInlineCanonicalRecordReadsAndMigratesWithoutChangingEvidence() throws Exception {
+    @Test void precedingSessionFormatsRejectWithoutMigrationAndCurrentEvidenceReopensExactly() throws Exception {
         // given
         var bytes = new ObservedBytes(); var storage = new DocumentSessionStorage(bytes, LIMITS);
-        var original = history("legacy", 3);
-        // The legacy writer is not a production entry point; reflection only creates a fixed-format reader control.
-        var encoder = DocumentSessionStorage.class.getDeclaredMethod("encodeSession", DocumentSession.StoredState.class, Function.class, Function.class);
-        encoder.setAccessible(true);
-        Function<RootedDocumentView, String> noViews = ignored -> { throw new AssertionError("Unexpected rooted view"); };
-        byte[] legacy = (byte[]) encoder.invoke(storage, original.storedState(), noViews, null);
-        String oldAddress = put(bytes, legacy);
+        var original = history("current", 3);
+        String current = storage.retain(original);
+        Map<String, String> fixtures = Map.of(
+                "session-inline-v1.bin", "58207ecab003afc179f88d112e647e5279e699d6add1cbaa4213e3568b2db2d3",
+                "session-flat-v2.bin", "2394833a90fed237365b4ff8e51e90f9997427a2970a73e89c82b61721e53174");
+        List<String> preceding = new ArrayList<>();
+        for (var fixture : fixtures.entrySet()) {
+            try (var input = getClass().getResourceAsStream("/general-entry/" + fixture.getKey())) {
+                assertNotNull(input);
+                byte[] frame = input.readAllBytes();
+                assertEquals(fixture.getValue(), digest(frame), "Authentic baseline-produced fixture");
+                preceding.add(put(bytes, frame));
+            }
+        }
+        bytes.clear();
         try (var owner = storage.openScope()) {
             // when
-            var restored = owner.open(original.documentId(), oldAddress);
+            for (String address : preceding) {
+                var failure = assertThrows(CoordinationObjectStorageException.class,
+                        () -> owner.open(DocumentId.of("baseline-session"), address));
+                assertTrue(failure.getMessage().contains("Unsupported session storage format"));
+            }
             // then
-            assertEquivalent(original, restored);
-            String upgraded = owner.retain(restored);
-            assertNotEquals(oldAddress, upgraded);
-            assertEquals(storage.retain(original), upgraded);
-            try (var cold = storage.openScope()) { assertEquivalent(original, cold.open(original.documentId(), upgraded)); }
-            byte[] trailing = Arrays.copyOf(legacy, legacy.length + 1);
-            String invalid = put(bytes, trailing);
-            assertThrows(CoordinationObjectStorageException.class, () -> owner.open(original.documentId(), invalid));
+            assertTrue(bytes.writes.isEmpty(), "Unsupported formats must not migrate or reset storage");
+            assertEquivalent(original, owner.open(original.documentId(), current));
+            assertEquals(current, owner.retain(original));
+            byte[] frame = bytes.delegate.records.get(current);
+            String trailing = put(bytes, Arrays.copyOf(frame, frame.length + 1));
+            assertThrows(CoordinationObjectStorageException.class, () -> owner.open(original.documentId(), trailing));
         }
+        try (var cold = storage.openScope()) { assertEquivalent(original, cold.open(original.documentId(), current)); }
     }
 
     @Test void correctlyAddressedInvalidOrMisorderedRevisionStillFailsFullSessionValidation() throws Exception {
