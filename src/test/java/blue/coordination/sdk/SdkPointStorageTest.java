@@ -162,8 +162,8 @@ final class SdkPointStorageTest {
             }
             Files.write(directory.resolve(address(core)), originalCore);
             var value = stored.metadata.entries().get(id);
-            var wrong = new SdkStorageCodec.CoreEntrySnapshot(value.exactEvent(), value.request(), value.journalOrderKey(),
-                    value.sourceOrderKey(), value.timeline(), value.operation(), value.channel(), value.timestampMicros(),
+            var wrong = new SdkStorageCodec.CoreEntrySnapshot(value.exactEvent(), value.operationDetails(), value.journalOrderKey(),
+                    value.sourceOrderKey(), value.timeline(), value.timestampMicros(),
                     value.globalSequence() + 1, value.timelineSequence());
             stored.entries.put(id, stored.storage.retainCoreEntry(id, wrong));
             try (var scope = f.blue.advanced().openPointStorage(stored.storage, stored)) {

@@ -251,7 +251,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                     if (intent.targetId() == null || intent.expectedTargetBlueId() == null
                             || !Objects.equals(intent.timelineId(), entry.timeline().timelineId())
                             || !Objects.equals(intent.actorId(), entry.timeline().actorId())
-                            || !Objects.equals(intent.operation(), entry.operation()) || !Objects.equals(intent.channel(), entry.channel()))
+                            || entry.operationDetails().isEmpty() || !Objects.equals(intent.operation(), entry.operation()) || !Objects.equals(intent.channel(), entry.channel()))
                         throw new IllegalArgumentException("Stored targeted intent differs from its entry");
                 } else if (!intent.equals(EntryIntent.broadcast()))
                     throw new IllegalArgumentException("Broadcast intent carries targeted operands");
@@ -1113,11 +1113,10 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                         : previous.blueId();
         return new TimelineEntrySnapshot(
                 ExactBlueValue.wrap(entry.exactEvent()),
-                entry.request().map(ExactBlueValue::wrap),
+                entry.operationDetails().map(details -> new TimelineEntrySnapshot.OperationDetails(
+                        details.operation(), details.channel(), details.request().map(ExactBlueValue::wrap))),
                 timelineHandle(entry),
                 Optional.ofNullable(previousBlueId),
-                entry.operation(),
-                entry.channel(),
                 entry.timestampMicros(),
                 entry.globalSequence(),
                 entry.timelineSequence());

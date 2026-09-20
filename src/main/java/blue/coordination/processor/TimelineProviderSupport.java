@@ -84,8 +84,9 @@ public final class TimelineProviderSupport {
 
     /**
      * Validates the immutable envelope accepted by the compact Timeline
-     * feeder. The check uses the registered Timeline Entry and Operation
-     * Request identities; it does not invent document-targeting semantics.
+     * feeder. This direct-header check preserves outer authority restrictions
+     * and validates directly recognized operations. Managed admission additionally
+     * verifies message type ancestry before deriving optional operation metadata.
      *
      * @param exactEntry exact, direct-header Timeline Entry
      * @throws IllegalArgumentException when the supported envelope is invalid
@@ -99,7 +100,7 @@ public final class TimelineProviderSupport {
                 : textProperty(entry.timeline(), "timelineId");
         String actorId = entry == null ? null
                 : textProperty(entry.actor(), "accountId");
-        if (entry == null || request == null || !request.routable()
+        if (entry == null || request != null && !request.routable()
                 || timelineId == null || timelineId.isBlank()
                 || actorId == null || actorId.isBlank()
                 || entry.timestamp().signum() <= 0
@@ -107,6 +108,12 @@ public final class TimelineProviderSupport {
             throw new IllegalArgumentException(
                     "Invalid exact Timeline Entry envelope");
         }
+        if (property(exactEntry, "onBehalfOf") != null) {
+            throw new IllegalArgumentException("onBehalfOf requires a Mandate resolver");
+        }
+        // The managed admission classifier separately establishes referenced
+        // message/type lineage. Business fields on general messages are data.
+        if (request == null) return;
         Node message = entry.message();
         Node exactVersion = property(
                 message, "requireExactDocumentVersion");
@@ -121,10 +128,6 @@ public final class TimelineProviderSupport {
                 && property(message, "document") == null) {
             throw new IllegalArgumentException(
                     "Exact document version requires a document");
-        }
-        if (property(exactEntry, "onBehalfOf") != null) {
-            throw new IllegalArgumentException(
-                    "onBehalfOf requires a Mandate resolver");
         }
     }
 

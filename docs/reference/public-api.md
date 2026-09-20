@@ -567,8 +567,21 @@ non-READY document read for host diagnostics.
 `auditTimelineEntries()` return immutable `TimelineEntrySnapshot` values from
 the engine's canonical journal, including entries appended through
 `rawEngine()`. Each snapshot retains the exact whole entry, Timeline identity,
-predecessor identity, operation/channel, timestamp, and global/per-Timeline
-sequence numbers.
+predecessor identity, optional operation details, timestamp, and global/per-Timeline
+sequence numbers. Both `api.TimelineEntry` and `sdk.TimelineEntrySnapshot` expose
+`operationDetails()`: an empty group for a general message or an immutable
+`OperationDetails(operation, channel, request)` group for a recognized operation.
+A business field named `request`, `operation`, or `channel` remains part of the
+exact general message and does not populate this group.
+
+The preceding operation-only constructor overloads and accessors remain.
+`operation()` and `channel()` are operation-specific and throw
+`NoSuchElementException` on a general entry. `request()` is empty on a general
+entry and continues distinguishing absent operation requests from semantic `{}`.
+Generic consumers must use the optional group. The canonical record components
+have intentionally changed; record reflection/serialization compatibility is
+not promised for this RC change. The SDK metadata writer emits revision 2 and
+can read revision 1 operation metadata without reauthoring the accepted input.
 
 `auditOperationRoutes(documentId)` returns the immutable compiled Root-scoped
 operation surface. Each `OperationRouteSnapshot` carries the operation,

@@ -33,13 +33,16 @@ import static blue.language.snapshot.ExactNodeStorageCodec.*;
  * reflection, handler execution or authority construction occurs here.
  */
 final class SdkStorageCodec {
-    static final String FORMAT = "blue-coordination/rooted-sdk-metadata/1";
+    static final String FORMAT = "blue-coordination/rooted-sdk-metadata/2";
+    private static final String PREVIOUS_FORMAT = "blue-coordination/rooted-sdk-metadata/1";
+    private final int maximumBytes;
     private final Object owner;
     private final ExactNodeStorageCodec envelope;
     private final ExactValueStorageCodec exact;
 
     SdkStorageCodec(Object owner, int maximumBytes) {
         this.owner = Objects.requireNonNull(owner, "owner");
+        this.maximumBytes = maximumBytes;
         envelope = new ExactNodeStorageCodec(maximumBytes, 128);
         exact = new ExactValueStorageCodec(maximumBytes, 128);
     }
@@ -65,19 +68,27 @@ final class SdkStorageCodec {
 
     // This is data, not a TimelineEntry authority factory. Install must resolve the
     // corresponding row through the supplied engine's verified journal and compare it.
-    record CoreEntrySnapshot(ExactBlueValue exactEvent, Optional<ExactBlueValue> request,
+    record CoreEntrySnapshot(ExactBlueValue exactEvent,
+            Optional<TimelineEntrySnapshot.OperationDetails> operationDetails,
             ExternalOrderKey journalOrderKey, ExternalOrderKey sourceOrderKey, Timeline timeline,
-            String operation, String channel, long timestampMicros, long globalSequence, long timelineSequence) {
+            long timestampMicros, long globalSequence, long timelineSequence) {
         CoreEntrySnapshot {
-            Objects.requireNonNull(exactEvent); Objects.requireNonNull(request); Objects.requireNonNull(journalOrderKey);
-            Objects.requireNonNull(sourceOrderKey); Objects.requireNonNull(timeline); Objects.requireNonNull(operation);
-            Objects.requireNonNull(channel);
+            Objects.requireNonNull(exactEvent); Objects.requireNonNull(operationDetails);
+            Objects.requireNonNull(journalOrderKey); Objects.requireNonNull(sourceOrderKey); Objects.requireNonNull(timeline);
             if (timestampMicros <= 0 || globalSequence <= 0 || timelineSequence <= 0)
                 throw invalid("Invalid stored entry coordinates");
         }
+        CoreEntrySnapshot(ExactBlueValue exactEvent, Optional<ExactBlueValue> request,
+                ExternalOrderKey journalOrderKey, ExternalOrderKey sourceOrderKey, Timeline timeline,
+                String operation, String channel, long timestampMicros, long globalSequence, long timelineSequence) {
+            this(exactEvent, Optional.of(new TimelineEntrySnapshot.OperationDetails(operation, channel, request)),
+                    journalOrderKey, sourceOrderKey, timeline, timestampMicros, globalSequence, timelineSequence);
+        }
         static CoreEntrySnapshot from(TimelineEntry entry) {
-            return new CoreEntrySnapshot(ExactBlueValue.wrap(entry.exactEvent()), entry.request().map(ExactBlueValue::wrap),
-                    entry.journalOrderKey(), entry.sourceOrderKey(), entry.timeline(), entry.operation(), entry.channel(),
+            return new CoreEntrySnapshot(ExactBlueValue.wrap(entry.exactEvent()),
+                    entry.operationDetails().map(details -> new TimelineEntrySnapshot.OperationDetails(
+                            details.operation(), details.channel(), details.request().map(ExactBlueValue::wrap))),
+                    entry.journalOrderKey(), entry.sourceOrderKey(), entry.timeline(),
                     entry.timestampMicros(), entry.globalSequence(), entry.timelineSequence());
         }
     }
@@ -89,14 +100,27 @@ final class SdkStorageCodec {
     }
 
     byte[] encode(Object value) {
-        return physical(() -> envelope.encodeEnvelope(FORMAT, out -> new W(out).w(value)));
+        return encode(value, FORMAT);
+    }
+    private byte[] encode(Object value, String format) {
+        return physical(() -> envelope.encodeEnvelope(format, out -> new W(out, format.equals(PREVIOUS_FORMAT)).w(value)));
     }
     <T> T decode(byte[] bytes, Class<T> type) {
         return physical(() -> {
-            T value = type.cast(envelope.decodeEnvelope(bytes, FORMAT, in -> new R(in).r()));
-            if (!Arrays.equals(bytes, encode(value))) throw invalid("Noncanonical SDK evidence");
+            String format = format(bytes);
+            T value = type.cast(envelope.decodeEnvelope(bytes, format, in -> new R(in, format.equals(PREVIOUS_FORMAT)).r()));
+            if (!Arrays.equals(bytes, encode(value, format))) throw invalid("Noncanonical SDK evidence");
             return value;
         });
+    }
+    private String format(byte[] bytes) {
+        if (bytes == null || bytes.length > maximumBytes) throw invalid("SDK evidence size bound exceeded");
+        try (var input = new DataInputStream(new java.io.ByteArrayInputStream(bytes))) {
+            if (input.readInt() != 0x42455331) throw invalid("SDK evidence envelope mismatch");
+            String format = readText(input);
+            if (!FORMAT.equals(format) && !PREVIOUS_FORMAT.equals(format)) throw invalid("Unknown SDK evidence format");
+            return format;
+        } catch (IOException failure) { throw new CoordinationObjectStorageException("Invalid SDK evidence header", failure); }
     }
     private static <T> T physical(Supplier<T> operation) {
         try { return operation.get(); }
@@ -110,7 +134,8 @@ final class SdkStorageCodec {
     private final class W {
         private final DataOutputStream out;
         private int depth;
-        W(DataOutputStream out) { this.out = out; }
+        private final boolean previous;
+        W(DataOutputStream out, boolean previous) { this.out = out; this.previous = previous; }
         void fields(int tag, Object... fields) throws IOException {
             out.writeInt(tag); for (Object field : fields) w(field);
         }
@@ -204,7 +229,18 @@ final class SdkStorageCodec {
             if (value instanceof ManagedSurfaceEvidence.SubscriptionOperation v) { fields(58, v.name()); return; }
             if (value instanceof ManagedSurfaceEvidence.ContractPatchOperation v) { fields(59, v.name()); return; }
             if (value instanceof Configuration v) { fields(39, v.language(), v.contracts(), v.bundledRelease(), v.contentDerivedDocumentIds(), v.policy(), v.bundledIdentities()); return; }
-            if (value instanceof CoreEntrySnapshot v) { fields(40, v.exactEvent(), v.request(), v.journalOrderKey(), v.sourceOrderKey(), v.timeline(), v.operation(), v.channel(), v.timestampMicros(), v.globalSequence(), v.timelineSequence()); return; }
+            if (value instanceof CoreEntrySnapshot v) {
+                if (previous) {
+                    var details = v.operationDetails().orElseThrow();
+                    fields(40, v.exactEvent(), details.request(), v.journalOrderKey(), v.sourceOrderKey(), v.timeline(),
+                            details.operation(), details.channel(), v.timestampMicros(), v.globalSequence(), v.timelineSequence());
+                } else fields(40, v.exactEvent(), v.operationDetails(), v.journalOrderKey(), v.sourceOrderKey(), v.timeline(),
+                        v.timestampMicros(), v.globalSequence(), v.timelineSequence());
+                return;
+            }
+            if (!previous && value instanceof TimelineEntrySnapshot.OperationDetails v) {
+                fields(74, v.operation(), v.channel(), v.request()); return;
+            }
             if (value instanceof Timeline v) { fields(41, v.timelineId(), v.actorId()); return; }
             if (value instanceof SourceHistoryPrerequisite v) { fields(42, v.selectionIdentity(), v.requestingRoot(), v.requestingInvocationIdentity(), v.demandIdentity(), v.sourceDocumentId(), v.authoredBlueId(), v.cutoffExclusive(), v.kind(), v.sourceEpoch(), v.sourceBlueId(), v.workIdentity(), v.entryBlueId(), v.journalRevision(), v.routeGeneration(), v.sourceSurfaceIdentity(), v.diagnostic()); return; }
             if (value instanceof DrainResult v) { fields(43, v.entries(), v.stats(), v.quiescent(), v.paused(), v.diagnostic(), v.managedEpochApplications(), v.managedEpochApplicationAttempts(), v.managedEpochEvidenceFailures(), v.rootedRetainedApplications()); return; }
@@ -238,7 +274,8 @@ final class SdkStorageCodec {
     private final class R {
         private final DataInputStream in;
         private int depth;
-        R(DataInputStream in) { this.in = in; }
+        private final boolean previous;
+        R(DataInputStream in, boolean previous) { this.in = in; this.previous = previous; }
         @SuppressWarnings("unchecked") <T> T r() throws IOException {
             if (++depth > 128) throw invalid("SDK evidence depth bound exceeded");
             try { return (T) read(); } finally { depth--; }
@@ -310,7 +347,12 @@ final class SdkStorageCodec {
                 case 58: return ManagedSurfaceEvidence.SubscriptionOperation.valueOf(this.<String>r());
                 case 59: return ManagedSurfaceEvidence.ContractPatchOperation.valueOf(this.<String>r());
                 case 39: return new Configuration(r(), r(), flag(), flag(), r(), r());
-                case 40: return new CoreEntrySnapshot(r(), r(), r(), r(), r(), r(), r(), number(), number(), number());
+                case 40: return previous
+                        ? new CoreEntrySnapshot(r(), r(), r(), r(), r(), r(), r(), number(), number(), number())
+                        : new CoreEntrySnapshot(r(), r(), r(), r(), r(), number(), number(), number());
+                case 74:
+                    if (previous) throw invalid("Operation facet is not valid in preceding SDK format");
+                    return new TimelineEntrySnapshot.OperationDetails(r(), r(), r());
                 case 41: return new Timeline(r(), r());
                 case 42: return new SourceHistoryPrerequisite(r(), r(), r(), r(), r(), r(), r(), r(), number(), r(), r(), r(), number(), number(), r(), r());
                 case 43: return new DrainResult(r(), r(), flag(), flag(), r(), r(), r(), r(), r());

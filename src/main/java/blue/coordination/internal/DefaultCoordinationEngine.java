@@ -1207,7 +1207,6 @@ public final class DefaultCoordinationEngine
             ExactValue supplied = ExactValue.verified(
                     Objects.requireNonNull(exactEntry, "exactEntry"));
             Node canonical = supplied.copyNode();
-            TimelineProviderSupport.validateExactEnvelope(canonical);
             String timelineId = requiredTextAt(
                     canonical, "/timeline/timelineId");
             String actorId = requiredTextAt(

@@ -124,6 +124,7 @@ final class WholeRequestEntryFactory {
         Objects.requireNonNull(registeredTimeline, "registeredTimeline");
         ExactValue supplied = Objects.requireNonNull(
                 exactEvent, "exactEvent");
+        blue.coordination.processor.TimelineProviderSupport.validateExactEnvelope(supplied.copyNode());
         FrozenNode root = supplied.frozen();
         String timelineId = (String) root.at(
                 "/timeline/timelineId").getValue();
@@ -134,12 +135,7 @@ final class WholeRequestEntryFactory {
         }
         long timestamp = new BigInteger(
                 root.at("/timestamp").getValue().toString()).longValueExact();
-        String operation = (String) root.at(
-                "/message/operation").getValue();
-        String channel = (String) root.at("/message/channel").getValue();
-        FrozenNode requestNode = root.at("/message/request");
-        Optional<ExactValue> request = Optional.ofNullable(requestNode)
-                .map(this::retainExactRequest);
+        Optional<TimelineEntry.OperationDetails> details = operationDetails(root, true);
         ExactValue retainedEvent = objects.put(
                 supplied, "timeline-entry");
         ExternalOrderKey order = ExternalOrderKey.of(List.of(
@@ -147,26 +143,43 @@ final class WholeRequestEntryFactory {
                 orderTimeline(retainedEvent, timelineId),
                 retainedEvent.blueId()));
         metrics.increment("append.entriesBuilt");
-        return new TimelineEntry(
-                retainedEvent,
-                request,
-                order,
-                order,
-                registeredTimeline,
-                operation,
-                channel,
-                timestamp,
-                globalSequence,
-                timelineSequence);
+        return new TimelineEntry(retainedEvent, details, order, order, registeredTimeline,
+                timestamp, globalSequence, timelineSequence);
+    }
+
+    private Optional<TimelineEntry.OperationDetails> operationDetails(FrozenNode root, boolean retain) {
+        FrozenNode message = runtime.materializeExact(Objects.requireNonNull(root.property("message"), "message"));
+        if (!runtime.isOperationMessage(message)) return Optional.empty();
+        String operation = requiredRoutingText(message.property("operation"), "operation");
+        String channel = requiredRoutingText(message.property("channel"), "channel");
+        FrozenNode version = message.property("requireExactDocumentVersion");
+        if (version != null && version.getValue() != null && !(version.getValue() instanceof Boolean)) {
+            throw new IllegalArgumentException("requireExactDocumentVersion must be Boolean");
+        }
+        if (version != null && Boolean.TRUE.equals(version.getValue()) && message.property("document") == null) {
+            throw new IllegalArgumentException("Exact document version requires a document");
+        }
+        FrozenNode request = message.property("request");
+        Optional<ExactValue> value = Optional.ofNullable(request).map(node -> retain
+                ? retainExactRequest(node) : ExactValue.fromFrozen(runtime.materializeExact(node)));
+        return Optional.of(new TimelineEntry.OperationDetails(operation, channel, value));
+    }
+
+    private static String requiredRoutingText(FrozenNode value, String field) {
+        if (value == null || !(value.getValue() instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException("Operation Request requires nonblank Text " + field);
+        }
+        return text;
     }
 
     private String orderTimeline(ExactValue entry, String legacyTimelineName) {
         return exactTimelineOrder ? entry.canonicalAt("/timeline").blueId() : legacyTimelineName;
     }
 
-    /** Verifies stored rows without admission, provider reads, or object retention. */
+    /** Verifies stored coordinates and derived metadata against authenticated exact message/type evidence. */
     void verifyStoredEntry(TimelineEntry entry) {
         ExactValue exact = entry.exactEvent();
+        blue.coordination.processor.TimelineProviderSupport.validateExactEnvelope(exact.copyNode());
         FrozenNode root = exact.frozen();
         String timelineId = (String) root.at("/timeline/timelineId").getValue();
         String actorId = (String) root.at("/actor/accountId").getValue();
@@ -175,23 +188,22 @@ final class WholeRequestEntryFactory {
                 BigInteger.valueOf(timestamp), orderTimeline(exact, timelineId), exact.blueId()));
         if (!new Timeline(timelineId, actorId).equals(entry.timeline())
                 || timestamp != entry.timestampMicros()
-                || !Objects.equals(root.at("/message/operation").getValue(), entry.operation())
-                || !Objects.equals(root.at("/message/channel").getValue(), entry.channel())
                 || !order.equals(entry.journalOrderKey())
                 || !order.equals(entry.sourceOrderKey())) {
             throw new IllegalArgumentException("Stored Timeline metadata differs from exact event");
         }
-        FrozenNode request = root.at("/message/request");
-        if ((request != null) != entry.request().isPresent()) {
-            throw new IllegalArgumentException("Stored Timeline request presence differs from exact event");
+        Optional<TimelineEntry.OperationDetails> actual = operationDetails(root, false);
+        if (actual.isPresent() != entry.operationDetails().isPresent()) {
+            throw new IllegalArgumentException("Stored entry kind differs from exact message type");
         }
-        if (request != null) {
-            ExactValue retained = entry.request().orElseThrow();
-            String identity = request.isReferenceOnly() ? request.getReferenceBlueId() : request.blueId();
-            if (!identity.equals(retained.blueId())
-                    || !request.isReferenceOnly()
-                    && !ExactValue.fromFrozen(request).sameExactValue(retained)) {
-                throw new IllegalArgumentException("Stored Timeline request differs from exact event");
+        if (actual.isPresent()) {
+            var expected = actual.orElseThrow();
+            var stored = entry.operationDetails().orElseThrow();
+            if (!expected.operation().equals(stored.operation()) || !expected.channel().equals(stored.channel())
+                    || expected.request().isPresent() != stored.request().isPresent()
+                    || expected.request().isPresent() && !expected.request().orElseThrow()
+                            .sameExactValue(stored.request().orElseThrow())) {
+                throw new IllegalArgumentException("Stored operation metadata differs from exact event");
             }
         }
     }

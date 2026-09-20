@@ -8,24 +8,20 @@ import java.util.Optional;
 /** One whole exact Timeline Entry retained once in the journal. */
 public record TimelineEntry(
         ExactValue exactEvent,
-        Optional<ExactValue> request,
+        Optional<OperationDetails> operationDetails,
         ExternalOrderKey journalOrderKey,
         ExternalOrderKey sourceOrderKey,
         Timeline timeline,
-        String operation,
-        String channel,
         long timestampMicros,
         long globalSequence,
         long timelineSequence) {
     /** Validates exact values and deterministic journal/source coordinates. */
     public TimelineEntry {
         exactEvent = Objects.requireNonNull(exactEvent, "exactEvent");
-        request = Objects.requireNonNull(request, "request");
+        operationDetails = Objects.requireNonNull(operationDetails, "operationDetails");
         journalOrderKey = Objects.requireNonNull(journalOrderKey, "journalOrderKey");
         sourceOrderKey = Objects.requireNonNull(sourceOrderKey, "sourceOrderKey");
         timeline = Objects.requireNonNull(timeline, "timeline");
-        operation = requireText(operation, "operation");
-        channel = requireText(channel, "channel");
         if (timestampMicros <= 0L) {
             throw new IllegalArgumentException("timestampMicros must be positive");
         }
@@ -34,6 +30,40 @@ public record TimelineEntry(
                     "journal sequences must be positive");
         }
     }
+
+    /** Operation-specific metadata; absence identifies a general entry. */
+    public record OperationDetails(String operation, String channel, Optional<ExactValue> request) {
+        /** Requires real routing fields and preserves absent versus empty request. */
+        public OperationDetails {
+            operation = requireText(operation, "operation");
+            channel = requireText(channel, "channel");
+            request = Objects.requireNonNull(request, "request");
+        }
+    }
+
+    /** Retains the operation-only constructor from the preceding RC. */
+    public TimelineEntry(ExactValue exactEvent, Optional<ExactValue> request,
+            ExternalOrderKey journalOrderKey, ExternalOrderKey sourceOrderKey,
+            Timeline timeline, String operation, String channel,
+            long timestampMicros, long globalSequence, long timelineSequence) {
+        this(exactEvent, Optional.of(new OperationDetails(operation, channel, request)),
+                journalOrderKey, sourceOrderKey, timeline, timestampMicros, globalSequence, timelineSequence);
+    }
+
+    /**
+     * Returns the operation name for an operation entry.
+     * @throws java.util.NoSuchElementException for a general entry
+     */
+    public String operation() { return operationDetails.orElseThrow().operation(); }
+
+    /**
+     * Returns the target channel for an operation entry.
+     * @throws java.util.NoSuchElementException for a general entry
+     */
+    public String channel() { return operationDetails.orElseThrow().channel(); }
+
+    /** Operation request, empty for a general entry or an operation without a request. */
+    public Optional<ExactValue> request() { return operationDetails.flatMap(OperationDetails::request); }
 
     /** Retains the accepted-base constructor for entries with a present exact request. */
     public TimelineEntry(
@@ -53,7 +83,7 @@ public record TimelineEntry(
      * @throws java.util.NoSuchElementException if this entry has no request
      */
     public ExactValue exactRequest() {
-        return request.orElseThrow();
+        return request().orElseThrow();
     }
 
     /** Returns the exact content identity of the retained event. */

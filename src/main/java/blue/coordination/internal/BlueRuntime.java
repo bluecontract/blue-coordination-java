@@ -196,6 +196,34 @@ final class BlueRuntime implements AutoCloseable {
         return language.snapshots().resolvePreservingPaths(source, paths);
     }
 
+    /** Exact materialization without reauthoring or instance-field expansion. */
+    FrozenNode materializeExact(FrozenNode value) {
+        ensureOpen();
+        if (!value.isReferenceOnly()) return value;
+        var result = contracts.runtimeAccess().materializeVerifiedExactReference(value);
+        if (result.outcome() == BlueOperationOutcome.INCOMPLETE) {
+            throw new ExecutionEvidenceUnavailableException(result.reason().orElse(
+                    "Exact message evidence is unavailable"), result.outstandingBlueIds());
+        }
+        if (result.outcome() != BlueOperationOutcome.ESTABLISHED) {
+            throw new InvalidExecutionEvidenceException(result.reason().orElse("Invalid exact message evidence"));
+        }
+        return result.requireEstablished();
+    }
+
+    /** Nominal classification only; missing/corrupt type ancestry never means general. */
+    boolean isOperationMessage(FrozenNode message) {
+        ensureOpen();
+        if (message.getType() == null) return false;
+        var matcher = new blue.language.matching.FrozenTypeMatcher(language.processing().runtimeAccess());
+        try {
+            return matcher.isSubtypeOrSame(message.getType(), FrozenNode.fromNode(new Node()
+                    .blueId(blue.repo.coordination.OperationRequest.blueId())), Long.MAX_VALUE);
+        } finally {
+            matcher.clearCaches();
+        }
+    }
+
     ResolvedSnapshot loadExactSnapshot(String blueId) {
         return loadExactSnapshot(blueId, false);
     }
