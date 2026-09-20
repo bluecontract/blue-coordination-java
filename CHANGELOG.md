@@ -5,6 +5,20 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Add host-selected complete processing stages with separate readiness inspection,
+  frozen input cutoffs, source prerequisites and detached result evidence. Complete
+  entry, graph and catch-up operations remain atomic; hosts may batch their outcomes.
+- Add conditional logical-record publication and reconciliation for independent
+  runtime owners, including precise point/range conditions and owner/control fences.
+- Resolve historical source requirements from exact retained evidence before the
+  full exclusive order boundary. Independent consumers can publish the same
+  historical source view while another consumer attaches or the source advances;
+  genuine earlier work, joins, stale owners and corrupt evidence remain guarded.
+- Maintain rooted source surfaces from each owner's committed view and authenticate
+  projected occurrence resolutions against the immutable committing receipt.
+- Export source-bound local Coordination candidates with artifact and dependency
+  hashes. The new durable storage path does not provide legacy state migration or
+  constitute a stable public API/durable-format release approval.
 - Select published Language `3.1.0-rc.27` for the reconciled baseline and bind
   RC preparation/readiness to the RC11 declaration. Retain BEX RC6, Repository
   RC22, the complete capability inventory, release tier, and historical evidence.

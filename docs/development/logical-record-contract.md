@@ -335,3 +335,50 @@ explicit input selection materializes the SDK's existing zero-attempt dispositio
 (for example `STALE` for a targeted call whose exact target changed, or `NO_MATCH`
 for an untargeted exact event). Retain that result under the original input before
 completing the command, without inventing a Contracts invocation or gas charge.
+
+## Historical source requirements and independent consumers
+
+A historical attachment depends on the exact source facts and completeness
+required before its full exclusive `ExternalOrderKey` boundary. It must not
+acquire dependencies on unrelated current source heads merely to discover those
+facts. For example, A and C may both prepare an attachment to B5 at cutoff 30;
+B's publication of B6 from input 40 does not by itself invalidate either original
+packet. Each consumer still publishes only its complete actual owner set.
+
+The logical store retains independently addressed source admission, publication
+history, identity and position records. Historical lookup selects the retained
+complete image before the cutoff. Admission alone is not proof of historical
+completeness: relevant earlier input, retained work and pending joins remain
+requirements, and missing or corrupt evidence fails closed. Work which actually
+executes or publishes a source-owned outcome keeps its current owner fences.
+
+Controlled topology reads validate selected component and forward/reverse edge
+facts without implicitly observing the entire incoming-consumer bucket. Complete
+incoming queries remain protected when required by semantic traversal or
+uncontrolled integrity verification. Every writer must preserve the same atomic
+forward/reverse relationship invariant; this is not permission for hosts to
+remove publication conditions.
+
+Entry owners are fenced before execution. If the complete result acquires more
+owners, their actual fences are captured after calculation and checked against
+the selected state before publication. Borrowed historical witnesses do not
+become current publication owners simply because they were read. Rooted active
+source surfaces derive from each root's committed view; a source-only publication
+cannot replace another root's selected view.
+
+`AdvancedCoordination.auditCommittedOccurrenceResolutions(publicationIdentity)`
+authenticates projected occurrence facts against their committing receipt.
+Hosts project document histories for actual published outcomes: an admission
+waiting for content may retain authority over an expected-absent source without
+having a source document history to project.
+
+Publication of a valid historical attachment and discovery of subsequent work
+are separate obligations. If B advances before A's relationship is published,
+the host must retain a recheck/continuation obligation; it cannot rely solely on
+an earlier notification to consumers. The existing rooted recheck path can find
+the original later input without resubmitting it or repeating the attachment.
+
+Historical prefix lookup currently scans the selected prefix and retains complete
+session images. No large-history storage or throughput bound is established by
+the correctness controls. This storage path has no legacy migration contract;
+stable API and durable-format approval remain separate release decisions.
