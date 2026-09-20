@@ -107,7 +107,7 @@ test('authorizes RC12 without authorizing RC13', () => {
   );
 });
 
-test('repository authority prepares RC13 after RC12 and rejects RC14', () => {
+test('repository authority prepares RC14 after RC13 and rejects RC15', () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -116,22 +116,23 @@ test('repository authority prepares RC13 after RC12 and rejects RC14', () => {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'coordination-rc-authority-'));
   try {
     fs.cpSync(path.join(root, 'docs/releases'), path.join(fixture, 'docs/releases'), { recursive: true });
-    fs.writeFileSync(path.join(fixture, '.cz.toml'), 'version = "3.0.0-rc.12"\n');
+    fs.writeFileSync(path.join(fixture, '.cz.toml'), 'version = "3.0.0-rc.13"\n');
     const git = args => execFileSync('git', args, { cwd: fixture, stdio: 'pipe' });
     git(['init']);
+    git(['config', 'tag.gpgSign', 'false']);
     git(['-c', 'user.name=CI Test', '-c', 'user.email=ci@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']);
-    git(['tag', 'v3.0.0-rc.12']);
+    git(['tag', 'v3.0.0-rc.13']);
     const run = () => spawnSync(process.execPath, [path.join(__dirname, 'prepare-rc-release.js')], {
       cwd: fixture, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: '' },
     });
     const prepared = run();
     assert.equal(prepared.status, 0, prepared.stderr);
-    assert.equal(fs.readFileSync(path.join(fixture, '.cz.toml'), 'utf8'), 'version = "3.0.0-rc.13"\n');
-    git(['tag', 'v3.0.0-rc.13']);
+    assert.equal(fs.readFileSync(path.join(fixture, '.cz.toml'), 'utf8'), 'version = "3.0.0-rc.14"\n');
+    git(['tag', 'v3.0.0-rc.14']);
     const rejected = run();
     assert.notEqual(rejected.status, 0);
-    assert.match(rejected.stderr, /Prepared RC 3\.0\.0-rc\.14 does not match authorized release 3\.0\.0-rc\.13/);
-    assert.equal(fs.readFileSync(path.join(fixture, '.cz.toml'), 'utf8'), 'version = "3.0.0-rc.13"\n');
+    assert.match(rejected.stderr, /Prepared RC 3\.0\.0-rc\.15 does not match authorized release 3\.0\.0-rc\.14/);
+    assert.equal(fs.readFileSync(path.join(fixture, '.cz.toml'), 'utf8'), 'version = "3.0.0-rc.14"\n');
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
   }

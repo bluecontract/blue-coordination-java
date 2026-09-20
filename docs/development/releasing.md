@@ -6,10 +6,10 @@ separate from Maven Central staging and is intentionally non-overwriting.
 
 ## Current decision
 
-`3.0.0-rc.13` is authorized as a bounded external-pilot release candidate
+`3.0.0-rc.14` is authorized as a bounded external-pilot release candidate
 only after all required gates pass on the exact published dependency tuple.
 It is not stable or production-ready. The exact scope and non-claims are in the
-[rc.13 release decision](../releases/3.0.0-rc.13.md).
+[rc.14 release decision](../releases/3.0.0-rc.14.md).
 
 The release consumes only Maven Central artifacts:
 
@@ -18,13 +18,13 @@ The release consumes only Maven Central artifacts:
 | Language | `3.1.0-rc.32` |
 | BEX core/contracts | `1.1.0-rc.6` |
 | Repository | `3.0.0-rc.22` |
-| Coordination | `3.0.0-rc.13` |
+| Coordination | `3.0.0-rc.14` |
 
 Coordination directly owns the complete Language rc.32 graph. BEX and
 Repository Language transitive edges remain excluded, and the generated POM
 publishes the same exclusions.
 
-The complete current release gate and focused rc.13 capability inventory are
+The complete current release gate and focused rc.14 capability inventory are
 the required semantic evidence for this release. Their documentation does not
 claim that they have passed. Historical rc.4, rc.5, and rc.6 receipts remain evidence
 for their original releases only.
@@ -33,10 +33,10 @@ for their original releases only.
 
 From a clean feature branch:
 
-Keep `.cz.toml` at the authorized, not-yet-tagged candidate (`3.0.0-rc.13`)
+Keep `.cz.toml` at the authorized, not-yet-tagged candidate (`3.0.0-rc.14`)
 so PR Build also executes `verifyRcReadiness` during staging. Build seals a local
 verification commit without a release tag or publication. The release workflow
-owns the final version commit and tag; it retains RC13 while its tag is absent
+owns the final version commit and tag; it retains RC14 while its tag is absent
 and rejects a later candidate until its release authority is explicitly updated.
 
 ```bash
@@ -63,13 +63,13 @@ The shared workflow:
 
 1. checks out complete history and tags and sets up Java 17;
 2. validates credentials and prepares the RC authorized by
-   `docs/releases/3.0.0-rc.13.md`, with a local verification commit and tag;
+   `docs/releases/3.0.0-rc.14.md`, with a local verification commit and tag;
 3. exports and restores that exact source using a SHA-256-bound Git bundle;
 4. runs three groups of complete test classes and an independent extracted-source
    check on separate Java 17 runners (two JVMs × two JUnit threads per test runner);
 5. requires all four jobs to succeed, validates complete test inventory, topology,
    source/run/attempt-bound receipts and archive hashes, then runs the remaining
-   release and RC13 readiness gates and stages the Java 17 artifacts;
+   release and RC14 readiness gates and stages the Java 17 artifacts;
 6. seals the verified artifacts and checks the handoff in the publication job;
 7. atomically reserves the exact RC commit on `next` and its annotated tag;
 8. deploys the signed bundle, waits separately for Maven Central `PUBLISHED`,
@@ -150,7 +150,7 @@ The host owns atomic persistence, fences, scheduling and durable work delivery;
 Coordination adds no database implementation. It does not provide an
 authoritative Timeline-provider completeness service, provider-backed Mandates,
 distributed scheduling, production MyOS operations, arbitrary-history resource
-bounds, or a stable latency SLA. See the RC13 decision for the exact storage
+bounds, or a stable latency SLA. See the RC14 decision for the exact storage
 contract and remaining exclusions.
 
 `verifyRcReadiness` proves the current semantic bounded-pilot profile and
@@ -158,5 +158,5 @@ produces fresh artifact hashes after executing the complete
 published-dependency build.
 
 The rc.1 Round 13 reports and schemas are immutable historical evidence. Their
-performance exception is rc.1-specific and is not part of rc.13 or any future
+performance exception is rc.1-specific and is not part of rc.14 or any future
 stable release.
