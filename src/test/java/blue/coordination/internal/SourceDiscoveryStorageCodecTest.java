@@ -293,12 +293,22 @@ final class SourceDiscoveryStorageCodecTest {
         Scenario(boolean known) throws Exception {
             this(known, resource("source.yaml"));
         }
-        Scenario(boolean known, String sourceYaml) throws Exception {
+        Scenario(boolean known, String sourceYaml) throws Exception { this(known, sourceYaml, false); }
+        Scenario(boolean known, String sourceYaml, boolean general) throws Exception {
+            if (general) sourceYaml = sourceYaml.replace("type: Coordination/Sequential Workflow Operation\n    channel: owner\n    request: {}",
+                    "type: Coordination/Sequential Workflow\n    channel: owner\n    event: {message: {kind: Tick}}");
             parent = f.start(resource("parent.yaml"), "rcp2/parent", ActivationPolicy.importFullHistory());
             var authored = f.blue.values().yaml(sourceYaml); f.exact.put(authored.blueId(), authored.json());
             if (known) {
                 var source = f.start(sourceYaml, "rcp2/source", ActivationPolicy.importFullHistory());
-                f.append(source, "rcp2/source", "tick");
+                if (general) f.blue.events().from(f.timelines.get("rcp2/source")).exact(f.blue.values().yaml("""
+                        type: Coordination/Timeline Entry
+                        timeline: {type: MyOS/MyOS Timeline, timelineId: rcp2/source}
+                        timestamp: 100
+                        actor: {type: MyOS/Principal Actor, accountId: alice}
+                        message: {kind: Tick}
+                        """)).submit();
+                else f.append(source, "rcp2/source", "tick");
             } else f.timelines.put("rcp2/source", f.blue.timelines().register("rcp2/source", "alice"));
             var entry = f.blue.events().from(f.timelines.get("rcp2/parent")).exact(f.blue.values().yaml("""
                     type: Coordination/Timeline Entry
