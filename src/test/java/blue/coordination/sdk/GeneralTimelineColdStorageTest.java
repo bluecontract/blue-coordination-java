@@ -37,7 +37,8 @@ final class GeneralTimelineColdStorageTest {
             entryId = blue.events().from(timeline).exact(GeneralTimelineScenario.event(blue, "probe/cold", 20, 7)).submit().blueId();
             scope.stage(); assertTrue(records.publish(attempt.prepare("general-admitted", List.of(), EVIDENCE)));
         }
-        // when: the first complete outcome is discarded, then another owner calculates and publishes it.
+        // when
+        // The first complete outcome is discarded, then another owner calculates and publishes it.
         objects = objects.fresh();
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
                 .openLogical(LIMITS, configuration, attempt, ExactNodeProvider.empty())) {
@@ -56,7 +57,8 @@ final class GeneralTimelineColdStorageTest {
             assertArrayEquals(expectedResult, CODEC.encode(scope.coordination().runtimeForStorage().storedMaps().results().get(entryId)));
             scope.stage(); assertTrue(records.publish(attempt.prepare("general-published", List.of(), EVIDENCE)));
         }
-        // then: a cold owner reads the original result and exact history, with no duplicate application.
+        // then
+        // A cold owner reads the original result and exact history, with no duplicate application.
         objects = objects.fresh();
         try (var attempt = records.attempt(); var scope = RootedCoordinationStorage.controlledRepository(objects)
                 .openLogical(LIMITS, configuration, attempt, ExactNodeProvider.empty())) {

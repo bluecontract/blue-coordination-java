@@ -50,13 +50,15 @@ final class GeneralTimelineAuditStorageTest {
     }
 
     @Test void rejectsPrecedingOperationMetadataWithoutMigration() throws Exception {
-        // given: fixture emitted by merged bfcc821's unmodified candidate JAR.
+        // given
+        // Fixture emitted by merged bfcc821's unmodified candidate JAR.
         byte[] previous;
         try (var resource = getClass().getResourceAsStream("/general-entry/sdk-operation-v1.bin")) {
             previous = java.util.Objects.requireNonNull(resource).readAllBytes();
         }
         var codec = new SdkStorageCodec(new Object(), MAX);
-        // when / then
+        // when
+        // then
         assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(previous, SdkStorageCodec.Metadata.class));
         assertThrows(CoordinationObjectStorageException.class,
                 () -> codec.decode(Arrays.copyOf(previous, previous.length - 1), SdkStorageCodec.Metadata.class));
