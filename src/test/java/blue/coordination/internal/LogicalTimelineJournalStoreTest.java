@@ -147,6 +147,7 @@ final class LogicalTimelineJournalStoreTest {
     }
 
     @Test void exclusiveInputPrefixDoesNotDependOnTheEntryAtItsBoundary() {
+        // given
         var records = new LogicalRecordMapTest.Store();
         TimelineEntry first, boundary; Publication appendBoundary;
         try (var attempt = records.attempt()) {
@@ -163,11 +164,13 @@ final class LogicalTimelineJournalStoreTest {
                 appendBoundary = attempt.prepare("at-boundary", List.of(), EVIDENCE);
             }
         }
+        // when
         Publication historical;
         try (var attempt = records.attempt(); var owner = new Owner(new LogicalTimelineJournalStore(new LogicalPointStorage(attempt), LIMITS))) {
             assertEquals(List.of(first.blueId()), owner.journal.entriesBefore("a", boundary.sourceOrderKey()).stream().map(TimelineEntry::blueId).toList());
             historical = attempt.prepare("exclusive-prefix", List.of(), EVIDENCE);
         }
+        // then
         assertTrue(records.publish(appendBoundary));
         assertTrue(records.publish(historical), "An entry exactly at the exclusive boundary is outside the observed input prefix");
         try (var attempt = records.attempt(); var owner = new Owner(new LogicalTimelineJournalStore(new LogicalPointStorage(attempt), LIMITS))) {

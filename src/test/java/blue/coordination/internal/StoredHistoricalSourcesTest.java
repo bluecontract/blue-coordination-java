@@ -14,11 +14,13 @@ final class StoredHistoricalSourcesTest {
     private static final PersistentMapStorage.Limits MAPS = RootedEngineStorageTest.LIMITS.indexes();
 
     @Test void historicalPacketSurvivesLaterSourcePublicationAndUsesTheFullExclusiveOrder() throws Exception {
+        // given
         try (var f = new Scenario()) {
             f.publish("admit");
             var first = f.process(); f.publish("first");
             var second = f.append();
             var cutoff = f.order(second.blueId());
+            // when
             Publication held;
             try (var read = f.read()) {
                 assertEquals(1, read.sources.before(f.id, cutoff).orElseThrow().epoch());
@@ -31,6 +33,7 @@ final class StoredHistoricalSourcesTest {
                 held = read.attempt.prepare("historical-reader", List.of(), EVIDENCE);
                 assertTrue(held.points().stream().noneMatch(p -> p.key().family() == Family.SESSION));
             }
+            // then
             f.fixture.process(f.root, second); f.publish("second");
             assertTrue(f.records.publish(held), "A source publication at/after the cutoff cannot invalidate its earlier prefix");
             try (var cold = f.read()) {
@@ -43,25 +46,30 @@ final class StoredHistoricalSourcesTest {
     }
 
     @Test void anEarlierPublicationInvalidatesAnAlreadyObservedPrefix() throws Exception {
+        // given
         try (var f = new Scenario()) {
             f.publish("admit"); var input = f.append();
             var order = f.order(input.blueId());
             var components = new ArrayList<Object>(order.components());
             components.set(components.size() - 1, components.get(components.size() - 1).toString() + "~");
             var cutoff = ExternalOrderKey.of(components);
+            // when
             Publication held;
             try (var read = f.read()) {
                 assertEquals(0, read.sources.before(f.id, cutoff).orElseThrow().epoch());
                 held = read.attempt.prepare("before-earlier-work", List.of(), EVIDENCE);
             }
+            // then
             f.fixture.process(f.root, input); f.publish("earlier-work");
             assertFalse(f.records.publish(held), "An omitted earlier source publication is a genuine conflict");
         }
     }
 
     @Test void accumulatedCompleteOutcomesRetainEveryPositionAndDiscardedWindowPublishesNothing() throws Exception {
+        // given
         try (var f = new Scenario()) {
             ExternalOrderKey first, second;
+            // when
             try (var window = f.read()) {
                 window.sources.published(Set.of(f.id), f.fixture.engine.documents().storedState());
                 first = f.process(); window.sources.published(Set.of(f.id), f.fixture.engine.documents().storedState());
@@ -70,6 +78,7 @@ final class StoredHistoricalSourcesTest {
                 window.sources.stage(); window.context.flush();
                 assertTrue(f.records.publish(window.attempt.prepare("complete-window", List.of(), EVIDENCE)));
             }
+            // then
             try (var cold = f.read()) {
                 assertEquals(0, cold.sources.before(f.id, first).orElseThrow().epoch());
                 assertEquals(1, cold.sources.before(f.id, second).orElseThrow().epoch());
@@ -87,11 +96,14 @@ final class StoredHistoricalSourcesTest {
     }
 
     @Test void missingAndCorruptSelectedHistoryNeverBecomeACompletedSource() throws Exception {
+        // given
         try (var f = new Scenario()) {
             f.publish("admit"); var cutoff = f.process();
             var row = f.records.data.entrySet().stream().filter(e -> e.getKey().family() == Family.SOURCE_HISTORY).findFirst().orElseThrow();
             var key = row.getKey(); var value = row.getValue();
+            // when
             f.records.data.remove(key);
+            // then
             try (var read = f.read()) {
                 assertTrue(read.sources.admission(f.id).isPresent());
                 assertTrue(read.sources.before(f.id, cutoff).isEmpty(), "Admission is not a substitute for historical evidence");

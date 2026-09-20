@@ -13,6 +13,7 @@ final class StoredTopologyConditionTest {
             new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
 
     @Test void selectedSourceComponentSurvivesAnotherIncomingConsumerButCompleteTraversalDoesNot() {
+        // given
         var records = new LogicalRecordMapTest.Store(); var storage = new StoredTopologyIndexes(new StoredRouteIndexesTest.Bytes(), LIMITS);
         seed(records, storage);
         Publication selected, incoming, strict;
@@ -31,7 +32,9 @@ final class StoredTopologyConditionTest {
             assertTrue(storage.component(graph, id(1)).isPresent());
             strict = attempt.prepare("uncontrolled-check", List.of(), EVIDENCE);
         }
+        // when
         addEdge(records, storage, id(2), id(1), true);
+        // then
         assertTrue(records.publish(selected));
         assertFalse(records.publish(incoming), "An actual incoming traversal must retain phantom protection");
         assertFalse(records.publish(strict), "Uncontrolled validation still authenticates complete incoming membership");
@@ -39,17 +42,23 @@ final class StoredTopologyConditionTest {
     }
 
     @Test void selectedOutgoingEdgeStillRequiresItsReversePointAndValidComponent() {
+        // given
         var records = new LogicalRecordMapTest.Store(); var storage = new StoredTopologyIndexes(new StoredRouteIndexesTest.Bytes(), LIMITS);
-        seed(records, storage); addEdge(records, storage, id(2), id(1), false);
+        seed(records, storage);
+        // when
+        addEdge(records, storage, id(2), id(1), false);
         try (var attempt = records.attempt()) {
             var graph = storage.openLogical(new LogicalRecordContext(attempt));
+            // then
             assertThrows(NoncommittingExecutionException.class, () -> storage.component(graph, id(2), true));
         }
     }
 
     @Test void incomingCorruptionIsStillDetectedByUncontrolledCheck() {
+        // given
         var records = new LogicalRecordMapTest.Store(); var storage = new StoredTopologyIndexes(new StoredRouteIndexesTest.Bytes(), LIMITS);
         seed(records, storage);
+        // when
         try (var attempt = records.attempt()) {
             var context = new LogicalRecordContext(attempt); var graph = storage.openLogical(context); var s = graph.storedIndexes();
             var bucket = s.sources().get(id(1));
@@ -58,6 +67,7 @@ final class StoredTopologyConditionTest {
         }
         try (var attempt = records.attempt()) {
             var graph = storage.openLogical(new LogicalRecordContext(attempt));
+            // then
             assertThrows(NoncommittingExecutionException.class, () -> storage.component(graph, id(1)));
         }
     }
