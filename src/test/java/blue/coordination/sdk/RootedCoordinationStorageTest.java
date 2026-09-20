@@ -23,6 +23,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Actual complete SDK/engine installation; all cold state comes from immutable bytes plus the exact journal. */
 final class RootedCoordinationStorageTest {
+    private boolean generalCycle;
+    RootedCoordinationStorageTest generalCycleEntries() { generalCycle = true; return this; }
+
     private static final int MAX = 32 * 1024 * 1024;
     static final RootedCoordinationStorage.Limits LIMITS = new RootedCoordinationStorage.Limits(
             // Same complete-receipt capacities as RootedEngineStorageTest;
@@ -286,7 +289,7 @@ final class RootedCoordinationStorageTest {
         try (var original = new RootedSdkFixture()) {
             var blue = original.blue;
             var b = original.start("cycle-b.yaml", "rcp2/cycle", Map.of()); bId = b.id();
-            String aYaml = RootedSdkFixture.resource("cycle-a.yaml") + "\npeer:\n  blueId: " + b.snapshot().blueId() + "\n";
+            String aYaml = cycleSource(RootedSdkFixture.resource("cycle-a.yaml")) + "\npeer:\n  blueId: " + b.snapshot().blueId() + "\n";
             var authoredA = blue.values().yaml(aYaml); original.exact.put(authoredA.blueId(), authoredA.json());
             var a = original.startYaml(aYaml, "rcp2/cycle"); aId = a.id();
             var connect = cycleAppend(blue, b, null, "connectA", 90, "a:\n  blueId: " + authoredA.blueId()); connectId = connect.blueId();
@@ -432,7 +435,12 @@ final class RootedCoordinationStorageTest {
         assertInstanceOf(java.util.NoSuchElementException.class, failure.getCause());
         assertEquals(before, cycleEvidence(blue, a, b, detached), "Unsupported explicit replay publishes nothing");
     }
-    private static EntryHandle cycleAppend(BlueCoordination blue, DocumentHandle target, String previous,
+    private String cycleSource(String yaml) {
+        return generalCycle ? yaml.replace("  startFinite:\n    type: Coordination/Sequential Workflow Operation\n    channel: ownerChannel\n    request: {}",
+                "  startFinite:\n    type: Coordination/Sequential Workflow\n    channel: ownerChannel\n    event: {message: {kind: StartFinite}}") : yaml;
+    }
+
+    private EntryHandle cycleAppend(BlueCoordination blue, DocumentHandle target, String previous,
             String operation, long timestamp, String request) {
         String yaml = """
                 type: Coordination/Timeline Entry
@@ -453,6 +461,13 @@ final class RootedCoordinationStorageTest {
                   request:
                 %s
                 """.formatted(timestamp, target.snapshot().blueId(), operation, request.indent(4));
+        if (generalCycle && operation.equals("startFinite")) yaml = """
+                type: Coordination/Timeline Entry
+                timeline: {type: MyOS/MyOS Timeline, timelineId: rcp2/cycle}
+                timestamp: %d
+                actor: {type: MyOS/Principal Actor, accountId: alice}
+                message: {kind: StartFinite}
+                """.formatted(timestamp);
         if (previous != null) yaml += "\nprevEntry:\n  blueId: " + previous + "\n";
         return blue.events().from(blue.timelines().register("rcp2/cycle", "alice")).exact(blue.values().yaml(yaml)).submit();
     }
