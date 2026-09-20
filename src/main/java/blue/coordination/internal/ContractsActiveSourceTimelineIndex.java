@@ -90,7 +90,9 @@ final class ContractsActiveSourceTimelineIndex {
             for (DocumentId owner : affectedDocuments) {
                 if (!Boolean.TRUE.equals(publicRoots.get(owner))) continue;
                 metrics.increment("sourceSurface.rootsResolved");
-                replacements.put(owner, Objects.requireNonNull(rootedSurface.apply(owner)));
+                var surface = Objects.requireNonNull(rootedSurface.apply(owner));
+                surface.managedDocuments().forEach(ignored -> metrics.increment("sourceSurface.documentsResolved"));
+                replacements.put(owner, surface);
             }
             installReplacements(replacements);
             return;
