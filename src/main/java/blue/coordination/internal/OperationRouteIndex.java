@@ -33,6 +33,15 @@ final class OperationRouteIndex {
 
     private LogicalRouteRows logicalRows;
     private GeneralRouteIndex general = GeneralRouteIndex.empty();
+    private Function<FrozenNode, FrozenNode> operationMessage = message -> {
+        if (message.isReferenceOnly()) throw new IllegalStateException("Exact operation message resolver is required");
+        return message;
+    };
+
+    void operationMessageResolver(Function<FrozenNode, FrozenNode> resolver) {
+        operationMessage = Objects.requireNonNull(resolver, "operation message resolver");
+    }
+
     private java.util.function.BiFunction<GeneralRouteIndex.Row, TimelineEntry, Optional<String>> generalDelivery;
 
     void generalDeliveryResolver(java.util.function.BiFunction<GeneralRouteIndex.Row, TimelineEntry, Optional<String>> resolver) {
@@ -482,7 +491,7 @@ final class OperationRouteIndex {
         if (entry.operationDetails().isEmpty()) return selectGeneralDeliveries(entry).documentIds();
         long started = System.nanoTime();
         metrics.increment("routing.lookups");
-        DocumentTarget target = DocumentTarget.from(entry);
+        DocumentTarget target = DocumentTarget.from(entry, operationMessage);
         Set<DocumentId> selected = new LinkedHashSet<>();
         for (String eventKey
                 : TimelineProviderSupport.exactTimelineEntryEventKeys(
@@ -530,7 +539,7 @@ final class OperationRouteIndex {
         metrics.increment(revalidation
                 ? DIRECT_ROUTE_REVALIDATION_SNAPSHOTS
                 : DIRECT_ROUTE_SNAPSHOTS);
-        DocumentTarget target = DocumentTarget.from(entry);
+        DocumentTarget target = DocumentTarget.from(entry, operationMessage);
         Map<DirectDeliveryKey, RouteRow> selected = new LinkedHashMap<>();
         for (String eventKey
                 : TimelineProviderSupport.exactTimelineEntryEventKeys(
@@ -1072,18 +1081,18 @@ final class OperationRouteIndex {
 
     private record DocumentTarget(
             String stateBlueId, boolean exact, boolean supported) {
-        private static DocumentTarget from(TimelineEntry entry) {
+        private static DocumentTarget from(TimelineEntry entry, Function<FrozenNode, FrozenNode> resolve) {
             if (hasRuntimeValue(entry.exactEvent()
                     .canonicalAt("/onBehalfOf"), false)) {
                 return new DocumentTarget(null, false, false);
             }
-            FrozenNode document = entry.exactEvent()
-                    .canonicalAt("/message/document");
+            FrozenNode message = resolve.apply(Objects.requireNonNull(
+                    entry.exactEvent().canonicalAt("/message"), "Operation message"));
+            FrozenNode document = message.property("document");
             if (!hasRuntimeValue(document, true)) {
                 return new DocumentTarget(null, false, true);
             }
-            FrozenNode exactVersion = entry.exactEvent().canonicalAt(
-                    "/message/requireExactDocumentVersion");
+            FrozenNode exactVersion = message.property("requireExactDocumentVersion");
             boolean exact = exactVersion != null
                     && Boolean.TRUE.equals(exactVersion.getValue());
             return new DocumentTarget(

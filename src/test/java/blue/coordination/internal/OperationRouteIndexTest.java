@@ -146,6 +146,20 @@ final class OperationRouteIndexTest {
     }
 
     @Test
+    void unresolvedOperationMessageCannotBecomeUnrestrictedWithoutAVerifier() {
+        // given
+        var index = new OperationRouteIndex(new EngineMetrics());
+        index.replace(DOCUMENT, surface("timeline-a", "alice"), List.of(active("timeline-a", "alice")));
+        var body = ExactValue.verified(new Node().properties("document", new Node().value("target")));
+        var input = entryWithEnvelopeField("message", FrozenNode.fromNode(new Node().blueId(body.blueId())));
+        // when
+        var failure = assertThrows(IllegalStateException.class, () -> index.route(input));
+        // then
+        assertEquals("Exact operation message resolver is required", failure.getMessage());
+        assertThrows(IllegalStateException.class, () -> index.selectDirectDeliveries(input));
+    }
+
+    @Test
     void explicitEmptyAggregateDocumentTargetIsNotTreatedAsAbsent() {
         // given
         OperationRouteIndex index = new OperationRouteIndex(
@@ -622,6 +636,13 @@ final class OperationRouteIndexTest {
             String channel,
             ExactValue event,
             ExternalOrderKey order) {
+        if (event.canonicalAt("/message") == null) {
+            event = ExactValue.fromFrozen((event.frozen().getValue() == null ? event.frozen()
+                    : FrozenNode.fromNode(new Node().properties("fixtureIdentity", new Node().value(event.blueId()))))
+                    .withProperty("message", FrozenNode.fromNode(
+                    new Node().properties("operation", new Node().value("increment"))
+                            .properties("channel", new Node().value(channel)))));
+        }
         ExactValue request = ExactValue.verified(new Node().value("request"));
         return new TimelineEntry(
                 event,

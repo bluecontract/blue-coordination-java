@@ -742,7 +742,8 @@ def currentProductionShapeLimits = [
         // Accepted-input cutoff selection and closed cutoff evidence; no new production type.
         // Counter-only logical owner diagnostics: three accessors, +11 measured lines; no new types.
         // Point-lookup overload for a retained exact input stage: +12 lines, no new type or semantic processing.
-        lines: 93_108L,
+        // R1: verified operation-message resolution in all rooted selectors (+14 lines; no new type).
+        lines: 93_122L,
         publicApiTypes: 107,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]

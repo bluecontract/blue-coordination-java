@@ -463,6 +463,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                 id -> documents.sourceBefore(id, cutoff).orElseThrow(() ->
                         new ProjectionUnavailableException("Missing retained operation-target lineage " + id)),
                 id -> view.retainedSnapshot().managedDocument(closureId(id)).blueId());
+        localRoutes.operationMessageResolver(runtime::materializeExact);
         localRoutes.generalDeliveryResolver((row, entry) -> runtime.generalDelivery(
                 view.retainedSnapshot().managedDocument(closureId(row.documentId())).document(), row.channelKey(), entry));
         var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
@@ -601,6 +602,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         var snapshot = ClosureEvidenceFactory.rootedWitnessSelection(original.invocation().input().snapshot(), proofs);
         var localRoutes = new OperationRouteIndex(runtime.metrics(), documents::require,
                 id -> captured.containsKey(id) ? captured.get(id).head().blueId() : null);
+        localRoutes.operationMessageResolver(runtime::materializeExact);
         localRoutes.generalDeliveryResolver((row, entry) -> runtime.generalDelivery(
                 snapshot.managedDocument(closureId(row.documentId())).document(), row.channelKey(), entry));
         captured.forEach((id, value) -> localRoutes.replace(id, value.layout().routingSurface(), value.activeSubscriptions()));
@@ -1697,6 +1699,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
         Map<DocumentId, CapturedDocument> captured = state.documents();
         OperationRouteIndex localRoutes = state.routes();
         AffectedClosureSnapshot selectedRoutingSnapshot = snapshot;
+        localRoutes.operationMessageResolver(runtime::materializeExact);
         localRoutes.generalDeliveryResolver((row, selectedEntry) -> runtime.generalDelivery(
                 selectedRoutingSnapshot.managedDocument(closureId(row.documentId())).document(), row.channelKey(), selectedEntry));
         DocumentId anchor = state.anchor();
@@ -1815,6 +1818,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                     CapturedDocument document = captured.get(documentId);
                     return document == null ? null : document.head().blueId();
                 });
+        localRoutes.operationMessageResolver(runtime::materializeExact);
         localRoutes.generalDeliveryResolver((row, entry) -> runtime.generalDelivery(
                 view.snapshot().managedDocument(closureId(row.documentId())).document(), row.channelKey(), entry));
         ClosureSubscriptionInventory currentSubscriptions = documents.closureTopologySnapshot().closureSubscriptions();

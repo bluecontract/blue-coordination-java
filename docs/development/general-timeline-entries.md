@@ -33,3 +33,7 @@ outcomes but must account for losing an unpublished batch. This follow-up does n
 add mandates, a new scheduler, a partial Timeline coverage API, or production MyOS
 integration. The combined Mini proof report records exact runtime gates and any
 remaining scope/review limits; source inventory alone is not acceptance evidence.
+
+## Referenced operation targeting
+
+Operation routing resolves the exact message through the same verified materializer used by admission before reading document and exact-version restrictions. It preserves the original envelope and uses the captured selected head for exact-version matching. All rooted route views, including earlier-source sufficiency and historical processing, bind this resolver. An unresolved reference without a verifier is rejected; unavailable/corrupt message evidence cannot widen the recipient set. This correction adds no persisted metadata, storage format or lower dependency change. Native inline/reference, stale/current/foreign target and cold-evidence controls cover the boundary.

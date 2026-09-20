@@ -266,6 +266,7 @@ public final class DefaultCoordinationEngine
                 : OperationRouteIndex.restoreIndexes(stored.routes(), metrics,
                         documentId -> documents.find(documentId).orElse(null),
                         documentId -> documents.find(documentId).map(session -> session.currentRepresentation().blueId()).orElse(null));
+        routeIndex.operationMessageResolver(runtime::materializeExact);
         routeIndex.generalDeliveryResolver((row, entry) -> runtime.generalDelivery(
                 documents.require(row.documentId()).layout().processingFrozen().toNode(), row.channelKey(), entry));
         layoutBuilder = new EmbeddedOnlyLayoutBuilder(

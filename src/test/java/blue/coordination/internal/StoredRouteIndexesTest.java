@@ -233,7 +233,9 @@ final class StoredRouteIndexesTest {
     }
     static void replace(OperationRouteIndex index, int document, String timeline) { index.prepareReplacement(List.of(replacement(document, timeline))).publish(); }
     static TimelineEntry entry(String timeline) {
-        var event = ExactValue.verified(new Node().value(timeline));
+        var event = ExactValue.verified(new Node().properties("fixtureTimeline", new Node().value(timeline))
+                .properties("message", new Node().properties("operation", new Node().value("increment"))
+                        .properties("channel", new Node().value("owner"))));
         var order = ExternalOrderKey.of(List.of(java.math.BigInteger.ONE.shiftLeft(70), timeline, event.blueId()));
         return new TimelineEntry(event, Optional.of(ExactValue.verified(new Node().value("request"))), order, order,
                 new Timeline(timeline, "alice"), "increment", "owner", 1L, 1L, 1L);

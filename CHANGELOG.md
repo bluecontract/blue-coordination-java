@@ -5,6 +5,11 @@ the new 3.x API before the first stable 3.0.0 release.
 
 ## Unreleased
 
+- Preserve document and exact-version restrictions for referenced Operation Requests
+  across live, historical and earlier-source routing. Resolve verified message
+  content without rewriting the original envelope; unavailable evidence never
+  widens delivery to other documents.
+
 - Accept exact general Timeline messages through managed entry admission and
   registered channel routing, with optional operation details. General entries
   participate in full-key ordering, historical source work and atomic graph
