@@ -3,13 +3,12 @@ package blue.coordination.internal;
 import blue.coordination.api.CoordinationEngine;
 import blue.coordination.api.DocumentId;
 import blue.language.model.NodeWireForm;
-import blue.language.processor.closure.BlueClosureContracts;
 import blue.language.processor.closure.ClosureInvocationInput;
 import blue.language.processor.closure.ClosureProcessResult;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 
-/** Test-only inspection of a real local terminal calculation; never publishes or repairs a fence. */
+/** Test-only inspection of the ordinary local terminal calculation; never publishes or invents a fence. */
 public final class RootedJoinPrefixProbe {
     private final DefaultCoordinationEngine engine;
 
@@ -18,14 +17,16 @@ public final class RootedJoinPrefixProbe {
         this.engine = (DefaultCoordinationEngine) Objects.requireNonNull(engine);
     }
 
-    /** Calculates the actual next local input and checks every prospective owner's original publication fence. */
+    /** Calculates the actual next local input and checks the ordinary result-owner publication fences. */
     public Observation inspect(DocumentId root) {
         var adapter = engine.contractsClosureAdapter();
         var step = Objects.requireNonNull(adapter.nextRootLocalHistory(root, engine.auditTimelineEntries()).step(),
                 "No actual local terminal work");
-        var invocation = step.invocation();
-        var result = new BlueClosureContracts(engine.runtime().documentProcessor())
-                .processClosure(invocation.input()).processResult();
+        var calculated = adapter.resolveManagedApplicationOccurrences(step.invocation());
+        var invocation = calculated.invocation();
+        var result = calculated.attempt().processResult();
+        if (!step.invocation().input().invocationIdentity().equals(invocation.input().invocationIdentity()))
+            throw new IllegalStateException("Terminal probe changed the original selected input");
         if (!result.commits()) throw new IllegalStateException("Terminal probe did not commit: " + result.diagnostic());
         var owners = new LinkedHashSet<>(RootedResultScope.members(result));
         var current = engine.documents().closureSnapshot(owners);
