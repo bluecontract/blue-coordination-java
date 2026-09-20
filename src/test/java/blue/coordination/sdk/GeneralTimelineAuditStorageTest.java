@@ -58,9 +58,11 @@ final class GeneralTimelineAuditStorageTest {
         }
         var codec = new SdkStorageCodec(new Object(), MAX);
         // when
-        // then
-        assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(previous, SdkStorageCodec.Metadata.class));
-        assertThrows(CoordinationObjectStorageException.class,
+        var old = assertThrows(CoordinationObjectStorageException.class, () -> codec.decode(previous, SdkStorageCodec.Metadata.class));
+        var truncated = assertThrows(CoordinationObjectStorageException.class,
                 () -> codec.decode(Arrays.copyOf(previous, previous.length - 1), SdkStorageCodec.Metadata.class));
+        // then
+        assertEquals("Exact storage format mismatch", old.getCause().getMessage());
+        assertEquals("Exact storage checksum mismatch", truncated.getCause().getMessage());
     }
 }
