@@ -1,8 +1,10 @@
 package blue.coordination.internal;
 
 import blue.coordination.api.DocumentId;
+import blue.coordination.api.DocumentInstanceRef;
 import blue.coordination.api.ExactValue;
 import blue.coordination.api.SourceHistoryPrerequisite;
+import blue.coordination.api.SourceHistoryRequest;
 import blue.coordination.api.SourceHistoryPrerequisiteObservation;
 import blue.coordination.api.SourceHistoryPrerequisiteResult;
 import blue.coordination.api.Timeline;
@@ -35,15 +37,17 @@ final class RootedSourceDiscoveryCoordinator {
     private final Map<String, Pending> pending;
     private final Map<String, SourceHistoryPrerequisiteResult> completed;
     private final Map<String, Prepared> submitted;
+    private final LogicalSourceRequests requests;
 
     /** Owned maps from one complete runtime scope; not independently publishable evidence. */
     record StoredMaps(Map<String, Pending> pending, Map<String, SourceHistoryPrerequisiteResult> completed,
-            Map<String, Prepared> submitted) {
+            Map<String, Prepared> submitted, LogicalSourceRequests requests) {
+        StoredMaps(Map<String, Pending> pending, Map<String, SourceHistoryPrerequisiteResult> completed, Map<String, Prepared> submitted) { this(pending, completed, submitted, null); }
         StoredMaps { Objects.requireNonNull(pending); Objects.requireNonNull(completed); Objects.requireNonNull(submitted); }
         static StoredMaps empty() { return new StoredMaps(new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>()); }
     }
 
-    StoredMaps storedMaps() { return new StoredMaps(pending, completed, submitted); }
+    StoredMaps storedMaps() { return new StoredMaps(pending, completed, submitted, requests); }
 
     Pending pendingForStorage(String key) { return pending.get(key); }
     Prepared submittedForStorage(String selectionIdentity) { return submitted.get(selectionIdentity); }
@@ -65,7 +69,7 @@ final class RootedSourceDiscoveryCoordinator {
             OperationRouteIndex routes, Map<String, Timeline> timelines, ExactNodeProvider provider, StoredMaps maps) {
         this.engine = engine; this.documents = documents; this.adapter = adapter; this.journal = journal;
         this.layouts = layouts; this.routes = routes; this.timelines = timelines; this.provider = provider;
-        pending = maps.pending(); completed = maps.completed(); submitted = maps.submitted();
+        pending = maps.pending(); completed = maps.completed(); submitted = maps.submitted(); requests = maps.requests();
     }
 
     ManagedOccurrenceResolver.Resolution requirePrerequisites(ContractsClosureAdapter.CohortInvocation current,
@@ -78,7 +82,9 @@ final class RootedSourceDiscoveryCoordinator {
             if (candidate == null) { accepted.add(occurrence); continue; }
             Prepared next = prepare(candidate);
             if (next == null) { accepted.add(occurrence); continue; }
-            pending.put(candidate.key(), candidate);
+            if (pending instanceof PendingSelections indexed)
+                indexed.putForSource(candidate, documents.pendingSourceInstance(candidate.source(), RootedAttachmentCapture.sourceOwners(current)));
+            else pending.put(candidate.key(), candidate);
             missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
                     ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
                     "Separate source-owned prerequisite required: " + next.descriptor().kind()
@@ -97,7 +103,7 @@ final class RootedSourceDiscoveryCoordinator {
         if (declared || current.rootedEvidence().context().entryOwners()
                 .contains(ContractsClosureAdapter.closureId(occurrence.targetDocumentId()))) return null;
         ExactValue authored;
-        var source = documents.sourceAdmission(occurrence.targetDocumentId()).orElse(null);
+        var source = documents.sourceAdmission(occurrence.targetDocumentId(), RootedAttachmentCapture.sourceOwners(current)).orElse(null);
         if (source == null) {
             if (occurrence.targetKind() != ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
                     || occurrence.newDraft() == null || !occurrence.newDraft().contentDerivedIdentity()) return null;
@@ -124,24 +130,89 @@ final class RootedSourceDiscoveryCoordinator {
         return new Pending(current, attempt, demand, occurrence.targetDocumentId(), authored, cutoff);
     }
 
-    interface PendingSelections { List<Pending> forRoot(DocumentId root); }
+    interface PendingSelections {
+        List<Pending> forRoot(DocumentId root);
+        List<Pending> forSource(DocumentInstanceRef source);
+        void putForSource(Pending pending, DocumentInstanceRef source);
+        SourceHistoryRequest request(Pending pending, SourceHistoryPrerequisite descriptor);
+        Pending forRequest(SourceHistoryRequest request);
+        void removeCurrent(Pending pending);
+        boolean currentOwners(Pending pending);
+
+    }
+
+    List<Pending> pendingForRetirement(DocumentInstanceRef instance) {
+        var selected = new LinkedHashMap<String, Pending>();
+        if (pending instanceof PendingSelections indexed) {
+            indexed.forRoot(instance.documentId()).forEach(row -> selected.put(row.key(), row));
+            indexed.forSource(instance).forEach(row -> selected.put(row.key(), row));
+        } else pending.values().stream().filter(row -> row.owns(instance.documentId()) || row.source().equals(instance.documentId()))
+                .forEach(row -> selected.put(row.key(), row));
+        return selected.values().stream().filter(this::stillCurrent).toList();
+    }
 
     List<SourceHistoryPrerequisite> selections(DocumentId requestingRoot) {
         var values = new ArrayList<SourceHistoryPrerequisite>();
         for (var candidate : pending instanceof PendingSelections selected
                 ? selected.forRoot(requestingRoot) : List.copyOf(pending.values())) {
             if (!candidate.owns(requestingRoot)) continue;
-            if (!stillCurrent(candidate)) { pending.remove(candidate.key()); continue; }
+            if (!stillCurrent(candidate)) { removePending(candidate); continue; }
             Prepared next = prepare(candidate);
-            if (next != null) values.add(next.descriptor());
+            if (next != null) {
+                if (requests != null) requests.bind(((PendingSelections) pending).request(candidate, next.descriptor()));
+                values.add(next.descriptor());
+            }
         }
         values.sort(java.util.Comparator.comparing(SourceHistoryPrerequisite::demandIdentity)
                 .thenComparing(value -> value.sourceDocumentId().value()));
         return List.copyOf(values);
     }
 
+    List<SourceHistoryRequest> requests(DocumentId root) {
+        if (requests == null) throw new IllegalStateException("Instance-bound source requests require native instance storage");
+        var result = new ArrayList<SourceHistoryRequest>();
+        for (var descriptor : selections(root)) {
+            for (var candidate : ((PendingSelections) pending).forRoot(root)) {
+                if (candidate.key().equals(key(descriptor.requestingInvocationIdentity(), descriptor.demandIdentity()))) {
+                    var request = ((PendingSelections) pending).request(candidate, descriptor);
+                    requests.bind(request); result.add(request); break;
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+    void retainStage(SourceHistoryRequest request, blue.coordination.api.SourceHistoryStageContext stage) { requests.retainStage(request, stage); }
+    blue.coordination.api.SourceHistoryStageContext retainedStage(SourceHistoryRequest request) { return requests.stage(request); }
+    void requireRequest(SourceHistoryRequest request) { requests.require(request); }
+    Optional<SourceHistoryRequest> findOriginalRequest(SourceHistoryPrerequisite descriptor) { return requests.findOriginal(descriptor); }
+    SourceHistoryRequest originalRequest(SourceHistoryPrerequisite descriptor) {
+        if (requests == null) throw new IllegalStateException("Source context requires native instance storage");
+        return requests.original(descriptor);
+    }
+    private String resultKey(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        if (requests == null) return expected.selectionIdentity();
+        requests.require(Objects.requireNonNull(request));
+        if (!request.prerequisite().equals(expected)) throw new IllegalArgumentException("Source context descriptor differs");
+        return LogicalSourceRequests.storageKey(request);
+    }
+    private SourceHistoryRequest originalIfNative(SourceHistoryPrerequisite expected) {
+        return requests == null ? null : requests.original(expected);
+    }
+    private Pending pending(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        return requests == null ? pending.get(key(expected.requestingInvocationIdentity(), expected.demandIdentity()))
+                : ((PendingSelections) pending).forRequest(request);
+    }
+    private void removePending(Pending row) {
+        if (pending instanceof PendingSelections indexed) indexed.removeCurrent(row); else pending.remove(row.key());
+    }
     SourceHistoryPrerequisiteObservation observe(SourceHistoryPrerequisite expected) {
-        Pending candidate = pending.get(key(expected.requestingInvocationIdentity(), expected.demandIdentity()));
+        return observe(expected, originalIfNative(expected));
+    }
+    SourceHistoryPrerequisiteObservation observe(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        resultKey(expected, request);
+        if (requests != null && !requests.currentRequesters(request)) return new SourceHistoryPrerequisiteObservation(
+                SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
+        Pending candidate = pending(expected, request);
         if (candidate == null) return new SourceHistoryPrerequisiteObservation(
                 SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
         if (!expected.requestingRoot().value().equals(candidate.invocation().rootedEvidence()
@@ -151,11 +222,12 @@ final class RootedSourceDiscoveryCoordinator {
                 || !expected.cutoffExclusive().equals(candidate.cutoff()))
             throw new IllegalArgumentException("Changed source-prerequisite logical authority");
         if (!stillCurrent(candidate)) {
-            pending.remove(candidate.key());
+            removePending(candidate);
             return new SourceHistoryPrerequisiteObservation(
                     SourceHistoryPrerequisiteObservation.Status.STALE, Optional.empty());
         }
         Prepared next = prepare(candidate);
+        if (requests != null && next != null) requests.bind(((PendingSelections) pending).request(candidate, next.descriptor()));
         return next == null ? new SourceHistoryPrerequisiteObservation(
                 SourceHistoryPrerequisiteObservation.Status.SATISFIED, Optional.empty())
                 : new SourceHistoryPrerequisiteObservation(
@@ -163,22 +235,34 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     Optional<SourceHistoryPrerequisiteResult> completed(SourceHistoryPrerequisite expected) {
-        var prior = completed.get(expected.selectionIdentity());
+        return completed(expected, originalIfNative(expected));
+    }
+    Optional<SourceHistoryPrerequisiteResult> completed(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        var prior = completed.get(resultKey(expected, request));
         if (prior == null) return Optional.empty();
         if (!prior.selection().equals(expected)) throw new IllegalArgumentException("Changed source result selection");
         return Optional.of(new SourceHistoryPrerequisiteResult(expected, prior.admission(), prior.processing(), true));
     }
 
     Optional<Prepared> committedSelection(SourceHistoryPrerequisite expected) {
-        Prepared prior = submitted.get(expected.selectionIdentity());
+        return committedSelection(expected, originalIfNative(expected));
+    }
+    Optional<Prepared> committedSelection(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        Prepared prior = submitted.get(resultKey(expected, request));
         if (prior == null) return Optional.empty();
+        if (requests != null) requests.requireExecutable(request);
         if (!prior.descriptor().equals(expected)) throw new IllegalArgumentException("Changed submitted source selection");
         // An exact retained publication is the only route around stale-head checks after response loss.
         return engine.sourceHistoryPrerequisiteCommitted(prior) ? Optional.of(prior) : Optional.empty();
     }
 
     Prepared requireSelection(SourceHistoryPrerequisite expected) {
-        Pending candidate = pending.get(key(expected.requestingInvocationIdentity(), expected.demandIdentity()));
+        return requireSelection(expected, originalIfNative(expected));
+    }
+    Prepared requireSelection(SourceHistoryPrerequisite expected, SourceHistoryRequest request) {
+        resultKey(expected, request);
+        if (requests != null) requests.requireExecutable(request);
+        Pending candidate = pending(expected, request);
         if (candidate == null || !stillCurrent(candidate)) throw new IllegalArgumentException("Source prerequisite is stale");
         Prepared selected = prepare(candidate);
         if (selected == null || !selected.descriptor().equals(expected))
@@ -186,19 +270,22 @@ final class RootedSourceDiscoveryCoordinator {
         if (expected.kind() == SourceHistoryPrerequisite.Kind.WAIT)
             throw new blue.coordination.api.CoordinationException(blue.coordination.api.CoordinationErrorCode.NEEDS_RESOURCES,
                     expected.diagnostic());
-        submitted.put(expected.selectionIdentity(), selected);
+        submitted.put(resultKey(expected, request), selected);
         return selected;
     }
 
-    void retain(SourceHistoryPrerequisiteResult result) {
+    void retain(SourceHistoryPrerequisiteResult result) { retain(result, originalIfNative(result.selection())); }
+    void retain(SourceHistoryPrerequisiteResult result, SourceHistoryRequest request) {
         boolean commits = result.admission().map(value -> value.published()).orElse(false)
                 || result.processing().map(value -> value.committedProcessTransitions() > 0L).orElse(false);
-        if (commits) completed.put(result.selection().selectionIdentity(), result);
+        if (commits) completed.put(resultKey(result.selection(), request), result);
     }
 
     private boolean stillCurrent(Pending candidate) {
+        if (pending instanceof PendingSelections indexed && !indexed.currentOwners(candidate)) return false;
         // Terminal rejections can consume the exact requester without changing its document head.
-        if (documents.hasPublicationReceipt(candidate.invocation().rootedEvidence().terminalKey())) return false;
+        if (documents.hasExecutionPublication(candidate.invocation().rootedEvidence().terminalKey(),
+                DocumentId.of(candidate.invocation().rootedEvidence().context().canonicalRootDocumentId().value()))) return false;
         for (var owner : candidate.invocation().rootedEvidence().context().entryOwners()) {
             DocumentId id = ContractsClosureAdapter.coordinationId(owner);
             var prior = candidate.invocation().rootedEvidence().publicationFence(id);
@@ -211,8 +298,8 @@ final class RootedSourceDiscoveryCoordinator {
     }
 
     private Prepared prepare(Pending candidate) {
-        var admitted = documents.sourceAdmission(candidate.source());
-        var source = documents.sourceBefore(candidate.source(), candidate.cutoff()).orElse(null);
+        var admitted = documents.sourceAdmission(candidate.source(), RootedAttachmentCapture.sourceOwners(candidate.invocation()));
+        var source = documents.sourceBefore(candidate.source(), candidate.cutoff(), RootedAttachmentCapture.sourceOwners(candidate.invocation())).orElse(null);
         if (admitted.isPresent() && source == null)
             return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
                     "missing-retained-source", "Admitted source lacks authenticated pre-boundary history", null);
@@ -238,8 +325,11 @@ final class RootedSourceDiscoveryCoordinator {
                     window.identity(), null, window.evidence());
         }
         var assessment = RootedSourceHistoryAssessment.assess(candidate.source(), source, candidate.cutoff(),
-                documents, adapter, journal);
+                documents, adapter, journal, RootedAttachmentCapture.sourceOwners(candidate.invocation()));
         if (assessment.satisfied()) return null;
+        var retired = documents.sourceWorkBlock(candidate.source(), RootedAttachmentCapture.sourceOwners(candidate.invocation()));
+        if (retired.isPresent()) return selected(candidate, SourceHistoryPrerequisite.Kind.WAIT, null, null,
+                window.identity(), retired.orElseThrow() + " prerequisite=" + assessment.requiredEvidence(), window.evidence());
         // Actual source-owned selection retains all ordinary live head, owner and control fences.
         source = documents.require(candidate.source());
         boolean logical = documents.storedState().sessionIndex().isLogical();

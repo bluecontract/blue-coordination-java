@@ -96,6 +96,45 @@ final class ProcessEmbeddedComponentIndex {
 
     List<DocumentId> pendingJoinRootsFor(DocumentId member) { return pendingJoins.rootsFor(member); }
 
+    List<DocumentId> directSources(DocumentId target) { return List.copyOf(bucket(sourcesByDocument, target).keys()); }
+
+    /** Removes live authority/outgoing memberships; preserves foreign retained-role endpoints and reverse symmetry. */
+    ProcessEmbeddedComponentIndex withoutIndependentOwner(DocumentId owner, Set<DocumentId> retainedIncoming) {
+        var component = component(owner);
+        if (component.cyclic() || !component.members().equals(List.of(owner))
+                || !Set.copyOf(directSources(owner)).equals(retainedIncoming) || !pendingJoinRootsFor(owner).isEmpty())
+            throw new IllegalStateException("Retirement requires an independent acyclic owner: " + owner);
+        var incoming = sourcesByDocument;
+        var targets = targetsByDocument.get(owner);
+        if (targets != null) for (var target : targets.keys()) {
+            var bucket = Objects.requireNonNull(incoming.get(target), "Missing reverse topology bucket");
+            if (!Boolean.TRUE.equals(bucket.get(owner))) throw new IllegalStateException("Missing reverse topology member");
+            incoming = incoming.put(target, bucket.remove(owner).map()).map();
+        }
+        return new ProcessEmbeddedComponentIndex(retainedIncoming.isEmpty() ? componentByDocument.remove(owner).map() : componentByDocument,
+                targetsByDocument.remove(owner).map(), retainedIncoming.isEmpty() ? incoming.remove(owner).map() : incoming, rootedViews,
+                pendingJoins.replaceRoot(owner, Set.of()));
+    }
+
+    /** Starts one owner from an authenticated archived view; no neighbor projection is replaced. */
+    ProcessEmbeddedComponentIndex withStartingOwner(DocumentSession basis) {
+        var owner = basis.documentId(); var snapshot = basis.rootedView().snapshot();
+        var endpoint = componentByDocument.get(owner);
+        if (endpoint != null && (endpoint.cyclic() || !endpoint.members().equals(List.of(owner))
+                || !bucket(targetsByDocument, owner).isEmpty()))
+            throw new IllegalStateException("Starting topology contains more than a retained singleton endpoint");
+        var proof = snapshot.components().stream().filter(row -> row.orderedMemberDocumentIds()
+                .contains(ContractsClosureAdapter.closureId(owner))).findFirst().orElseThrow();
+        if (proof.kind() == blue.language.processor.closure.ComponentKind.CYCLIC || proof.orderedMemberDocumentIds().size() != 1)
+            throw new IllegalStateException("Starting owner is not independent and acyclic");
+        var active = snapshot.occurrences().stream().filter(row -> row.active()).map(row -> new DirectedBinding(row.occurrenceIdentity(),
+                DocumentId.of(row.sourceDocumentId().value()), DocumentId.of(row.targetDocumentId().value()))).toList();
+        var local = fromDirectedBindings(snapshot.managedDocuments().stream().map(row -> DocumentId.of(row.documentId().value())).toList(), active);
+        var replaced = replaceRegion(List.of(owner), local);
+        return new ProcessEmbeddedComponentIndex(replaced.componentByDocument, replaced.targetsByDocument,
+                replaced.sourcesByDocument, true, pendingJoins.replace(List.of(owner), snapshot));
+    }
+
     ProcessEmbeddedComponentIndex withReconstructedPendingJoins(Collection<DocumentSession> sessions) {
         return new ProcessEmbeddedComponentIndex(componentByDocument, targetsByDocument, sourcesByDocument,
                 rootedViews, RootedJoinCandidateIndex.fromSessions(sessions));

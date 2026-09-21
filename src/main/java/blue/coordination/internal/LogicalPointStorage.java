@@ -17,6 +17,9 @@ public final class LogicalPointStorage {
     public LogicalPointStorage(CoordinationRecordAttempt attempt) { context = new LogicalRecordContext(attempt); }
     LogicalRecordContext context() { return context; }
 
+    /** Runs a native cross-package projection in this attempt's failure boundary. */
+    public <T> T protect(java.util.function.Supplier<T> operation) { return context.protect(operation); }
+
     /**
      * Tracks immutable bytes consumed or retained by this owner as required packet dependencies.
      * @param objects host-owned immutable store
@@ -83,6 +86,25 @@ public final class LogicalPointStorage {
                 i.nodeBytes(), i.keyBytes(), i.valueBytes(), i.descriptorBytes(), i.cachedNodes(),
                 limits.maximumRecordBytes(), limits.maximumPinnedBytes(), limits.maximumPinnedEntries()));
     }
+    <K, V> Scope<K, V> openInstanceProgress(Family family, String scope, PersistentMapCodec<K> keys,
+            PersistentMapCodec<V> values, StoredInsertionOrderedMap.Limits limits,
+            java.util.function.Function<K, List<blue.coordination.api.DocumentId>> observers) {
+        return context.protect(() -> {
+            var ordered = new OrderedRecordKey<K>() {
+                public String identity() { return keys.identity(); }
+                public byte[] encode(K key) { return keys.encode(key); }
+                public K decode(byte[] bytes) { return keys.decode(bytes); }
+            };
+            var i = limits.indexes();
+            var selectedLimits = new InsertionOrderedStorage.Limits(i.nodeBytes(), i.keyBytes(), i.valueBytes(),
+                    i.descriptorBytes(), i.cachedNodes(), limits.maximumRecordBytes(), limits.maximumPinnedBytes(), limits.maximumPinnedEntries());
+            var progress = new LogicalInstanceProgress<>(context, family, new Bytes(OrderedRecordKey.text().encode(scope)),
+                    ordered, values, i.keyBytes(), limits.maximumRecordBytes(), observers);
+            selectBeforeFlush(progress::preflightSelectedInstances);
+            var selected = new Scope<>(progress.open(), adapt(values), selectedLimits); scopes.add(selected); return selected;
+        });
+    }
+
     private static <T> InsertionOrderedStorage.Codec<T> adapt(PersistentMapCodec<T> codec) {
         return new InsertionOrderedStorage.Codec<>() {
             public String identity() { return codec.identity(); }

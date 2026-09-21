@@ -26,9 +26,9 @@ final class LogicalActiveSources {
                 nextTimelines = nextTimelines.put(timeline, bucket.remove(root).map()).map();
             }
         }
-        for (var document : after.managedDocuments())
+        if (after != null) for (var document : after.managedDocuments())
             nextDocuments = nextDocuments.put(document, nextDocuments.get(document).put(root, true).map()).map();
-        for (var timeline : after.timelineIds())
+        if (after != null) for (var timeline : after.timelineIds())
             nextTimelines = nextTimelines.put(timeline, nextTimelines.get(timeline).put(root, true).map()).map();
         return new LogicalActiveSources(nextDocuments, nextTimelines);
     }

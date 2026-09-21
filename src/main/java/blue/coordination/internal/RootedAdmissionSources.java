@@ -83,9 +83,14 @@ final class RootedAdmissionSources {
 
     RootedDocumentView selected(DocumentId source, ExternalOrderKey requestedBoundary,
             InMemoryDocumentStore documents) {
+        return selected(source, requestedBoundary, documents::require);
+    }
+
+    RootedDocumentView selected(DocumentId source, ExternalOrderKey requestedBoundary,
+            java.util.function.Function<DocumentId, DocumentSession> sessions) {
         if (!requestedBoundary.equals(boundary)) return null;
         RootedDocumentView view = views.get(source);
-        if (view != null) documents.require(source).requireRetainedRootedView(view);
+        if (view != null) sessions.apply(source).requireRetainedRootedView(view);
         return view;
     }
 }

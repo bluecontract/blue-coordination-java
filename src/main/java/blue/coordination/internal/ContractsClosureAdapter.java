@@ -456,12 +456,12 @@ final class ContractsClosureAdapter implements AutoCloseable {
 
     /** Tests only accepted input strictly before the requirement, using the exact retained source body. */
     synchronized boolean sourceHasEligibleInputBefore(DocumentId root, RootedDocumentView view,
-            ExternalOrderKey cutoff, TimelineJournal journal) {
+            ExternalOrderKey cutoff, TimelineJournal journal,
+            java.util.function.Function<DocumentId, DocumentSession> retainedSessions) {
         var surfaces = sourceDiscoverySurfaces(view, root);
         var active = surfaces.stream().map(SourceDiscoverySurface::documentId).collect(java.util.stream.Collectors.toSet());
         var localRoutes = new OperationRouteIndex(runtime.metrics(),
-                id -> documents.sourceBefore(id, cutoff).orElseThrow(() ->
-                        new ProjectionUnavailableException("Missing retained operation-target lineage " + id)),
+                retainedSessions,
                 id -> view.retainedSnapshot().managedDocument(closureId(id)).blueId());
         localRoutes.operationMessageResolver(runtime::materializeExact);
         localRoutes.generalDeliveryResolver((row, entry) -> runtime.generalDelivery(
@@ -1009,10 +1009,10 @@ final class ContractsClosureAdapter implements AutoCloseable {
         CohortInvocation selected = Objects.requireNonNull(cohort, "cohort");
         String identity = publicationIdentity(frozen, selected);
         ContractsClosurePublicationReceipt receipt = documents
-                .closurePublicationReceipt(identity)
+                .executionPublicationReceipt(identity, selected.rootedAnchor())
                 .orElse(null);
         if (receipt == null) {
-            if (documents.hasPublicationReceipt(identity)) {
+            if (documents.hasExecutionPublication(identity, selected.rootedAnchor())) {
                 throw new IllegalStateException(
                         "Closure publication has no typed replay receipt "
                                 + identity);
@@ -1107,6 +1107,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         receipt.publicationIdentity(),
                         current.occurrenceInventoryGeneration(),
                         current.componentIndexGeneration());
+        transaction.executionObserver(invocation.rootedAnchor());
         transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document : invocation.documents().values()) {
             if (!terminalOwners.contains(document.documentId())) continue;
@@ -3140,6 +3141,7 @@ final class ContractsClosureAdapter implements AutoCloseable {
                         publicationIdentity,
                         current.occurrenceInventoryGeneration(),
                         current.componentIndexGeneration());
+        transaction.executionObserver(invocation.rootedAnchor());
         transaction.onFailurePoint(storeFailureInjector);
         for (CapturedDocument document
                 : invocation.documents().values()) {

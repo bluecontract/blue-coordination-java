@@ -102,7 +102,7 @@ final class ManagedEpochInvocationCapturer {
         }
         InMemoryDocumentStore.ManagedEpochEvidence retainedEvidence = documents
                 .managedEpochEvidence(
-                        work.sourceDocumentId(), work.sourceEpoch());
+                        work.sourceDocumentId(), work.sourceEpoch(), java.util.Set.of(work.consumerDocumentId()));
         ManagedEpochSourceEvidenceVerifier.VerifiedSourceEvidence
                 sourceEvidence = evidenceVerifier.verify(
                         work, retainedEvidence, plan);
@@ -167,7 +167,8 @@ final class ManagedEpochInvocationCapturer {
                 connected.members(), List.of(work.sourceDocumentId()),
                 topology.occurrenceInventory(), runtime.metrics()) : new LinkedHashSet<>(connected.members());
         InMemoryDocumentStore.ClosureSnapshot publication = documents
-                .closureSnapshot(members, topology);
+                .closureSnapshot(rootedState == null ? members : rootedState.snapshot().publicRootDocumentIds().stream()
+                        .map(ContractsClosureAdapter::coordinationId).toList(), topology);
         InMemoryDocumentStore.DocumentHead consumerHead = publication
                 .requireHead(work.consumerDocumentId());
         if (consumerHead.epoch()
@@ -202,7 +203,7 @@ final class ManagedEpochInvocationCapturer {
         long graphGeneration = ContractsClosureAdapter
                 .maximumCapturedGraphGeneration(captured.values());
         Map<DocumentId, Long> componentGenerations = new LinkedHashMap<>();
-        for (ComponentSnapshot component : publication.componentStates()) {
+        for (ComponentSnapshot component : rootedState == null ? publication.componentStates() : rootedState.snapshot().components()) {
             runtime.metrics().increment(
                     ContractsClosureAdapter.COMPONENT_STATES_READ);
             for (blue.language.processor.closure.DocumentId documentId
@@ -217,7 +218,7 @@ final class ManagedEpochInvocationCapturer {
         ArrayList<blue.language.processor.closure.DocumentId> publicRoots =
                 new ArrayList<>();
         ManagedLineageIndex lineageIndex = documents.lineageIndex();
-        for (ContractsClosureAdapter.CapturedDocument document
+        if (rootedState == null) for (ContractsClosureAdapter.CapturedDocument document
                 : captured.values()) {
             blue.language.processor.closure.DocumentId closureDocumentId =
                     ContractsClosureAdapter.closureId(document.documentId());
@@ -240,7 +241,7 @@ final class ManagedEpochInvocationCapturer {
             }
         }
         List<ManagedOccurrenceBinding> occurrences = new ArrayList<>();
-        for (DocumentId member : members) {
+        if (rootedState == null) for (DocumentId member : members) {
             List<ManagedOccurrenceBinding> rows = topology.occurrenceInventory()
                     .rowsFrom(member);
             runtime.metrics().add(
@@ -329,8 +330,8 @@ final class ManagedEpochInvocationCapturer {
                                 : List.of());
         if (rootedState != null) {
             String position = target.pendingRepresentationCursor() == null
-                    ? fromEpoch < 0 ? documents.require(work.sourceDocumentId()).requireRootedHistory().identity()
-                            : documents.managedEpochEvidence(work.sourceDocumentId(), fromEpoch).receipt().receiptIdentity()
+                    ? fromEpoch < 0 ? documents.observedHistoryIdentity(work.sourceDocumentId(), java.util.Set.of(work.consumerDocumentId()))
+                            : documents.managedEpochEvidence(work.sourceDocumentId(), fromEpoch, java.util.Set.of(work.consumerDocumentId())).receipt().receiptIdentity()
                     : target.pendingRepresentationCursor().positionIdentity();
             invocation = invocation.withRootedAnchor(rootedState.anchor()).withRootedEvidence(
                     RootedInvocationEvidence.retained(rootedState.anchor(), input, documents, target, position));

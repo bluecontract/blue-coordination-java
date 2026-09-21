@@ -71,6 +71,7 @@ final class EnginePendingStorage {
 
     final class Scope implements AutoCloseable {
         private final LogicalPointStorage logical;
+        private final LogicalSourceRequests requests;
         private final Map<Kind, Map<String, ?>> maps = new EnumMap<>(Kind.class);
         private final DocumentSessionStorage.OpenScope views;
         private final Function<String, ManagedEpochApplicationWork> originalWork;
@@ -91,6 +92,7 @@ final class EnginePendingStorage {
                 Function<String, ManagedEpochApplicationWork> originalWork,
                 Function<String, ContractsClosureAdmissionReceipt> originalAdmission, LogicalPointStorage logical) {
             this.logical = logical;
+            this.requests = logical == null ? null : new LogicalSourceRequests(logical.context(), sources, limits.maximumRecordBytes());
             this.views = Objects.requireNonNull(views); this.originalWork = Objects.requireNonNull(originalWork);
             this.originalAdmission = Objects.requireNonNull(originalAdmission);
             try {
@@ -108,9 +110,9 @@ final class EnginePendingStorage {
                         }, (key, value) -> { });
                 var pendingRows = map(Kind.SOURCE_PENDING, selected,
                         (key, value) -> sources.encodePending(value, views::retainView),
-                        (key, bytes) -> sources.decodePending(key, bytes, views),
+                        (key, bytes) -> sources.decodePending(LogicalSourceRequests.canonicalSelection(key), bytes, views),
                         (key, value) -> {
-                            require(key.equals(value.key()), "Pending source map has foreign key");
+                            require(LogicalSourceRequests.canonicalSelection(key).equals(value.key()), "Pending source map has foreign key");
                             var historical = value.invocation().rootedEvidence().historicalOrigin();
                             require(historical == null || value.cutoff().equals(historical.logicalBoundary()),
                                     "Pending source changed its original historical boundary");
@@ -118,7 +120,7 @@ final class EnginePendingStorage {
                 pending = logical == null ? pendingRows : new LogicalSourcePendingMap(logical, pendingRows, limits.indexes());
                 submitted = map(Kind.SOURCE_SUBMITTED, selected,
                         (key, value) -> sources.encodePrepared(value, views::retainView),
-                        (key, bytes) -> sources.decodePrepared(key, bytes, views), this::validateSubmitted);
+                        (key, bytes) -> sources.decodePrepared(LogicalSourceRequests.canonicalSelection(key), bytes, views), this::validateSubmitted);
                 completed = map(Kind.SOURCE_COMPLETED, selected, this::encodeCompleted, this::decodeCompleted, this::validateCompleted);
             } catch (RuntimeException failure) {
                 maps.values().forEach(Scope::closeMap); throw failure;
@@ -127,7 +129,7 @@ final class EnginePendingStorage {
 
         ContractsClosureAdapter.StoredPlans plans() { ensureOpen(); return new ContractsClosureAdapter.StoredPlans(drafts, selections); }
         RootedSourceDiscoveryCoordinator.StoredMaps sources() {
-            ensureOpen(); return new RootedSourceDiscoveryCoordinator.StoredMaps(pending, completed, submitted);
+            ensureOpen(); return new RootedSourceDiscoveryCoordinator.StoredMaps(pending, completed, submitted, requests);
         }
 
         Snapshot snapshot() {
@@ -141,12 +143,24 @@ final class EnginePendingStorage {
             ensureOpen();
             require(maps.values().stream().allMatch(Map::isEmpty), "Pending transfer requires empty selected indexes");
             drafts.putAll(p.drafts()); selections.putAll(p.selections()); pending.putAll(s.pending());
-            submitted.putAll(s.submitted()); completed.putAll(s.completed());
+            if (requests == null) { submitted.putAll(s.submitted()); completed.putAll(s.completed()); }
+            else {
+                // Explicit resident conversion authenticates each original request before selecting native keys.
+                s.submitted().values().forEach(value -> {
+                    var d = value.descriptor();
+                    var prior = Objects.requireNonNull(s.pending().get(d.requestingInvocationIdentity() + "/" + d.demandIdentity()),
+                            "Resident source transfer lacks original pending authority");
+                    var request = ((RootedSourceDiscoveryCoordinator.PendingSelections) pending).request(prior, d);
+                    String key = requests.bind(request); submitted.put(key, value);
+                    var response = s.completed().get(d.selectionIdentity()); if (response != null) completed.put(key, response);
+                });
+            }
         }
 
         private void validateSubmitted(String key, RootedSourceDiscoveryCoordinator.Prepared value) {
-            var d = value.descriptor(); require(key.equals(d.selectionIdentity()), "Submitted source map has foreign key");
-            var request = pending.get(d.requestingInvocationIdentity() + "/" + d.demandIdentity());
+            var d = value.descriptor(); require(LogicalSourceRequests.canonicalSelection(key).equals(d.selectionIdentity()), "Submitted source map has foreign key");
+            var request = requests == null ? pending.get(d.requestingInvocationIdentity() + "/" + d.demandIdentity())
+                    : ((RootedSourceDiscoveryCoordinator.PendingSelections) pending).forRequest(requests.byStorageKey(key));
             // A terminal parent can retire its old pending row while the source receipt
             // and submitted operation remain available for lost-response reconciliation.
             if (request == null) return;
@@ -159,7 +173,7 @@ final class EnginePendingStorage {
         }
 
         private void validateCompleted(String key, SourceHistoryPrerequisiteResult value) {
-            require(key.equals(value.selection().selectionIdentity()), "Completed source map has foreign key");
+            require(LogicalSourceRequests.canonicalSelection(key).equals(value.selection().selectionIdentity()), "Completed source map has foreign key");
             var original = submitted.get(key);
             require(original != null && original.descriptor().equals(value.selection()), "Source response lost its original submitted operation");
             SourcePrerequisiteResultStorageValidation.require(original, value, originalAdmission, results);
@@ -184,7 +198,7 @@ final class EnginePendingStorage {
                         java.util.Optional.ofNullable(optional(r, in -> results.decodeAdmission(in.bytes(limits.maximumRecordBytes())))),
                         java.util.Optional.ofNullable(optional(r, in -> results.decodeDrain(in.bytes(limits.maximumRecordBytes())))), r.bool());
             });
-            require(key.equals(value.selection().selectionIdentity()) && Arrays.equals(bytes, encodeCompleted(key, value)),
+            require(LogicalSourceRequests.canonicalSelection(key).equals(value.selection().selectionIdentity()) && Arrays.equals(bytes, encodeCompleted(key, value)),
                     "Noncanonical or foreign complete source response");
             return value;
         }

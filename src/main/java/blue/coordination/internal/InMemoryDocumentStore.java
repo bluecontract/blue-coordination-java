@@ -78,11 +78,66 @@ final class InMemoryDocumentStore {
         return historicalSources == null ? find(id) : historicalSources.before(id, cutoff);
     }
 
+    synchronized Optional<DocumentSession> sourceAdmission(DocumentId id, Set<DocumentId> observers) {
+        if (historicalSources == null) return sourceAdmission(id);
+        return historicalSources.sourceInstance(id, observers.stream().map(this::require).toList()).flatMap(historicalSources::admission);
+    }
+
+    synchronized Optional<DocumentSession> sourceBefore(DocumentId id, blue.language.processor.ExternalOrderKey cutoff,
+            Set<DocumentId> observers) {
+        if (historicalSources == null) return sourceBefore(id, cutoff);
+        return historicalSources.sourceInstance(id, observers.stream().map(this::require).toList())
+                .flatMap(ref -> historicalSources.before(ref, cutoff));
+    }
+
+    /** Route lineage belongs to the exact retained source and its recorded forward roles. */
+    synchronized Optional<DocumentSession> retainedSourceBefore(DocumentId target, DocumentSession retainedSource,
+            blue.language.processor.ExternalOrderKey cutoff, Set<DocumentId> observers) {
+        if (target.equals(retainedSource.documentId())) return Optional.of(retainedSource);
+        if (historicalSources == null) return sourceBefore(target, cutoff);
+        return historicalSources.sourceInstance(retainedSource.documentId(), observers.stream().map(this::require).toList())
+                .flatMap(ref -> historicalSources.beforeFrom(target, ref, retainedSource, cutoff));
+    }
+
+    synchronized <T> T historicalRead(java.util.function.Supplier<T> reader) {
+        return historicalSources == null ? reader.get() : historicalSources.protectRead(reader);
+    }
+    synchronized blue.coordination.api.DocumentRevision observedRevision(DocumentId source, long epoch, Set<DocumentId> observers) {
+        return historicalRead(() -> observedSource(source, observers).revision(epoch));
+    }
+    synchronized String observedHistoryIdentity(DocumentId source, Set<DocumentId> observers) {
+        return historicalRead(() -> observedSource(source, observers).requireRootedHistory().identity());
+    }
+
+    synchronized DocumentSession observedSource(DocumentId source, Set<DocumentId> observers) {
+        if (historicalSources == null || observers.contains(source)) return require(source);
+        var ref = historicalSources.sourceInstance(source, observers.stream().map(this::require).toList()).orElseThrow(
+                () -> new IllegalStateException("Historical source has no retained execution association"));
+        return historicalSources.latest(ref);
+    }
+    synchronized ManagedEpochEvidence managedEpochEvidence(DocumentId source, long epoch, Set<DocumentId> observers) {
+        if (historicalSources == null || observers.contains(source)) return managedEpochEvidence(source, epoch);
+        return historicalSources.sourceInstance(source, observers.stream().map(this::require).toList())
+                .map(ref -> historicalSources.receipt(ref, epoch)).orElse(new ManagedEpochEvidence(null, null));
+    }
+
+    synchronized blue.coordination.api.DocumentInstanceRef pendingSourceInstance(DocumentId source, Set<DocumentId> observers) {
+        if (historicalSources == null) throw new IllegalStateException("Pending instance association requires logical history");
+        return historicalSources.sourceInstance(source, observers.stream().map(this::require).toList())
+                .orElseGet(() -> LogicalDocumentInstances.initialReference(source));
+    }
+
+    synchronized Optional<String> sourceWorkBlock(DocumentId id, Set<DocumentId> observers) {
+        return historicalSources == null ? Optional.empty()
+                : historicalSources.sourceWorkBlock(id, observers.stream().map(this::require).toList());
+    }
+
     synchronized OccurrenceResolutionSnapshot historicalOccurrenceResolutionSnapshot(
             blue.language.processor.ExternalOrderKey cutoff, Set<DocumentId> owners) {
         var current = occurrenceResolutionSnapshot();
         if (historicalSources == null) return current;
-        return new OccurrenceResolutionSnapshot(historicalSources.lineages(cutoff, current.lineageIndex(), owners),
+        return new OccurrenceResolutionSnapshot(historicalSources.lineages(cutoff, current.lineageIndex(), owners,
+                        id -> historicalSources.sourceInstance(id, owners.stream().map(this::require).toList())),
                 current.occurrenceInventory(), current.componentIndex(), current.occurrenceInventoryGeneration(),
                 current.componentIndexGeneration());
     }
@@ -184,6 +239,50 @@ final class InMemoryDocumentStore {
                 nextIndex,
                 increment(state.componentIndexGeneration(),
                         "component index generation"));
+    }
+
+    /** Dedicated lifecycle operation; its caller proves topology/work eligibility first. */
+    synchronized Set<DocumentId> retainedIncomingSources(blue.coordination.api.DocumentInstanceRef retiring) {
+        var retained = new LinkedHashSet<DocumentId>();
+        if (historicalSources == null) return retained;
+        for (var source : state.componentIndex().directSources(retiring.documentId())) {
+            var rows = state.occurrenceInventory().activeRowsFrom(source).stream().filter(row ->
+                    row.targetDocumentId().value().equals(retiring.documentId().value())).toList();
+            if (rows.isEmpty()) throw new IllegalStateException("Incoming topology has no exact active occurrence");
+            if (rows.stream().allMatch(row -> historicalSources.targetsRetiredOtherInstance(source, row, retiring))) retained.add(source);
+        }
+        return Set.copyOf(retained);
+    }
+
+    synchronized void retireIndependentOwner(DocumentId owner, Set<DocumentId> retainedIncoming) {
+        require(owner);
+        var nextTopology = state.componentIndex().withoutIndependentOwner(owner, retainedIncoming);
+        state = StoreState.trustedTransition(state.sessionIndex().remove(owner).map(),
+                state.lineageIndex().withoutLineage(owner), state.occurrenceInventory().replaceSources(Set.of(owner), List.of()).inventory(),
+                state.occurrenceInventoryGeneration(), nextTopology, state.componentIndexGeneration(),
+                state.graphGenerations().withoutDocument(owner), state.componentStateInventory().replaceAffected(Set.of(owner), List.of()),
+                state.closureSubscriptions().withoutDocument(owner), state.outboxLog(), state.checkpointEvidenceLog(),
+                state.publicationReceiptIndex(), state.admissionReceiptIndex(), state.closurePublicationReceiptIndex(),
+                state.rootedProviderFrontiers(), state.closureApplicationResults(), state.managedEpochReceipts(), state.catchUpPlans());
+    }
+
+    synchronized void startInstanceAtBasis(DocumentSession basis, ManagedEpochReceiptStore.DocumentHistory originalReceipts) {
+        var owner = basis.documentId();
+        if (state.sessionIndex().get(owner) != null) throw new IllegalStateException("Starting session already exists");
+        var session = basis.copyForAtomicPublication(); var view = session.rootedView();
+        var receipts = state.managedEpochReceipts().withStartingHistory(session, originalReceipts);
+        var component = view.snapshot().components().stream().filter(row -> row.orderedMemberDocumentIds()
+                .contains(ContractsClosureAdapter.closureId(owner))).findFirst().orElseThrow();
+        var replacement = StoreState.trustedTransition(state.sessionIndex().put(owner, session).map(),
+                state.lineageIndex().withNewLineage(session), state.occurrenceInventory().replaceSources(Set.of(owner),
+                        view.snapshot().occurrences().stream().filter(row -> row.sourceDocumentId().equals(ContractsClosureAdapter.closureId(owner))).toList()).inventory(),
+                state.occurrenceInventoryGeneration(), state.componentIndex().withStartingOwner(session), state.componentIndexGeneration(),
+                state.graphGenerations().withStartingDocument(owner, view.snapshot().graphGeneration()),
+                state.componentStateInventory().replaceAffected(Set.of(owner), List.of(component)),
+                state.closureSubscriptions().withStartingOwner(owner, view.subscriptions()), state.outboxLog(), state.checkpointEvidenceLog(),
+                state.publicationReceiptIndex(), state.admissionReceiptIndex(), state.closurePublicationReceiptIndex(),
+                state.rootedProviderFrontiers(), state.closureApplicationResults(), receipts, state.catchUpPlans());
+        historicalSources.published(Set.of(owner), replacement); state = replacement;
     }
 
     public synchronized Collection<DocumentSession> sessions() {
@@ -382,6 +481,39 @@ final class InMemoryDocumentStore {
                 publicationIdentity,
                 expectedOccurrenceInventoryGeneration,
                 expectedComponentIndexGeneration);
+    }
+
+    synchronized void requireGlobalDrainSupported() { if (historicalSources != null) historicalSources.requireGlobalDrainSupported(); }
+    synchronized boolean hasInstanceStorage() { return historicalSources != null; }
+
+    synchronized Optional<blue.coordination.api.DocumentInstanceRef> activeInstance(DocumentId owner) {
+        return historicalSources == null ? Optional.empty() : Optional.of(historicalSources.activeInstance(owner));
+    }
+    synchronized void requireRetainedInstance(blue.coordination.api.DocumentInstanceRef ref) {
+        if (historicalSources == null) throw new IllegalStateException("Retained instance selection requires logical storage");
+        historicalSources.requireRetainedInstance(ref);
+    }
+
+    synchronized <T> Optional<T> retiredOriginalAdmission(String identity, DocumentId document, java.util.function.Function<DocumentSession, T> projection) {
+        if (historicalSources == null) return Optional.empty();
+        var receipt = admissionReceipt(identity).orElseThrow(() -> new IllegalArgumentException("Unknown original admission"));
+        return historicalSources.retiredOriginalAdmission(identity, receipt.documentIds(), document, projection);
+    }
+
+    synchronized Optional<ContractsClosurePublicationReceipt> executionPublicationReceipt(String identity, DocumentId observer) {
+        if (historicalSources == null || observer == null) return closurePublicationReceipt(identity);
+        return historicalSources.executionReceipt(observer, identity);
+    }
+
+    synchronized Optional<ContractsClosurePublicationReceipt> executionPublicationReceipt(blue.coordination.api.DocumentInstanceRef observer, String identity) {
+        return historicalSources.executionReceipt(observer, identity);
+    }
+    synchronized List<DocumentRevision> executionCausal(blue.coordination.api.DocumentInstanceRef observer, String identity, DocumentId member, String entry) {
+        return historicalSources.executionCausal(observer, identity, member, entry);
+    }
+    synchronized boolean hasExecutionPublication(String identity, DocumentId observer) {
+        return historicalSources == null || observer == null ? state.hasPublicationReceipt(identity)
+                : historicalSources.hasExecution(observer, identity);
     }
 
     /** Looks up one typed process receipt without opening document heads. */
@@ -794,7 +926,10 @@ final class InMemoryDocumentStore {
         MultiDocumentPublicationTransaction selected = Objects.requireNonNull(
                 transaction, "transaction");
         StoreState replacement = selected.prepareReplacement(state);
-        if (historicalSources != null) historicalSources.published(selected.retainedSourceOwners(), replacement);
+        if (historicalSources != null) {
+            historicalSources.published(selected.retainedSourceOwners(), replacement);
+            historicalSources.completedExecution(selected.closureReceipt(), replacement);
+        }
         state = replacement;
     }
 

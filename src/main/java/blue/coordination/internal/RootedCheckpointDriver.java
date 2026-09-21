@@ -171,7 +171,7 @@ final class RootedCheckpointDriver {
     }
 
     private ExternalOrderKey order(ManagedEpochApplicationWork work) {
-        return documents.managedEpochEvidence(work.sourceDocumentId(), work.sourceEpoch())
+        return documents.managedEpochEvidence(work.sourceDocumentId(), work.sourceEpoch(), Set.of(work.consumerDocumentId()))
                 .receipt().sourceOrder().orElseThrow();
     }
 

@@ -133,6 +133,10 @@ final class LogicalDocumentStoreTest {
                             var result = fixture.blue.processing().processNextStage(parent);
                             assertEquals(blue.coordination.sdk.ProcessingStageResult.Disposition.COMPLETED, result.disposition());
                         }
+                        // This fixture installs only document families, so explicitly participates in
+                        // the native publication callback normally bound by RootedEngineStorage.
+                        opened.historicalSources().published(Set.of(stage < 2 ? source.id() : parent.id()),
+                                fixture.engine.documents().storedState());
                         opened.stageLogical(fixture.engine.documents().storedState()); context.flush();
                     }
                     assertTrue(records.publish(attempt.prepare("parent-stage-" + stage, List.of(), new Bytes(new byte[] {1}))));

@@ -154,7 +154,10 @@ final class StoredDocumentStore {
                     m.activeBarriers(), m.catchUpComparisons(), m.catchUpCopies()));
             selectedSessions = documents.openWorkingSessions((logical == null ? documents.openSessions(selected.root(Root.SESSIONS)) : documents.openLogicalSessions(logical)),
                     lineages, generations, maximumSelectedSessions,
-                    (id, original) -> topology.requireJoinRoot(graph, id, original.retainedView()));
+                    (id, original) -> {
+                        topology.requireJoinRoot(graph, id, original.retainedView());
+                        if (logical != null) logical.instances(sessionLimits.maximumRecordBytes()).requireOrCreateInitial(id);
+                    });
             historicalSources = logical == null ? null : new StoredHistoricalSources(objects, mapLimits, logical, selectedSessions.viewScope());
             results = new StoredResultRows(objects, sessionLimits, decodedCache);
             StoredDocumentReadChecks openingChecks = null;
@@ -162,19 +165,27 @@ final class StoredDocumentStore {
             try {
                 publication = publication(selectedSessions.viewScope(), results);
                 openingPublication = publication;
+                if (historicalSources != null) {
+                    historicalSources.bindExecutionPublications(publication);
+                    historicalSources.bindReceipts((ref, epoch) -> receipts.retainedEvidence(logical, ref, epoch));
+                }
                 var generic = (logical == null ? publication.openGeneric(selected.root(Root.PUBLICATIONS)) : publication.openLogicalGeneric(logical));
                 var admissions = (logical == null ? publication.openAdmissions(selected.root(Root.ADMISSIONS)) : publication.openLogicalAdmissions(logical));
                 var closures = (logical == null ? publication.openClosures(selected.root(Root.CLOSURES)) : publication.openLogicalClosures(logical));
-                admissionValues = admissions.projectValues((key, row) -> {
+                admissionValues = admissions.projectValues((key, row) -> checkedPublication(() -> {
                     StoredPublicationIndexes.checkedAdmission(key, row, generic, closures);
                     InMemoryDocumentStore.StoreState.requireRetainedResult(row.documentIds(), row.attempt().processResult(),
-                            new PersistentMapView<>(selectedSessions.open()), "Stored admission receipt"); return row;
-                });
-                closureValues = closures.projectValues((key, row) -> {
+                            historicalSources == null ? new PersistentMapView<>(selectedSessions.open())
+                                    : historicalSources.publicationSessions(blue.coordination.api.storage.CoordinationRecords.Family.ADMISSION, key, row.documentIds()),
+                            "Stored admission receipt"); return row;
+                }));
+                closureValues = closures.projectValues((key, row) -> checkedPublication(() -> {
                     StoredPublicationIndexes.checkedClosure(key, row, generic, admissions);
                     InMemoryDocumentStore.StoreState.requireRetainedClosureReceipt(row,
-                            new PersistentMapView<>(selectedSessions.open()), "Stored closure receipt"); return row;
-                });
+                            historicalSources == null ? new PersistentMapView<>(selectedSessions.open())
+                                    : historicalSources.publicationSessions(blue.coordination.api.storage.CoordinationRecords.Family.CLOSURE, key, row.documentIds()),
+                            "Stored closure receipt"); return row;
+                }));
                 var frontierRows = (logical == null ? publication.openFrontiers(selected.root(Root.PROVIDER_FRONTIERS)) : publication.openLogicalFrontiers(logical));
                 // Raw namespaces cannot prove a maximum from a single witness. Verify before guard, mutation or export,
                 // not during open: mere selection must not materialize every historical receipt and document.
@@ -195,6 +206,7 @@ final class StoredDocumentStore {
                 openingChecks = new StoredDocumentReadChecks(maximumSelectedIndexMaps, raw, occurrences, topology, components,
                         subscriptions, receipts, plans, work, selectedSessions::selected,
                         RootedEngineStorage.isControlledNamespace(objects));
+                openingChecks.bindHistoricalSources(historicalSources);
                 initial = openingChecks.open(); checks = openingChecks;
             } catch (RuntimeException failure) {
                 if (openingChecks != null) openingChecks.close();
@@ -202,18 +214,31 @@ final class StoredDocumentStore {
                 results.close(); selectedSessions.close(); throw failure;
             }
         }
+        private <T> T checkedPublication(java.util.function.Supplier<T> read) {
+            return logical == null ? read.get() : logical.protect(read);
+        }
         InMemoryDocumentStore.StoreState state() { require(!closed, "Document-store scope is closed"); return initial; }
         DocumentSessionStorage.OpenScope viewScope() { require(!closed, "Document-store scope is closed"); return selectedSessions.viewScope(); }
         StoredPublicationReceiptReuse publicationReuse() { require(!closed, "Document-store scope is closed"); return publication.closureReuse(); }
         StoredHistoricalSources historicalSources() { require(!closed, "Document-store scope is closed"); return Objects.requireNonNull(historicalSources); }
+
+        ManagedEpochReceiptStore.DocumentHistory retainedInstanceReceipts(blue.coordination.api.DocumentInstanceRef ref) {
+            require(!closed, "Document-store scope is closed"); return receipts.retainedLogicalHistory(logical, ref);
+        }
 
         /** Selects typed record changes only; the enclosing engine prepares and publishes the closed attempt. */
         void stageLogical(InMemoryDocumentStore.StoreState complete) {
             Objects.requireNonNull(logical, "Not a logical document-store scope").protect(() -> {
                 try {
                     require(!closed, "Document-store scope is closed"); selectedSessions.preflightSelectedAuthority();
-                    var admissions = admissionValues.stage(complete.admissionReceiptIndex(), (key, row) -> row);
-                    var closures = closureValues.stage(complete.closurePublicationReceiptIndex(), (key, row) -> row);
+                    var admissions = admissionValues.stage(complete.admissionReceiptIndex(), (key, row) -> {
+                        historicalSources.retainPublication(blue.coordination.api.storage.CoordinationRecords.Family.ADMISSION,
+                                key, row.documentIds(), complete.sessionIndex()); return row;
+                    });
+                    var closures = closureValues.stage(complete.closurePublicationReceiptIndex(), (key, row) -> {
+                        historicalSources.retainPublication(blue.coordination.api.storage.CoordinationRecords.Family.CLOSURE,
+                                key, row.documentIds(), complete.sessionIndex()); return row;
+                    });
                     // Original result rows must be registered before outbox/checkpoint members are encoded.
                     admissions.selectLogicalRecords(); closures.selectLogicalRecords();
                     var state = checks.stage(complete);

@@ -317,6 +317,8 @@ public final class RootedEngineStorage {
         private DefaultCoordinationEngine engine;
         private boolean closed;
         private boolean staged;
+        private LogicalDocumentInstances.Binding retirement;
+        private boolean lifecycleSelected;
         private LogicalScope(LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
                 ExactNodeProvider provider, TimelineJournalStore journal) {
             this.records = records; var context = records.context();
@@ -350,6 +352,66 @@ public final class RootedEngineStorage {
         public synchronized DefaultCoordinationEngine engine() { open(); return engine; }
         /** Counter-only diagnostics do not read durable catalogs or add publication conditions. */
         public synchronized Map<String, Long> workCounters() { open(); return engine.workCounters(); }
+        /** Captures this document's current exact instance/publication association. */
+        public synchronized blue.coordination.api.DocumentInstancePosition instancePosition(DocumentId document) {
+            open(); return records.context().protect(() -> documentScope.historicalSources().instancePosition(engine.documents().require(document)));
+        }
+        /** Reads the exact checkpoint representation at the selected archived publication. */
+        public synchronized blue.coordination.api.ExactValue retainedInstanceRepresentation(
+                blue.coordination.api.DocumentInstancePosition position) {
+            open(); return records.context().protect(() -> documentScope.historicalSources().retainedInstance(position).currentRepresentation());
+        }
+        /** Reads the original numbered revision at an archived position, before any representation-only update. */
+        public synchronized blue.coordination.api.DocumentRevision retainedInstanceRevision(
+                blue.coordination.api.DocumentInstancePosition position) {
+            open(); return records.context().protect(() -> documentScope.historicalSources().retainedInstance(position).revision(position.epoch()));
+        }
+        /** Prepares retirement in a dedicated owner, retaining exact original history. */
+        public synchronized blue.coordination.api.DocumentInstanceRetirement retireInstance(
+                blue.coordination.api.DocumentInstanceRef expected) {
+            open(); return records.context().protect(() -> {
+                require(!lifecycleSelected, "Only one lifecycle transition is allowed in a logical owner");
+                lifecycleSelected = true;
+                var ledger = records.context().instances(limits.maximumRecordBytes());
+                var binding = ledger.requireActive(expected);
+                var session = engine.documents().require(expected.documentId());
+                var history = documentScope.historicalSources();
+                var position = history.instancePosition(session);
+                require(position.instance().equals(expected), "Retirement selected another instance");
+                require(history.retainedInstance(position).currentRepresentation().blueId().equals(session.currentRepresentation().blueId()),
+                        "Retirement lacks the original retained head");
+                var blockers = engine.instanceRetirementBlocks(expected);
+                if (!blockers.isEmpty()) return new blue.coordination.api.DocumentInstanceRetirement(
+                        blue.coordination.api.DocumentInstanceRetirement.Status.BLOCKED_POLICY_REQUIRED, position, blockers);
+                new LogicalInstanceCatalog(records.context(), limits.maximumRecordBytes()).retain(binding,
+                        engine.isPublicRoot(expected.documentId()));
+                engine.retireIndependentInstance(expected); retirement = binding;
+                return new blue.coordination.api.DocumentInstanceRetirement(
+                        blue.coordination.api.DocumentInstanceRetirement.Status.PREPARED, position, List.of());
+            });
+        }
+        /** Starts one absent semantic owner at its authenticated declared archived basis. */
+        public synchronized blue.coordination.api.DocumentInstanceStart startInstance(
+                blue.coordination.api.DocumentInstanceRef next, blue.coordination.api.DocumentInstancePosition basis) {
+            open(); return records.context().protect(() -> {
+                require(!lifecycleSelected, "Only one lifecycle transition is allowed in a logical owner"); lifecycleSelected = true;
+                require(next.documentId().equals(basis.instance().documentId()), "Starting basis belongs to another document");
+                var ledger = records.context().instances(limits.maximumRecordBytes());
+                require(ledger.select(next.documentId()).instance().isEmpty(), "Starting document still has active authority");
+                require(engine.documents().find(next.documentId()).isEmpty(), "Starting document still has an active session");
+                var history = documentScope.historicalSources(); var session = history.retainedInstance(basis);
+                var blockers = new java.util.ArrayList<>(InstanceStartingProjection.blocks(session));
+                blockers.addAll(history.startingLiveRoleBlocks(basis, session));
+                if (!blockers.isEmpty()) return new blue.coordination.api.DocumentInstanceStart(
+                        blue.coordination.api.DocumentInstanceStart.Status.BLOCKED_BASIS, next, basis, blockers);
+                var receipts = Objects.requireNonNull(documentScope.retainedInstanceReceipts(basis.instance()), "Starting basis lacks numbered receipts");
+                boolean publicRoot = new LogicalInstanceCatalog(records.context(), limits.maximumRecordBytes()).startingRole(next.documentId());
+                ledger.start(next); history.inheritStartingRoles(next, basis, session);
+                engine.startInstanceAtBasis(session, receipts, publicRoot);
+                return new blue.coordination.api.DocumentInstanceStart(blue.coordination.api.DocumentInstanceStart.Status.PREPARED,
+                        next, basis, List.of());
+            });
+        }
         /** Selects all final engine records and prewrites artifacts; the caller separately flushes and publishes. */
         public synchronized void stage() {
             open(); records.context().protect(() -> {
@@ -360,6 +422,7 @@ public final class RootedEngineStorage {
                 StoredRouteIndexes.selectLogical(OperationRouteIndex.restoreIndexes(parts.routes(), metrics, session,
                         id -> Objects.requireNonNull(session.apply(id)).currentRepresentation().blueId()));
                 StoredActiveSourceIndexes.selectLogical(ContractsActiveSourceTimelineIndex.restoreIndexes(parts.activeSources(), metrics));
+                if (retirement != null) records.context().instances(limits.maximumRecordBytes()).retire(retirement);
                 staged = true; return null;
             });
         }

@@ -110,6 +110,11 @@ final class StoredPublicationIndexes implements AutoCloseable {
                 }, value -> receipts.encodeRejection(value, sessions::viewAddress), bytes -> receipts.decodeRejection(bytes, scope)));
     }
 
+    byte[] encodeExecutionReceipt(ContractsClosurePublicationReceipt receipt) {
+        return closureValues.prepareEncoding(receipt).consume(closureValues);
+    }
+    ContractsClosurePublicationReceipt decodeExecutionReceipt(byte[] bytes) { return closureValues.decode(bytes); }
+
     PersistentOrderedMap<String, Boolean> openLogicalGeneric(LogicalRecordContext context) {
         return generic.openLogical(context, Family.PUBLICATION, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text());
     }

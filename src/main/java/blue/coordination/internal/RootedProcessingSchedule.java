@@ -100,6 +100,11 @@ final class RootedProcessingSchedule {
         }
     }
 
+    void retire(DocumentId owner) {
+        if (logicalTurns == null || logicalRounds == null) throw new IllegalStateException("Instance retirement requires logical scheduling");
+        logicalTurns.remove(owner); logicalRounds.remove(owner); isolated.remove(owner);
+    }
+
     private static boolean historical(RootedCheckpointDriver.Selection selected) {
         return selected.historical() != null || selected.localHistorical() != null;
     }

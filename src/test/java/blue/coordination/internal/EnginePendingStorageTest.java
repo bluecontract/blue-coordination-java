@@ -95,6 +95,113 @@ final class EnginePendingStorageTest {
         }
     }
 
+    @Test void identicalCanonicalPendingAndSubmittedOperandsRemainSeparateForReplacementRequester() throws Exception {
+        // given
+        var records = new LogicalRecordMapTest.Store();
+        try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false); var views = scenario.f.storage.openScope()) {
+            var descriptor = scenario.selection(); var pending = scenario.coordinator().pendingForStorage(key(descriptor));
+            var prepared = scenario.coordinator().requireSelection(descriptor);
+            blue.coordination.api.SourceHistoryRequest original, replacement;
+            var proof = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+            try (var attempt = records.attempt()) {
+                var logical = new LogicalPointStorage(attempt);
+                try (var store = storage(scenario.f.bytes, scenario.f.storage).openLogical(logical, views, NO_WORK, NO_ADMISSION)) {
+                    var indexed = (RootedSourceDiscoveryCoordinator.PendingSelections) store.sources().pending();
+                    store.sources().pending().put(pending.key(), pending);
+                    original = indexed.request(pending, descriptor);
+                    store.sources().submitted().put(store.sources().requests().bind(original), prepared);
+                    logical.stage(); assertTrue(records.publish(attempt.prepare("first-requester", java.util.List.of(), proof)));
+                }
+            }
+            // Low-level storage control: the unchanged actual stopped invocation is installed for a new observer.
+            // Public lifecycle eligibility is separately tested; this test does not authorize that transition.
+            // when
+            try (var attempt = records.attempt()) {
+                var ledger = new LogicalDocumentInstances(attempt, MAX);
+                ledger.retire(ledger.requireActive(original.requestingInstances().get(0)));
+                ledger.start(new blue.coordination.api.DocumentInstanceRef(descriptor.requestingRoot(), "replacement-requester"));
+                assertTrue(records.publish(attempt.prepare("replace-observer-control", java.util.List.of(), proof)));
+            }
+            // then
+            try (var attempt = records.attempt()) {
+                var logical = new LogicalPointStorage(attempt);
+                try (var store = storage(scenario.f.bytes, scenario.f.storage).openLogical(logical, views, NO_WORK, NO_ADMISSION)) {
+                    var indexed = (RootedSourceDiscoveryCoordinator.PendingSelections) store.sources().pending();
+                    indexed.putForSource(pending, original.sourceInstance());
+                    replacement = indexed.request(pending, descriptor);
+                    assertEquals(original.prerequisite(), replacement.prerequisite());
+                    assertNotEquals(original.requestingInstances(), replacement.requestingInstances());
+                    assertNotEquals(LogicalSourceRequests.storageKey(original), store.sources().requests().bind(replacement));
+                    store.sources().submitted().put(LogicalSourceRequests.storageKey(replacement), prepared);
+                    logical.stage(); assertTrue(records.publish(attempt.prepare("second-requester", java.util.List.of(), proof)));
+                }
+            }
+            try (var attempt = records.attempt()) {
+                var logical = new LogicalPointStorage(attempt);
+                try (var store = storage(scenario.f.bytes, scenario.f.storage).openLogical(logical, views, NO_WORK, NO_ADMISSION)) {
+                    var indexed = (RootedSourceDiscoveryCoordinator.PendingSelections) store.sources().pending();
+                    assertEquals(original, store.sources().requests().original(descriptor));
+                    var old = indexed.forRequest(original); var current = indexed.forRequest(replacement);
+                    assertNotSame(old, current); assertFalse(indexed.currentOwners(old)); assertTrue(indexed.currentOwners(current));
+                    assertEquals(java.util.List.of(current), indexed.forRoot(descriptor.requestingRoot()));
+                    assertEquals(descriptor, store.sources().submitted().get(LogicalSourceRequests.storageKey(original)).descriptor());
+                    assertEquals(descriptor, store.sources().submitted().get(LogicalSourceRequests.storageKey(replacement)).descriptor());
+                }
+            }
+        }
+    }
+
+    @Test void pendingSourceAssociationNeverFollowsAReplacementAndMissingMetadataPoisonsTheAttempt() throws Exception {
+        // given
+        var records = new LogicalRecordMapTest.Store();
+        try (var scenario = new SourceDiscoveryStorageCodecTest.Scenario(false); var views = scenario.f.storage.openScope()) {
+            var descriptor = scenario.selection(); var pending = scenario.coordinator().pendingForStorage(key(descriptor));
+            var original = LogicalDocumentInstances.initialReference(pending.source());
+            var replacement = new blue.coordination.api.DocumentInstanceRef(pending.source(), "source-replacement");
+            var evidence = new blue.coordination.api.storage.CoordinationRecords.Bytes(new byte[] {1});
+            try (var attempt = records.attempt()) {
+                var binding = new LogicalPointStorage(attempt);
+                try (var selected = storage(scenario.f.bytes, scenario.f.storage).openLogical(binding, views, NO_WORK, NO_ADMISSION)) {
+                    binding.context().instances(MAX).start(original);
+                    selected.sources().pending().put(pending.key(), pending); binding.stage();
+                    assertTrue(records.publish(attempt.prepare("original-source-request", java.util.List.of(), evidence)));
+                }
+            }
+            // when
+            try (var attempt = records.attempt()) {
+                var ledger = new LogicalDocumentInstances(attempt, MAX);
+                ledger.retire(ledger.requireActive(original)); ledger.start(replacement);
+                assertTrue(records.publish(attempt.prepare("native-source-binding-control", java.util.List.of(), evidence)));
+            }
+            // then
+            try (var attempt = records.attempt()) {
+                var binding = new LogicalPointStorage(attempt);
+                try (var selected = storage(scenario.f.bytes, scenario.f.storage).openLogical(binding, views, NO_WORK, NO_ADMISSION)) {
+                    var index = (RootedSourceDiscoveryCoordinator.PendingSelections) selected.sources().pending();
+                    assertEquals(1, index.forSource(original).size());
+                    assertTrue(index.forSource(replacement).isEmpty());
+                    assertEquals(1, index.forRoot(scenario.parent.id()).size()); binding.stage();
+                    var proof = attempt.prepare("original-source-membership", java.util.List.of(), evidence);
+                    assertEquals(1, proof.points().stream().filter(point -> point.key().family()
+                            == blue.coordination.api.storage.CoordinationRecords.Family.INSTANCE_BINDING).count(),
+                            "Only requesting B's binding is read; original A's association cannot follow A2");
+                }
+            }
+            var metadataScope = new blue.coordination.api.storage.CoordinationRecords.Bytes(
+                    OrderedRecordKey.text().encode("engine/source-pending-instances/2"));
+            var metadata = records.data.keySet().stream().filter(key -> key.scope().equals(metadataScope)).toList();
+            assertEquals(1, metadata.size()); metadata.forEach(records.data::remove);
+            try (var attempt = records.attempt()) {
+                var binding = new LogicalPointStorage(attempt);
+                try (var selected = storage(scenario.f.bytes, scenario.f.storage).openLogical(binding, views, NO_WORK, NO_ADMISSION)) {
+                    var index = (RootedSourceDiscoveryCoordinator.PendingSelections) selected.sources().pending();
+                    assertThrows(RuntimeException.class, () -> index.forSource(original));
+                    assertThrows(IllegalStateException.class, () -> attempt.prepare("missing-source-association", java.util.List.of(), evidence));
+                }
+            }
+        }
+    }
+
     private void sourceRoundTrip(boolean known, boolean publish) throws Exception { sourceRoundTrip(known, publish, false); }
 
     private void sourceRoundTrip(boolean known, boolean publish, boolean logical) throws Exception {
@@ -146,12 +253,13 @@ final class EnginePendingStorageTest {
             }
             assertFalse(pending.attempt().isComplete());
             assertTrue(pending.attempt().resourceDemands().stream().anyMatch(d -> d == pending.demand()));
-            var submitted = selected.sources().submitted().get(descriptor.selectionIdentity());
+            String sourceKey = logical ? LogicalSourceRequests.storageKey(selected.sources().requests().original(descriptor)) : descriptor.selectionIdentity();
+            var submitted = selected.sources().submitted().get(sourceKey);
             assertEquals(descriptor, submitted.descriptor());
-            assertSame(submitted, selected.sources().submitted().get(descriptor.selectionIdentity()), "Original selected value is identity-pinned");
+            assertSame(submitted, selected.sources().submitted().get(sourceKey), "Original selected value is identity-pinned");
             assertArrayEquals(preparedPacket, new SourceDiscoveryStorageCodec(MAX, 128).encodePrepared(submitted, views::addressOf));
             if (publish) {
-                var result = selected.sources().completed().get(descriptor.selectionIdentity());
+                var result = selected.sources().completed().get(sourceKey);
                 assertEquals(descriptor, result.selection()); var codec = new CoreReceiptStorageCodec(MAX, 128);
                 assertArrayEquals(responsePacket, known ? codec.encodeDrain(result.processing().orElseThrow(), NO_WORK)
                         : codec.encodeAdmission(result.admission().orElseThrow()));

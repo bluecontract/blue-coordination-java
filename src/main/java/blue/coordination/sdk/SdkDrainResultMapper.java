@@ -36,12 +36,17 @@ import java.util.Set;
 final class SdkDrainResultMapper {
     private final SdkCoordinationRuntime runtime;
     private final DefaultCoordinationEngine engine;
+    private final blue.coordination.api.DocumentInstanceRef executionObserver;
 
     SdkDrainResultMapper(
             SdkCoordinationRuntime runtime,
             DefaultCoordinationEngine engine) {
+        this(runtime, engine, null);
+    }
+    SdkDrainResultMapper(SdkCoordinationRuntime runtime, DefaultCoordinationEngine engine,
+            blue.coordination.api.DocumentInstanceRef executionObserver) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
-        this.engine = Objects.requireNonNull(engine, "engine");
+        this.engine = Objects.requireNonNull(engine, "engine"); this.executionObserver = executionObserver;
     }
 
     DrainResult map(ProcessingDrainReceipt receipt) {
@@ -836,7 +841,8 @@ final class SdkDrainResultMapper {
                     .toList();
 
             List<blue.coordination.api.DocumentRevision> matching =
-                    engine.causalRevisionEndpoints(documentId, entry.blueId());
+                    executionObserver == null ? engine.causalRevisionEndpoints(documentId, entry.blueId())
+                            : engine.causalRevisionEndpoints(executionObserver, retained.publicationIdentity(), documentId, entry.blueId());
             if (!matching.isEmpty()) {
                 blue.coordination.api.DocumentRevision first =
                         matching.get(0);

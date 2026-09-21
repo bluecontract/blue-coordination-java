@@ -61,6 +61,19 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     private Map<String, EntryIntent> intents = new LinkedHashMap<>();
     private Map<String, EntryResult> retainedResults =
             new LinkedHashMap<>();
+    boolean hasInstanceStorage() { return engine.hasDocumentInstanceStorage(); }
+    private SdkInstanceResults instanceResults;
+    void installInstanceResults(SdkInstanceResults selected) { ensureOpen(); if (instanceResults != null) throw new IllegalStateException("Instance results already installed"); instanceResults = selected; }
+    blue.coordination.api.DocumentInstanceRef activeInstance(DocumentId id) { return engine.activeDocumentInstance(id).orElseThrow(); }
+    void requireSourceRequest(blue.coordination.api.SourceHistoryRequest request) { engine.requireSourceHistoryRequest(request); }
+    void requireRetainedInstance(blue.coordination.api.DocumentInstanceRef ref) { engine.requireRetainedDocumentInstance(ref); }
+    synchronized Optional<EntryResult> recordedResult(blue.coordination.api.DocumentInstanceRef ref, String entry) {
+        ensureOpen(); if (instanceResults == null) throw new IllegalStateException("Instance results require logical storage");
+        return instanceResults.read(ref, entry);
+    }
+    synchronized Optional<EntryResult> originalResult(String entry) {
+        ensureOpen(); return instanceResults == null ? Optional.ofNullable(retainedResults.get(entry)) : instanceResults.original(entry);
+    }
     private boolean closed;
 
     private SdkCoordinationRuntime(
@@ -491,8 +504,8 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 prepareAdmission(() -> contentDerivedDocumentIds
                         ? compiler.compileContentIdentified(request)
                         : compiler.compile(request));
-        admitCompiled(compiled, Set.of(selected.id()));
-        return requireDocument(selected.id());
+        var receipt = admitCompiled(compiled, Set.of(selected.id()));
+        return admissionHandle(receipt, selected.id());
     }
 
     synchronized ClosureHandle admitStaticProcessEmbedded(
@@ -578,8 +591,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
         LinkedHashMap<String, ExactBlueValue> authored = new LinkedHashMap<>();
         aliases.forEach((alias, documentId) -> {
-            handles.put(alias, requireDocument(documentId));
-            ExactValue initial = engine.revisionAt(documentId, 0L).before()
+            var handle = admissionHandle(receipt, documentId); handles.put(alias, handle);
+            ExactValue initial = handle instanceof ArchivedAdmissionHandle archived ? archived.authored().unwrap()
+                    : engine.revisionAt(documentId, 0L).before()
                     .orElseThrow(() -> new IllegalStateException(
                             "Static admission lost authored history for "
                                     + documentId));
@@ -702,12 +716,27 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 compiled, roots);
         LinkedHashMap<String, DocumentHandle> handles = new LinkedHashMap<>();
         selected.members().forEach((alias, member) -> handles.put(
-                alias, requireDocument(member.id())));
+                alias, admissionHandle(receipt, member.id())));
         return new ClosureHandle(
                 owner,
                 receipt.attempt().processResult().outputClosureIdentity(),
                 handles,
                 selected.publicRoots());
+    }
+
+    private DocumentHandle admissionHandle(ContractsClosureAdmissionReceipt receipt, DocumentId id) {
+        if (receipt.publicationOutcome() == ContractsClosureAdmissionReceipt.PublicationOutcome.ALREADY_PUBLISHED) {
+            var original = engine.retiredOriginalAdmission(receipt.publicationIdentity(), id);
+            if (original.isPresent()) {
+                var retained = original.orElseThrow(); var source = retained.snapshot();
+                var history = retained.revisions().stream().filter(row -> row.epoch() <= source.epoch()).map(this::publicRevision).toList();
+                var events = history.get(history.size() - 1).publicEvents();
+                return new ArchivedAdmissionHandle(this, id,
+                        new DocumentSnapshot(id, source.epoch(), true, ExactBlueValue.wrap(source.current()), events), history,
+                        ExactBlueValue.wrap(retained.authored()));
+            }
+        }
+        return requireDocument(id);
     }
 
     synchronized DocumentHandle requireDocument(DocumentId id) {
@@ -788,7 +817,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     synchronized EntryResult executeOperation(OperationCall call) {
-        ensureOpen();
+        ensureOpen(); engine.requireGlobalDrainSupported();
         EntryHandle handle = appendOperation(
                 Objects.requireNonNull(call, "call"));
         TimelineEntry entry = requireCoreEntry(handle);
@@ -802,7 +831,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
     }
 
     synchronized EntryResult executeEvent(EventCall call) {
-        ensureOpen();
+        ensureOpen(); engine.requireGlobalDrainSupported();
         EntryHandle handle = appendEvent(Objects.requireNonNull(call, "call"));
         TimelineEntry entry = requireCoreEntry(handle);
         return terminalResult(handle, engine.drainThrough(
@@ -823,7 +852,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             throw new IllegalArgumentException("Entry belongs to another runtime");
         }
         requireDocument(root.id());
-        return mapper.map(engine.processRootInput(root.id(), requireCoreEntry(input), policy));
+        var result = mapper.map(engine.processRootInput(root.id(), requireCoreEntry(input), policy));
+        // Legacy process is a current-input observation, not retained-result reconciliation.
+        return instanceResults == null ? result : retain(root.id(), result);
     }
 
     synchronized List<blue.coordination.api.SourceHistoryPrerequisite> sourceHistoryPrerequisites(DocumentHandle root) {
@@ -832,6 +863,39 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             throw new IllegalArgumentException("Document belongs to another runtime");
         exactNodeProvider.beginLookupScope();
         try { return engine.sourceHistoryPrerequisites(root.id()); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    synchronized List<blue.coordination.api.SourceHistoryRequest> sourceHistoryRequests(DocumentHandle root) {
+        requireStageRoot(root); exactNodeProvider.beginLookupScope();
+        try { return engine.sourceHistoryRequests(root.id()); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); exactNodeProvider.beginLookupScope();
+        try { return engine.observeSourceHistoryPrerequisite(request); }
+        finally { exactNodeProvider.endLookupScope(); }
+    }
+    synchronized Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); if (instanceResults == null) throw new IllegalStateException("Source contexts require native instance storage");
+        return instanceResults.source(request);
+    }
+    synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); exactNodeProvider.beginLookupScope();
+        try {
+            var result = engine.processSourceHistoryPrerequisite(request);
+            result.processing().ifPresent(processing -> {
+                if (!result.replayed() || instanceResults.source(request).isEmpty())
+                    instanceResults.retainSource(request, new SdkDrainResultMapper(this, engine, request.sourceInstance()).map(processing), retainedResults);
+            });
+            return result;
+        } finally { exactNodeProvider.endLookupScope(); }
+    }
+    synchronized AdvancedCoordination.SourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); exactNodeProvider.beginLookupScope();
+        try { pendingSourceStage = new AdvancedCoordination.SourceStage(this, engine.selectSourceHistoryStage(request)); return pendingSourceStage; }
         finally { exactNodeProvider.endLookupScope(); }
     }
 
@@ -848,7 +912,9 @@ final class SdkCoordinationRuntime implements AutoCloseable {
 
     synchronized Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryPrerequisite expected) {
         ensureOpen();
-        return Optional.ofNullable(sourceHistoryProcessingResults.get(Objects.requireNonNull(expected, "expected")));
+        Objects.requireNonNull(expected, "expected");
+        return instanceResults == null ? Optional.ofNullable(sourceHistoryProcessingResults.get(expected))
+                : engine.findOriginalSourceHistoryRequest(expected).flatMap(instanceResults::source);
     }
 
     synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
@@ -857,9 +923,19 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         exactNodeProvider.beginLookupScope();
         try {
             var result = engine.processSourceHistoryPrerequisite(Objects.requireNonNull(expected));
-            result.processing().ifPresent(processing -> sourceHistoryProcessingResults.put(expected, retain(mapper.map(processing))));
+            result.processing().ifPresent(processing -> {
+                if (instanceResults == null || !result.replayed()
+                        || instanceResults.source(engine.originalSourceHistoryRequest(expected)).isEmpty())
+                    retainSource(expected, instanceResults == null ? mapper.map(processing) : new SdkDrainResultMapper(this, engine,
+                            engine.originalSourceHistoryRequest(expected).sourceInstance()).map(processing));
+            });
             return result;
         } finally { exactNodeProvider.endLookupScope(); }
+    }
+
+    private void retainSource(blue.coordination.api.SourceHistoryPrerequisite descriptor, DrainResult result) {
+        if (instanceResults == null) sourceHistoryProcessingResults.put(descriptor, retain(result));
+        else instanceResults.retainSource(engine.originalSourceHistoryRequest(descriptor), result, retainedResults);
     }
 
     synchronized DrainResult processNextRoot(DocumentHandle root) {
@@ -881,7 +957,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             throw new IllegalArgumentException("Document belongs to another runtime");
         }
         requireDocument(root.id());
-        return retain(mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
+        return retain(root.id(), mapper.map(engine.processNextRoot(root.id(), expectedLocalWork)));
     }
 
     private SelectedProcessingStage pendingStage;
@@ -902,8 +978,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         try {
             var completed = stage.selected.execute(); pendingSourceStage = null;
             if (!completed.committable()) close();
-            else completed.result().processing().ifPresent(processing -> sourceHistoryProcessingResults.put(
-                    completed.selection().prerequisite(), retain(mapper.map(processing))));
+            else completed.result().processing().ifPresent(processing -> {
+                if (stage.selected.request().isPresent()) {
+                    var request = stage.selected.request().orElseThrow();
+                    if (!completed.result().replayed() || instanceResults.source(request).isEmpty())
+                        instanceResults.retainSource(request, new SdkDrainResultMapper(this, engine, request.sourceInstance()).map(processing), retainedResults);
+                } else retainSource(completed.selection().prerequisite(), mapper.map(processing));
+            });
             return completed;
         } finally { exactNodeProvider.endLookupScope(); }
     }
@@ -989,7 +1070,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         var disposition = failed ? ProcessingStageResult.Disposition.NONCOMMITTING
                 : !receipt.quiescent() ? ProcessingStageResult.Disposition.WAITING
                 : selected ? ProcessingStageResult.Disposition.COMPLETED : ProcessingStageResult.Disposition.NO_WORK;
-        if (!failed) retain(mapped);
+        if (!failed) retain(stage.context().root(), mapped);
         else close(); // A rejected publication cannot leave a stageable mutable owner.
         return new ProcessingStageResult(disposition, mapped, stage.context(), stage.selected.resultOwners(receipt),
                 stage.selected.invalidatesSelection(receipt));
@@ -1335,6 +1416,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             }
         }
         EntryHandle handle = retainCoreEntry(appended);
+        if (instanceResults != null && target.presentAtSelection()) instanceResults.submitted(appended.blueId(), target.id());
         intents.put(appended.blueId(), EntryIntent.targeted(
                 target,
                 call.operation(),
@@ -1551,6 +1633,11 @@ final class SdkCoordinationRuntime implements AutoCloseable {
                 diagnostic);
     }
 
+    private DrainResult retain(DocumentId observer, DrainResult result) {
+        if (instanceResults == null) return retain(result);
+        instanceResults.retain(observer, result, retainedResults); return result;
+    }
+
     private DrainResult retain(DrainResult result) {
         result.entries().forEach(entry -> retainedResults.put(
                 entry.entry().blueId(), entry));
@@ -1577,7 +1664,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         return handle(entry);
     }
 
-    private DocumentRevision publicRevision(
+    DocumentRevision publicRevision(
             blue.coordination.api.DocumentRevision revision) {
         EntryHandle source = revision.sourceEntry()
                 .map(this::handle)
@@ -1812,6 +1899,13 @@ final class SdkCoordinationRuntime implements AutoCloseable {
             }
             return result;
         }
+    }
+
+    private record ArchivedAdmissionHandle(SdkCoordinationRuntime runtime, DocumentId id,
+            DocumentSnapshot retainedSnapshot, List<DocumentRevision> retainedHistory, ExactBlueValue authored) implements DocumentHandle {
+        @Override public DocumentSnapshot snapshot() { runtime.ensureOpen(); return retainedSnapshot; }
+        @Override public List<DocumentRevision> history() { runtime.ensureOpen(); return retainedHistory; }
+        @Override public ExactBlueValue exact() { return snapshot().exact(); }
     }
 
     private static final class SdkDocumentHandle implements DocumentHandle {

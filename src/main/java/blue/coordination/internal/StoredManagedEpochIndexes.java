@@ -6,6 +6,7 @@ import blue.coordination.api.storage.CoordinationImmutableObjectStore;
 import blue.coordination.api.storage.CoordinationRecords.Family;
 import blue.language.processor.closure.ClosureExecutionEvidenceStorageCodec;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import static blue.coordination.internal.SessionRecordCodec.*;
@@ -77,7 +78,48 @@ final class StoredManagedEpochIndexes {
     ManagedEpochReceiptStore openLogical(LogicalRecordContext context) {
         return ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(
                 new LogicalReceiptHistories(context, epochs, objectsForLogical, limits).open(),
-                identities.openLogical(context, Family.RECEIPT_IDENTITY, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text()), 0, 0));
+                identities.openLogical(context, Family.RECEIPT_IDENTITY, LogicalRecordContext.runtimeScope(), OrderedRecordKey.text())
+                        .logicalValues(row -> row, row -> {
+                            LogicalReceiptOrigins.retain(context, row.publicReceipt(), limits.valueBytes()); return row;
+                        }, row -> true), 0, 0));
+    }
+    ManagedEpochReceiptStore.DocumentHistory retainedLogicalHistory(LogicalRecordContext context,
+            blue.coordination.api.DocumentInstanceRef ref) {
+        return new LogicalReceiptHistories(context, epochs, objectsForLogical, limits).retained(ref);
+    }
+    InMemoryDocumentStore.ManagedEpochEvidence retainedEvidence(LogicalRecordContext context,
+            blue.coordination.api.DocumentInstanceRef ref, long epoch) {
+        return context.protect(() -> {
+            var history = retainedLogicalHistory(context, ref);
+            var row = history == null ? null : history.receipt(epoch);
+            if (row == null) {
+                require(history == null || epoch < 0 || epoch > history.latestEpoch(), "Missing in-range retained instance receipt");
+                return new InMemoryDocumentStore.ManagedEpochEvidence(null, null);
+            }
+            require(row.publicReceipt().documentId().equals(ref.documentId()) && row.publicReceipt().epoch() == epoch,
+                    "Retained instance receipt has another key");
+            var canonical = identities.openLogical(context, Family.RECEIPT_IDENTITY, LogicalRecordContext.runtimeScope(),
+                    OrderedRecordKey.text()).get(row.publicReceipt().receiptIdentity());
+            require(canonical != null && Arrays.equals(receipts.encode(row), receipts.encode(canonical)),
+                    "Retained instance receipt differs from canonical complete evidence");
+            return new InMemoryDocumentStore.ManagedEpochEvidence(row.publicReceipt(), row.transitionReceipt());
+        });
+    }
+    void requireIdentityMembership(ManagedEpochReceiptStore store, String identity, ManagedEpochReceiptStore.StoredReceipt row) {
+        var documents = store.storedState().documents();
+        if (documents.isLogical()) {
+            var context = documents.logicalContext();
+            context.protect(() -> {
+                var ref = LogicalReceiptOrigins.requireOrigin(context, row.publicReceipt(), limits.valueBytes());
+                var history = Objects.requireNonNull(retainedLogicalHistory(context, ref), "Receipt origin lacks its numbered history");
+                var original = history.receipt(row.publicReceipt().epoch());
+                require(original != null && Arrays.equals(receipts.encode(original), receipts.encode(row)),
+                        "Canonical receipt differs from its original numbered evidence"); return null;
+            });
+        } else {
+            var selected = exact(store, row.publicReceipt().documentId(), row.publicReceipt().epoch());
+            require(selected.found() && identity.equals(selected.receipt().receiptIdentity()), "Receipt identity has no exact numbered row");
+        }
     }
     void selectLogical(ManagedEpochReceiptStore store) {
         store.storedState().documents().selectLogicalRecords(); store.storedState().identities().selectLogicalRecords();

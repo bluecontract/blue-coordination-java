@@ -77,6 +77,18 @@ final class ContractsActiveSourceTimelineIndex {
         publicRoots = prepared;
     }
 
+    /** Logical retirement removes one root's memberships, never another root's union. */
+    synchronized void removeLogicalRoot(DocumentId root) {
+        if (logicalSources == null) throw new IllegalStateException("Instance retirement requires logical storage");
+        var prior = surfacesByRoot.get(root);
+        if (prior != null && !prior.lane().equals(ContractsRootFeederWindow.LaneId.publicRoots(List.of(root))))
+            throw new IllegalStateException("Retained source surface has foreign root");
+        var changed = logicalSources.replace(root, prior, null);
+        var roots = publicRoots.remove(root).map(); var surfaces = surfacesByRoot.remove(root).map();
+        logicalSources = changed; publicRoots = roots; surfacesByRoot = surfaces;
+        rootsByManagedDocument = changed.memberships(); timelineReferences = changed.counts();
+    }
+
     /** Refreshes configured Roots affected by one newly published cohort. */
     synchronized void refresh(
             Collection<DocumentId> affectedDocuments,

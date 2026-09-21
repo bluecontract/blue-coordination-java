@@ -21,6 +21,8 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private final Function<DocumentId, StoredDocumentIndexes.SelectedDocument> selected;
     private final boolean controlledNamespace;
     private boolean closed;
+    private StoredHistoricalSources historicalSources;
+    void bindHistoricalSources(StoredHistoricalSources sources) { this.historicalSources = sources; }
 
     StoredDocumentReadChecks(int maximumMaps, InMemoryDocumentStore.StoreState original,
             StoredOccurrenceIndexes occurrences, StoredTopologyIndexes topology, StoredComponentStateIndexes components,
@@ -238,8 +240,7 @@ final class StoredDocumentReadChecks implements AutoCloseable {
         }, (id, history) -> history.withReceipts(maps.stage(history.receiptMap())));
         var identities = stage ? maps.stage(s.identities()) : checked("receipt/identity", s.identities(), (id, row) -> {
             require(id.equals(row.publicReceipt().receiptIdentity()), "Receipt identity key differs");
-            var selected = receipts.exact(raw, row.publicReceipt().documentId(), row.publicReceipt().epoch());
-            require(selected.found() && id.equals(selected.receipt().receiptIdentity()), "Receipt identity has no exact numbered row"); return row;
+            receipts.requireIdentityMembership(raw, id, row); return row;
         });
         return ManagedEpochReceiptStore.restoreStored(new ManagedEpochReceiptStore.StoredState(documents, identities, s.comparisons(), s.copiedNodes()));
     }
@@ -285,11 +286,15 @@ final class StoredDocumentReadChecks implements AutoCloseable {
     private void checkWorkOrder(ManagedCatchUpWorkIndex.RegisteredWork row) {
         var raw = original.catchUpPlans().storedState(); var item = row.work();
         var barrier = plans.barrier(raw.plans(), raw.barriers(), item.barrierIdentity());
-        var source = receipts.exact(original.managedEpochReceipts(), item.sourceDocumentId(), item.sourceEpoch());
-        require(barrier != null && source.found() && source.receipt().receiptIdentity().equals(item.sourceReceiptIdentity())
+        var source = historicalSources == null
+                ? receipts.exact(original.managedEpochReceipts(), item.sourceDocumentId(), item.sourceEpoch()).receipt()
+                : historicalSources.sourceInstance(item.sourceDocumentId(), List.of(Objects.requireNonNull(
+                        original.sessionIndex().get(item.consumerDocumentId()), "Retained work has no consumer")))
+                        .map(ref -> historicalSources.receipt(ref, item.sourceEpoch()).receipt()).orElse(null);
+        require(barrier != null && source != null && source.receiptIdentity().equals(item.sourceReceiptIdentity())
                 && barrier.consumerDocumentId().equals(item.consumerDocumentId()) && barrier.planIdentities().contains(item.planIdentity())
                 && barrier.causeOrder().equals(row.dueKey().barrierCauseOrder())
-                && source.receipt().sourceOrder().orElseThrow().equals(row.dueKey().sourceOrder()), "Work order differs from exact barrier/source");
+                && source.sourceOrder().orElseThrow().equals(row.dueKey().sourceOrder()), "Work order differs from exact barrier/source");
     }
     @Override public void close() { closed = true; maps.close(); }
 }

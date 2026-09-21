@@ -88,6 +88,17 @@ final class ManagedEpochReceiptStore {
         DocumentHistory history = documentRead.value();
         StoredReceipt sameEpoch = history == null ? null
                 : history.receipt(selected.epoch());
+        // A logical execution instance can reuse canonical Blue receipt content while
+        // retaining its own numbered history. Resident stores keep their original invariant.
+        if (sameIdentity != null && sameEpoch == null && byDocument.isLogical()) {
+            if (!sameIdentity.publicReceipt().documentId().equals(selected.documentId())
+                    || sameIdentity.publicReceipt().epoch() != selected.epoch()
+                    || sameIdentity.transitionReceipt() != null && transitionReceipt != null
+                    && !sameIdentity.transitionReceipt().transitionReceiptIdentity().equals(transitionReceipt.transitionReceiptIdentity()))
+                throw new IllegalArgumentException("Canonical receipt reuse has conflicting owner or transition evidence");
+            if (sameIdentity.transitionReceipt() != null) selectedRow = sameIdentity;
+            sameIdentity = null;
+        }
         if (sameIdentity != null || sameEpoch != null) {
             if (sameIdentity != null
                     && sameEpoch != null
@@ -144,6 +155,26 @@ final class ManagedEpochReceiptStore {
                 identityMutation.map(),
                 comparisons,
                 copies);
+    }
+
+    /** Installs an authenticated archived prefix; numbered rows do not encode intervening representation-only rebinds. */
+    ManagedEpochReceiptStore withStartingHistory(DocumentSession basis, DocumentHistory original) {
+        var owner = basis.documentId();
+        if (!byDocument.isLogical() || byDocument.get(owner) != null || !owner.equals(original.documentId()))
+            throw new IllegalStateException("Starting history requires a fresh logical instance of the original owner");
+        var rows = PersistentOrderedMap.<Long, StoredReceipt>empty(EPOCH_ORDER);
+        for (long epoch = 0; epoch <= basis.epoch(); epoch++) {
+            var row = Objects.requireNonNull(original.receipt(epoch), "Starting basis lacks its numbered receipt prefix");
+            var revision = basis.revision(epoch);
+            if (!owner.equals(row.publicReceipt().documentId()) || row.publicReceipt().epoch() != epoch
+                    || !revision.managedEpochReceipt().orElseThrow().receiptIdentity().equals(row.publicReceipt().receiptIdentity()))
+                throw new IllegalArgumentException("Starting receipt does not authenticate the archived revision");
+            rows = rows.put(epoch, row).map();
+        }
+        var selected = DocumentHistory.restoreStored(new DocumentHistory.StoredState(owner, rows, basis.epoch(),
+                basis.currentRepresentation().blueId(), 0, 0));
+        var mutation = byDocument.put(owner, selected);
+        return new ManagedEpochReceiptStore(mutation.map(), byIdentity, mutation.comparisons(), mutation.copiedNodes());
     }
 
     /**

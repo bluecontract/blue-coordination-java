@@ -57,6 +57,27 @@ public final class AdvancedCoordination {
         return runtime.sourceHistoryPrerequisites(Objects.requireNonNull(root, "root"));
     }
 
+    /** Returns instance-bound current source work; canonical descriptors remain unchanged. */
+    public List<blue.coordination.api.SourceHistoryRequest> sourceHistoryRequests(DocumentHandle root) {
+        return runtime.sourceHistoryRequests(Objects.requireNonNull(root));
+    }
+    /** Observes only this authenticated original requester/source context. */
+    public blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(blue.coordination.api.SourceHistoryRequest request) {
+        return runtime.observeSourceHistoryPrerequisite(Objects.requireNonNull(request));
+    }
+    /** Executes/reconciles one explicitly selected instance-bound source request. */
+    public blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(blue.coordination.api.SourceHistoryRequest request) {
+        return runtime.processSourceHistoryPrerequisite(Objects.requireNonNull(request));
+    }
+    /** Freezes one instance-bound source stage before independent host publication. */
+    public SourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryRequest request) {
+        return runtime.selectSourceHistoryStage(Objects.requireNonNull(request));
+    }
+    /** Reads this source execution outcome without following current document bindings. */
+    public Optional<DrainResult> sourceHistoryProcessingResult(blue.coordination.api.SourceHistoryRequest request) {
+        return runtime.sourceHistoryProcessingResult(Objects.requireNonNull(request));
+    }
+
     /**
      * Observes one previously emitted prerequisite without executing its source or retrying its parent.
      * The original root, invocation, demand, source, authored identity and cutoff are immutable authority;

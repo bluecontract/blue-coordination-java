@@ -90,6 +90,10 @@ final class LogicalEngineControl {
         return DefaultCoordinationEngine.ContractsRecoveryState.logical(schedule,
                 LogicalFeederControl.open(logical, feeder, limits), journal, deferred, isolated, this);
     }
+    void retire(DocumentId owner) {
+        schedule.retire(owner); deferred.remove(owner); isolated.remove(owner);
+    }
+
     private Set<DocumentId> membership(Family family, String name) {
         return new LogicalRecordSet<>(map(family, name, document, bool)
                 .validateRows((key, value) -> require(Boolean.TRUE.equals(value), "False membership row")));

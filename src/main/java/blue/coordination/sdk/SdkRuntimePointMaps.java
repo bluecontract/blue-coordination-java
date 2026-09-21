@@ -61,6 +61,7 @@ final class SdkRuntimePointMaps implements AutoCloseable {
     private NativeMap<String, EntryResult> results;
     private NativeMap<String, SdkCoordinationRuntime.CoreEntryRef> entries;
     private NativeMap<SourceHistoryPrerequisite, DrainResult> sourceResults;
+    private SdkInstanceResults instanceResults;
     private volatile boolean closed;
 
     static SdkRuntimePointMaps empty(SdkCoordinationRuntime owner, CoordinationImmutableObjectStore objects, Limits limits) {
@@ -116,6 +117,10 @@ final class SdkRuntimePointMaps implements AutoCloseable {
             results = create(objects, snapshot, Kind.RESULTS, String.class, points::retainEntryResult, pointScope::entryResult);
             sourceResults = create(objects, snapshot, Kind.SOURCE_RESULTS, SourceHistoryPrerequisite.class,
                     points::retainSourceResult, pointScope::sourceResult);
+            if (logical != null && owner.hasInstanceStorage()) {
+                instanceResults = new SdkInstanceResults(owner, logical, codec, points, pointScope, limits.maps());
+                owner.installInstanceResults(instanceResults);
+            }
         } catch (RuntimeException | Error failure) { close(); throw failure; }
     }
 
@@ -272,7 +277,7 @@ final class SdkRuntimePointMaps implements AutoCloseable {
         }
     }
     @Override public synchronized void close() {
-        if (!closed) { closed = true; all.values().forEach(NativeMap::closeBacking); pointScope.close(); }
+        if (!closed) { closed = true; all.values().forEach(NativeMap::closeBacking); if (instanceResults != null) instanceResults.close(); pointScope.close(); }
     }
     private void guard() {
         require(!closed, "SDK point map scope is closed");

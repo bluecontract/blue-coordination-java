@@ -63,6 +63,26 @@ final class ClosureSubscriptionInventory {
                 Indexes.empty(), emptyEmbeddedDemands(), new Work());
     }
 
+    /** Drops only the retiring owner's active subscriptions and demand projection. */
+    ClosureSubscriptionInventory withoutDocument(DocumentId owner) {
+        var work = new Work(); var indexes = new Indexes(bySlot, slotByIdentity, byDocument);
+        var bucket = byDocument.get(owner.value());
+        if (bucket != null) for (var row : bucket.values()) {
+            work.visitedRows = Math.addExact(work.visitedRows, 1);
+            indexes = removePresent(indexes, Slot.from(row), row, work);
+        }
+        var demands = embeddedDemandsByDocument.remove(owner); work.mutation(demands);
+        return new ClosureSubscriptionInventory(indexes, demands.map(), work);
+    }
+
+    ClosureSubscriptionInventory withStartingOwner(DocumentId owner, ClosureSubscriptionInventory basis) {
+        if (!statesFor(owner).isEmpty()) throw new IllegalStateException("Starting subscription owner already exists");
+        var work = new Work(); var indexes = new Indexes(bySlot, slotByIdentity, byDocument);
+        for (var row : basis.statesFor(owner)) indexes = insertAbsent(indexes, row, work);
+        return new ClosureSubscriptionInventory(indexes, embeddedDemandsByDocument, work)
+                .replaceEmbeddedDemands(owner, basis.embeddedDemandsFor(owner));
+    }
+
     record StoredIndexes(PersistentOrderedMap<Slot, SubscriptionState> slots,
             PersistentOrderedMap<String, Slot> identities,
             PersistentOrderedMap<String, PersistentOrderedMap<String, SubscriptionState>> documents,

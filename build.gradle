@@ -710,6 +710,10 @@ def publicBoundarySources = files(
 // source types. F2 adds three source files, 375 lines and two public types to
 // the selected base (222 sources, 66,642 lines, 82 public types). These are not
 // historical Round 13 counts and are not performance evidence.
+// HOST-01/02 reviewed extension: native document-instance ledger, authenticated
+// retained history and observer progress/results, lifecycle/role/occurrence guards,
+// and public primitive storage limits. Exact settled inventory (no growth buffer).
+// docs/reference/document-instances.md records boundaries and consumer evidence.
 def currentProductionShapeLimits = [
         // Baseline31 plus P2: merged RC11 behavior and the reviewed external-storage POC,
         // including eight private indexed-session/lineage history and provider-frontier helpers,
@@ -724,7 +728,7 @@ def currentProductionShapeLimits = [
         // Exact measured inventory (+2 sources, +454 lines); API and per-source caps stay unchanged.
         // General entries: two private scoped channel-index/storage helpers; +410 net lines.
         // Exact inventory; public/per-source caps unchanged. See docs/development/general-timeline-entries.md.
-        classes: 360,
+        classes: 380,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
         // Completed-stage SDK result/gateways plus three logical-record contract/tracking types.
         // Measured count; see docs/development/logical-record-contract.md.
@@ -743,8 +747,8 @@ def currentProductionShapeLimits = [
         // Counter-only logical owner diagnostics: three accessors, +11 measured lines; no new types.
         // Point-lookup overload for a retained exact input stage: +12 lines, no new type or semantic processing.
         // R1: verified operation-message resolution in all rooted selectors (+14 lines; no new type).
-        lines: 93_122L,
-        publicApiTypes: 107,
+        lines: 95_714L,
+        publicApiTypes: 113,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -1056,14 +1060,19 @@ tasks.register('verifySdkPublicApiBoundary') {
                 // Pure readiness is separate from a completed result and exposes no engine/storage handle.
                 if (className == 'blue.coordination.sdk.ProcessingGateway') {
                     normalSignature = normalSignature.replaceAll(/blue\.coordination\.api\.ProcessingReadiness\b/, '')
+                    normalSignature = normalSignature.replaceAll(/blue\.coordination\.api\.DocumentInstanceRef\b/, '')
                 }
                 // This host-only facade is not exempt from the boundary check:
-                // only its four reviewed storage types are permitted. Other API,
+                // only its enumerated storage and immutable lifecycle types are permitted. Other API,
                 // processor or internal types in it or its nested types still fail.
                 if (className == 'blue.coordination.sdk.RootedCoordinationStorage'
                         || className.startsWith('blue.coordination.sdk.RootedCoordinationStorage$')) {
                     [
                             'blue.coordination.api.TimelineJournalStore',
+                            'blue.coordination.api.DocumentInstanceRef',
+                            'blue.coordination.api.DocumentInstancePosition',
+                            'blue.coordination.api.DocumentInstanceRetirement',
+                            'blue.coordination.api.DocumentInstanceStart',
                             'blue.coordination.api.storage.CoordinationImmutableObjectStore',
                             'blue.coordination.api.storage.CoordinationRecordAttempt',
                             'blue.coordination.internal.RootedEngineStorage$Limits',

@@ -466,11 +466,13 @@ public final class RootedCoordinationStorage {
         private final LogicalPointStorage records;
         private final CoordinationRecordAttempt attempt;
         private boolean closed;
+        private boolean ordinaryAccess;
+        private boolean lifecycleSelected;
         private LogicalScope(BlueCoordination coordination, LogicalOpening owned, LogicalPointStorage records, CoordinationRecordAttempt attempt) {
             this.coordination = coordination; this.owned = owned; this.records = records; this.attempt = attempt;
         }
         /** Returns this live facade. @return actual SDK */
-        public BlueCoordination coordination() { guard(); return coordination; }
+        public BlueCoordination coordination() { ordinary(); return coordination; }
         /**
          * Captures immutable work counters without reading document, route, journal or object inventories.
          * Unlike full engine metrics, this does not broaden the selected publication dependencies.
@@ -478,21 +480,91 @@ public final class RootedCoordinationStorage {
          */
         public Map<String, Long> workCounters() { guard(); return Map.copyOf(owned.engine.workCounters()); }
         /** Finds a handle without readiness or body materialization. @param id selected identity @return owned handle */
-        public Optional<DocumentHandle> documentHandle(DocumentId id) { guard(); return owned.runtime.findStoredDocumentHandle(id); }
+        public Optional<DocumentHandle> documentHandle(DocumentId id) { ordinary(); return owned.runtime.findStoredDocumentHandle(id); }
+        /**
+         * Captures this document's exact instance/publication position. It becomes durable only with
+         * this attempt's successful publication; construction alone grants no retained authority.
+         * @param id selected semantic document @return instance-bound publication position
+         */
+        public blue.coordination.api.DocumentInstancePosition instancePosition(DocumentId id) {
+            return archivedRead(() -> owned.engine.instancePosition(Objects.requireNonNull(id)));
+        }
+        /**
+         * Reads the original numbered revision at an authenticated archived position. A later
+         * same-epoch checkpoint representation does not change this canonical revision or receipt.
+         * This operation does not follow today's active binding or head.
+         * @param position exact original instance and publication @return original committed revision
+         */
+        public DocumentRevision retainedRevision(blue.coordination.api.DocumentInstancePosition position) {
+            return archivedRead(() -> owned.runtime.publicRevision(owned.engine.retainedInstanceRevision(Objects.requireNonNull(position))));
+        }
+        /**
+         * Reads the exact checkpoint representation at an archived invocation position, including
+         * same-epoch representation-only updates and their existing exact cyclic evidence.
+         * @param position exact original instance and publication @return authenticated exact representation
+         */
+        public ExactBlueValue retainedRepresentation(blue.coordination.api.DocumentInstancePosition position) {
+            return archivedRead(() -> ExactBlueValue.wrap(owned.engine.retainedInstanceRepresentation(Objects.requireNonNull(position))));
+        }
         /** Finds retained SDK registration. @param id Timeline identity @return owned Timeline handle */
-        public Optional<TimelineHandle> timelineHandle(String id) { guard(); return Optional.ofNullable(owned.maps.maps().timelines().get(id)); }
+        public Optional<TimelineHandle> timelineHandle(String id) { ordinary(); return Optional.ofNullable(owned.maps.maps().timelines().get(id)); }
         /** Explicit complete document inventory; records a catalog predicate. Never use as an unrelated-work scheduler.
          * @return detached stored document identities */
-        public List<DocumentId> documentIds() { guard(); return owned.engine.engine().storedDocumentIds(); }
+        public List<DocumentId> documentIds() { ordinary(); return owned.engine.engine().storedDocumentIds(); }
         /** Explicit complete registration inventory; records a catalog predicate.
          * @return detached Timeline identities */
-        public List<String> timelineIds() { guard(); return owned.maps.maps().timelines().keySet().stream().sorted().toList(); }
+        public List<String> timelineIds() { ordinary(); return owned.maps.maps().timelines().keySet().stream().sorted().toList(); }
+
+        /**
+         * Prepares independent acyclic retirement in a dedicated logical owner. No ordinary SDK
+         * facade, live handle or inventory may be used in this owner before or after this call.
+         * The host must atomically publish the staged records with its own removal/control rows.
+         * @param expected exact active execution instance
+         * @return tentative preparation or exact unresolved-policy blockers, never host commit success
+         */
+        public blue.coordination.api.DocumentInstanceRetirement retireInstance(blue.coordination.api.DocumentInstanceRef expected) {
+            return archivedRead(() -> {
+                if (ordinaryAccess || lifecycleSelected) throw new IllegalStateException("Instance retirement requires a fresh dedicated owner");
+                lifecycleSelected = true;
+                return owned.engine.retireInstance(Objects.requireNonNull(expected));
+            });
+        }
+        /**
+         * Prepares a never-used instance at an authenticated archived basis of the same document.
+         * The basis is declared explicitly; this does not rerun semantic initialization or restore
+         * another owner's current projection. Use a fresh dedicated owner and atomically publish
+         * its staged packet with host lifecycle rows before opening a new execution owner.
+         * @param next never-used native execution reference
+         * @param basis exact original publication selected as the starting history basis
+         * @return tentative preparation or exact unsupported basis prerequisites
+         */
+        public blue.coordination.api.DocumentInstanceStart startInstance(blue.coordination.api.DocumentInstanceRef next,
+                blue.coordination.api.DocumentInstancePosition basis) {
+            return archivedRead(() -> {
+                if (ordinaryAccess || lifecycleSelected) throw new IllegalStateException("Instance start requires a fresh dedicated owner");
+                lifecycleSelected = true;
+                return owned.engine.startInstance(Objects.requireNonNull(next), Objects.requireNonNull(basis));
+            });
+        }
+        private void ordinary() {
+            archivedRead(() -> {
+                if (lifecycleSelected) throw new IllegalStateException("A lifecycle owner cannot expose ordinary execution");
+                ordinaryAccess = true; return null;
+            });
+        }
 
         /** Selects and flushes all families, then retires this owner. No database publication occurs here. */
         public void stage() {
             guard();
             try { owned.engine.stage(); records.stage(); close(); }
             catch (RuntimeException | Error failure) { closeOne(failure, this::close); closeOne(failure, attempt::close); throw failure; }
+        }
+        private <T> T archivedRead(java.util.function.Supplier<T> read) {
+            guard();
+            try { return read.get(); }
+            catch (RuntimeException | Error failure) {
+                closeOne(failure, this::close); closeOne(failure, attempt::close); throw failure;
+            }
         }
         private void guard() { attempt.address(); if (closed) throw new CoordinationObjectStorageException("Logical SDK owner is closed"); }
         /** Releases the runtime and physical views; the caller owns the attempt and host stores. */

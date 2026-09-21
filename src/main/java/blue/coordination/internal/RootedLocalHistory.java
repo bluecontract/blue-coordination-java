@@ -127,7 +127,7 @@ final class RootedLocalHistory {
         }
         long epoch = representation == null ? Math.addExact(from, 1L) : from;
         if (epoch > selectedSource.epoch()) return null;
-        var evidence = documents.managedEpochEvidence(source, epoch);
+        var evidence = documents.managedEpochEvidence(source, epoch, java.util.Set.of(root));
         if (evidence.receipt() == null) return null;
         var receipt = evidence.receipt();
         ExternalOrderKey order = receipt.sourceOrder().orElseThrow();
@@ -180,8 +180,8 @@ final class RootedLocalHistory {
         }
         var input = ClosureEvidenceFactory.processClosure(state.snapshot(), cause, List.of(), policy, environment);
         String position = target.pendingRepresentationCursor() != null ? target.pendingRepresentationCursor().positionIdentity()
-                : from < 0 ? documents.require(source).requireRootedHistory().identity()
-                        : documents.managedEpochEvidence(source, from).receipt().receiptIdentity();
+                : from < 0 ? documents.observedHistoryIdentity(source, java.util.Set.of(root))
+                        : documents.managedEpochEvidence(source, from, java.util.Set.of(root)).receipt().receiptIdentity();
         var rooted = RootedInvocationEvidence.retainedLocal(state, input, documents, target, position, work);
         var members = state.documents().keySet().stream().sorted(EmbeddingBinding.DOCUMENT_ORDER).toList();
         var owners = state.snapshot().publicRootDocumentIds().stream().map(ContractsClosureAdapter::coordinationId).toList();

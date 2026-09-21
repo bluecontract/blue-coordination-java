@@ -272,6 +272,7 @@ Developer references:
 - [Test strategy](docs/development/test-strategy.md)
 - [Initialization causality](docs/semantics/initialization-causality.md)
 - [Retained managed-epoch catch-up](docs/semantics/retained-managed-epoch-catch-up.md)
+- [Document execution instances and public storage bounds](docs/reference/document-instances.md)
 - [MyOS retained managed-epoch integration guide](MYOS_RETAINED_MANAGED_EPOCH_INTEGRATION_GUIDE.md)
 - [Shared NBA Game lifecycle](docs/examples/nba-shared-game-lifecycle.md)
 - [Five-occurrence Playground API example](docs/examples/playground-five-occurrence.md)

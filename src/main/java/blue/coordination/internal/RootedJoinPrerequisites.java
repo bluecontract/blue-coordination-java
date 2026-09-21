@@ -28,13 +28,20 @@ final class RootedJoinPrerequisites {
         for (var occurrence : resolution.resolvedOccurrences()) {
             DocumentId source = occurrence.targetDocumentId();
             if (occurrence.targetKind() != ManagedOccurrenceResolver.TargetKind.NEW_AUTHORED
-                    && !owners.contains(source) && documents.sourceBefore(source, boundary).isPresent()
+                    && !owners.contains(source) && documents.sourceBefore(source, boundary, owners).isPresent()
                     && returnsToOwner(source, owners, boundary, documents)) {
-                var selected = documents.sourceBefore(source, boundary).orElseThrow().rootedViewBefore(boundary);
+                var selected = documents.sourceBefore(source, boundary, owners).orElseThrow().rootedViewBefore(boundary);
                 String pending = pendingBefore(source, selected, boundary, documents);
                 if (pending != null) {
                     missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
                             ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY, pending));
+                    continue;
+                }
+                var retired = documents.sourceWorkBlock(source, owners);
+                if (retired.isPresent()) {
+                    missing.add(new ManagedOccurrenceResolver.UnresolvedDemand(occurrence.demand(),
+                            ManagedOccurrenceResolver.ResolutionStatus.UNPROVEN_MANAGED_HISTORY,
+                            retired.orElseThrow() + " pending-join-boundary=" + boundary));
                     continue;
                 }
                 var next = new RootedCheckpointDriver(documents, adapter).select(source, entries);
@@ -108,7 +115,7 @@ final class RootedJoinPrerequisites {
     /** Reads authenticated pre-boundary forward graphs only; incoming indexes and newer heads are excluded. */
     private static boolean returnsToOwner(DocumentId source, Set<DocumentId> owners,
             ExternalOrderKey boundary, InMemoryDocumentStore documents) {
-        var session = documents.sourceBefore(source, boundary).orElse(null);
+        var session = documents.sourceBefore(source, boundary, owners).orElse(null);
         if (session == null || session.rootedView() == null) return false;
         var view = session.rootedViewBefore(boundary);
         var pending = new ArrayDeque<DocumentId>();

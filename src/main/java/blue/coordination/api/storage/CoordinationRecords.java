@@ -19,6 +19,7 @@ public final class CoordinationRecords {
      * are individual records, not replaceable whole-family AVL descriptors.
      */
     public enum Family {
+        INSTANCE_BINDING, INSTANCE_IDENTITY, INSTANCE_HISTORY, INSTANCE_PROGRESS, INSTANCE_PUBLICATION, INSTANCE_OCCURRENCE,
         SESSION, GRAPH_GENERATION, SOURCE_ADMISSION, SOURCE_HISTORY, SOURCE_IDENTITY, SOURCE_POSITION,
         LINEAGE_DOCUMENT, LINEAGE_AUTHORED, LINEAGE_INITIALIZED, LINEAGE_RETAINED, LINEAGE_CURRENT,
         OCCURRENCE_PATH, OCCURRENCE_ORDERED, OCCURRENCE_ACTIVE, OCCURRENCE_ID, BINDING_ID,
@@ -64,7 +65,7 @@ public final class CoordinationRecords {
         @Override public String toString() { return hex(); }
     }
 
-    /** A recreated semantic document must receive a new execution instance. */
+    /** Stable host execution domain; document instances coexist inside this address. */
     public record Address(String namespace, String instance) {
         /** Rejects empty identities and invalid Unicode before encoding. */
         public Address { namespace = text(namespace); instance = text(instance); }

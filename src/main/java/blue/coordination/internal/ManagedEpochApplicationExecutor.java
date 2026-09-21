@@ -750,9 +750,8 @@ final class ManagedEpochApplicationExecutor {
                                         && staged.epoch() == epoch) {
                                     return staged;
                                 }
-                                return documents.managedEpochReceipt(
-                                                documentId, epoch)
-                                        .orElse(null);
+                                return documents.managedEpochEvidence(documentId, epoch,
+                                        Set.of(work.consumerDocumentId())).receipt();
                             },
                             documentId -> ownedMembers.contains(
                                     documentId)
@@ -951,8 +950,7 @@ final class ManagedEpochApplicationExecutor {
             ManagedEpochApplicationWork work,
             ManagedEpochReceipt sourceReceipt) {
         DocumentRevision sourceRevision = documents
-                .require(work.sourceDocumentId())
-                .revision(work.sourceEpoch());
+                .observedRevision(work.sourceDocumentId(), work.sourceEpoch(), Set.of(work.consumerDocumentId()));
         ManagedEpochReceipt revisionReceipt = sourceRevision
                 .managedEpochReceipt()
                 .orElseThrow(() -> ManagedEpochEvidenceException.blocked(

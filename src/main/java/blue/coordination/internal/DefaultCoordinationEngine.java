@@ -1245,6 +1245,9 @@ public final class DefaultCoordinationEngine
                 Objects.requireNonNull(entry, "entry"))).size();
     }
 
+    /** Validates aggregate execution before a convenience command appends or selects any work. */
+    public synchronized void requireGlobalDrainSupported() { ensureOpen(); documents.requireGlobalDrainSupported(); }
+
     @Override
     public synchronized ProcessingDrainReceipt drain() {
         return drain(CoordinationEngine.DrainBudget.unlimited());
@@ -1254,7 +1257,7 @@ public final class DefaultCoordinationEngine
     public synchronized ProcessingDrainReceipt drain(
             CoordinationEngine.DrainBudget budget) {
         try {
-            ensureOpen();
+            ensureOpen(); requireGlobalDrainSupported();
             if (contractsJournalCoordinator != null) {
                 return drainContracts(
                         null, Objects.requireNonNull(budget, "budget"));
@@ -1382,6 +1385,28 @@ public final class DefaultCoordinationEngine
         return rootedSourceDiscoveries.selections(Objects.requireNonNull(root, "root"));
     }
 
+    /** Selects native instance authority alongside each unchanged source descriptor. */
+    public synchronized List<blue.coordination.api.SourceHistoryRequest> sourceHistoryRequests(DocumentId root) {
+        ensureOpen(); return rootedSourceDiscoveries.requests(root);
+    }
+    /** Resolves descriptor-only reconciliation to its original native source request. */
+    public synchronized blue.coordination.api.SourceHistoryRequest originalSourceHistoryRequest(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); return rootedSourceDiscoveries.originalRequest(expected);
+    }
+    /** Finds a complete original descriptor; unknown or caller-mismatched operands are absent. */
+    public synchronized Optional<blue.coordination.api.SourceHistoryRequest> findOriginalSourceHistoryRequest(blue.coordination.api.SourceHistoryPrerequisite expected) {
+        ensureOpen(); return rootedSourceDiscoveries.findOriginalRequest(expected);
+    }
+    /** Authenticates a native source request against its actual suspended request association. */
+    public synchronized void requireSourceHistoryRequest(blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); rootedSourceDiscoveries.requireRequest(request);
+    }
+    /** Observes the explicitly selected original requester and source instances. */
+    public synchronized blue.coordination.api.SourceHistoryPrerequisiteObservation observeSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); return rootedSourceDiscoveries.observe(request.prerequisite(), request);
+    }
+
     /**
      * Observes a previously emitted prerequisite without executing its source or requesting parent.
      * Frozen root, invocation, demand, source, authored identity and cutoff must remain unchanged;
@@ -1409,16 +1434,29 @@ public final class DefaultCoordinationEngine
         ensureOpen();
         if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
         Objects.requireNonNull(expected, "expected");
+        if (documents.hasInstanceStorage()) return processSourceHistoryPrerequisite(rootedSourceDiscoveries.originalRequest(expected));
         var replay = rootedSourceDiscoveries.completed(expected);
         if (replay.isPresent()) return replay.orElseThrow();
         var committed = rootedSourceDiscoveries.committedSelection(expected);
         var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
-        return executeSourcePrerequisite(expected, selected, committed.isPresent());
+        return executeSourcePrerequisite(expected, selected, committed.isPresent(), null);
+    }
+
+    /** Executes or reconciles only the authenticated instance-bound source request. */
+    public synchronized blue.coordination.api.SourceHistoryPrerequisiteResult processSourceHistoryPrerequisite(
+            blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); var expected = request.prerequisite();
+        var replay = rootedSourceDiscoveries.completed(expected, request);
+        if (replay.isPresent()) return replay.orElseThrow();
+        var committed = rootedSourceDiscoveries.committedSelection(expected, request);
+        var selected = committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected, request));
+        if (!committed.isPresent()) rootedSourceDiscoveries.retainStage(request, RootedStageCapture.source(expected, selected, null, documents));
+        return executeSourcePrerequisite(expected, selected, committed.isPresent(), request);
     }
 
     private blue.coordination.api.SourceHistoryPrerequisiteResult executeSourcePrerequisite(
             blue.coordination.api.SourceHistoryPrerequisite expected, RootedSourceDiscoveryCoordinator.Prepared selected,
-            boolean replayed) {
+            boolean replayed, blue.coordination.api.SourceHistoryRequest request) {
         blue.coordination.api.SourceHistoryPrerequisiteResult result;
         if (selected.admission() != null) {
             var admission = selected.admission();
@@ -1431,7 +1469,7 @@ public final class DefaultCoordinationEngine
             var receipt = executeRootSelection(Objects.requireNonNull(selected.step()), System.nanoTime());
             result = new blue.coordination.api.SourceHistoryPrerequisiteResult(expected, Optional.empty(), Optional.of(receipt), replayed);
         }
-        rootedSourceDiscoveries.retain(result);
+        rootedSourceDiscoveries.retain(result, request);
         return result;
     }
 
@@ -1440,14 +1478,25 @@ public final class DefaultCoordinationEngine
     /** Freezes exact source-owned admission/history work before the host acquires execution authority. */
     public synchronized SelectedSourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected) {
         ensureOpen(); Objects.requireNonNull(expected);
+        if (documents.hasInstanceStorage()) return selectSourceHistoryStage(rootedSourceDiscoveries.originalRequest(expected));
+        return selectSourceHistoryStage(expected, null);
+    }
+    /** Freezes the explicitly authenticated requester/source instances, or their original completed stage. */
+    public synchronized SelectedSourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryRequest request) {
+        ensureOpen(); return selectSourceHistoryStage(request.prerequisite(), request);
+    }
+    private SelectedSourceStage selectSourceHistoryStage(blue.coordination.api.SourceHistoryPrerequisite expected,
+            blue.coordination.api.SourceHistoryRequest request) {
         if (rootedSourceDiscoveries == null) throw new IllegalStateException("Source prerequisites require the rooted profile");
         if (expected.kind() == blue.coordination.api.SourceHistoryPrerequisite.Kind.WAIT)
             throw new IllegalArgumentException("A resource wait is not executable source work");
-        var replay = rootedSourceDiscoveries.completed(expected).orElse(null);
-        var committed = replay == null ? rootedSourceDiscoveries.committedSelection(expected) : Optional.<RootedSourceDiscoveryCoordinator.Prepared>empty();
-        var selected = replay != null ? null : committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected));
-        var context = RootedStageCapture.source(expected, selected, replay, documents);
-        pendingSourceStage = new SelectedSourceStage(context, selected, replay, committed.isPresent());
+        var replay = rootedSourceDiscoveries.completed(expected, request).orElse(null);
+        var committed = replay == null ? rootedSourceDiscoveries.committedSelection(expected, request) : Optional.<RootedSourceDiscoveryCoordinator.Prepared>empty();
+        var selected = replay != null ? null : committed.orElseGet(() -> rootedSourceDiscoveries.requireSelection(expected, request));
+        var context = request != null && (replay != null || committed.isPresent()) ? rootedSourceDiscoveries.retainedStage(request)
+                : RootedStageCapture.source(expected, selected, replay, documents);
+        if (request != null && replay == null && committed.isEmpty()) rootedSourceDiscoveries.retainStage(request, context);
+        pendingSourceStage = new SelectedSourceStage(context, selected, replay, committed.isPresent(), request);
         return pendingSourceStage;
     }
 
@@ -1458,10 +1507,13 @@ public final class DefaultCoordinationEngine
         private final RootedSourceDiscoveryCoordinator.Prepared selected;
         private final blue.coordination.api.SourceHistoryPrerequisiteResult replay;
         private final boolean committed;
+        private final blue.coordination.api.SourceHistoryRequest request;
+        /** Original native authority, absent only for resident engines. */
+        public Optional<blue.coordination.api.SourceHistoryRequest> request() { return Optional.ofNullable(request); }
         private SelectedSourceStage(blue.coordination.api.SourceHistoryStageContext context,
                 RootedSourceDiscoveryCoordinator.Prepared selected, blue.coordination.api.SourceHistoryPrerequisiteResult replay,
-                boolean committed) {
-            this.context = context; this.selected = selected; this.replay = replay; this.committed = committed;
+                boolean committed, blue.coordination.api.SourceHistoryRequest request) {
+            this.context = context; this.selected = selected; this.replay = replay; this.committed = committed; this.request = request;
         }
         public blue.coordination.api.SourceHistoryStageContext context() { return context; }
         public blue.coordination.api.SourceHistoryStageResult execute() {
@@ -1470,7 +1522,7 @@ public final class DefaultCoordinationEngine
                     throw new IllegalStateException("Source stage is retired, used or belongs to another thread");
                 pendingSourceStage = null;
                 try {
-                    var result = replay != null ? replay : executeSourcePrerequisite(context.prerequisite(), selected, committed);
+                    var result = replay != null ? replay : executeSourcePrerequisite(context.prerequisite(), selected, committed, request);
                     var owners = new java.util.TreeSet<DocumentId>();
                     context.entryOwners().forEach(value -> owners.add(value.documentId()));
                     result.admission().ifPresent(receipt -> owners.addAll(receipt.documentIds()));
@@ -1768,7 +1820,7 @@ public final class DefaultCoordinationEngine
 
     private ProcessingDrainReceipt drainJournalThroughOrder(
             ExternalOrderKey cutoff, CoordinationEngine.DrainBudget budget) {
-        ensureOpen();
+        ensureOpen(); requireGlobalDrainSupported();
         CoordinationEngine.DrainBudget selected = Objects.requireNonNull(
                 budget, "budget");
         ProcessingSelection next = auditNextProcessingSelection();
@@ -1801,7 +1853,7 @@ public final class DefaultCoordinationEngine
     @Override
     public synchronized ProcessingDrainReceipt
             drainManagedEpochApplication(String expectedWorkIdentity) {
-        ensureOpen();
+        ensureOpen(); requireGlobalDrainSupported();
         String expected = Objects.requireNonNull(
                 expectedWorkIdentity, "expectedWorkIdentity");
         if (!expected.matches("sha256:[0-9a-f]{64}")) {
@@ -1883,7 +1935,7 @@ public final class DefaultCoordinationEngine
     public synchronized ProcessingDrainReceipt drainThrough(
             ExternalOrderKey inclusiveCutoff) {
         try {
-            ensureOpen();
+            ensureOpen(); requireGlobalDrainSupported();
             if (contractsJournalCoordinator != null) {
                 return drainContracts(
                         Objects.requireNonNull(
@@ -1958,6 +2010,29 @@ public final class DefaultCoordinationEngine
                     "Contracts 1.0 was not enabled for this engine");
         }
         return contractsClosureAdmissionAdapter;
+    }
+
+    synchronized List<String> instanceRetirementBlocks(blue.coordination.api.DocumentInstanceRef instance) {
+        return InstanceRetirementProjection.blocks(documents.storedState(), instance.documentId(),
+                rootedSourceDiscoveries.pendingForRetirement(instance),
+                plan -> RetainedInstancePlan.witnessed(instance, plan, documents, contractsClosureAdapter, journal),
+                documents.retainedIncomingSources(instance));
+    }
+
+    synchronized void retireIndependentInstance(blue.coordination.api.DocumentInstanceRef instance) {
+        var owner = instance.documentId();
+        documents.retireIndependentOwner(owner, documents.retainedIncomingSources(instance));
+        routeIndex.remove(owner); contractsActiveSourceTimelines.removeLogicalRoot(owner);
+        Objects.requireNonNull(logicalControl, "Instance retirement requires logical storage").retire(owner);
+    }
+
+    synchronized boolean isPublicRoot(DocumentId owner) { return contractsClosureProfile.publicRoots().contains(owner); }
+
+    synchronized void startInstanceAtBasis(DocumentSession basis, ManagedEpochReceiptStore.DocumentHistory receipts, boolean publicRoot) {
+        documents.startInstanceAtBasis(basis, receipts);
+        routeIndex.replace(basis.documentId(), basis.layout().routingSurface(), basis.rootedView().routes(basis.documentId()));
+        if (publicRoot) contractsActiveSourceTimelines.addPublicRoots(List.of(basis.documentId()));
+        contractsActiveSourceTimelines.refresh(List.of(basis.documentId()), documents);
     }
 
     synchronized ContractsClosureAdapter contractsClosureAdapter() {
@@ -2151,6 +2226,30 @@ public final class DefaultCoordinationEngine
                                     session.graphPublishedEpoch())));
         }
         return snapshot(session, true);
+    }
+
+    /** Reports the installed native instance storage capability without reading any record. */
+    public synchronized boolean hasDocumentInstanceStorage() { ensureOpen(); return documents.hasInstanceStorage(); }
+
+    /** Native SDK observer binding; resident engines have no execution-instance storage. */
+    public synchronized Optional<blue.coordination.api.DocumentInstanceRef> activeDocumentInstance(DocumentId owner) {
+        ensureOpen(); return documents.activeInstance(owner);
+    }
+    /** Authenticates a retained SDK observer without selecting today's binding. */
+    public synchronized void requireRetainedDocumentInstance(blue.coordination.api.DocumentInstanceRef ref) {
+        ensureOpen(); documents.requireRetainedInstance(ref);
+    }
+
+    /** Immutable original admission outcome, present only after that exact instance retired. */
+    public record ArchivedAdmissionDocument(DocumentSnapshot snapshot, List<DocumentRevision> revisions, ExactValue authored) {
+        public ArchivedAdmissionDocument { revisions = List.copyOf(revisions); }
+    }
+
+    /** SDK reconciliation bridge; never resolves an original receipt through a replacement head. */
+    public synchronized Optional<ArchivedAdmissionDocument> retiredOriginalAdmission(String identity, DocumentId document) {
+        ensureOpen();
+        return documents.retiredOriginalAdmission(identity, document, session ->
+                new ArchivedAdmissionDocument(snapshot(session, true), session.revisions(), session.revision(0).before().orElseThrow()));
     }
 
     @Override
@@ -2467,6 +2566,11 @@ public final class DefaultCoordinationEngine
      * @param entryBlueId exact causal entry identity
      * @return no match, one matching revision, or the first and last matching revisions
      */
+    /** Projects causal endpoints from the original execution publication, without current-head authority. */
+    public synchronized List<DocumentRevision> causalRevisionEndpoints(blue.coordination.api.DocumentInstanceRef observer,
+            String publicationIdentity, DocumentId documentId, String entryBlueId) {
+        ensureOpen(); return documents.executionCausal(observer, publicationIdentity, documentId, entryBlueId);
+    }
     public synchronized List<DocumentRevision> causalRevisionEndpoints(DocumentId documentId, String entryBlueId) {
         return requireDocument(documentId).causalRevisionEndpoints(entryBlueId);
     }

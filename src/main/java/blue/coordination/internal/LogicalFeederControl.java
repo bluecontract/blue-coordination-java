@@ -26,9 +26,9 @@ final class LogicalFeederControl {
                 list(r, in -> DocumentId.of(text(in)))), r.bool(), r.bool()));
         var orders = codec("frontier", limits.maximumRecordBytes(), SessionStorageWire::order,
                 r -> Objects.requireNonNull(order(r)));
-        var terminal = logical.open(Family.FEEDER_TERMINAL, "engine/feeder-control/1", events, terminals, limits)
+        var terminal = logical.openInstanceProgress(Family.FEEDER_TERMINAL, "engine/feeder-control/1", events, terminals, limits, key -> key.lane().roots())
                 .validateRows((key, value) -> require(key.equals(value.ticket().eventLaneKey()), "Foreign feeder terminal key"));
-        var frontier = logical.open(Family.FEEDER_FRONTIER, "engine/feeder-control/1", lanes, orders, limits);
+        var frontier = logical.openInstanceProgress(Family.FEEDER_FRONTIER, "engine/feeder-control/1", lanes, orders, limits, LaneId::roots);
         return DurableState.logical(progress, terminal, frontier);
     }
     private static void lane(Writer out, LaneId value) {

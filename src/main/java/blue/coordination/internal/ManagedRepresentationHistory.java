@@ -87,6 +87,17 @@ final class ManagedRepresentationHistory {
         return new ManagedRepresentationHistory(documents, Objects.requireNonNull(publication), heads, receipts, capturedRoot,
                 admissionSources, consumer, view);
     }
+    private java.util.Set<DocumentId> observers() {
+        return capturedRoot != null ? java.util.Set.of(capturedRoot.anchor())
+                : consumer != null ? java.util.Set.of(consumer) : java.util.Set.of();
+    }
+    private DocumentSession sourceSession(DocumentId source) {
+        return observers().isEmpty() ? documents.require(source) : documents.observedSource(source, observers());
+    }
+    private InMemoryDocumentStore.ManagedEpochEvidence evidence(DocumentId source, long epoch) {
+        return observers().isEmpty() ? documents.managedEpochEvidence(source, epoch)
+                : documents.managedEpochEvidence(source, epoch, observers());
+    }
     private RootedDocumentView consumerView() {
         if (capturedRoot != null) {
             capturedRoot.requireCurrentView(documents);
@@ -106,9 +117,9 @@ final class ManagedRepresentationHistory {
     /** Authenticate committed membership, plus only this transaction's exact owned publication. */
     private java.util.function.Predicate<String> publicationMembership(DocumentId source, RootedDocumentView view) {
         if (view != stagedRootedView) {
-            var session = documents.require(source);
+            var session = sourceSession(source);
             session.requireRetainedRootedView(view);
-            return invocation -> session.rootedPublicationIncludes(view, invocation);
+            return invocation -> documents.historicalRead(() -> session.rootedPublicationIncludes(view, invocation));
         }
         if (stagedPublication == null || !stagedPublication.commits()
                 || !RootedResultScope.members(view.result()).contains(source)
@@ -123,7 +134,10 @@ final class ManagedRepresentationHistory {
     }
     /** A co-owned causal position, committed or this publisher's private staged proposal; never an ambient future head. */
     private RootedDocumentView sourceView(DocumentId source, blue.language.processor.ExternalOrderKey boundary) {
-        DocumentSession session = documents.require(source);
+        return documents.historicalRead(() -> sourceViewRead(source, boundary));
+    }
+    private RootedDocumentView sourceViewRead(DocumentId source, blue.language.processor.ExternalOrderKey boundary) {
+        DocumentSession session = sourceSession(source);
         var rootView = consumerView();
         var rootSnapshot = capturedRoot != null ? capturedRoot.snapshot()
                 : rootView == null ? null : rootView.retainedSnapshot();
@@ -140,7 +154,7 @@ final class ManagedRepresentationHistory {
         if (rootView != null && boundary.equals(rootView.logicalBoundary())) {
             var selected = rootSnapshot.managedDocument(ContractsClosureAdapter.closureId(source));
             if (selected != null) {
-                var evidence = documents.managedEpochEvidence(source, selected.epoch());
+                var evidence = evidence(source, selected.epoch());
                 if (evidence.receipt() != null && evidence.transitionReceipt() != null
                         && evidence.receipt().afterBlueId().equals(selected.blueId())
                         && evidence.receipt().sourceOrder().filter(boundary::equals).isPresent()) {
@@ -159,12 +173,12 @@ final class ManagedRepresentationHistory {
                 }
             }
         }
-        RootedDocumentView admitted = admissionSources.selected(source, boundary, documents);
+        RootedDocumentView admitted = admissionSources.selected(source, boundary, this::sourceSession);
         return admitted != null ? admitted : session.rootedViewBefore(boundary);
     }
     private ManagedEpochReceipt receipt(DocumentId id, long epoch) {
         ManagedEpochReceipt staged = stagedReceipts.get(id);
-        return staged != null && staged.epoch() == epoch ? staged : documents.managedEpochEvidence(id, epoch).receipt();
+        return staged != null && staged.epoch() == epoch ? staged : evidence(id, epoch).receipt();
     }
     boolean provesReplayable(ManagedLineageIndex.Lineage lineage, long epoch) {
         if (epoch < -1L || epoch >= lineage.currentEpoch()) return false;
@@ -177,7 +191,10 @@ final class ManagedRepresentationHistory {
     }
 
     Chain at(DocumentId documentId, long epoch) {
-        DocumentSession session = documents.find(documentId).orElse(null);
+        return documents.historicalRead(() -> readChain(documentId, epoch));
+    }
+    private Chain readChain(DocumentId documentId, long epoch) {
+        DocumentSession session = observers().isEmpty() ? documents.find(documentId).orElse(null) : sourceSession(documentId);
         ManagedCatchUpPlanner.Head head = stagedHeads.get(documentId);
         if (head == null && session != null) head = new ManagedCatchUpPlanner.Head(session.epoch(), session.currentRepresentation().blueId());
         if (head == null) throw new IllegalArgumentException("Historical representation source is absent");
@@ -311,7 +328,7 @@ final class ManagedRepresentationHistory {
             }
             return Optional.empty();
         }
-        DocumentSession session = documents.require(source);
+        DocumentSession session = sourceSession(source);
         RootedDocumentView sourceView = sourceView(source, boundary);
         var sourceAtView = sourceView.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(source));
         if (sourceAtView == null || sourceAtView.epoch() != epoch || !sourceAtView.blueId().equals(selected.blueId())) {
@@ -354,8 +371,8 @@ final class ManagedRepresentationHistory {
             throw new IllegalArgumentException("Numbered successor omitted its first exact position");
         }
         var last = captured.transitions().get(captured.transitions().size() - 1);
-        RootedDocumentView targetView = documents.require(work.sourceDocumentId())
-                .rootedViewForInvocation(last.originalResult().invocationIdentity());
+        RootedDocumentView targetView = documents.historicalRead(() -> sourceSession(work.sourceDocumentId())
+                .rootedViewForInvocation(last.originalResult().invocationIdentity()));
         var positioned = prefixAt(full, targetView, boundary);
         if (!positioned.stream().map(ManagedRepresentationTransition::positionIdentity).toList()
                 .equals(captured.transitions().stream().map(ManagedRepresentationTransition::positionIdentity).toList())

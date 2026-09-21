@@ -95,7 +95,7 @@ final class ManagedEpochSourceEvidenceVerifier {
         boolean initializationMismatch = initialization
                 && (before != null
                         || (work.isRepresentationApplication()
-                            ? !documents.require(work.sourceDocumentId()).authoredInitialBlueId().equals(transition.beforeBlueId())
+                            ? !documents.observedSource(work.sourceDocumentId(), java.util.Set.of(work.consumerDocumentId())).authoredInitialBlueId().equals(transition.beforeBlueId())
                             : (plan.admittedSourceEpoch() != -1L
                                 || work.sourceEpoch() != Math.addExact(plan.admittedSourceEpoch(), 1L)
                                 || !plan.admittedSourceBlueId().equals(transition.beforeBlueId()))));

@@ -76,6 +76,18 @@ final class ClosureGraphGenerationInventory {
         return new ClosureGraphGenerationInventory(retained, work);
     }
 
+    ClosureGraphGenerationInventory withoutDocument(DocumentId documentId) {
+        var changed = generations.remove(Objects.requireNonNull(documentId));
+        var work = new Work(); work.mutation(changed);
+        return new ClosureGraphGenerationInventory(changed.map(), work);
+    }
+
+    ClosureGraphGenerationInventory withStartingDocument(DocumentId documentId, long generation) {
+        if (generations.get(documentId) != null) throw new IllegalStateException("Starting graph owner already exists");
+        var changed = generations.put(documentId, safeGeneration(generation)); var work = new Work(); work.mutation(changed);
+        return new ClosureGraphGenerationInventory(changed.map(), work);
+    }
+
     long require(DocumentId documentId) {
         DocumentId selected = Objects.requireNonNull(
                 documentId, "documentId");

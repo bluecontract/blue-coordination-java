@@ -97,8 +97,10 @@ final class StoredFeederProgress {
             var storage = new StoredInsertionOrderedMap.Storage<>(objects, limits, FORMAT + "/" + kind,
                     FORMAT + "/order/" + kind, order, keys, values);
             Map<K, V> map = logical == null ? selected == null ? storage.empty() : storage.open(selected.roots().get(kind))
-                    : logical.open(kind == Kind.PENDING ? Family.FEEDER_PENDING : Family.FEEDER_REJECTED,
-                            "engine/feeder/1", keys, values, limits);
+                    : kind == Kind.PENDING
+                            ? logical.openInstanceProgress(Family.FEEDER_PENDING, "engine/feeder/1", keys, values, limits,
+                                    key -> ((LaneId) key).roots())
+                            : logical.open(Family.FEEDER_REJECTED, "engine/feeder/1", keys, values, limits);
             owned.put(kind, map); return map;
         }
 

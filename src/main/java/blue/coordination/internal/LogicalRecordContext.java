@@ -27,6 +27,10 @@ final class LogicalRecordContext {
                 ? attempt.firstImmutableFact(range) : attempt.first(range);
     }
 
+    LogicalDocumentInstances instances(int maximumRecordBytes) {
+        open(); return new LogicalDocumentInstances(attempt, maximumRecordBytes);
+    }
+
     void requireArtifact(Artifact artifact) { open(); attempt.requireArtifact(artifact); }
 
     void select(Key key, Bytes content) {

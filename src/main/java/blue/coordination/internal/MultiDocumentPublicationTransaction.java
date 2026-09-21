@@ -57,6 +57,10 @@ final class MultiDocumentPublicationTransaction {
 
     private final InMemoryDocumentStore store;
     private final String publicationIdentity;
+    private DocumentId executionObserver;
+
+    synchronized void executionObserver(DocumentId observer) { ensureOpen(); executionObserver = observer; }
+    ContractsClosurePublicationReceipt closureReceipt() { return stagedClosurePublicationReceipt; }
     private final long expectedOccurrenceInventoryGeneration;
     private final long expectedComponentIndexGeneration;
     private final Map<DocumentId, InMemoryDocumentStore.DocumentHead>
@@ -739,7 +743,7 @@ final class MultiDocumentPublicationTransaction {
             throw new AtomicPublicationCasException(
                     "Catch-up plan state changed during publication");
         }
-        if (before.hasPublicationReceipt(publicationIdentity)) {
+        if (store.hasExecutionPublication(publicationIdentity, executionObserver)) {
             throw new IllegalStateException(
                     "Duplicate publication receipt " + publicationIdentity);
         }
@@ -1068,7 +1072,7 @@ final class MultiDocumentPublicationTransaction {
                 before.closurePublicationReceiptIndex();
         RootedProviderFrontiers resultingProviderFrontiers = before.rootedProviderFrontiers();
         ClosureApplicationResultIndex resultingApplicationResults = before.closureApplicationResults();
-        if (stagedClosurePublicationReceipt != null) {
+        if (stagedClosurePublicationReceipt != null && !before.hasPublicationReceipt(publicationIdentity)) {
             PersistentOrderedMap.Mutation<String,
                     ContractsClosurePublicationReceipt> mutation =
                     resultingClosurePublicationReceipts.put(

@@ -42,7 +42,7 @@ final class RootedAttachmentCapture {
         Map<DocumentId, RootedDocumentView> selected = new LinkedHashMap<>();
         for (DocumentId target : resolution.existingTargets()) {
             if (current.input().snapshot().contains(ContractsClosureAdapter.closureId(target))) continue;
-            RootedDocumentView view = documents.sourceBefore(target, boundary).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history")).rootedViewBefore(boundary);
+            RootedDocumentView view = documents.sourceBefore(target, boundary, sourceOwners(current)).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history")).rootedViewBefore(boundary);
             Set<DocumentId> visited = new LinkedHashSet<>();
             var pending = new ArrayDeque<DocumentId>();
             pending.add(target);
@@ -94,11 +94,11 @@ final class RootedAttachmentCapture {
                             ContractsClosureAdapter.closureId(occurrence.targetDocumentId()))) {
                 // A second new path can name an already frozen source. Do not replace that
                 // primary, or mistake its locally advanced representation for the source anchor.
-                RootedDocumentView anchor = documents.sourceBefore(occurrence.targetDocumentId(), boundary).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history")).rootedViewBefore(boundary);
+                RootedDocumentView anchor = documents.sourceBefore(occurrence.targetDocumentId(), boundary, sourceOwners(current)).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history")).rootedViewBefore(boundary);
                 if (matchesFrozenSource(current.input().snapshot(), anchor, occurrence.targetDocumentId())) view = anchor;
             }
             if (!existing && occurrence.historicalExisting() && occurrence.admittedSourceEpoch() >= 0L
-                    && view != null && isNumberedActivationPosition(occurrence, view, boundary, documents)) {
+                    && view != null && isNumberedActivationPosition(occurrence, view, boundary, documents, sourceOwners(current))) {
                 occurrences.add(new ManagedOccurrenceResolver.ResolvedOccurrence(occurrence.demand(), occurrence.targetDocumentId(),
                         occurrence.expectedTargetBlueId(), ManagedOccurrenceResolver.TargetKind.CURRENT_EXISTING,
                         occurrence.admittedSourceEpoch(), null));
@@ -107,6 +107,11 @@ final class RootedAttachmentCapture {
         }
         return changed ? new ManagedOccurrenceResolver.Resolution(resolution.demands(), occurrences,
                 resolution.resolvedExactNodes(), resolution.unresolvedDemands(), resolution.resolvedSelectorPaths()) : resolution;
+    }
+
+    static Set<DocumentId> sourceOwners(ContractsClosureAdapter.CohortInvocation current) {
+        return current.rootedEvidence().context().entryOwners().stream().map(ContractsClosureAdapter::coordinationId)
+                .collect(java.util.stream.Collectors.toSet());
     }
 
     private static boolean matchesFrozenSource(blue.language.processor.closure.AffectedClosureSnapshot input,
@@ -133,9 +138,9 @@ final class RootedAttachmentCapture {
     }
 
     private static boolean isNumberedActivationPosition(ManagedOccurrenceResolver.ResolvedOccurrence occurrence,
-            RootedDocumentView view, ExternalOrderKey boundary, InMemoryDocumentStore documents) {
+            RootedDocumentView view, ExternalOrderKey boundary, InMemoryDocumentStore documents, Set<DocumentId> observers) {
         DocumentId id = occurrence.targetDocumentId();
-        DocumentSession session = documents.sourceBefore(id, boundary).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history"));
+        DocumentSession session = documents.sourceBefore(id, boundary, observers).orElseThrow(() -> new ProjectionUnavailableException("Missing exact source history"));
         // Compare the complete authenticated publication/position, not Java identity: a retained
         // view may be reconstructed. Equal source endpoint hashes alone do not identify a position.
         RootedDocumentView anchor = session.rootedViewBefore(boundary);
@@ -149,7 +154,7 @@ final class RootedAttachmentCapture {
         var source = view.retainedSnapshot().managedDocument(ContractsClosureAdapter.closureId(id));
         if (source == null || !source.initialized() || source.epoch() != occurrence.admittedSourceEpoch()
                 || !source.blueId().equals(occurrence.expectedTargetBlueId())) return false;
-        var evidence = documents.managedEpochEvidence(id, source.epoch());
+        var evidence = documents.managedEpochEvidence(id, source.epoch(), observers);
         if (evidence.receipt() == null || evidence.transitionReceipt() == null)
             throw new ProjectionUnavailableException("Current-at-activation attachment lacks its exact source receipt");
         var receipt = evidence.receipt();

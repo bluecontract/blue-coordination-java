@@ -152,6 +152,16 @@ public final class ProcessingGateway {
         return runtime.inspectProcessingReadinessThrough(SdkPreconditions.requireText(inclusiveEntryBlueId, "inclusiveEntryBlueId"));
     }
 
+    /** Reads an exact observer instance's recorded outcome without processing or consulting the current head. */
+    public java.util.Optional<EntryResult> recordedResult(blue.coordination.api.DocumentInstanceRef observer, String entryBlueId) {
+        return runtime.recordedResult(Objects.requireNonNull(observer), SdkPreconditions.requireText(entryBlueId, "entryBlueId"));
+    }
+
+    /** Reads the original command outcome as recorded, including its original zero-attempt diagnostic. */
+    public java.util.Optional<EntryResult> originalResult(String entryBlueId) {
+        return runtime.originalResult(SdkPreconditions.requireText(entryBlueId, "entryBlueId"));
+    }
+
     /** Drains all currently eligible work to a safe frontier. */
     public DrainResult drain() {
         return runtime.drain();

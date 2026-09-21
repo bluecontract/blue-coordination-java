@@ -15,10 +15,18 @@ final class LogicalFeederControlTest {
     @Test void independentlySelectedCohortsPublishTerminalProgressInBothOrdersAndStayTerminalCold() {
         // given
         for (boolean reverse : List.of(false, true)) {
-            var store = new LogicalRecordMapTest.Store(); var a = store.attempt(); var b = store.attempt();
-            var ca = new LogicalPointStorage(a); var cb = new LogicalPointStorage(b);
+            var store = new LogicalRecordMapTest.Store();
             try (var fixture = ContractsRootFeederWindowTest.fixture()) {
                 var original = fixture.adapter().capture(fixture.eventOne());
+                try (var initial = store.attempt()) {
+                    var instances = new LogicalDocumentInstances(initial, LIMITS.maximumRecordBytes());
+                    new ContractsRootFeederWindow().select(original).stream()
+                            .flatMap(ticket -> ticket.lane().roots().stream()).distinct()
+                            .forEach(instances::requireOrCreateInitial);
+                    assertTrue(store.publish(initial.prepare("initial-instances", List.of(), EVIDENCE)));
+                }
+                var a = store.attempt(); var b = store.attempt();
+                var ca = new LogicalPointStorage(a); var cb = new LogicalPointStorage(b);
                 var left = selected(original, 0); var right = selected(original, 1);
                 var wa = window(ca); var wb = window(cb);
                 // when
