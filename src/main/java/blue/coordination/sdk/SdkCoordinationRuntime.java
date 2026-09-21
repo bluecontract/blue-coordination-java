@@ -305,6 +305,7 @@ final class SdkCoordinationRuntime implements AutoCloseable {
         Map<String, String> identities = new LinkedHashMap<>();
         if (bundledRelease) for (String key : List.of("release", "fixtures", "gas", "finalizer", "verifier"))
             identities.put(key, bundledIdentity(key).orElseThrow());
+        identities.put("runtimeRegistration", engine.contractsRuntimeRegistrationIdentity());
         return new SdkStorageCodec.Configuration(languageSpecificationIdentity, contractsSpecificationIdentity,
                 bundledRelease, contentDerivedDocumentIds, contractsExecutionPolicy, identities);
     }

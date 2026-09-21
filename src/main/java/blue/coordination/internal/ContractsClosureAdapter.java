@@ -440,18 +440,35 @@ final class ContractsClosureAdapter implements AutoCloseable {
         return rootedJournalEntries(root, journal, null);
     }
     synchronized List<TimelineEntry> rootedJournalEntries(DocumentId root, TimelineJournal journal, ExternalOrderKey through) {
+        return rootedJournalEntries(root, journal, through, true);
+    }
+    synchronized List<TimelineEntry> rootedJournalEntriesBefore(DocumentId root, TimelineJournal journal, ExternalOrderKey exclusive) {
+        return rootedJournalEntries(root, journal, Objects.requireNonNull(exclusive), false);
+    }
+    private List<TimelineEntry> rootedJournalEntries(DocumentId root, TimelineJournal journal, ExternalOrderKey through, boolean inclusive) {
         var view = Objects.requireNonNull(documents.require(root).rootedView());
         var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
         sourceDiscoverySurfaces(view, root).forEach(surface -> timelines.addAll(surface.routing().externalTimelineIds()));
+        journal.requireCoverage(timelines, through, inclusive);
         var selected = new java.util.TreeMap<ExternalOrderKey, TimelineEntry>();
-        for (var timeline : timelines) for (var entry : through == null ? journal.entries(timeline) : journal.entriesThrough(timeline, through)) selected.put(entry.sourceOrderKey(), entry);
-        if (view.logicalBoundary() != null && (through == null || view.logicalBoundary().compareTo(through) <= 0)
+        for (var timeline : timelines) for (var entry : through == null ? journal.entries(timeline)
+                : inclusive ? journal.entriesThrough(timeline, through) : journal.entriesBefore(timeline, through)) selected.put(entry.sourceOrderKey(), entry);
+        if (view.logicalBoundary() != null && (through == null || view.logicalBoundary().compareTo(through) < 0
+                || inclusive && view.logicalBoundary().equals(through))
                 && !RootedLocalHistory.pending(view.snapshot(), root).isEmpty()) {
             var anchor = journal.atExternalOrder(view.logicalBoundary()).orElseThrow(
                     () -> new IllegalStateException("Retained root boundary has no accepted causal entry"));
             selected.put(anchor.sourceOrderKey(), anchor);
         }
         return List.copyOf(selected.values());
+    }
+
+    /** Native forward-view membership decides the provider ranges; host code does not choose recipients. */
+    synchronized void requireRootCoverage(DocumentId root, TimelineJournal journal, ExternalOrderKey through) {
+        var view = Objects.requireNonNull(documents.require(root).rootedView());
+        var timelines = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER);
+        sourceDiscoverySurfaces(view, root).forEach(surface -> timelines.addAll(surface.routing().externalTimelineIds()));
+        journal.requireCoverage(timelines, through, true);
     }
 
     /** Tests only accepted input strictly before the requirement, using the exact retained source body. */

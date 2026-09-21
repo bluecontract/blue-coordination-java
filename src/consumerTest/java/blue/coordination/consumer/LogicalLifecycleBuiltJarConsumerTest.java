@@ -86,6 +86,34 @@ final class LogicalLifecycleBuiltJarConsumerTest {
         });
     }
 
+    @Test void finiteProviderCannotAccidentallyAuthorizeAnUnboundedRootRead() {
+        // given
+        var host = new Host();
+        var id = host.transact(scope -> {
+            scope.coordination().timelines().register("rcp2/source", "alice");
+            return scope.coordination().documents().admitStaticProcessEmbedded(SOURCE,
+                    ActivationPolicy.importFullHistory()).document("root").id();
+        });
+        // when
+        var calls = new ArrayList<String>();
+        try (var attempt = host.attempt(); var scope = RootedCoordinationStorage.openLogicalWithHistoryCoverage(
+                host, host.limits, host.configuration, attempt, ExactNodeProvider.empty(),
+                (timelines, boundary, inclusive) -> {
+                    assertEquals(Set.of("rcp2/source"), timelines);
+                    assertNull(boundary); calls.add("unbounded");
+                    return blue.coordination.api.TimelineHistoryCoverage.Evidence.unavailable(
+                            "finite-provider-T100", "Only a finite prefix is complete");
+                })) {
+            assertThrows(RuntimeException.class, () -> scope.coordination().processing()
+                    .selectNextStage(scope.documentHandle(id).orElseThrow()));
+            assertThrows(RuntimeException.class, scope::stage);
+            assertThrows(IllegalStateException.class, () -> attempt.prepare("not-complete", List.of(), Host.EVIDENCE));
+        }
+        // then
+        assertEquals(List.of("unbounded"), calls);
+        host.transact(scope -> { assertEquals(0, scope.documentHandle(id).orElseThrow().snapshot().epoch()); return null; });
+    }
+
     private static final class Host implements CoordinationImmutableObjectStore {
         static final Bytes EVIDENCE = new Bytes(new byte[] {1});
         static final Address ADDRESS = new Address("jar-account", "stable-domain");

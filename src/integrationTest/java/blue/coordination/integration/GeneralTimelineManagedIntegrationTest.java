@@ -30,8 +30,10 @@ final class GeneralTimelineManagedIntegrationTest {
                 BlueRuntimeTypeRegistry.getDefault().asProcessorSnapshotProvider(), repository.nodeProvider());
         try (var language = BlueLanguage.builder().nodeProvider(provider).preprocessingAliases(aliases).environmentImports(aliases).build();
              var blue = BlueCoordination.builder().contentDerivedDocumentIds().build()) {
-            var registry = CoordinationProcessors.configure(ContractProcessorRegistryBuilder.create().registerDefaults(),
-                    CoordinationProcessorOptions.builder().language(language).build()).build();
+            var registry = CoordinationProcessors.registerTimelineSubtype(
+                    CoordinationProcessors.configure(ContractProcessorRegistryBuilder.create().registerDefaults(),
+                            CoordinationProcessorOptions.builder().language(language).build()),
+                    blue.repo.myos.MyOSTimelineChannel.class).build();
             try (var contracts = BlueContracts.builder(language.processing()).runtimeRegistry(registry).build();
                  var processor = DocumentProcessor.builder().runtimeAccess(contracts.runtimeAccess()).runtimeRegistry(registry)
                          .runtimeRegistryIdentity(registry.generationIdentity()).build()) {

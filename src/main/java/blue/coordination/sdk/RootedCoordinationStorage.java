@@ -418,6 +418,19 @@ public final class RootedCoordinationStorage {
      */
     public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits, Configuration configuration,
             CoordinationRecordAttempt attempt, ExactNodeProvider provider, TimelineJournalStore journal) {
+        return openLogical(objects, limits, configuration, attempt, provider, journal, null);
+    }
+
+    /** Opens native journal storage with coherent external finite history evidence. */
+    public static LogicalScope openLogicalWithHistoryCoverage(CoordinationImmutableObjectStore objects, Limits limits,
+            Configuration configuration, CoordinationRecordAttempt attempt, ExactNodeProvider provider,
+            blue.coordination.api.TimelineHistoryCoverage coverage) {
+        return openLogical(objects, limits, configuration, attempt, provider, null, Objects.requireNonNull(coverage));
+    }
+
+    private static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits, Configuration configuration,
+            CoordinationRecordAttempt attempt, ExactNodeProvider provider, TimelineJournalStore journal,
+            blue.coordination.api.TimelineHistoryCoverage coverage) {
         Objects.requireNonNull(attempt); var records = new LogicalPointStorage(attempt);
         var opening = new LogicalOpening();
         try {
@@ -436,7 +449,7 @@ public final class RootedCoordinationStorage {
                 opening.runtime = SdkCoordinationRuntime.restore(owner, selected, provider, scopedProvider -> {
                     opening.engine = RootedEngineStorage.openLogical(trackedObjects, limits.engine(), records,
                             new DefaultCoordinationEngine.ContractsRuntimeBinding(selected.language(), selected.contracts(), selected.policy()),
-                            scopedProvider, journal);
+                            scopedProvider, journal, coverage);
                     return opening.engine.engine();
                 });
                 opening.maps = SdkRuntimePointMaps.openLogical(opening.runtime, trackedObjects, limits.sdk().maps(), records);

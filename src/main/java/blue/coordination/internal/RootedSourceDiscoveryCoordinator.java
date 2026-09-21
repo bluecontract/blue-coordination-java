@@ -333,9 +333,9 @@ final class RootedSourceDiscoveryCoordinator {
         // Actual source-owned selection retains all ordinary live head, owner and control fences.
         source = documents.require(candidate.source());
         boolean logical = documents.storedState().sessionIndex().isLogical();
-        var driver = new RootedCheckpointDriver(documents, adapter, logical);
+        var driver = new RootedCheckpointDriver(documents, adapter, logical, candidate.cutoff());
         java.util.function.Function<DocumentId, List<TimelineEntry>> inputs = root -> logical
-                ? adapter.rootedJournalEntries(root, journal) : journal.entries();
+                ? adapter.rootedJournalEntriesBefore(root, journal, candidate.cutoff()) : journal.entries();
         var next = driver.select(candidate.source(), inputs);
         if (next.blocked()) {
             if (driver.completeBefore(candidate.source(), inputs.apply(candidate.source()), candidate.cutoff())) return null;

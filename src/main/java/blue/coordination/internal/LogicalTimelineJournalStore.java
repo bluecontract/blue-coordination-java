@@ -13,6 +13,7 @@ import static blue.coordination.internal.SessionStorageWire.*;
 /** Library-owned journal rows and indexes in the runtime's atomic logical attempt. */
 final class LogicalTimelineJournalStore implements TimelineJournalStore {
     private final LogicalPointStorage logical;
+    private final blue.coordination.api.TimelineHistoryCoverage historyCoverage;
     private final StoredInsertionOrderedMap.Limits limits;
     private final Map<String, State> control;
     private final Map<String, TimelineEntry> entries;
@@ -28,7 +29,11 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
     private record Position(String timeline, long sequence) { }
 
     LogicalTimelineJournalStore(LogicalPointStorage logical, RootedEngineStorage.Limits limits) {
-        this.logical = logical; this.limits = limits.pending();
+        this(logical, limits, null);
+    }
+    LogicalTimelineJournalStore(LogicalPointStorage logical, RootedEngineStorage.Limits limits,
+            blue.coordination.api.TimelineHistoryCoverage historyCoverage) {
+        this.logical = logical; this.limits = limits.pending(); this.historyCoverage = historyCoverage;
         var values = codec("text", Writer::text, SessionRecordCodec::text);
         var text = OrderedRecordKey.text();
         var rows = new SessionRecordCodec(limits.maximumRecordBytes(), limits.maximumDepth());
@@ -49,6 +54,25 @@ final class LogicalTimelineJournalStore implements TimelineJournalStore {
             w.text(state.availability().kind().name()); w.nullableText(state.availability().diagnostic());
         }, r -> new State(r.longValue(), r.integer(), r.longValue(),
                 new Availability(AvailabilityKind.valueOf(text(r)), nullableText(r)))));
+    }
+
+    blue.coordination.api.TimelineHistoryCoverage.Evidence coverage(Set<String> timelines,
+            ExternalOrderKey boundary, boolean inclusive) {
+        if (historyCoverage == null) return null;
+        return logical.context().protect(() -> Objects.requireNonNull(
+                historyCoverage.inspect(Set.copyOf(timelines), boundary, inclusive), "coverage evidence"));
+    }
+
+    void requireCoverage(Set<String> timelines, ExternalOrderKey boundary, boolean inclusive) {
+        logical.context().protect(() -> {
+            var evidence = coverage(timelines, boundary, inclusive);
+            if (evidence == null) return null;
+            if (evidence.availability().kind() == AvailabilityKind.UNAVAILABLE)
+                throw new blue.coordination.api.TimelineHistoryUnavailableException(evidence.availability().diagnostic());
+            if (evidence.availability().kind() == AvailabilityKind.INVALID_EVIDENCE)
+                throw new blue.coordination.api.TimelineJournalStorageException(evidence.availability().diagnostic());
+            return null;
+        });
     }
 
     private State current() { return control.getOrDefault("state", State.empty()); }

@@ -136,11 +136,11 @@ final class BlueRuntime implements AutoCloseable {
                         .language(language)
                         .build();
         ContractProcessorRegistry runtimeRegistry =
-                CoordinationProcessors.configure(
-                        ContractProcessorRegistryBuilder.create()
-                                .registerDefaults(),
-                        options)
-                .build();
+                CoordinationProcessors.registerTimelineSubtype(
+                        CoordinationProcessors.configure(
+                                ContractProcessorRegistryBuilder.create().registerDefaults(), options),
+                        blue.repo.myos.MyOSTimelineChannel.class)
+                        .build();
         String runtimeRegistryIdentity =
                 runtimeRegistry.generationIdentity();
         BlueContracts contracts = BlueContracts.builder(

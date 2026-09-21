@@ -714,6 +714,9 @@ def publicBoundarySources = files(
 // retained history and observer progress/results, lifecycle/role/occurrence guards,
 // and public primitive storage limits. Exact settled inventory (no growth buffer).
 // docs/reference/document-instances.md records boundaries and consumer evidence.
+// HOST-03/04: fixed generated MyOS channel registration and attempt-bound finite
+// provider coverage; +2 public source types and +140 measured lines, no buffer.
+// docs/reference/host-timeline-history.md records the authority boundary.
 def currentProductionShapeLimits = [
         // Baseline31 plus P2: merged RC11 behavior and the reviewed external-storage POC,
         // including eight private indexed-session/lineage history and provider-frontier helpers,
@@ -728,7 +731,7 @@ def currentProductionShapeLimits = [
         // Exact measured inventory (+2 sources, +454 lines); API and per-source caps stay unchanged.
         // General entries: two private scoped channel-index/storage helpers; +410 net lines.
         // Exact inventory; public/per-source caps unchanged. See docs/development/general-timeline-entries.md.
-        classes: 380,
+        classes: 382,
         // Cost40: additive READY revision point audit (+16 lines), no new type or semantic cursor.
         // Completed-stage SDK result/gateways plus three logical-record contract/tracking types.
         // Measured count; see docs/development/logical-record-contract.md.
@@ -747,8 +750,8 @@ def currentProductionShapeLimits = [
         // Counter-only logical owner diagnostics: three accessors, +11 measured lines; no new types.
         // Point-lookup overload for a retained exact input stage: +12 lines, no new type or semantic processing.
         // R1: verified operation-message resolution in all rooted selectors (+14 lines; no new type).
-        lines: 95_714L,
-        publicApiTypes: 113,
+        lines: 95_854L,
+        publicApiTypes: 115,
         maxLinesPerRetainedManagedEpochSource: 1_166L
 ]
 def retainedManagedEpochProductionSources = [
@@ -1069,6 +1072,7 @@ tasks.register('verifySdkPublicApiBoundary') {
                         || className.startsWith('blue.coordination.sdk.RootedCoordinationStorage$')) {
                     [
                             'blue.coordination.api.TimelineJournalStore',
+                            'blue.coordination.api.TimelineHistoryCoverage',
                             'blue.coordination.api.DocumentInstanceRef',
                             'blue.coordination.api.DocumentInstancePosition',
                             'blue.coordination.api.DocumentInstanceRetirement',

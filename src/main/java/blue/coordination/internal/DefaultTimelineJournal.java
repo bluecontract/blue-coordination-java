@@ -276,6 +276,11 @@ class DefaultTimelineJournal implements TimelineJournal {
         }
     }
 
+    @Override public synchronized void requireCoverage(java.util.Set<String> timelines, ExternalOrderKey boundary, boolean inclusive) {
+        if (!(store instanceof LogicalTimelineJournalStore logical)) return;
+        logical.requireCoverage(timelines, boundary, inclusive);
+    }
+
     @Override public boolean scopedCoverage() { return store instanceof LogicalTimelineJournalStore; }
 
     /** Exact bounded source prefixes; later or unrelated accepted inputs do not replace this authority. */
@@ -286,9 +291,15 @@ class DefaultTimelineJournal implements TimelineJournal {
         var availability = logical.availability();
         if (availability.kind() == AvailabilityKind.UNAVAILABLE) return new HistoricalStep.Unavailable(availability.diagnostic());
         if (availability.kind() == AvailabilityKind.INVALID_EVIDENCE) return new HistoricalStep.InvalidEvidence(availability.diagnostic());
+        var external = logical.coverage(timelines, cutoff, false);
+        if (external != null && external.availability().kind() == AvailabilityKind.UNAVAILABLE)
+            return new HistoricalStep.Unavailable(external.availability().diagnostic());
+        if (external != null && external.availability().kind() == AvailabilityKind.INVALID_EVIDENCE)
+            return new HistoricalStep.InvalidEvidence(external.availability().diagnostic());
         var selected = new java.util.TreeSet<String>(EmbeddingBinding.TEXT_ORDER); selected.addAll(timelines);
         var fields = new ArrayList<String>(); fields.add(requireText(surfaceIdentity, "surfaceIdentity"));
         fields.add(java.util.HexFormat.of().formatHex(OrderedRecordKey.externalOrder().encode(cutoff)));
+        if (external != null) { fields.add("external-coverage"); fields.add(external.identity()); }
         boolean found = false;
         try (ReadView view = open()) {
             for (var timeline : selected) {

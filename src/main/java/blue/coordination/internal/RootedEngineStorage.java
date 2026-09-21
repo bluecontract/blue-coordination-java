@@ -300,8 +300,16 @@ public final class RootedEngineStorage {
     public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits,
             LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
             ExactNodeProvider provider, TimelineJournalStore journal) {
+        return openLogical(objects, limits, records, binding, provider, journal, null);
+    }
+
+    /** Logical journal with optional coherent external history authority. */
+    public static LogicalScope openLogical(CoordinationImmutableObjectStore objects, Limits limits,
+            LogicalPointStorage records, DefaultCoordinationEngine.ContractsRuntimeBinding binding,
+            ExactNodeProvider provider, TimelineJournalStore journal, blue.coordination.api.TimelineHistoryCoverage coverage) {
         Objects.requireNonNull(records);
-        if (journal == null) journal = new LogicalTimelineJournalStore(records, limits);
+        if (journal != null && coverage != null) throw new IllegalArgumentException("History coverage requires the native logical journal");
+        if (journal == null) journal = new LogicalTimelineJournalStore(records, limits, coverage);
         final TimelineJournalStore selectedJournal = journal;
         return records.context().protect(() -> new RootedEngineStorage(objects, limits)
                 .new LogicalScope(records, binding, provider, selectedJournal));

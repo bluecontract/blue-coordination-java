@@ -586,6 +586,12 @@ public final class DefaultCoordinationEngine
      * @return exact bootstrap binding
      * @throws IllegalStateException if this is not a Contracts engine
      */
+    /** Exact immutable processor registrations used by SDK configuration and cold restore. */
+    public synchronized String contractsRuntimeRegistrationIdentity() {
+        ensureOpen();
+        return blue.coordination.processor.CoordinationProcessors.runtimeRegistrationIdentity(runtime.documentProcessor());
+    }
+
     public synchronized ContractsRuntimeBinding contractsRuntimeBinding() {
         ensureOpen();
         if (contractsRuntimeBinding == null) throw new IllegalStateException("Engine has no Contracts bootstrap");
@@ -1246,7 +1252,15 @@ public final class DefaultCoordinationEngine
     }
 
     /** Validates aggregate execution before a convenience command appends or selects any work. */
-    public synchronized void requireGlobalDrainSupported() { ensureOpen(); documents.requireGlobalDrainSupported(); }
+    public synchronized void requireGlobalDrainSupported() {
+        ensureOpen(); documents.requireGlobalDrainSupported();
+        journal.requireCoverage(Set.copyOf(timelines.keySet()), null, true);
+    }
+
+    private List<TimelineEntry> completeJournalEntries(ExternalOrderKey through) {
+        journal.requireCoverage(Set.copyOf(timelines.keySet()), through, true);
+        return journal.entries();
+    }
 
     @Override
     public synchronized ProcessingDrainReceipt drain() {
@@ -1303,6 +1317,7 @@ public final class DefaultCoordinationEngine
             ensureOpen();
             TimelineEntry entry = journal.requireCanonical(Objects.requireNonNull(input, "input"));
             long started = System.nanoTime();
+            contractsClosureAdapter.requireRootCoverage(root, journal, entry.sourceOrderKey());
             ContractsClosureAdapter.FrozenBatch batch = contractsClosureAdapter.captureRoot(
                     Objects.requireNonNull(root, "root"), entry, policy);
             var completed = executeRootBatch(batch, started);
@@ -1549,7 +1564,7 @@ public final class DefaultCoordinationEngine
     public synchronized ProcessingSelection auditNextRootProcessingSelection(DocumentId root) {
         ensureOpen();
         var next = new RootedCheckpointDriver(documents, contractsClosureAdapter)
-                .select(Objects.requireNonNull(root, "root"), journal.entries());
+                .select(Objects.requireNonNull(root, "root"), completeJournalEntries(null));
         if (next.localHistorical() != null && next.historical() == null)
             return ProcessingSelection.rootedRetained(next.localHistorical().root(), next.localHistorical().work());
         if (next.historical() != null) return ProcessingSelection.managedEpochApplication(next.historical());
@@ -1578,13 +1593,14 @@ public final class DefaultCoordinationEngine
         RootedCheckpointDriver.Selection selected;
         if (input != null) {
             var entry = journal.requireCanonical(input);
+            contractsClosureAdapter.requireRootCoverage(root, journal, entry.sourceOrderKey());
             selected = new RootedCheckpointDriver.Selection(contractsClosureAdapter.captureRoot(root, entry, null), null,
                     CatchUpConsumerScope.owners(RootedStageCapture.owners(root, documents)), false);
         } else {
             var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
             selected = documents.storedState().sessionIndex().isLogical()
                     ? driver.select(root, owner -> contractsClosureAdapter.rootedJournalEntries(owner, journal))
-                    : driver.select(root, journal.entries());
+                    : driver.select(root, completeJournalEntries(null));
         }
         if (expectedWorkIdentity != null && (selected.localHistorical() == null
                 || !expectedWorkIdentity.equals(selected.localHistorical().work().workIdentity())))
@@ -1608,7 +1624,7 @@ public final class DefaultCoordinationEngine
     }
 
     private ProcessingReadiness rootedStageReadiness(ExternalOrderKey cutoff) {
-        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var entries = completeJournalEntries(cutoff).stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
         var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff).scan(entries, cutoff);
         return new ProcessingReadiness(scan.quiescent(), !scan.heads().isEmpty());
     }
@@ -1622,7 +1638,7 @@ public final class DefaultCoordinationEngine
         if (!contractsClosureProfile.rootedCheckpoint())
             throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
         var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true);
-        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(journal.entries(), null), false, Set.of());
+        var head = contractsRecoveryState.rootedSchedule.next(driver.scan(completeJournalEntries(null), null), false, Set.of());
         var next = head == null ? auditNextProcessingSelection() : rootedSelection(head.selection());
         if (head == null || next.kind() != ProcessingSelection.Kind.MANAGED_EPOCH_APPLICATION
                 || !next.managedEpochApplicationWork().map(ManagedEpochApplicationWork::workIdentity).filter(expected::equals).isPresent())
@@ -1644,7 +1660,7 @@ public final class DefaultCoordinationEngine
             throw new IllegalStateException("Durable stages require the rooted checkpoint profile");
         var cutoffEntry = inclusiveEntry == null ? null : journal.requireCanonical(inclusiveEntry);
         var cutoff = cutoffEntry == null ? null : cutoffEntry.sourceOrderKey();
-        var entries = journal.entries().stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
+        var entries = completeJournalEntries(cutoff).stream().filter(entry -> cutoff == null || entry.sourceOrderKey().compareTo(cutoff) <= 0).toList();
         var driver = new RootedCheckpointDriver(documents, contractsClosureAdapter, true, cutoff);
         var head = contractsRecoveryState.rootedSchedule.next(driver.scan(entries, cutoff), false, Set.of());
         if (head == null || rootedSelection(head.selection()).kind() != ProcessingSelection.Kind.JOURNAL) {
@@ -1723,7 +1739,7 @@ public final class DefaultCoordinationEngine
             Objects.requireNonNull(root, "root");
             RootedCheckpointDriver.Selection next = !inspectReadiness && documents.storedState().sessionIndex().isLogical()
                     ? driver.select(root, selected -> contractsClosureAdapter.rootedJournalEntries(selected, journal))
-                    : driver.select(root, journal.entries());
+                    : driver.select(root, completeJournalEntries(null));
             if (expectedLocalWork != null && (next.localHistorical() == null
                     || !expectedLocalWork.equals(next.localHistorical().work().workIdentity()))) {
                 throw new IllegalArgumentException("Selected root no longer requires this exact retained work: " + expectedLocalWork);
@@ -1787,7 +1803,7 @@ public final class DefaultCoordinationEngine
         if (!completed.quiescent()) return completed;
         inject(FailurePoint.BEFORE_ROOTED_READINESS);
         RootedCheckpointDriver.Selection remaining = new RootedCheckpointDriver(documents, contractsClosureAdapter)
-                .select(root, journal.entries());
+                .select(root, completeJournalEntries(null));
         boolean pending = remaining.live() != null || remaining.historical() != null || remaining.localHistorical() != null;
         boolean quiescent = !pending && !remaining.blocked();
         return new ProcessingDrainReceipt(completed.processedEntries(), completed.outcomesByEntry(),
@@ -1865,7 +1881,7 @@ public final class DefaultCoordinationEngine
         var driver = contractsClosureProfile.rootedCheckpoint()
                 ? new RootedCheckpointDriver(documents, contractsClosureAdapter) : null;
         var head = driver == null ? null : contractsRecoveryState.rootedSchedule.next(
-                driver.scan(journal.entries(), null), false, Set.of());
+                driver.scan(completeJournalEntries(null), null), false, Set.of());
         ProcessingSelection next = head == null ? auditNextProcessingSelection()
                 : rootedSelection(head.selection());
         String actual = next.managedEpochApplicationWork()
@@ -1882,7 +1898,7 @@ public final class DefaultCoordinationEngine
             long started = System.nanoTime();
             var completed = executeScheduledRoot(Objects.requireNonNull(head));
             if (!completed.quiescent()) return completed;
-            var remaining = driver.scan(journal.entries(), null);
+            var remaining = driver.scan(completeJournalEntries(null), null);
             return new ProcessingDrainReceipt(List.of(), Map.of(), Map.of(), null,
                     remaining.quiescent(), !remaining.heads().isEmpty(), completed.committedProcessTransitions(),
                     System.nanoTime() - started, completed.managedEpochApplications(),
@@ -2321,7 +2337,7 @@ public final class DefaultCoordinationEngine
         String selected = Objects.requireNonNull(workIdentity, "workIdentity");
         var independent = documents.catchUpWork(selected);
         if (independent.isPresent() || !contractsClosureProfile.rootedCheckpoint()) return independent;
-        return new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null)
+        return new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(completeJournalEntries(null), null)
                 .heads().stream().map(head -> head.selection().localHistorical()).filter(Objects::nonNull)
                 .map(RootedLocalHistory.Step::work).filter(work -> selected.equals(work.workIdentity())).findFirst();
     }
@@ -2336,7 +2352,7 @@ public final class DefaultCoordinationEngine
         if (contractsClosureProfile.rootedCheckpoint() && result.values().stream().anyMatch(Optional::isEmpty)) {
             // One synchronized observation: no cache survives into another call,
             // where document, journal or provider evidence may have changed.
-            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(completeJournalEntries(null), null);
             for (var head : scan.heads()) {
                 var local = head.selection().localHistorical();
                 if (local == null) continue;
@@ -2365,7 +2381,7 @@ public final class DefaultCoordinationEngine
             return ProcessingSelection.none();
         }
         if (contractsClosureProfile.rootedCheckpoint()) {
-            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(journal.entries(), null);
+            var scan = new RootedCheckpointDriver(documents, contractsClosureAdapter).scan(completeJournalEntries(null), null);
             var selected = contractsRecoveryState.rootedSchedule.next(scan, supplied.journalAdmissionAvailable(), Set.of());
             if (selected == null) return supplied.journalAdmissionAvailable()
                     || contractsJournalCoordinator.hasCompletableRootedTransport(scan)

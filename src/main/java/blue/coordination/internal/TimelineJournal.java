@@ -35,6 +35,7 @@ interface TimelineJournal {
             String excluded, Predicate<TimelineEntry> eligible, long routeGeneration,
             long graphGeneration, Supplier<String> sourceSurfaceIdentity);
     boolean scopedCoverage();
+    void requireCoverage(java.util.Set<String> timelines, ExternalOrderKey boundary, boolean inclusive);
     HistoricalStep sourceCoverage(java.util.Set<String> timelines, ExternalOrderKey cutoff,
             long routeGeneration, long graphGeneration, String surfaceIdentity);
     ExternalOrderKey latestExternalOrder();
