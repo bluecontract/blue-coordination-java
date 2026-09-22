@@ -30,6 +30,7 @@ For a five-minute path, use the repository [Start here](../START-HERE.md) and
 
 | Document | Use it for |
 | --- | --- |
+| [Coordination host API](guides/coordination-host-api.md) | Concise durable host flow, ownership, publication/recovery and prototype execution-instance APIs. |
 | [SDK developer guide](guides/developer-guide.md) | Canonical end-to-end application journey and decision guide. |
 | [Counter](examples/counter.md) | Minimal targeted operations and READY snapshot. |
 | [Five managed occurrences](examples/playground-five-occurrence.md) | Several occurrences sharing fewer new managed lineages. |
